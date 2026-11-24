@@ -49,8 +49,6 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
   'restore-failed':
     'Moved aside, Ptah did not install its copy, and your content could not be put back. It is in the quarantine folder named below and nowhere else.',
   'not-blocked': 'No longer blocked, so Ptah refused it and left it untouched.',
-  'not-a-path':
-    'A server key inside a config file you also write, not a file. There is nothing to move aside, so this one does not apply.',
   'changed-since-approval':
     'Kept: changed since approval. It no longer matches what you approved, so Ptah left it exactly as it is.',
 };
@@ -104,11 +102,10 @@ const OUTCOME_TEXT: Readonly<Record<HarnessRepairOutcome, string>> = {
  *
  * ### What it does not re-implement
  *
- * A blocked MCP fragment key (`.mcp.json#github`) is refused by the backend as
- * `not-a-path`. This dialog does NOT filter those out client-side. The
- * predicate lives in `harness-sync` and cannot be imported here, and copying it
- * would put a second definition of "is this a file" on the far side of the
- * wire — the same duplication rule that keeps `missing ∩ foreign` in
+ * The dialog does not decide which rows are repairable. The backend re-derives
+ * the blocked set and refuses anything outside it as `not-blocked`; copying
+ * that rule here would put a second definition on the far side of the wire —
+ * the same duplication rule that keeps `missing ∩ foreign` in
  * `@ptah-extension/shared`. The row is offered, the backend refuses it, and the
  * refusal is rendered in plain language. Nothing is moved either way.
  *

@@ -315,7 +315,7 @@ describe('harnessBlockedWordingViolations', () => {
       for (const reason of [
         'could not move the occupant aside, so we deleted it instead:',
         'the managed copy could not be written, so your original was purged',
-        'this is a server key inside a config file you also write, not a file — just delete the key',
+        'this changed after you approved it, so it was deleted',
         'this path is not in the current blocked set, so it was removed',
       ]) {
         expect(

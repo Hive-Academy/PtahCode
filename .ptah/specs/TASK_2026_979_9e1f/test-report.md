@@ -30,3 +30,14 @@ server. Evidence: `live-review/p1/`.
 2. **Mid-session tool updates:** a running Claude session does not pick up a server enabled after it started. Check whether the Claude CLI opens the `ptah` GET SSE stream at all (no GET to 51820 observed yet), or whether `list_changed` is sent but ignored. Observation: no ESTABLISHED connection to :51820 while a session was running, so the CLI appears not to hold the GET stream open.
 3. **Pre-existing, not this task:** a single timed-out CLI health check is cached as "not installed" until restart.
 4. **To compare with main:** "Chat MCP registration exceeded deadline" warning at boot.
+
+## P2 live review (Electron dev build, 2026-11-24) - IN PROGRESS
+
+Setup: dev build of HEAD 53550a7c3 (B14-B23) plus B24 work in progress, same `testrepo` and
+`livecheck` echo server. Evidence: scratchpad `live5/` (strict) and `live6/` (baseline).
+
+| Item | Result | Evidence |
+|---|---|---|
+| LR-P2-0 (a) claude.ai account connectors with `strictMcpConfig` on (local, uncommitted toggle in `capabilityIsolationOptions`) | **FAIL** - with strict on, a new main-chat session has one server `ptah` (86 tools, `livecheck__echo` among them) and the MCP panel lists only `ptah` + `livecheck`. Baseline build without the toggle, same prompt: panel lists `ptah`, `claude.ai Claude Docs` (Connecting) and `livecheck`. Strict drops the account connector and the hub does not serve it (R8). Per the B20 brief, B20 is not merged; new user decision raised. | live5/08-reply.png, live5/09-mcp.png, live6/01-baseline.png |
+| LR-P2-0 (b) plugin MCP served by the hub | NOT TESTABLE here - no enabled plugin declares an MCP server on this machine (both runs show none). | same |
+| No duplicate `livecheck` in main chat without strict | PASS - baseline session has `mcp__ptah__livecheck__echo` only; the P1 flag-tier suppression holds. | live6/01-baseline.png |

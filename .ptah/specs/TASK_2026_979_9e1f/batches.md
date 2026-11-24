@@ -1091,6 +1091,21 @@ P2 gate:
 - Write set: defined when the trigger occurs. Verify: the scoped pair for its project.
 - Status: PENDING
 
+## Batch 24: Open items from B23 (decision row 39) - COMPLETE
+
+- Id: P2-B11 | Phase: P2 | Shape: logic
+- Purpose: the B23 leftovers the user put into this PR (decision row 39), plus the
+  `listInstalledMcpServers()` gap: (1) drop the dead `not-a-path` repair outcome and its MCP
+  server-key wording; (2) the Installed tab lists a linked worktree's main-checkout workspace
+  intents, as the gateway serves them; (3) remove the unused persistent credential family
+  (`issuePersistent`, `preparePersistent`, `reconcilePersistent`) from vscode-lm-tools
+  `McpCallerTokenRegistry`; (4) `ptah.harness.listInstalledMcpServers()` lists Ptah install
+  intents beside `.vscode/mcp.json` and `.mcp.json`.
+- Executor: backend-developer (subagent)
+- Projects: shared, harness-sync, cli-agent-runtime, vscode-lm-tools, marketplace
+- Report: `batch-24-report.md`
+- Status: COMPLETE (uncommitted; the coordinator commits)
+
 ---
 
 ## Live review (completion gate)

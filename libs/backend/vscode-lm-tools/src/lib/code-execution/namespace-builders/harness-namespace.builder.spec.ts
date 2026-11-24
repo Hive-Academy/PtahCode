@@ -10,7 +10,7 @@
  *     assembly, allowedTools serialization, return value
  *   - searchMcpRegistry — delegation with default limit
  *   - listInstalledMcpServers — reads .vscode/mcp.json and .mcp.json with
- *     tolerance for IO errors
+ *     tolerance for IO errors, plus the installer's Ptah install intents
  *   - installMcpServer — target/key defaulting, zod config validation, missing
  *     installer degradation, per-target failure warnings
  *   - proposeConfig — zod validation before broadcast
@@ -1800,5 +1800,95 @@ describe('buildHarnessNamespace — listInstalledMcpServers', () => {
     const { deps } = makeDeps();
     const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
     expect(out).toEqual([]);
+  });
+
+  // B24: an install through `ptah_harness_install_mcp_server` is recorded as
+  // an intent the gateway serves; no file carries it, so the list reads the
+  // installer's rows too and says where each came from.
+  describe('Ptah install intents', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+    const intentRow = (
+      serverKey: string,
+      target: string,
+      scope: 'global' | 'workspace',
+      removal: 'ptah-managed' | 'none' = 'ptah-managed',
+    ) => ({
+      serverKey,
+      target,
+      configPath: 'D:/home/.ptah/mcp-installed.json',
+      config: stdio,
+      managedByPtah: true,
+      origin: 'ptah-intent',
+      originLabel: 'Ptah',
+      removal,
+      scope,
+    });
+    const withRows = (rows: unknown[] | Error): McpInstallerMock & {
+      listInstalled: jest.Mock;
+    } => ({
+      install: jest.fn(),
+      listInstalled:
+        rows instanceof Error
+          ? jest.fn().mockRejectedValue(rows)
+          : jest.fn().mockResolvedValue(rows),
+    });
+
+    it('lists each recorded server once per scope with its targets, after the files', async () => {
+      existsSync.mockImplementation((p: string) => p.endsWith('.mcp.json'));
+      fsp.readFile.mockResolvedValueOnce(
+        JSON.stringify({ mcpServers: { github: { url: 'x' } } }),
+      );
+      const mcpInstaller = withRows([
+        intentRow('g', 'codex', 'global'),
+        intentRow('k', 'claude', 'workspace'),
+        intentRow('k', 'cursor', 'workspace'),
+        intentRow('m', 'claude', 'workspace', 'none'),
+        // A file row is already listed from the file itself.
+        { ...intentRow('github', 'claude', 'workspace'), origin: 'harness-config' },
+      ]);
+      const { deps } = makeDeps({ mcpInstaller });
+
+      const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
+
+      expect(mcpInstaller.listInstalled).toHaveBeenCalledWith('D:/ws');
+      expect(out).toEqual([
+        { name: 'github', config: { url: 'x' }, source: '.mcp.json' },
+        {
+          name: 'g',
+          config: stdio,
+          source: 'ptah-intent (global)',
+          targets: ['codex'],
+        },
+        {
+          name: 'k',
+          config: stdio,
+          source: 'ptah-intent (workspace)',
+          targets: ['claude', 'cursor'],
+        },
+        {
+          name: 'm',
+          config: stdio,
+          source: 'ptah-intent (main checkout)',
+          targets: ['claude'],
+        },
+      ]);
+    });
+
+    it('still lists the files, and logs, when the installer cannot list', async () => {
+      existsSync.mockImplementation((p: string) => p.endsWith('.mcp.json'));
+      fsp.readFile.mockResolvedValueOnce(
+        JSON.stringify({ mcpServers: { github: { url: 'x' } } }),
+      );
+      const { deps, logger } = makeDeps({
+        mcpInstaller: withRows(new Error('store unreadable')),
+      });
+
+      const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
+
+      expect(out.map((s) => s.source)).toEqual(['.mcp.json']);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('store unreadable'),
+      );
+    });
   });
 });

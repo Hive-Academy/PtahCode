@@ -124,8 +124,8 @@ const ALPHA = '.claude/skills/alpha';
 const RUN_IT = '.claude/commands/run-it.md';
 /**
  * A server key a stale, pre-P2 report could still name. No target plans an
- * MCP entry any more (TASK_2026_979), so it is never in the blocked set, but
- * the repair still refuses it as `not-a-path` (parity row 28).
+ * MCP entry any more (TASK_2026_979), so it is never in the blocked set and
+ * the repair refuses it as `not-blocked`, untouched (decision row 39).
  */
 const MCP_KEY = '.mcp.json#wanted';
 const USER_MCP_JSON = `${JSON.stringify(
@@ -382,15 +382,15 @@ describe('HarnessBlockedRepairService', () => {
     expect(report.health).toBeNull();
   });
 
-  it('refuses an MCP server key a stale report names — there is no directory to move aside', async () => {
+  it('refuses an MCP server key a stale report names as not blocked, leaving the config untouched', async () => {
     const report = await makeService().repair(ws, [
       { target: 'claude', relPath: MCP_KEY },
     ]);
 
-    expect(report.paths[0].outcome).toBe('not-a-path');
-    expect(report.paths[0].reason).toContain('nothing to move aside');
-    // The sixth wording surface — see the `not-blocked` case above.
-    expect(report.paths[0].reason).toBe(HARNESS_REPAIR_REASONS.notAPath);
+    expect(report.paths[0].outcome).toBe('not-blocked');
+    expect(report.paths[0].reason).toBe(HARNESS_REPAIR_REASONS.notBlocked);
+    expect(report.repaired).toBe(0);
+    expect(report.health).toBeNull();
     expect(readFileSync(join(ws, '.mcp.json'), 'utf-8')).toBe(USER_MCP_JSON);
   });
 

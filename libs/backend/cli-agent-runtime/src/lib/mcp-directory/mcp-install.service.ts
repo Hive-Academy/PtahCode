@@ -25,9 +25,11 @@
  * - A global install with no folder open is a success, not a deferral: the
  *   gateway serves a global intent in every workspace. A workspace install
  *   with no root still throws `McpIntentScopeError` before anything is saved.
- * - A linked git worktree needs no special case: nothing is written there
- *   either way, and the gateway reads a worktree's intents with its main
- *   checkout's (#1469).
+ * - A linked git worktree needs no special case for writes: nothing is
+ *   written there either way. The gateway serves a worktree's intents with
+ *   its main checkout's (#1469), so `listInstalled` lists the main checkout's
+ *   workspace intents too, resolved by the same `worktreeMainRoot`. Those
+ *   rows are removed from the main checkout, not from the worktree.
  * - A key Ptah never recorded is the user's own entry in a file Ptah does not
  *   edit. Uninstalling it reports that, and the Installed tab gives the
  *   removal instruction instead of a delete button (decision D2).
@@ -69,6 +71,7 @@ import {
   type McpServerOrigin,
   type SmitheryInstalledRecord,
 } from '@ptah-extension/shared';
+import { worktreeMainRoot } from '../cli-agents/git-main-checkout-root';
 import {
   readClaudeUserMcpServers,
   type ClaudeUserMcpScope,
@@ -137,6 +140,12 @@ export interface McpInstallServiceOptions {
    * hears the change at once instead of at the gateway's next poll.
    */
   onIntentsChanged?: () => void;
+  /**
+   * The main checkout of a linked git worktree, or `null`. Defaults to the
+   * resolver `GatewayServerSources` uses, so the Installed tab lists the same
+   * workspace intents the gateway serves. Overridable for specs.
+   */
+  mainCheckoutRoot?: (root: string) => string | null;
 }
 
 /** The detail logged for a caught cause: never sent to the UI. */
@@ -484,10 +493,12 @@ export class McpInstallService {
 
   /**
    * The servers installed through Ptah (`~/.ptah/mcp-installed.json`) that
-   * apply here: the global record and this workspace's own, one row per
-   * recorded target. No config file carries them; the gateway serves them, so
+   * apply here: the global record, this workspace's own and, in a linked git
+   * worktree, the main checkout's workspace record, one row per recorded
+   * target. No config file carries them; the gateway serves them all, so
    * without these rows an install would never show on the Installed tab.
-   * Each is removed by forgetting its intent (`ptah-managed`).
+   * A global or own-workspace row is removed by forgetting its intent
+   * (`ptah-managed`); a main-checkout row is removed from the main checkout.
    */
   private intentRows(workspaceRoot?: string): InstalledMcpServer[] {
     try {
@@ -506,50 +517,89 @@ export class McpInstallService {
 
   /** {@link intentRows} without the read guard. Throws what the store throws. */
   private readIntentRows(root: string): InstalledMcpServer[] {
-    const rows: InstalledMcpServer[] = [];
-    const push = (
-      serverKey: string,
-      config: McpServerConfig,
-      targets: readonly McpInstallTarget[],
-      scope: CapabilityScope,
-    ): void => {
-      for (const target of targets) {
-        rows.push({
-          serverKey,
-          target,
-          configPath: this.intents.filePath,
-          config,
-          managedByPtah: true,
-          origin: 'ptah-intent',
-          originLabel: ORIGIN_LABELS['ptah-intent'],
-          removal: 'ptah-managed',
-          scope,
-        });
-      }
-    };
-
     // `listFor('')` is the global record alone.
-    for (const intent of this.intents.listFor('')) {
-      push(intent.serverKey, intent.config, intent.targets, 'global');
-    }
+    const rows = this.intents
+      .listFor('')
+      .flatMap((intent) =>
+        this.intentRowsFor(intent.serverKey, intent.config, intent.targets, {
+          scope: 'global',
+        }),
+      );
     if (root.trim() === '') return rows;
+    rows.push(...this.workspaceIntentRows(root));
 
-    // `listFor(root)` merges in this workspace's record, whose config is the
-    // one that lists the workspace record's targets.
-    const applying = this.intents.listFor(root);
+    // A linked worktree also gets its main checkout's workspace intents, as
+    // in `GatewayServerSources.resolve`. They are not this workspace's own
+    // record, so an uninstall here cannot drop them.
+    const main = this.mainCheckoutOf(root);
+    if (main !== null) rows.push(...this.workspaceIntentRows(root, main));
+    return rows;
+  }
+
+  /**
+   * One row per target of each server `recordRoot`'s workspace record lists.
+   * `recordRoot` differs from `root` only for a worktree's main checkout.
+   */
+  private workspaceIntentRows(
+    root: string,
+    recordRoot: string = root,
+  ): InstalledMcpServer[] {
+    // `listFor(recordRoot)` merges in that workspace's record, whose config
+    // is the one that lists the workspace record's targets.
+    const applying = this.intents.listFor(recordRoot);
+    const rows: InstalledMcpServer[] = [];
     for (const serverKey of new Set(applying.map((i) => i.serverKey))) {
-      const local = this.intents.targetsIn(serverKey, 'workspace', root);
+      const local = this.intents.targetsIn(serverKey, 'workspace', recordRoot);
       if (local.length === 0) continue;
       const intent = applying.find(
         (candidate) =>
           candidate.serverKey === serverKey &&
           candidate.targets.some((target) => local.includes(target)),
       );
-      if (intent !== undefined) {
-        push(serverKey, intent.config, local, 'workspace');
-      }
+      if (intent === undefined) continue;
+      rows.push(
+        ...this.intentRowsFor(serverKey, intent.config, local, {
+          scope: 'workspace',
+          ...(recordRoot === root ? {} : { mainCheckout: recordRoot }),
+        }),
+      );
     }
     return rows;
+  }
+
+  private intentRowsFor(
+    serverKey: string,
+    config: McpServerConfig,
+    targets: readonly McpInstallTarget[],
+    where: { scope: CapabilityScope; mainCheckout?: string },
+  ): InstalledMcpServer[] {
+    const removal =
+      where.mainCheckout === undefined
+        ? { removal: 'ptah-managed' as const }
+        : {
+            removal: 'none' as const,
+            removalBlockedReason: mainCheckoutRemovalReason(
+              serverKey,
+              where.mainCheckout,
+            ),
+          };
+    return targets.map((target) => ({
+      serverKey,
+      target,
+      configPath: this.intents.filePath,
+      config,
+      managedByPtah: true,
+      origin: 'ptah-intent' as const,
+      originLabel: ORIGIN_LABELS['ptah-intent'],
+      ...removal,
+      scope: where.scope,
+    }));
+  }
+
+  /** The main checkout of a linked worktree `root`, or `null`. */
+  private mainCheckoutOf(root: string): string | null {
+    const main = (this.options.mainCheckoutRoot ?? worktreeMainRoot)(root);
+    return main === null || main === root ? null : main;
   }
 
   /** `~/.claude.json`, user scope and this workspace's project scope. */
@@ -715,6 +765,18 @@ function unownedConfigRemovalReason(
     `"${serverKey}" is declared in ${configPath}, which Ptah did not write. ` +
     'Ptah does not edit MCP config files: remove the entry from that file ' +
     'by hand.'
+  );
+}
+
+/** Why a main-checkout intent row has no removal path in a linked worktree. */
+function mainCheckoutRemovalReason(
+  serverKey: string,
+  mainCheckout: string,
+): string {
+  return (
+    `"${serverKey}" was installed through Ptah for the main checkout ` +
+    `${mainCheckout}, and this worktree uses it from there. Open that folder ` +
+    'in Ptah to remove it.'
   );
 }
 

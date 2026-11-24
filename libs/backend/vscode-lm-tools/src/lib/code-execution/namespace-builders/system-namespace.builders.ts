@@ -248,7 +248,10 @@ DISCOVERY:
     Smithery API key is configured). Returns { servers, count, status, sources,
     next_cursor? }. 'limit' bounds the MERGED list, drawn round-robin so neither
     source starves the other.
-- listInstalledMcpServers() - Servers already in .vscode/mcp.json and .mcp.json.
+- listInstalledMcpServers() - Servers in .vscode/mcp.json and .mcp.json, plus
+    those installed through Ptah (served by the gateway, in no config file).
+    Each row has { name, config, source, targets? }; source is the file or
+    'ptah-intent (global|workspace|main checkout)'.
 
 READING A SEARCH RESULT — three states, not two:
   status 'ok'       + empty list -> the catalogue genuinely has nothing.

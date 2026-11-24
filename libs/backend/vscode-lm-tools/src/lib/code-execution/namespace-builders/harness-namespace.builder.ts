@@ -12,7 +12,7 @@
 
 import * as path from 'path';
 import { existsSync } from 'fs';
-import { mkdir, writeFile, readFile } from 'fs/promises';
+import { mkdir, writeFile } from 'fs/promises';
 import { resolvePtahHomeDir } from '@ptah-extension/platform-core';
 import { z } from 'zod';
 import {
@@ -31,12 +31,17 @@ import {
   type HarnessConfig,
   type HarnessConfigProposedPayload,
   type HarnessProposal,
+  type InstalledMcpServer,
   type McpInstallResult,
   type McpInstallTarget,
   type McpServerConfig,
   type PluginConfigState,
   type SkillShEntry,
 } from '@ptah-extension/shared';
+import {
+  listHarnessInstalledMcpServers,
+  type HarnessInstalledMcpServer,
+} from './harness-installed-mcp-servers';
 
 class HarnessConfigUpdatesError extends Error {
   override name = 'HarnessConfigUpdatesError';
@@ -193,6 +198,12 @@ export interface HarnessMcpInstaller {
     workspaceRoot?: string,
     scope?: CapabilityScope,
   ): Promise<McpInstallResult[]>;
+  /**
+   * The Installed-tab rows (`McpInstallService.listInstalled`). Its Ptah
+   * install intents feed `listInstalledMcpServers`; optional so a host or a
+   * spec with an install-only installer still lists the project files.
+   */
+  listInstalled?(workspaceRoot?: string): Promise<InstalledMcpServer[]>;
 }
 
 /**
@@ -468,9 +479,7 @@ export interface HarnessNamespace {
     query: string,
     limit?: number,
   ): Promise<HarnessMcpSearchResult>;
-  listInstalledMcpServers(): Promise<
-    Array<{ name: string; config: Record<string, unknown>; source: string }>
-  >;
+  listInstalledMcpServers(): Promise<HarnessInstalledMcpServer[]>;
   installMcpServer(
     serverName: string,
     config: McpServerConfig,
@@ -966,66 +975,12 @@ export function buildHarnessNamespace(
     },
 
     async listInstalledMcpServers() {
-      const servers: Array<{
-        name: string;
-        config: Record<string, unknown>;
-        source: string;
-      }> = [];
-      const wsRoot = getWorkspaceRoot();
-      const vscodeMcpPath = path.join(wsRoot, '.vscode', 'mcp.json');
-      try {
-        if (existsSync(vscodeMcpPath)) {
-          const raw = await readFile(vscodeMcpPath, 'utf-8');
-          const parsed = JSON.parse(raw) as Record<string, unknown>;
-          const mcpServers =
-            (parsed['servers'] as Record<string, unknown>) ??
-            (parsed['mcpServers'] as Record<string, unknown>) ??
-            {};
-
-          for (const [name, config] of Object.entries(mcpServers)) {
-            servers.push({
-              name,
-              config:
-                typeof config === 'object' && config !== null
-                  ? (config as Record<string, unknown>)
-                  : {},
-              source: '.vscode/mcp.json',
-            });
-          }
-        }
-      } catch (err) {
-        logger.warn(
-          `[Harness] Failed to read .vscode/mcp.json: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      const rootMcpPath = path.join(wsRoot, '.mcp.json');
-      try {
-        if (existsSync(rootMcpPath)) {
-          const raw = await readFile(rootMcpPath, 'utf-8');
-          const parsed = JSON.parse(raw) as Record<string, unknown>;
-          const mcpServers =
-            (parsed['servers'] as Record<string, unknown>) ??
-            (parsed['mcpServers'] as Record<string, unknown>) ??
-            {};
-
-          for (const [name, config] of Object.entries(mcpServers)) {
-            servers.push({
-              name,
-              config:
-                typeof config === 'object' && config !== null
-                  ? (config as Record<string, unknown>)
-                  : {},
-              source: '.mcp.json',
-            });
-          }
-        }
-      } catch (err) {
-        logger.warn(
-          `[Harness] Failed to read .mcp.json: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-
-      return servers;
+      const listInstalled = mcpInstaller?.listInstalled?.bind(mcpInstaller);
+      return listHarnessInstalledMcpServers({
+        workspaceRoot: getWorkspaceRoot(),
+        logger,
+        ...(listInstalled === undefined ? {} : { installer: { listInstalled } }),
+      });
     },
 
     async installMcpServer(

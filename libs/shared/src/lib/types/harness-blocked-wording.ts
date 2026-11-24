@@ -185,9 +185,6 @@ export const HARNESS_REPAIR_REASONS = {
   /** `restore-failed`. Continues with the quarantine path and `describeError(error)`. */
   restoreFailed:
     'the managed copy was not written and your original could not be put back — it is at',
-  /** `not-a-path`. Fixed. */
-  notAPath:
-    'this is a server key inside a config file you also write, not a file — there is nothing to move aside',
   /** `not-blocked`. Fixed. */
   notBlocked:
     'this path is not in the current blocked set, so it was left untouched',
@@ -309,8 +306,6 @@ export const HARNESS_BLOCKED_APPROVED_PROSE: Readonly<
     'Moved aside, Ptah did not install its copy, and your content could not ' +
       'be put back. It is in the quarantine folder named below and nowhere else.',
     'No longer blocked, so Ptah refused it and left it untouched.',
-    'A server key inside a config file you also write, not a file. There is ' +
-      'nothing to move aside, so this one does not apply.',
     'Kept: changed since approval. It no longer matches what you approved, ' +
       'so Ptah left it exactly as it is.',
     'Move aside and install',

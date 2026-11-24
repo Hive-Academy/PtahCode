@@ -1964,16 +1964,16 @@ export function buildHarnessSearchMcpRegistryTool(): MCPToolDefinition {
 
 /**
  * Build the ptah_harness_list_installed_mcp tool definition
- * List MCP servers configured in the workspace
+ * List the MCP servers the workspace's files declare and Ptah has installed
  */
 export function buildHarnessListInstalledMcpTool(): MCPToolDefinition {
   return {
     name: 'ptah_harness_list_installed_mcp',
     description:
-      'Harness-builder tool: list the MCP servers already configured in the workspace. ' +
-      'Reads from .vscode/mcp.json and .mcp.json in the workspace root and returns each ' +
-      "server's name, config, and source file. Use this to check what is already available " +
-      'before searching the registry with ptah_harness_search_mcp_registry.',
+      'Harness-builder tool: list the MCP servers this workspace already has: ' +
+      '.vscode/mcp.json, .mcp.json and servers installed through Ptah. Returns each ' +
+      "server's name, config and source. Check this before " +
+      'ptah_harness_search_mcp_registry.',
     inputSchema: {
       type: 'object',
       properties: {},

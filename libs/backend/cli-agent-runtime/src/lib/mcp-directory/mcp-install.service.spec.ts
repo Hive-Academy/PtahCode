@@ -926,5 +926,100 @@ describe('McpInstallService', () => {
       expect(warnings).toEqual([]);
       expect(filesBesideIntentStore()).toEqual(['.git']);
     });
+
+    // B24 (decision row 39): the gateway serves a worktree's intents with its
+    // main checkout's (`GatewayServerSources.resolve`), so the Installed tab
+    // lists them too, resolved through the same `mainCheckoutRoot` seam.
+    describe("lists the main checkout's workspace intents the gateway serves", () => {
+      const stdio = { type: 'stdio' as const, command: 'node' };
+      let worktree: string;
+      let mainRoot: string;
+      const linked = (): McpInstallService =>
+        new McpInstallService(null, intents, {
+          homeDir: tmp,
+          mainCheckoutRoot: (root) => (root === worktree ? mainRoot : null),
+        });
+
+      /**
+       * A root with its own workspace marker, so the intent store keys it as
+       * its own workspace rather than walking up to `tmp` (which holds the
+       * `.ptah` of the intent store).
+       */
+      const repoRoot = (name: string): string => {
+        const root = path.join(tmp, name);
+        fs.mkdirSync(path.join(root, '.ptah'), { recursive: true });
+        return root;
+      };
+
+      beforeEach(() => {
+        worktree = repoRoot('wt');
+        mainRoot = repoRoot('main');
+      });
+
+      it('adds the main checkout rows after the worktree own rows, removable only there', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+        await linked().install('r/w', 'own', stdio, ['cursor'], worktree);
+
+        const rows = await linked().listInstalled(worktree);
+
+        expect(
+          rows.map((row) => [row.serverKey, row.target, row.scope, row.removal]),
+        ).toEqual([
+          ['own', 'cursor', 'workspace', 'ptah-managed'],
+          ['from-main', 'claude', 'workspace', 'none'],
+        ]);
+        const fromMain = rows.find((row) => row.serverKey === 'from-main');
+        expect(fromMain).toMatchObject({
+          origin: 'ptah-intent',
+          managedByPtah: true,
+          configPath: path.join(tmp, '.ptah', 'mcp-installed.json'),
+          config: stdio,
+        });
+        expect(fromMain?.removalBlockedReason).toContain(mainRoot);
+        expect(fromMain?.removalBlockedReason).toContain('Open that folder');
+      });
+
+      it('feeds the main checkout rows to the capability inventory too', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+
+        const { declarations } = await linked().listDeclarations(worktree);
+
+        expect(declarations).toEqual([
+          expect.objectContaining({
+            serverKey: 'from-main',
+            origin: 'ptah-intent',
+            scope: 'workspace',
+          }),
+        ]);
+      });
+
+      it('lists nothing extra outside a linked worktree', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+        const other = repoRoot('other');
+
+        expect(await linked().listInstalled(other)).toEqual([]);
+        // The main checkout itself lists its own record once, as removable.
+        expect(
+          (await linked().listInstalled(mainRoot)).map((row) => row.removal),
+        ).toEqual(['ptah-managed']);
+      });
+
+      it('lists a global install once, not again through the main checkout', async () => {
+        await linked().install(
+          'r/g',
+          'g',
+          stdio,
+          ['codex'],
+          undefined,
+          'global',
+        );
+
+        const rows = await linked().listInstalled(worktree);
+
+        expect(rows.map((row) => [row.serverKey, row.scope])).toEqual([
+          ['g', 'global'],
+        ]);
+      });
+    });
   });
 });
