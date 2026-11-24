@@ -25,6 +25,21 @@ const senderSchema = z.union([
   z.enum(['user', 'parent']).transform((kind) => ({ kind })),
 ]);
 
+/** Model / effort ids: the RPC boundary allows the same characters. */
+const turnSettingSchema = z.string().min(1).max(200);
+
+/**
+ * The per-turn request of a held message, without image bytes: images stay
+ * in host memory (`AgentMessageAttachmentStore`) and only their count is
+ * durable, so a restart can say they were lost.
+ */
+export const AgentMessageEnvelopeTurnSchema = z.object({
+  model: turnSettingSchema.optional(),
+  reasoningEffort: turnSettingSchema.optional(),
+  files: z.array(z.string().min(1).max(4096)).max(32).optional(),
+  imageCount: z.number().int().positive().max(8).optional(),
+}).strict();
+
 export const AgentMessageEnvelopeSchema = z.object({
   id: z.string().uuid(),
   targetAgentId: agentIdSchema,
@@ -70,6 +85,15 @@ export const AgentMessageEnvelopeSchema = z.object({
   ackState: z.enum(['pending', 'read', 'acted', 'rejected', 'unavailable']).optional(),
   ackAt: timestamp.optional(),
   ackNote: z.string().max(500).optional(),
+  /** Settings and attachment summary of the turn this message starts. */
+  turn: AgentMessageEnvelopeTurnSchema.optional(),
+  /**
+   * Delivered as a raw provider `/command` (no Ptah header, no ack line). The
+   * decision is recorded once, so a retry or a scheduler re-offer delivers it
+   * the same way. Named apart from `delivery` (`queue` | `now`), which this
+   * schema already uses.
+   */
+  rawDelivery: z.object({ raw: z.literal(true) }).strict().optional(),
 }).strict();
 
 export const AgentMessageEnvelopeIndexSchema = z.object({
@@ -87,6 +111,7 @@ export const AgentMessageBodySchema = z.object({
 
 export type AgentMessageEnvelope = z.infer<typeof AgentMessageEnvelopeSchema>;
 export type AgentMessageBody = z.infer<typeof AgentMessageBodySchema>;
+export type AgentMessageEnvelopeTurn = z.infer<typeof AgentMessageEnvelopeTurnSchema>;
 export type NewEnvelope = Omit<AgentMessageEnvelope,
   'id' | 'state' | 'createdAt' | 'updatedAt' | 'attemptCount' | 'attemptId' |
   'everDispatched' | 'terminalAt' | 'nextRetryAt'
@@ -101,7 +126,8 @@ export type NewEnvelope = Omit<AgentMessageEnvelope,
 };
 /** The semantic ack fields, written apart from transport transitions. */
 export type EnvelopeAckPatch = Pick<AgentMessageEnvelope, 'ackState' | 'ackAt' | 'ackNote'>;
+/** `turn` is written once at `put`; a transition never rewrites what the user asked for. */
 export type EnvelopePatch =Partial<Omit<AgentMessageEnvelope,
   'id' | 'targetAgentId' | 'laneLineageId' | 'sender' | 'senderKey' |
-  'idempotencyKey' | 'createdAt'
+  'idempotencyKey' | 'createdAt' | 'turn'
 >>;

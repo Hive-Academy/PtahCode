@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 16/30
+Total tasks: 49 | Batches: 30 | Complete: 17/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -820,7 +820,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 17: B3a envelope turn field, attachment side store, failure classifier - PENDING (AFTER REBASE)
+## Batch 17: B3a envelope turn field, attachment side store, failure classifier - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~22k (schema 1k, store 6k, classifier ~1k, DI ~2k, specs ~9k, plan ~3k)
@@ -845,8 +845,8 @@ Edge cases:
 - Tasks: 2 | Depends on: Batch 15
 - Phase: P5 Messaging core
 
-### Task 17.1: Envelope schema/store turn + delivery.raw; classifier code - PENDING
-### Task 17.2: Attachment side store + DI registration - PENDING
+### Task 17.1: Envelope schema/store turn + delivery.raw; classifier code - COMPLETE
+### Task 17.2: Attachment side store + DI registration - COMPLETE
 
 ### Batch 17 verification
 

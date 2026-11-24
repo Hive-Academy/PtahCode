@@ -26,6 +26,7 @@ import { AgentMessageCoordinator } from '../cli-agents/messaging/agent-message-c
 import { AgentMessageDeliveryScheduler } from '../cli-agents/messaging/agent-message-delivery.scheduler';
 import type { AgentMessageDispatchJournal } from '../cli-agents/messaging/agent-message-dispatch-journal.port';
 import { AgentMessageEnvelopeStore } from '../cli-agents/messaging/envelope/agent-message-envelope.store';
+import { AgentMessageAttachmentStore } from '../cli-agents/messaging/agent-message-attachment.store';
 import type { LaneLimitLookupService } from '../cli-agents/limits/lane-limit-lookup.service';
 import { LaneDeliveryLimitGate } from '../cli-agents/messaging/lane-delivery-limit.gate';
 import { LaneMessagePolicy } from '../cli-agents/messaging/lane-message.policy';
@@ -43,14 +44,31 @@ const envelopeStore = (c: DependencyContainer): AgentMessageEnvelopeStore =>
 const isParentFrozen = (c: DependencyContainer) => (parentSessionId: string): boolean =>
   c.resolve(ParentEnvelopeStoreService).isParentFrozen(parentSessionId);
 
-/** Envelope store and the router's dispatch journal over it. */
+/** Held images go when their envelope ends (settled, cancelled, failed, expired). */
+function withAttachmentRelease(
+  c: DependencyContainer,
+  store: AgentMessageEnvelopeStore,
+): AgentMessageEnvelopeStore {
+  const attachments = c.resolve<AgentMessageAttachmentStore>(
+    CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE,
+  );
+  store.setTerminalListener((envelope) => attachments.release(envelope.id));
+  return store;
+}
+
+/** Attachment side store, envelope store and the router's dispatch journal over it. */
 export function registerAgentMessageJournal(container: DependencyContainer): void {
+  container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE, {
+    useFactory: instanceCachingFactory((c) => new AgentMessageAttachmentStore(
+      c.resolve<Logger>(TOKENS.LOGGER),
+    )),
+  });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE, {
-    useFactory: instanceCachingFactory((c) => AgentMessageEnvelopeStore.fromStateStorage(
+    useFactory: instanceCachingFactory((c) => withAttachmentRelease(c, AgentMessageEnvelopeStore.fromStateStorage(
       c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
       lazyReceiptSink(c),
       c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    ))),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_DISPATCH_JOURNAL, {
     useFactory: instanceCachingFactory((c): AgentMessageDispatchJournal => ({

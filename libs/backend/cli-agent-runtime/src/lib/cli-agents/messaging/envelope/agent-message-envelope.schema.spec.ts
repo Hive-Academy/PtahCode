@@ -183,3 +183,32 @@ describe('AgentMessageBodySchema', () => {
     }).success).toBe(false);
   });
 });
+
+describe('AgentMessageEnvelopeSchema turn and rawDelivery', () => {
+  it('parses older records without turn or rawDelivery', () => {
+    const parsed = AgentMessageEnvelopeSchema.parse(record());
+    expect(parsed.turn).toBeUndefined();
+    expect(parsed.rawDelivery).toBeUndefined();
+  });
+
+  it('parses a turn summary and a raw delivery decision', () => {
+    const parsed = AgentMessageEnvelopeSchema.parse({
+      ...record(),
+      turn: { model: 'grok-4', reasoningEffort: 'high', files: ['src/a.ts'], imageCount: 2 },
+      rawDelivery: { raw: true },
+    });
+    expect(parsed.turn).toEqual({ model: 'grok-4', reasoningEffort: 'high', files: ['src/a.ts'], imageCount: 2 });
+    expect(parsed.rawDelivery).toEqual({ raw: true });
+  });
+
+  it.each([
+    ['unknown turn key', { turn: { images: [] } }],
+    ['too many files', { turn: { files: Array.from({ length: 33 }, (_, i) => `f${i}`) } }],
+    ['too long a file path', { turn: { files: ['x'.repeat(4097)] } }],
+    ['a fractional image count', { turn: { imageCount: 1.5 } }],
+    ['raw false', { rawDelivery: { raw: false } }],
+    ['an unknown raw key', { rawDelivery: { raw: true, header: false } }],
+  ])('rejects %s', (_label, patch) => {
+    expect(AgentMessageEnvelopeSchema.safeParse({ ...record(), ...patch }).success).toBe(false);
+  });
+});
