@@ -190,6 +190,7 @@ let nextTaskSectionId = 0;
       @let digest = readyDigest();
       @let lastModified = digest?.lastModified;
       <ptah-surface-section
+        tone="flush"
         class="task-section block border-t border-surface-border"
         padding="md"
         role="region"
@@ -864,7 +865,6 @@ let nextTaskSectionId = 0;
     .task-section ::ng-deep > section {
       padding: 0.75rem;
       gap: 0.375rem;
-      border-radius: 0;
     }
     .task-stats,
     .task-disclosures {
