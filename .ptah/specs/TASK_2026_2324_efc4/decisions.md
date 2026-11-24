@@ -1,0 +1,9 @@
+# Decisions - TASK_2026_2324_efc4
+
+| # | Date | Decision | Evidence | Decided by | Reversible |
+|---|---|---|---|---|---|
+| 1 | 2026-11-24 | Delete `interruptSession` end to end: `AgentMonitorStore.interruptSession`, `ClaudeRpcService.interruptSubagentSession`, the `subagent:interrupt` RPC (handler, types, schema) and `SubagentMessageDispatcher.interruptSession`. It duplicates main chat Stop (`chat:abort`, the same `query.interrupt()`) without Stop's queue withdrawal, turn end or resume-state save, and nothing in the UI calls it | subagent-rpc.handlers.ts:472-495; subagent-message-dispatcher.ts:353; chat-session.service.ts:2790 | user ("delete them and start") | yes (git) |
+| 2 | 2026-11-24 | Delete the `agent:continue` RPC along with `continueAgent` / `resumeAgentWithMessage`; `agent:sendMessage` replaces it | implementation-plan.md D6 | user ("delete them and start") | yes (git) |
+| 3 | 2026-11-24 | The plan (implementation-plan.md rev 1) is approved by the orchestrator under the carried-over full-auto instruction. No separate document review: the requirements and design were approved in TASK_2026_2320_lnpar | context.md | orchestrator | yes |
+| 4 | 2026-11-24 | Batches 1, 2 and 3-5 run in parallel with 3 agents, file-disjoint, with no agent commits; the orchestrator commits each batch after all three finish (lint-staged safety) | CLAUDE.md commit rules | orchestrator | yes |
+| 5 | 2026-11-24 | Electron visual review of the merged lane parity work (TASK_2026_2320_lnpar, frozen 2aba18e6e): NEEDS_REVISION 5/10. Its visual findings become Batch 7 here. L4 did not pass because steer is dormant, so Batch 6 (the manifest flip) is not justified yet | visual-review-2320.md | orchestrator | yes |
