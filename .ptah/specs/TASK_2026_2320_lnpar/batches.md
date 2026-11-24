@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 26/30
+Total tasks: 49 | Batches: 30 | Complete: 27/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1182,7 +1182,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 27: B8b ACP lane handle and Grok/agy manifests - PENDING (AFTER REBASE)
+## Batch 27: B8b ACP lane handle and Grok/agy manifests - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~24k
@@ -1211,11 +1211,11 @@ Edge cases:
 - Tasks: 2 | Depends on: Batches 15, 16, 20
 - Phase: P6 Adapters
 
-### Task 27.0: Re-read the post-rebase lane handle and agy entry point - PENDING
+### Task 27.0: Re-read the post-rebase lane handle and agy entry point - COMPLETE
 
 - Stop and report if agy no longer builds through `createProviderSessionLaneHandle`.
 
-### Task 27.1: Handle content, settings, catalog, commands; Grok and agy manifests - PENDING
+### Task 27.1: Handle content, settings, catalog, commands; Grok and agy manifests - COMPLETE
 
 ### Batch 27 verification
 
