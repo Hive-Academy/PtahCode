@@ -389,7 +389,7 @@ describe('SubagentLaneComponent', () => {
         'ptah-subagent-lane-composer',
       );
       expect(
-        composer?.querySelector('ptah-agent-steer-input textarea'),
+        composer?.querySelector('textarea'),
       ).not.toBeNull();
     },
   );
@@ -435,7 +435,9 @@ describe('SubagentLaneComponent', () => {
     expect(buttons).toHaveLength(2);
     buttons.forEach((button) => { expect(button.disabled).toBe(true); button.click(); });
     expect(root.textContent).toContain('Native Codex subagents do not support send or stop from Ptah yet.');
-    expect(root.querySelector('ptah-agent-steer-input')).toBeNull();
+    // The composer stays, in its unavailable state: no context reaches it.
+    expect(root.querySelector<HTMLTextAreaElement>('ptah-subagent-lane-composer textarea')?.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="subagent-composer-send"]')?.disabled).toBe(true);
     expect(steer).not.toHaveBeenCalled();
     expect(stop).not.toHaveBeenCalled();
     fixture.componentRef.setInput('record', { ...base, agentType: 'codex', taskId: undefined,
@@ -451,7 +453,7 @@ describe('SubagentLaneComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelector('[data-testid="native-codex-controls"]')).toBeNull();
     expect(root.textContent).not.toContain('Native Codex subagents do not support send or stop from Ptah yet.');
-    expect(root.querySelector('ptah-agent-steer-input textarea')).not.toBeNull();
+    expect(root.querySelector('ptah-subagent-lane-composer textarea')).not.toBeNull();
     const stopButton = root.querySelector<HTMLButtonElement>('[aria-label="Stop Explore"]');
     expect(stopButton?.disabled).toBe(false);
     stopButton?.click();
@@ -673,7 +675,7 @@ describe('SubagentLaneComponent', () => {
     const fixture = setup();
     const root: HTMLElement = fixture.nativeElement;
     const field = root.querySelector<HTMLTextAreaElement>(
-      'ptah-agent-steer-input textarea',
+      'ptah-subagent-lane-composer textarea',
     )!;
     field.value = 'Check tests';
     field.dispatchEvent(new Event('input'));
@@ -689,7 +691,7 @@ describe('SubagentLaneComponent', () => {
     );
     expect(root.textContent).toContain('Could not send your message');
     expect(
-      root.querySelector<HTMLTextAreaElement>('ptah-agent-steer-input textarea')
+      root.querySelector<HTMLTextAreaElement>('ptah-subagent-lane-composer textarea')
         ?.value,
     ).toBe('Check tests');
     root
@@ -698,7 +700,7 @@ describe('SubagentLaneComponent', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     expect(
-      root.querySelector<HTMLTextAreaElement>('ptah-agent-steer-input textarea')
+      root.querySelector<HTMLTextAreaElement>('ptah-subagent-lane-composer textarea')
         ?.value,
     ).toBe('');
     expect(root.textContent).not.toContain('Could not send your message');

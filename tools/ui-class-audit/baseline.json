@@ -226,10 +226,10 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.html": {
+    "<dynamic>": 6,
     "btn": 1,
     "btn-warning": 1,
-    "btn-xs": 1,
-    "<dynamic>": 6
+    "btn-xs": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-server-list.component.ts": {
     "<dynamic>": 1
@@ -296,9 +296,6 @@
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane-composer.component.ts": {
-    "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane.component.ts": {
     "<dynamic>": 4

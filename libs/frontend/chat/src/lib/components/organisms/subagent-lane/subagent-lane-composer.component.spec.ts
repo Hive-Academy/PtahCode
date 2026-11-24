@@ -1,10 +1,24 @@
+import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { SubagentRecord } from '@ptah-extension/chat-streaming';
-import type { AgentFeedbackSendResult } from '@ptah-extension/core';
+import {
+  COMPOSER_CARD_BORDER_CLASS,
+  COMPOSER_CARD_CLASS,
+  COMPOSER_ICON_BUTTON_CLASS,
+  COMPOSER_SEND_BUTTON_CLASS,
+  COMPOSER_STATUS_LINE_CLASS,
+  COMPOSER_STOP_BUTTON_CLASS,
+  COMPOSER_TEXTAREA_CLASS,
+} from '@ptah-extension/chat-ui';
+import { VSCodeService, type AgentFeedbackSendResult } from '@ptah-extension/core';
 import type { TrayAgentContext } from '../../../services/session-agents/session-agent-tray';
 import { SessionAgentTrayService } from '../../../services/session-agents/session-agent-tray.service';
 import { ChatAgentFeedbackSender } from '../../../services/agent-feedback/chat-agent-feedback-sender.service';
-import { SubagentLaneComposerComponent } from './subagent-lane-composer.component';
+import { VoiceInputService } from '../../../services/voice-input.service';
+import {
+  SUBAGENT_GATED_REASONS,
+  SubagentLaneComposerComponent,
+} from './subagent-lane-composer.component';
 
 describe('SubagentLaneComposerComponent', () => {
   const steer = jest.fn<Promise<boolean>, [TrayAgentContext, string]>();
@@ -12,6 +26,13 @@ describe('SubagentLaneComposerComponent', () => {
     Promise<AgentFeedbackSendResult>,
     [{ sessionId: string } | 'active', string]
   >();
+  const voice = {
+    isRecording: signal(false),
+    isTranscribing: signal(false),
+    elapsedSeconds: signal(0),
+    start: jest.fn(),
+    stop: jest.fn(),
+  };
 
   const record: SubagentRecord = {
     parentToolUseId: 'tool-1',
@@ -22,14 +43,17 @@ describe('SubagentLaneComposerComponent', () => {
     status: 'completed',
   };
 
-  const context = (steerable: boolean): TrayAgentContext => ({
+  const context = (
+    steerable: boolean,
+    flags: { stoppable?: boolean; canBackground?: boolean } = {},
+  ): TrayAgentContext => ({
     entry: {
       id: 'tool-1',
       name: 'Explore',
       origin: 'foreground',
       status: 'running',
-      canBackground: false,
-      stoppable: false,
+      canBackground: flags.canBackground ?? false,
+      stoppable: flags.stoppable ?? false,
       steerable,
     },
     taskId: 'task-1',
@@ -55,19 +79,38 @@ describe('SubagentLaneComposerComponent', () => {
   const field = (fixture: ComponentFixture<unknown>): HTMLTextAreaElement =>
     root(fixture).querySelector('textarea') as HTMLTextAreaElement;
   const byId = (fixture: ComponentFixture<unknown>, id: string) =>
-    root(fixture).querySelector(`[data-testid="${id}"]`);
+    root(fixture).querySelector<HTMLElement>(`[data-testid="${id}"]`);
+  const sendButton = (fixture: ComponentFixture<unknown>) =>
+    byId(fixture, 'subagent-composer-send') as HTMLButtonElement;
+  const statusText = (fixture: ComponentFixture<unknown>) =>
+    byId(fixture, 'subagent-composer-status-line')?.querySelector(
+      '[aria-live="polite"]',
+    )?.textContent ?? '';
+
+  function fill(fixture: ComponentFixture<unknown>, text: string): void {
+    const input = field(fixture);
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+  }
 
   async function type(
     fixture: ComponentFixture<unknown>,
     text: string,
   ): Promise<void> {
-    const input = field(fixture);
-    input.value = text;
-    input.dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    fill(fixture, text);
+    field(fixture).dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter' }),
+    );
     await fixture.whenStable();
     fixture.detectChanges();
+  }
+
+  function expectClasses(element: Element | null, ...lists: string[]): void {
+    expect(element).not.toBeNull();
+    for (const token of lists.join(' ').split(/\s+/).filter(Boolean)) {
+      expect(element?.classList).toContain(token);
+    }
   }
 
   beforeEach(() => {
@@ -78,26 +121,129 @@ describe('SubagentLaneComposerComponent', () => {
       providers: [
         { provide: SessionAgentTrayService, useValue: { steer } },
         { provide: ChatAgentFeedbackSender, useValue: { send } },
+        { provide: VSCodeService, useValue: { isElectron: false } },
       ],
+    });
+    TestBed.overrideComponent(SubagentLaneComposerComponent, {
+      remove: { providers: [VoiceInputService] },
+      add: { providers: [{ provide: VoiceInputService, useValue: voice }] },
     });
   });
 
   afterEach(() => TestBed.resetTestingModule());
 
-  it('places Stop and Background in the composer actions', () => {
-    const original = context(true);
-    const ctx = { ...original, entry: { ...original.entry, stoppable: true, canBackground: true } };
+  it('uses the shared composer card, textarea, buttons and status line classes', () => {
+    const fixture = setup(
+      { ...record, status: 'running' },
+      context(true, { stoppable: true, canBackground: true }),
+    );
+    const card = byId(fixture, 'subagent-composer-card');
+    expectClasses(card, COMPOSER_CARD_CLASS, COMPOSER_CARD_BORDER_CLASS);
+    expect(card?.getAttribute('data-glass-surface')).toBe('tile');
+    expectClasses(field(fixture), COMPOSER_TEXTAREA_CLASS);
+    expectClasses(byId(fixture, 'subagent-composer-attach'), COMPOSER_ICON_BUTTON_CLASS);
+    expectClasses(byId(fixture, 'subagent-composer-background'), COMPOSER_ICON_BUTTON_CLASS);
+    expectClasses(byId(fixture, 'subagent-composer-stop'), COMPOSER_STOP_BUTTON_CLASS);
+    expectClasses(sendButton(fixture), COMPOSER_SEND_BUTTON_CLASS);
+    expectClasses(byId(fixture, 'subagent-composer-status-line'), COMPOSER_STATUS_LINE_CLASS);
+  });
+
+  it('labels the textarea and renders no approval, slash or mention controls', () => {
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    const label = root(fixture).querySelector(`label[for="${field(fixture).id}"]`);
+    expect(label?.textContent?.trim()).toBe('Message Explore');
+    expect(field(fixture).getAttribute('rows')).toBe('2');
+    expect(field(fixture).getAttribute('dir')).toBe('auto');
+    expect(root(fixture).querySelector('ptah-lane-approval-chip')).toBeNull();
+    expect(root(fixture).querySelector('ptah-agent-steer-input')).toBeNull();
+    expect(root(fixture).querySelector('[role="combobox"]')).toBeNull();
+  });
+
+  it('renders Stop and Send to background only by their flags', () => {
+    const shown = setup(
+      { ...record, status: 'running' },
+      context(true, { stoppable: true, canBackground: true }),
+    );
+    const card = byId(shown, 'subagent-composer-card');
+    expect(card?.querySelector('[aria-label="Stop generating"]')).not.toBeNull();
+    expect(card?.querySelector('[aria-label="Send to background"]')).not.toBeNull();
+  });
+
+  it('hides Stop and Send to background without the flags', () => {
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    expect(byId(fixture, 'subagent-composer-stop')).toBeNull();
+    expect(byId(fixture, 'subagent-composer-background')).toBeNull();
+  });
+
+  it('emits stop and background with the tray context', () => {
+    const ctx = context(true, { stoppable: true, canBackground: true });
     const fixture = setup({ ...record, status: 'running' }, ctx);
-    expect(root(fixture).querySelector('[data-testid="steer-composer-card"] [aria-label="Stop generating"]')).not.toBeNull();
-    expect(root(fixture).querySelector('[data-testid="steer-composer-card"] [aria-label="Send to background"]')).not.toBeNull();
+    const stopped = jest.fn();
+    const backgrounded = jest.fn();
+    fixture.componentInstance.stopRequested.subscribe(stopped);
+    fixture.componentInstance.backgroundRequested.subscribe(backgrounded);
+    byId(fixture, 'subagent-composer-stop')?.click();
+    byId(fixture, 'subagent-composer-background')?.click();
+    expect(stopped).toHaveBeenCalledWith(ctx);
+    expect(backgrounded).toHaveBeenCalledWith(ctx);
+  });
+
+  it('gates attach, model and effort with their reasons and counts 3 limited', () => {
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    const attach = byId(fixture, 'subagent-composer-attach') as HTMLButtonElement;
+    expect(attach.getAttribute('aria-disabled')).toBe('true');
+    expect(attach.disabled).toBe(false);
+    expect(attach.getAttribute('title')).toBe(SUBAGENT_GATED_REASONS.attach);
+    expect(attach.getAttribute('aria-describedby')).toBeTruthy();
+    const model = byId(fixture, 'composer-model-pill');
+    expect(model?.getAttribute('aria-disabled')).toBe('true');
+    expect(model?.getAttribute('title')).toBe(SUBAGENT_GATED_REASONS.steer.model);
+    const effort = root(fixture).querySelector(
+      'ptah-composer-effort-picker [aria-disabled="true"]',
+    );
+    expect(effort?.getAttribute('title')).toBe(SUBAGENT_GATED_REASONS.steer.effort);
+
+    const badge = byId(fixture, 'subagent-composer-limited-badge');
+    expect(badge?.textContent).toContain('3 limited');
+    expect(badge?.getAttribute('title')).toBe(
+      [
+        SUBAGENT_GATED_REASONS.attach,
+        SUBAGENT_GATED_REASONS.steer.model,
+        SUBAGENT_GATED_REASONS.steer.effort,
+      ].join('\n'),
+    );
+  });
+
+  it('uses the main chat wording for the model and effort reasons in follow-up mode', () => {
+    const fixture = setup(record);
+    expect(byId(fixture, 'composer-model-pill')?.getAttribute('title')).toBe(
+      SUBAGENT_GATED_REASONS.followUp.model,
+    );
+    expect(
+      root(fixture)
+        .querySelector('ptah-composer-effort-picker [aria-disabled="true"]')
+        ?.getAttribute('title'),
+    ).toBe(SUBAGENT_GATED_REASONS.followUp.effort);
+  });
+
+  it('shows a gated reason on the status line while revealed and sends nothing on click', () => {
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    fill(fixture, 'Check tests');
+    const attach = byId(fixture, 'subagent-composer-attach') as HTMLButtonElement;
+    attach.click();
+    fixture.detectChanges();
+    expect(statusText(fixture)).toBe(SUBAGENT_GATED_REASONS.attach);
+    expect(steer).not.toHaveBeenCalled();
+    attach.dispatchEvent(new Event('mouseleave'));
+    fixture.detectChanges();
+    expect(statusText(fixture)).toBe(
+      'Enter sends to Explore · Shift+Enter adds a line',
+    );
   });
 
   it('picks the mode from the tray context and the owning session', () => {
     expect(
-      setup(
-        { ...record, status: 'running' },
-        context(true),
-      ).componentInstance.mode(),
+      setup({ ...record, status: 'running' }, context(true)).componentInstance.mode(),
     ).toBe('steer');
     expect(setup(record, context(false)).componentInstance.mode()).toBe(
       'follow-up',
@@ -106,13 +252,18 @@ describe('SubagentLaneComposerComponent', () => {
 
   it.each(['running', 'background'] as const)(
     'never sends a %s agent without a steerable context to the main chat',
-    (status) => {
+    async (status) => {
       const fixture = setup({ ...record, status }, context(false));
       expect(fixture.componentInstance.mode()).toBe('unavailable');
       expect(
         byId(fixture, 'subagent-composer-unavailable')?.textContent,
       ).toContain('This agent cannot take messages right now');
-      expect(root(fixture).querySelector('textarea, input')).toBeNull();
+      expect(field(fixture).disabled).toBe(true);
+      expect(sendButton(fixture).disabled).toBe(true);
+      field(fixture).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await fixture.whenStable();
+      expect(send).not.toHaveBeenCalled();
+      expect(steer).not.toHaveBeenCalled();
     },
   );
 
@@ -131,30 +282,56 @@ describe('SubagentLaneComposerComponent', () => {
     expect(
       byId(fixture, 'subagent-composer-unavailable')?.textContent,
     ).toContain("This agent's session is not open");
-    expect(root(fixture).querySelector('textarea, input')).toBeNull();
+    expect(field(fixture).disabled).toBe(true);
+    expect(sendButton(fixture).disabled).toBe(true);
   });
 
   it('steers a running agent, keeps the draft on failure and clears it on success', async () => {
     steer.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const fixture = setup({ ...record, status: 'running' }, context(true));
     expect(field(fixture).placeholder).toBe('Message Explore…');
-    expect(byId(fixture, 'subagent-composer-hint')).toBeNull();
-    expect(
-      root(fixture).querySelector('[aria-label="Send steer message"]'),
-    ).not.toBeNull();
+    expect(statusText(fixture)).toBe(
+      'Enter sends to Explore · Shift+Enter adds a line',
+    );
+    expect(sendButton(fixture).getAttribute('aria-label')).toBe(
+      'Send steer message',
+    );
+    expect(sendButton(fixture).disabled).toBe(true);
     await type(fixture, 'Check tests');
     expect(steer).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: 'task-1' }),
       'Check tests',
     );
-    expect(byId(fixture, 'subagent-composer-error')?.getAttribute('role')).toBe(
-      'alert',
-    );
+    const error = byId(fixture, 'subagent-composer-error');
+    expect(error?.getAttribute('role')).toBe('alert');
+    expect(error?.classList).toContain('text-state-err');
     expect(field(fixture).value).toBe('Check tests');
     await type(fixture, 'Check tests');
     expect(byId(fixture, 'subagent-composer-error')).toBeNull();
     expect(field(fixture).value).toBe('');
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('sends through the Send button', async () => {
+    steer.mockResolvedValue(true);
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    fill(fixture, '  Look at src  ');
+    expect(sendButton(fixture).disabled).toBe(false);
+    sendButton(fixture).click();
+    await fixture.whenStable();
+    expect(steer).toHaveBeenCalledWith(expect.anything(), 'Look at src');
+  });
+
+  it('keeps Shift+Enter and an IME composition Enter out of sending', async () => {
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    fill(fixture, 'Check tests');
+    const input = field(fixture);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229 }));
+    await fixture.whenStable();
+    expect(steer).not.toHaveBeenCalled();
+    expect(input.value).toBe('Check tests');
   });
 
   it('sends a finished agent the follow-up prompt through the main chat', async () => {
@@ -163,12 +340,8 @@ describe('SubagentLaneComposerComponent', () => {
     expect(field(fixture).placeholder).toBe(
       'Ask the main agent to continue Explore…',
     );
-    expect(byId(fixture, 'subagent-composer-hint')?.textContent).toContain(
-      'Sends to the main chat as a follow-up',
-    );
-    expect(
-      root(fixture).querySelector('[aria-label="Send follow-up"]'),
-    ).not.toBeNull();
+    expect(statusText(fixture)).toBe('Sends to the main chat as a follow-up');
+    expect(sendButton(fixture).getAttribute('aria-label')).toBe('Send follow-up');
     await type(fixture, 'Add tests');
     expect(send).toHaveBeenCalledWith(
       { sessionId: 'session-1' },
@@ -176,7 +349,7 @@ describe('SubagentLaneComposerComponent', () => {
     );
     expect(field(fixture).value).toBe('');
     const status = byId(fixture, 'subagent-composer-status');
-    expect(status?.getAttribute('role')).toBe('status');
+    expect(status?.getAttribute('aria-live')).toBe('polite');
     expect(status?.textContent).toContain('Sent to the main chat');
     expect(steer).not.toHaveBeenCalled();
   });
@@ -214,11 +387,8 @@ describe('SubagentLaneComposerComponent', () => {
       new Promise<AgentFeedbackSendResult>((done) => (resolve = done)),
     );
     const fixture = setup(record);
-    const input = field(fixture);
-    input.value = 'For agent A';
-    input.dispatchEvent(new Event('input'));
-    fixture.detectChanges();
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    fill(fixture, 'For agent A');
+    field(fixture).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
     fixture.componentRef.setInput('record', {
       ...record,
       parentToolUseId: 'tool-2',
