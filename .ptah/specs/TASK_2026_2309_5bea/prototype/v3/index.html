@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Session inspector v3 prototype</title>
+<style>
+/* Token values copied from tailwind.config.js (themes anubis / anubis-light),
+   apps/ptah-extension-webview/src/styles.css (--surface-*, --ptah-gold) and
+   libs/frontend/ui/src/lib/tokens/ptah-tokens.css (--ptah-series-*, spacing, type). */
+:root,[data-theme="anubis"]{
+  --b1:#131317;--b2:#1a1a20;--b3:#242430;--bc:#e8e6e1;--bcm:oklch(66.509856% 0.007403 31.090978);
+  --st-run:#3b82f6;--st-need:#f97316;--st-err:#ef4444;--st-done:#16a34a;--st-idle:#9ca3af;
+  --gold:#d4af37;--series-1:oklch(78% 0.14 85);--series-2:oklch(76% 0.12 180);
+  --r-box:.75rem;--r-btn:.375rem;--r-chip:.25rem;--hl:13%;
+  --shadow-raised:0 12px 30px oklch(0% 0 0 / .42);
+}
+[data-theme="anubis-light"]{
+  --b1:oklch(97.788% 0.004 56.375);--b2:oklch(93.982% 0.007 61.449);--b3:oklch(91.586% 0.006 53.44);
+  --bc:oklch(23.574% 0.066 313.189);--bcm:oklch(48.955188% 0.044796 348.478612);
+  --st-run:#2a56c6;--st-need:#8f5200;--st-err:#b4232a;--st-done:#13713a;--st-idle:#6b6570;
+  --gold:oklch(58% 0.132 75);--series-1:oklch(52% 0.12 75);--series-2:oklch(50% 0.1 180);
+  --r-box:1rem;--r-btn:2rem;--r-chip:1rem;--hl:10%;
+  --shadow-raised:0 8px 24px color-mix(in oklch,var(--bc) 18%,transparent);
+}
+:root,[data-theme]{
+  --surface-1:color-mix(in oklch,var(--b2) 88%,var(--b1));--surface-2:var(--b2);
+  --surface-3:color-mix(in oklch,var(--b3) 86%,var(--b2));
+  --line:color-mix(in oklch,var(--bc) 14%,transparent);
+  --line-strong:color-mix(in oklch,var(--bc) 22%,transparent);
+  --highlight:color-mix(in oklch,var(--bc) var(--hl),transparent);
+  --hover:color-mix(in oklch,var(--bc) 5%,transparent);
+  --meter-fill:color-mix(in oklch,var(--bc) 62%,transparent);
+  --sp1:.25rem;--sp2:.5rem;--sp3:.75rem;--sp4:1rem;
+  --t-val:1.125rem;--t-row:.8125rem;--t-num:.75rem;--t-cap:.6875rem;
+  --mono:'JetBrains Mono','Fira Code',Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--b2);color:var(--bc);font:400 .75rem/1rem Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+:focus-visible{outline:2px solid var(--st-run);outline-offset:2px;border-radius:var(--r-btn)}
+svg.ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* Prototype chrome */
+.controls{display:flex;gap:var(--sp3);align-items:center;padding:var(--sp2) var(--sp3);border-bottom:1px solid var(--line);background:var(--b1)}
+.controls label{display:flex;gap:var(--sp1);align-items:center;color:var(--bcm)}
+.controls select{background:var(--surface-2);color:var(--bc);border:1px solid var(--line-strong);border-radius:var(--r-btn);padding:2px 6px;font:inherit}
+.stage{display:flex;justify-content:flex-end;min-height:calc(100% - 37px)}
+body.bare .controls{display:none}
+html:has(body.bare){scrollbar-width:none}
+body.bare .stage{justify-content:flex-start;min-height:100%}
+
+/* Inspector frame */
+.insp{container-type:inline-size;position:relative;background:var(--b1);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:100%}
+.sec{padding:var(--sp3);border-top:1px solid var(--line);position:relative}
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:var(--sp2);height:1rem;margin-bottom:var(--sp2)}
+.sec-h h3{margin:0;font-weight:600;font-size:var(--t-cap);line-height:1rem;letter-spacing:.06em;text-transform:uppercase;color:var(--bc)}
+.meta{font-size:var(--t-cap);color:var(--bcm);white-space:nowrap;font-variant-numeric:tabular-nums}
+.muted{color:var(--bcm)}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.num .mk{font-style:normal;color:color-mix(in oklch,var(--bc) 74%,transparent);font-weight:500;font-size:.84em;margin-right:2px;display:inline-flex;gap:2px}
+.num .mk i{font-style:normal}
+.num.unk{color:var(--bcm);font-weight:400}
+.link{color:var(--bcm);font-size:var(--t-cap);border-radius:var(--r-btn);padding:1px 4px;margin:-1px -4px}
+.link:hover{color:var(--bc);background:var(--hover)}
+
+/* Chip: one style everywhere */
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border:1px solid var(--line);border-radius:var(--r-chip);background:var(--surface-1);font-size:var(--t-cap);line-height:1;color:var(--bcm);white-space:nowrap;min-width:0;max-width:100%}
+.chip>span{overflow:hidden;text-overflow:ellipsis;line-height:16px}
+.chip svg.ic{width:11px;height:11px}
+.chip.mono{font-family:var(--mono);font-size:.625rem}
+.chip.st{color:var(--bc)}
+.chip.st svg{color:var(--tone)}
+button.chip:hover{border-color:var(--line-strong);color:var(--bc)}
+button.chip[aria-pressed="true"]{background:var(--highlight);color:var(--bc);border-color:var(--line-strong)}
+.t-done{--tone:var(--st-done)}.t-run{--tone:var(--st-run)}.t-err{--tone:var(--st-err)}.t-need{--tone:var(--st-need)}.t-idle{--tone:var(--st-idle)}
+
+/* Bars and rings: one language (3 px bar, pill ends, 2 px gap between segments) */
+.bar{display:flex;gap:2px;height:3px;border-radius:999px;background:var(--line-strong);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:999px;background:var(--meter-fill);min-width:2px}
+.bar.src{background:none}
+.bar .s1{background:var(--series-1)}.bar .s2{background:var(--series-2)}
+.bar.warn>i{background:var(--st-need)}.bar.err>i{background:var(--st-err)}.bar.ok>i{background:var(--st-done)}.bar.gold>i{background:var(--gold)}
+.bar .sx,.sw.sx{background:repeating-linear-gradient(135deg,var(--bcm) 0 2px,transparent 2px 4px)}
+.bar .sx{flex:none;width:10px;border-radius:0}
+.bar.off{visibility:hidden}
+.sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-0.5px}
+.sw.s1{background:var(--series-1)}.sw.s2{background:var(--series-2)}
+.ring{width:16px;height:16px;flex:none;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:2.5}
+.ring .trk{stroke:var(--line-strong)}.ring .arc{stroke:var(--meter-fill);stroke-linecap:round}
+.ring.warn .arc{stroke:var(--st-need)}.ring.err .arc{stroke:var(--st-err)}
+.cue{color:var(--st-need);display:inline-flex}.cue.err{color:var(--st-err)}
+.cue svg.ic{width:11px;height:11px}
+
+/* Header */
+.hd{display:flex;gap:var(--sp2);align-items:flex-start;padding:var(--sp3) var(--sp2) var(--sp3) var(--sp3)}
+.hd h2{margin:0 0 6px;font-weight:600;font-size:.875rem;line-height:1.25rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;padding-bottom:1px}
+.hd .chips{display:flex;gap:var(--sp1);min-width:0}
+@container (max-width:340px){.hd .chips{flex-wrap:wrap}}
+.hd .chips .chip{flex:none}.hd .chips .chip.mono{flex:0 1 auto}
+.acts{display:flex;gap:2px;flex:none}
+.ib{width:24px;height:24px;display:grid;place-items:center;border-radius:var(--r-btn);color:var(--bcm)}
+.ib:hover{background:var(--hover);color:var(--bc)}
+.ib.danger{color:var(--st-err)}
+
+/* Request line */
+.req{display:flex;align-items:center;gap:var(--sp2);padding:6px var(--sp3);border-top:1px solid var(--line);background:color-mix(in oklch,var(--st-need) 9%,transparent)}
+.req svg{color:var(--st-need)}
+.req span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-xs{height:20px;padding:0 8px;border-radius:var(--r-btn);border:1px solid var(--line-strong);font-size:var(--t-cap);font-weight:500;flex:none}
+.btn-xs:hover{background:var(--hover)}
+
+/* SESSION tiles */
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.tile{padding:var(--sp2) 10px;border-left:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:2px;text-align:left}
+.tile:nth-child(3n+1){border-left:0;padding-left:0}
+.tile:nth-child(3n){padding-right:0}
+.tile:nth-child(n+4){border-top:1px solid var(--line)}
+.tile:nth-child(-n+3){padding-top:0}
+.tile .cap{font-size:var(--t-cap);color:var(--bcm);display:flex;align-items:center;gap:3px}
+.tile .val{font-weight:600;font-size:var(--t-val);line-height:1.5rem;letter-spacing:-.01em}
+.tile .val .mk{font-size:.8125rem}
+.tiles.n5 .tile:nth-child(5){grid-column:span 2;padding-right:0}
+.tile:focus-visible{outline-offset:-2px}
+.tile .sub{height:1rem;display:flex;align-items:center;font-size:var(--t-cap);color:var(--bcm);white-space:nowrap;gap:5px}
+.tile .sub .bar{flex:1}
+button.tile{border-radius:0}
+button.tile:hover .cap,button.tile[aria-expanded="true"] .cap{color:var(--bc)}
+button.tile .cap svg{width:10px;height:10px;transition:transform .15s}
+button.tile[aria-expanded="true"] .cap svg{transform:rotate(180deg)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--st-run);flex:none}
+.legend{display:flex;gap:var(--sp4);margin-top:var(--sp2);font-size:var(--t-cap);color:var(--bcm)}
+.legend b{font-weight:500;color:var(--bc);font-variant-numeric:tabular-nums;margin-left:4px}
+@container (max-width:340px){.tile{padding-left:6px;padding-right:6px}.tile .val{font-size:1rem}.tile .sub{font-size:.625rem;gap:3px}}
+.tiles.enter{animation:enter .22s ease-out}
+@keyframes enter{from{opacity:0;transform:translateY(4px)}}
+
+/* Popover (Models) */
+.pop{margin-top:var(--sp2);background:var(--surface-3);border:1px solid var(--line-strong);border-radius:var(--r-box);box-shadow:var(--shadow-raised);padding:10px var(--sp3)}
+.pop table{width:100%;border-collapse:collapse}
+.pop td{padding:3px 0;font-size:var(--t-num)}
+.pop td.r{text-align:right;width:60px;vertical-align:top}
+.pop td small{display:block;font-size:.625rem;line-height:.8125rem;color:var(--bcm);font-variant-numeric:tabular-nums}
+.pop tr.sum td{border-top:1px solid var(--line);padding-top:5px;font-weight:600}
+.pop .strip{border-top:1px solid var(--line);margin-top:5px;padding-top:6px}
+
+/* AGENTS table */
+table.ag{width:calc(100% + 1.5rem);margin:0 -.75rem;border-collapse:collapse;table-layout:fixed}
+.ag col.c-tok{width:56px}.ag col.c-cost{width:62px}.ag col.c-time{width:58px}
+@container (max-width:340px){.ag col.c-tok{width:52px}.ag col.c-cost{width:54px}.ag col.c-time{width:50px}.ag td,.ag th{padding-left:6px}.agent{gap:6px}.agent .nm .rl,.agent .nm .cch{display:none}}
+.ag th{font-size:var(--t-cap);font-weight:400;color:var(--bcm);text-align:right;padding:0 0 4px 8px}
+.ag th:first-child{text-align:left;padding-left:var(--sp3)}
+.ag th:last-child,.ag td:last-child{padding-right:var(--sp3)}
+.ag td{padding:6px 0 6px 8px;text-align:right;vertical-align:middle;font-size:var(--t-num)}
+.ag td:first-child{padding-left:var(--sp3);text-align:left}
+.ag tr.row{cursor:pointer}
+.ag tr.row:hover td{background:var(--hover)}
+.ag tr.sel td,.ag tr.sel+tr.exp td{background:var(--highlight)}
+.ag tr.sel td:first-child,.ag tr.sel+tr.exp td:first-child{box-shadow:inset 2px 0 0 var(--gold)}
+.agent{display:flex;align-items:center;gap:var(--sp2);width:100%;min-width:0}
+.av{position:relative;width:26px;height:26px;border-radius:50%;background:var(--surface-3);border:1px solid var(--line);display:grid;place-items:center;flex:none;color:var(--bc)}
+.av svg.ic{width:13px;height:13px}
+.bd{position:absolute;right:-4px;bottom:-4px;width:13px;height:13px;border-radius:50%;background:var(--tone);color:var(--b1);display:grid;place-items:center;box-shadow:0 0 0 2px var(--b1)}
+.bd svg.ic{width:8px;height:8px;stroke-width:3.5}
+.bd.t-run svg{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.nm{min-width:0;display:flex;flex-direction:column}
+.nm b{font-weight:600;font-size:var(--t-row);line-height:1.0625rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm small{font-size:var(--t-cap);line-height:.875rem;color:var(--bcm);display:flex;align-items:center;gap:6px;white-space:nowrap;min-width:0}
+.nm small{overflow:hidden}
+.nm .mdl{overflow:hidden;text-overflow:ellipsis;min-width:1.5rem}
+.nm .rl{overflow:hidden;text-overflow:ellipsis;flex:0 100 auto}.nm .rl::before{content:'· '}
+.nm .x{display:inline-flex;align-items:center;gap:3px;flex:none}
+.nm .x svg.ic{width:10px;height:10px}.ring.sm{width:11px;height:11px}
+.cch.c-low{color:var(--st-need)}.cch.c-expired .num,.cch.c-idle .num,.cch.c-unknown .num{opacity:.7}
+.agent{text-align:left}
+.tokc{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.tokc .bar{width:100%}
+.tokc .bar{height:2px;background:var(--line)}.tokc .bar>i{flex:none;min-width:0}
+.rq{margin-bottom:6px}.rq .line+.line,.rq .out+.line{margin-top:5px;gap:6px}
+.out{margin:5px 0 0;padding:4px 6px;background:var(--b1);border:1px solid var(--line);border-radius:var(--r-chip);font:.625rem/.875rem var(--mono);max-height:3.75rem;overflow:auto;white-space:pre}
+.none{margin:6px 0 0;white-space:normal}
+.ag tr.exp td{padding:0 var(--sp3) var(--sp2) calc(var(--sp3) + 34px);text-align:left}
+.strip{display:flex;gap:var(--sp3);flex-wrap:wrap;font-size:var(--t-cap);color:var(--bcm);margin:0}
+.strip div{display:flex;gap:4px}.strip dt{margin:0}.strip dd{margin:0;color:var(--bc);font-variant-numeric:tabular-nums}
+.steer{display:flex;gap:4px;margin-top:6px;position:relative}
+.steer input{flex:1;min-width:0;height:26px;padding:0 8px;background:var(--b1);border:1px solid var(--line-strong);border-radius:var(--r-btn);font-size:var(--t-num)}
+.steer input::placeholder{color:var(--bcm)}
+.steer .ib{width:26px;height:26px;border:1px solid var(--line)}
+.alert{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:var(--t-cap);color:var(--bc)}
+.alert svg{color:var(--st-err)}
+.menu{position:absolute;right:0;top:30px;z-index:6;min-width:132px;background:var(--surface-3);border:1px solid var(--line-strong);border-radius:var(--r-box);box-shadow:var(--shadow-raised);padding:4px;display:flex;flex-direction:column}
+.menu button{padding:5px 8px;border-radius:calc(var(--r-box) - 4px);font-size:var(--t-num)}
+.menu button:hover,.menu button:focus-visible{background:var(--hover)}
+.menu button.danger{color:var(--st-err)}
+.more{display:flex;align-items:center;gap:4px;margin-top:4px;padding:3px 6px 3px 0;color:var(--bcm);font-size:var(--t-cap);border-radius:var(--r-btn)}
+.more:hover{color:var(--bc)}
+.more svg{width:11px;height:11px}
+
+/* Generic rows shared by LIMITS / TASK / GIT / LINKED */
+.rows>*+*{margin-top:10px}
+.line{display:flex;align-items:center;gap:var(--sp2);min-width:0}
+
+.grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ttl{font-weight:600;font-size:var(--t-row);line-height:1.125rem}
+.lim .win{display:grid;grid-template-columns:30px minmax(0,1fr) 46px 60px;align-items:center;column-gap:var(--sp2);height:18px;font-size:var(--t-cap)}
+.lim .bar>i{min-width:0}.lim .wl{color:var(--bcm)}.lim .rs{text-align:right}.lim .gl{font-size:var(--t-cap);color:var(--bcm);margin-top:5px;line-height:1rem}
+.lim .line{margin-bottom:2px}.lim .off{font-style:italic}
+.lim .pct{display:inline-flex;align-items:center;justify-content:flex-end;gap:3px}
+.lim .pct{font-weight:600;font-size:var(--t-num)}
+.notice{display:flex;align-items:center;gap:6px;font-size:var(--t-cap);color:var(--bcm);margin-bottom:var(--sp2)}
+.notice svg{color:var(--st-need);width:12px;height:12px}
+.docs{display:flex;flex-wrap:wrap;gap:4px;margin-top:var(--sp2)}
+.prog{display:flex;align-items:center;gap:var(--sp2);margin-top:6px}.prog .bar{flex:1}
+/* TASK digest (rev 3 task update): stats line, verdict cue, "+N more" menu anchor, folder count lines */
+.sec-h .hx{display:flex;align-items:center;gap:var(--sp1);min-width:0}
+.tiles.t4{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:10px}
+.tiles.t4 .tile{padding:0 8px;border-left:1px solid var(--line);border-top:0}.tiles.t4 .tile:first-child{border-left:0;padding-left:0}.tiles.t4 .tile:last-child{padding-right:0}
+.tiles.t4 .cap{white-space:nowrap;overflow:hidden}.tiles.t4 .cap svg{width:10px;height:10px;flex:none;color:var(--tone)}
+.tile.t-need .val,.tile.t-run .val{color:var(--tone)}
+@container (max-width:380px){.tiles.t4{grid-template-columns:repeat(2,minmax(0,1fr))}.tiles.t4 .tile:nth-child(odd){border-left:0;padding-left:0}.tiles.t4 .tile:nth-child(even){padding-right:0}.tiles.t4 .tile:nth-child(-n+2){padding-bottom:6px}.tiles.t4 .tile:nth-child(n+3){border-top:1px solid var(--line);padding-top:6px}}
+.tmeta{margin-top:6px;line-height:1rem}.tmeta b{color:var(--bc);font-weight:600}.tnote{margin:var(--sp2) 0 0}
+.tiles.t2{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:var(--sp2);padding-top:var(--sp2);border-top:1px solid var(--line)}
+.tiles.t2 .tile{padding-bottom:0}.tiles.t2 .tile:nth-child(2){padding-right:0}.tiles.t2 .tile:only-child{grid-column:span 2}.tiles.t2 .tile:disabled{cursor:default}
+.sec>.pop .docs,.sec>.pop .tdirs{margin-top:0}
+.vd{display:inline-flex;align-items:center;gap:3px;flex:none;color:var(--bc)}.vd svg{width:11px;height:11px;color:var(--tone)}.vd.t-done,.vd.t-need{color:var(--tone);font-weight:600}
+.chip:disabled{opacity:.6;cursor:default}
+.mw{position:relative;display:inline-flex}.mw .menu{top:22px;left:0;right:auto;max-width:240px}.mw .menu button{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tdirs{list-style:none;margin:var(--sp2) 0 0;padding:0}.tdirs li{height:18px;font-size:var(--t-cap)}.tdirs svg{width:12px;height:12px;color:var(--bcm);flex:none}
+.add{color:var(--st-done)}.del{color:var(--st-err)}
+.mono{font-family:var(--mono);font-size:.6875rem}
+.lk{display:flex;align-items:center;gap:var(--sp2);width:calc(100% + 1.5rem);margin:0 -.75rem;padding:5px var(--sp3)}
+.lk:hover{background:var(--hover)}
+.lk[aria-current="true"]{background:var(--highlight);box-shadow:inset 2px 0 0 var(--gold)}
+.lk[aria-current="true"] .grow{font-weight:600}
+.sk{display:block;height:10px;border-radius:4px;background:var(--line-strong);animation:pulse 1.4s ease-in-out infinite}
+
+/* Tooltip */
+#tip{position:fixed;z-index:20;max-width:260px;padding:5px 8px;background:var(--bc);color:var(--b1);border-radius:6px;font-size:var(--t-cap);line-height:.9375rem;pointer-events:none;opacity:0;transition:opacity .1s;font-variant-numeric:tabular-nums}
+#tip.on{opacity:1}
+
+/* Rail (56 px) */
+.rail{width:56px;background:var(--b1);border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:var(--sp1);padding:var(--sp1) 0;min-height:100%}
+.rail .rb{width:48px;min-height:40px;border-radius:var(--r-btn);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 0}
+.rail .rb:hover{background:var(--hover)}
+.rail .rb .cap{font-size:.625rem;color:var(--bcm)}
+.rail .rb .num{font-size:.6875rem;font-weight:600}
+.rail .rb .num .mk{font-size:.625rem}
+.rail .rb{position:relative}.rail .rb .av{margin:2px 0}
+.att{position:absolute;top:2px;right:2px;min-width:14px;height:14px;padding:0 3px;border-radius:7px;background:var(--st-need);color:var(--b1);font-size:.625rem;font-weight:700;line-height:14px;text-align:center}
+.rail hr{width:32px;border:0;border-top:1px solid var(--line);margin:2px 0}
+.rail .av{margin:3px 0}
+.rail .ring{width:20px;height:20px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="controls" aria-label="Prototype controls">
+  <label>Width <select id="c-w"><option>300</option><option>336</option><option>360</option><option>400</option><option>448</option><option value="rail">rail 56</option></select></label>
+  <label>Theme <select id="c-theme"><option>dark</option><option>light</option></select></label>
+  <label>Fixture <select id="c-fx"><option>lanes</option><option>live-small</option><option>limits</option><option>exact</option><option>partial</option><option>missing</option><option>live</option><option>resumed</option><option>loading</option><option>empty</option></select></label>
+  <span class="muted">Click a row to select it. Escape closes popovers.</span>
+</div>
+<div class="stage"><div id="root"></div></div>
+<div id="tip" role="tooltip"></div>
+<p role="status" aria-live="polite" class="sr" id="live"></p>
+<script>
+const I={pencil:'<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+folder:'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+square:'<rect width="14" height="14" x="5" y="5" rx="2"/>',panel:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/>',
+dots:'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+branch:'<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+down:'<path d="m6 9 6 6 6-6"/>',left:'<path d="m15 18-6-6 6-6"/>',check:'<path d="M20 6 9 17l-5-5"/>',x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+bang:'<path d="M12 5v9"/><path d="M12 19h.01"/>',run:'<circle cx="12" cy="12" r="5" fill="currentColor"/>',stop:'<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/>',
+bot:'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+term:'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+net:'<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+glass:'<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+send:'<polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>',flow:'<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>'};
+const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+const ST={done:['t-done','check','Done'],running:['t-run','run','Running'],failed:['t-err','x','Failed'],stopped:['t-idle','stop','Stopped'],needs:['t-need','bang','Needs you'],idle:['t-idle','stop','Idle']};
+/* Accuracy markers: one visual glyph set, one spoken phrase set. */
+const MKW={est:'about',low:'at least',both:'at least about'};
+const mkHtml=mk=>!mk?'':`<i class="mk" aria-hidden="true">${mk==='both'?'<i>≥</i><i>~</i>':mk==='est'?'~':'≥'}</i>`;
+const cap1=s=>s?s[0].toUpperCase()+s.slice(1):s;
+/* Compact figures floor, so a lower bound never claims more than the known amount. */
+const tok=n=>n==null?null:n>=1e6?(Math.floor(n/1e5+1e-6)/10).toFixed(1)+'M':n>=1e5?Math.floor(n/1e3)+'K':n>=1e3?(Math.floor(n/100+1e-6)/10).toFixed(1).replace('.0','')+'K':String(Math.round(n));
+const usd=n=>n==null?null:'$'+(n>0&&n<.01?n.toFixed(3):n.toFixed(2));
+const usdR=n=>n==null?null:n>=10?'$'+Math.floor(n):usd(n);
+const clock=s=>{if(s==null)return null;const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=String(s%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${x}`:`${m}:${x}`};
+const dur=s=>s>=3600?`${Math.floor(s/3600)}h${String(Math.floor(s%3600/60)).padStart(2,'0')}m`:clock(s);
+const esc=s=>String(s).replace(/[&<"]/g,c=>({'&':'&amp;','<':'&lt;','"':'&quot;'}[c]));
+/* num: visible glyphs are aria-hidden; the spoken sentence (state + full value + cause) is the sr text and the tooltip. */
+const num=(txt,mk,tip,dc,f)=>{const sp=tip||(txt==null?'Not reported':cap1((mk?MKW[mk]+' ':'')+txt));
+ return txt==null?`<span class="num unk" data-component="${dc||'ptah-stat'}" data-tip="${esc(sp)}"><span aria-hidden="true">—</span><span class="sr">${esc(sp)}</span></span>`
+  :`<span class="num" data-component="${dc||'ptah-stat'}" data-tip="${esc(sp)}">${mkHtml(mk)}<span aria-hidden="true">${txt}</span><span class="sr">${esc(sp)}</span></span>`};
+const time=(s,live,tip,short)=>s==null?`<span class="num unk" data-component="ptah-timer" data-tip="${esc(tip||'Duration not recorded')}"><span aria-hidden="true">--:--</span><span class="sr">Duration unknown. ${esc(tip||'Not recorded')}</span></span>`
+  :`<span class="num" data-component="ptah-timer"${live?` data-live="1" data-s="${s}"`:''}${short?' data-short="1"':''}${short&&s>=3600?` data-tip="${clock(s)}"`:''}>${short?dur(s):clock(s)}</span>`;
+const ring=(pct,cls)=>{const c=2*Math.PI*6,t=pct>=95?'err':pct>=80?'warn':'';return `<svg class="ring ${t} ${cls||''}" viewBox="0 0 16 16" data-component="ptah-ring" aria-hidden="true"><circle class="trk" cx="8" cy="8" r="6"/>${pct==null?'':`<circle class="arc" cx="8" cy="8" r="6" stroke-dasharray="${Math.max(pct,3)/100*c} ${c}"/>`}</svg>`};
+const cue=p=>p>=80?`<span class="cue ${p>=95?'err':''}" aria-hidden="true">${ic('alert')}</span>`:'';
+
+/* ---------- fixtures ---------- */
+/* s.sdk is the SDK snapshot (orchestrator + subagents). CLI lanes are owned separately. Totals are computed, never typed. */
+/* Real agy values (decisions.md row 15): Gemini 100% left on both windows; Claude and GPT 99% left (5h), 97% left (weekly). Reset times are sample values. */
+const AGY={n:'Antigravity',acct:'c41e',src:'CLI',groups:[{n:'Gemini models',w:[{l:'5h',full:'5-hour',pct:0,reset:'4h 52m'},{l:'Week',full:'weekly',pct:0,reset:'Mon 09:00'}]},{n:'Claude and GPT models',w:[{l:'5h',full:'5-hour',pct:1,reset:'4h 52m'},{l:'Week',full:'weekly',pct:3,reset:'Mon 09:00'}]}]};
+const base={
+ header:{title:'Stats sidebar redesign',status:'done',workflow:'orchestrate',branch:'feat/stats-sidebar-redesign',running:false},
+ requests:[],
+ s:{sdk:{t:23.5e6,c:14.92},time:2537,turns:24,budget:{unit:'tok',used:23.5e6,max:42e6},basis:'Provider pricing',
+    models:[{n:'Fable 5.2',t:18.9e6,c:12.10},{n:'Sonnet 5.5',t:3.9e6,c:2.41},{n:'Haiku 5',t:0.7e6,c:0.41}],cats:{in:1.9e6,out:0.6e6,cr:19.8e6,cw:1.2e6}},
+ ctx:{pct:6.7,used:'13.4K',cap:'200K',comp:1},cache:{s:3518,ttl:'1h',idle:'52:38',state:'ok'},
+ agents:[
+  {id:'o',k:'orch',n:'Orchestrator',m:'Fable 5.2',st:'done'},
+  {id:'a1',k:'sub',n:'Explore',m:'Haiku 5',st:'done',t:412e3,c:.31,d:252,io:['380K','32K','1.1M']},
+  {id:'a2',k:'sub',n:'code-logic-reviewer',m:'Sonnet 5.5',st:'done',t:1.2e6,c:.94,d:663,io:['1.1M','96K','2.4M']},
+  {id:'a3',k:'sub',n:'software-architect',m:'Fable 5.2',st:'failed',t:88e3,c:.07,d:130,io:['81K','7K','0']},
+  {id:'a4',k:'sub',n:'frontend-developer',m:'Fable 5.2',st:'done',t:9.6e6,c:5.92,d:5204,io:['9.1M','512K','14.2M']},
+  {id:'a5',k:'sub',n:'senior-tester',m:'Sonnet 5.5',st:'running',t:3.1e6,c:1.71,d:347,live:1,io:['2.9M','204K','4.0M']},
+  {id:'a6',k:'sub',n:'code-style-reviewer',m:'Sonnet 5.5',st:'stopped',t:1.4e6,c:.52,d:0,io:['1.3M','88K','1.9M']},
+  {id:'a7',k:'sub',n:'researcher-expert',m:'Haiku 5',st:'done',t:800e3,c:.35,d:418,io:['742K','58K','610K']},
+  {id:'l1',k:'cli',n:'Codex CLI',m:'gpt-6.2-sol',role:'implementer',start:'12:41',st:'done',t:2.2e6,c:2.62,cmk:'est',ccause:'Estimated from weighted tokens',d:1584},
+  {id:'l2',k:'cli',n:'Antigravity',m:'Sonnet 5.5 medium',role:'reviewer',start:'13:02',st:'done',t:200e3,tmk:'est',tcause:'Estimated by the lane',c:null,ccause:'Cost unavailable: Antigravity reports no cost or price',d:637}],
+ limits:{notice:null,providers:[
+  {n:'Claude',acct:'227d',src:'API',groups:[{w:[{l:'5h',full:'5-hour',pct:41,reset:'2h 14m'},{l:'Week',full:'weekly',pct:12,reset:'Sat 04:59'}]}]},
+  {n:'Codex',acct:'6ba5',src:'API',groups:[{w:[{l:'Week',full:'weekly',pct:6,reset:'Sun 01:49'}]}]},
+  AGY]},
+ task:{id:'TASK_2026_2309_5bea',title:'Redesign the session stats sidebar',st:'running',label:'In progress',stage:'design',related:2,ds:'ok',
+  /* digest mirrors TaskDigest (implementation-plan-task-digest.md §1); chips/more = the groupTaskDocuments partition (§6); lastModified is pre-formatted here */
+  chips:[{name:'task.md',kind:'carrier'},{name:'task-description.md',kind:'requirements'},{name:'design-spec-v3.md',kind:'design'},{name:'implementation-plan.md',kind:'plan'},{name:'batches.md',kind:'batches'},{name:'code-logic-review.md',kind:'reviews'},{name:'code-style-review.md',kind:'reviews'}],
+  more:['context.md','decisions.md','design-spec-v2.md','handoff-1.md','research-report.md','test-report.md'],
+  digest:{truncated:false,truncatedReasons:[],entryCount:17,lastModified:'14m ago',lastModifiedAbs:'23 Nov 2026 12:36',progress:{done:3,total:7,source:'batches.md'},decisions:{rows:12,pendingUser:2},openQuestions:3,
+   reviews:[{file:'code-logic-review.md',subject:'code-logic',verdict:'APPROVED',serious:0,moderate:1,minor:3},{file:'code-style-review.md',subject:'code-style',verdict:'REVISE',serious:1,moderate:2,minor:4}],
+   directories:[{name:'prototype',files:14,markdown:3,images:9,directories:2,truncated:false},{name:'reference',files:6,markdown:4,images:0,directories:1,truncated:false}]}},
+ git:{branch:'feat/stats-sidebar-redesign',add:128,del:42},
+ linked:[{t:'Stats sidebar redesign',rel:'this session',cur:true},{t:'Usage limits fix',rel:'parent'},{t:'Visual review of inspector',rel:'child'}]};
+const clone=o=>JSON.parse(JSON.stringify(o));
+const FX={lanes:()=>clone(base),
+ /* Real numbers from reference/live/live-test-findings.md (Codex limit value was not captured, so it is left out). */
+ 'live-small'(){const f=clone(base);f.header={title:'Stats sidebar live test',status:'done',workflow:null,branch:null,running:false};
+   f.s={sdk:{t:624600,c:.03},time:36,turns:4,budget:{unit:'tok',used:624600,max:30e6},basis:'Provider pricing',models:[{n:'Haiku 5.5',t:624600,c:.03}],cats:null};
+   f.ctx={pct:6.7,used:'13.4K',cap:'200K',comp:0};f.cache={s:3584,ttl:'1h',idle:'53:44',state:'ok'};
+   f.agents=[{id:'o',k:'orch',n:'Orchestrator',m:'Haiku 5.5',st:'done'},
+    {id:'l1',k:'cli',n:'Codex CLI',m:'gpt-6-sol',role:'lane',start:'12:50',st:'done',t:117100,c:.05,cmk:'est',ccause:'Estimated from tokens',d:40},
+    {id:'l2',k:'cli',n:'Antigravity',m:'Sonnet 5.5 medium',role:'lane',start:'12:50',st:'done',t:35400,tmk:'low',tcause:'The lane reported part of its usage',c:null,ccause:'This lane reports no cost',d:15},
+    {id:'a1',k:'sub',n:'spec-counter',m:'Haiku 5.5',st:'done',t:35700,c:.004,cmk:'est',ccause:'Estimated from tokens',d:12,io:['33.1K','2.6K','0']}];
+   f.limits={notice:null,providers:[{n:'Claude',acct:'227d',src:'API',groups:[{w:[{l:'Week',full:'weekly',pct:45,reset:'Sat 04:59'}]}]},clone(AGY)]};
+   f.task=null;f.git={branch:'HEAD',detached:true,add:0,del:1};f.linked=[];return f},
+ exact(){const f=clone(base);f.agents=f.agents.filter(a=>a.k!=='cli').map(a=>({...a,st:a.st==='running'?'done':a.st,live:0}));f.s.io=['1.9M','0.6M'];f.limits.providers.length=1;
+   Object.assign(f.task,{related:0,chips:[{name:'task.md',kind:'carrier'},{name:'task-description.md',kind:'requirements'}],more:[],digest:{truncated:false,truncatedReasons:[],entryCount:2,lastModified:'2h ago',lastModifiedAbs:'23 Nov 2026 10:48'}});return f},
+ partial(){const f=FX.exact();f.s.sdk={t:23.5e6,c:12.51,cmk:'low',ccause:'Sonnet 5.5 has no price'};f.s.models[1].c=null;f.s.budget={unit:'usd',used:12.51,max:25,mk:'low',cause:'Sonnet 5.5 has no price'};f.cache.state='est';
+   Object.assign(f.task.digest,{truncated:true,truncatedReasons:['nested'],entryCount:4,progress:{done:1,total:4,source:'tasks.md'},directories:[{name:'reference',files:200,markdown:12,images:188,directories:3,truncated:true},{name:'logs',files:null}]});
+   f.agents.forEach(a=>{if(a.m==='Sonnet 5.5'){a.c=null;a.ccause='No price for Sonnet 5.5'}});return f},
+ missing(){const f=clone(base);f.s.sdk={t:null,c:null};f.s.budget=null;f.s.models=[];f.s.cats=null;f.ctx={pct:null};f.cache={state:'unknown'};
+   f.agents.forEach(a=>{a.t=a.c=null;a.tmk=a.cmk=null;a.tcause=a.ccause='Usage not reported';a.io=null;a.live=0;if(a.st==='running')a.st='done'});f.task.ds='failed';f.task.digest=null;return f},
+ live(){const f=clone(base),A=f.agents;f.header.status='running';f.header.running=true;f.s.liveTime=1;f.s.sdk={t:38.2e6,c:24.9};f.s.models[0]={n:'Fable 5.2',t:33.6e6,c:22.08};
+   f.s.budget={unit:'tok',used:38.2e6,max:42e6,stage:'tighten'};f.ctx={pct:86,used:'172K',cap:'200K',comp:2};f.cache={s:221,ttl:'5m',idle:'3:41',live:1,state:'low'};
+   A[0].st='running';A[2].st='running';A[2].live=1;A[4].st='needs';A[4].req={q:'Allow npm run verify?',opts:['Allow','Deny']};
+   A[8].st='needs';A[8].req={q:'Apply patch to 3 files?',out:'M inspector-session-stats.component.ts\nM inspector-agent-row.component.ts\n+42 -17',opts:['Approve','Reject']};
+   A[9].st='running';A[9].live=1;f.requests=[{t:'frontend-developer: Allow npm run verify?',row:'a4'}];f.limits.notice='Limits refreshed 14 min ago';return f},
+ resumed(){const f=clone(base);f.s.time=null;f.agents.forEach(a=>{a.d=null;a.live=0;if(a.st==='running')a.st='done'});f.cache.state='expired';f.task.ds='loading';f.task.digest=null;return f},
+ loading(){const f=clone(base);f.loading=true;return f},
+ empty(){const f=clone(base);f.header={title:'New session',status:'idle',workflow:null,branch:null,running:false};f.s=null;f.ctx={pct:null};f.cache=null;f.agents=[f.agents[0]];f.agents[0].st='idle';f.limits=null;f.task=null;f.git=null;f.linked=[];return f},
+ limits(){const f=clone(base);f.limits={notice:null,providers:[
+   {n:'Claude',acct:'227d',src:'API',groups:[{w:[{l:'5h',full:'5-hour',pct:41,reset:'2h 14m'},{l:'Week',full:'weekly',pct:12,reset:'Sat 04:59'}]}]},
+   {n:'Codex',acct:'6ba5',src:'API',groups:[{w:[{l:'5h',full:'5-hour',pct:78,reset:'48m'},{l:'Week',full:'weekly',pct:23,reset:'Sun 01:49'}]}]},
+   {n:'Antigravity',acct:'c41e',src:'CLI',groups:[
+     {n:'Gemini models',w:[{l:'5h',full:'5-hour',pct:92,reset:'1h 05m'},{l:'Week',full:'weekly',pct:37,reset:'Mon 09:00'}]},
+     {n:'Claude and GPT models',w:[{l:'5h',full:'5-hour',pct:100,state:'limit',reset:'3h 40m'},{l:'Week',full:'weekly',pct:64,reset:'Mon 09:00'}]}]},
+   {n:'Gemini',acct:'9e02',src:'CLI',off:'Usage unavailable: the CLI returned no quota data'}]};return f}};
+
+/* ---------- derived values (the R1 model in miniature) ---------- */
+/* Whole-session total = SDK snapshot + CLI lanes. Subagent rows are inside the SDK snapshot and are never added again. */
+function totals(){const s=F.s;if(!s)return null;const L=F.agents.filter(a=>a.k==='cli'),sd=s.sdk||{};
+ const mix=(sv,smk,key,mkk,cause)=>{let low=smk==='low'||smk==='both',est=smk==='est'||smk==='both',cli=null,miss=0,cest=false,clow=false;
+  for(const a of L){const x=a[key],m=a[mkk];if(x==null){miss++;continue}cli=(cli||0)+x;if(m==='est'||m==='both')cest=true;if(m==='low'||m==='both')clow=true}
+  if(sv==null&&cli==null)return {v:null,n:L.length,miss};
+  if(sv==null||miss||clow)low=true;const e=est||cest;
+  return {v:(sv||0)+(cli||0),mk:low&&e?'both':low?'low':e?'est':null,sdk:sv,smk,cause,cli,cmk:clow&&cest?'both':clow?'low':cest?'est':null,miss,n:L.length}};
+ return {tok:mix(sd.t,sd.tmk,'t','tmk',sd.tcause),cost:mix(sd.c,sd.cmk,'c','cmk',sd.ccause)}}
+/* Orchestrator own usage = SDK snapshot minus SDK subagent rows; a derived value, so it carries `~`. Not derivable -> null. */
+function orchUse(){const s=F.s;if(!s||!s.sdk)return {};const subs=F.agents.filter(a=>a.k==='sub');
+ const d=(sv,key)=>sv==null||subs.some(a=>a[key]==null)?null:Math.max(0,sv-subs.reduce((n,a)=>n+a[key],0));
+ return {t:d(s.sdk.t,'t'),c:d(s.sdk.c,'c'),derived:subs.length>0}}
+const why=(m,what)=>[m.cause||(m.smk?`SDK ${what} is ${m.smk==='est'?'estimated':'incomplete'}`:''),m.cmk==='est'||m.cmk==='both'?`CLI lane ${what} is estimated`:'',m.cmk==='low'||m.cmk==='both'?`a lane reported part of its ${what}`:'',m.miss?`${m.miss} of ${m.n} lanes report no ${what}`:''].filter(Boolean).join('; ');
+
+/* ---------- state ---------- */
+const P=new URLSearchParams(location.search);
+const S={w:P.get('w')||'400',theme:P.get('theme')||'dark',fx:P.get('fx')||'lanes',sel:P.get('sel'),more:P.get('more')==='1',pop:P.get('pop')==='1',menu:false,err:P.get('err')==='1',docs:null};
+if(P.get('chrome')==='0')document.body.classList.add('bare');
+let F=FX[S.fx]?FX[S.fx]():FX.lanes();
+const VISIBLE=6;
+
+/* ---------- sections ---------- */
+function header(){const h=F.header,[tc,ti,tl]=ST[h.status];
+ return `<header class="hd"><div style="flex:1;min-width:0"><h2 data-tip="${esc(h.title)}">${esc(h.title)}</h2>
+ <div class="chips"><span class="chip st ${tc}" data-component="ptah-badge">${ic(ti)}<span>${tl}</span></span>
+ ${h.workflow?`<span class="chip" data-component="ptah-badge" data-tip="Workflow: ${esc(h.workflow)}">${ic('flow')}<span>${esc(h.workflow)}</span></span>`:''}
+ ${h.branch?`<span class="chip mono" data-component="ptah-badge" data-tip="Branch: ${esc(h.branch)}">${ic('branch')}<span>${esc(h.branch)}</span></span>`:''}</div></div>
+ <div class="acts" data-component="ptah-inspector-session-actions"><button class="ib" aria-label="Rename session" data-tip="Rename">${ic('pencil')}</button><button class="ib" aria-label="Organize session" data-tip="Organize">${ic('folder')}</button>
+ ${h.running?`<button class="ib danger" aria-label="Stop session" data-tip="Stop session">${ic('square')}</button>`:''}<button class="ib" aria-label="Compact session details" data-tip="Collapse to rail" data-act="rail">${ic('panel')}</button></div></header>
+ ${F.requests.map(r=>`<div class="req" data-component="ptah-inspector-request-lines">${ic('alert')}<span data-tip="${esc(r.t)}">${esc(r.t)}</span><button class="btn-xs" data-goto="${r.row}">Answer</button></div>`).join('')}`}
+
+
+
+
+/* Source split: both segments are contributions to the same whole-session total; a hatched stub stands for lanes that reported nothing. */
+function srcbar(m,f,what){const lab=`Session ${what} by source: SDK ${m.sdk==null?'not reported':(m.smk?MKW[m.smk]+' ':'')+f(m.sdk)}, CLI lanes ${m.cli==null?'not reported':(m.cmk?MKW[m.cmk]+' ':'')+f(m.cli)}${m.miss?`, ${m.miss} of ${m.n} lanes not reported`:''}`;
+ return `<span class="bar src" data-component="ptah-meter (segmented variant)" role="img" aria-label="${esc(lab)}" data-tip="${esc(lab)}">${m.sdk>0?`<i class="s1" style="flex:${m.sdk}"></i>`:''}${m.cli>0?`<i class="s2" style="flex:${m.cli}"></i>`:''}${m.miss?'<i class="sx"></i>':''}</span>`}
+function tile(label,tip,inner,extra){return `<div class="tile" data-component="ptah-stat" role="group" tabindex="0" aria-label="${esc(label)}" data-tip="${esc(tip)}" ${extra||''}>${inner}</div>`}
+function session(){const s=F.s;if(F.loading)return `<section class="sec" aria-busy="true" aria-label="Session, loading"><div class="sec-h"><h3>Session</h3></div><div class="tiles">${'<div class="tile"><span class="sk" style="width:40%"></span><span class="sk" style="width:70%;height:18px;margin:4px 0"></span><span class="sk" style="height:3px"></span></div>'.repeat(6)}</div></section>`;
+ if(!s)return '';
+ const T=totals(),t=T.tok,c=T.cost,lanes=t.n>0,A=F.agents,live=A.filter(a=>a.st==='running'||a.st==='needs').length;
+ const ttip=t.v==null?'Tokens not reported':cap1(`${t.mk?MKW[t.mk]+' ':''}${Math.round(t.v).toLocaleString()} tokens, whole session${t.mk?'. '+cap1(why(t,'tokens')):''}`);
+ const ctip=c.v==null?'Cost not reported':cap1(`${c.mk?MKW[c.mk]+' ':''}${usd(c.v)}, whole session${c.mk?'. '+cap1(why(c,'cost')):''}`);
+ const b=s.budget,bp=b?Math.floor(b.used/b.max*100):null,bt=b?(b.stage==='limit'||bp>=100?'err':b.stage?'warn':'gold'):'',bf=b&&(b.unit==='usd'?usd:tok);
+ const btip=b?`${b.mk?cap1(MKW[b.mk])+' ':''}${bp}% of the session budget: ${bf(b.used)} of ${bf(b.max)}${b.unit==='usd'?'':b.unit==='wtok'?' weighted tokens':' tokens'}. SDK usage only${lanes?', CLI lanes are not counted':''}${b.stage?`. Stage: ${b.stage}`:''}${b.cause?'. '+b.cause:''}`:'';
+ const ttl=s.time==null?'Duration unknown. Not recorded before this session was resumed':`Session time ${clock(s.time)}, ${s.turns} turns`;
+ return `<section class="sec" data-inspector-section="session" data-component="ptah-surface-section" aria-labelledby="h-s">
+ <div class="sec-h"><h3 id="h-s" tabindex="-1">Session</h3><span class="meta">${lanes?'SDK + CLI':''}</span></div>
+ <div class="tiles ${b?'':'n5'} ${S.enter?'enter':''}" data-component="css grid of ptah-stat">
+  ${tile('Tokens. '+ttip,ttip,`<span class="cap">Tokens</span><span class="val">${num(tok(t.v),t.mk,ttip)}</span><span class="sub">${t.v==null?'':lanes?srcbar(t,tok,'tokens'):s.io?`in ${s.io[0]} · out ${s.io[1]}`:''}</span>`)}
+  ${tile('Cost. '+ctip,ctip,`<span class="cap">Cost</span><span class="val">${num(usd(c.v),c.mk,ctip)}</span><span class="sub">${c.v==null?'':lanes?srcbar(c,usd,'cost'):''}</span>`)}
+  ${tile(ttl,ttl,`<span class="cap">Time</span><span class="val">${time(s.time,s.liveTime,'Not recorded before this session was resumed')}</span><span class="sub num">${s.turns} turns</span>`)}
+  ${tile(`${A.length} agents, ${live} live`,`${A.length} agents, ${live} live`,`<span class="cap">Agents</span><span class="val num">${A.length}</span><span class="sub">${live?'<span class="dot"></span>':''}${live} live</span>`)}
+  <button class="tile" id="t-models" data-component="ptah-stat + ptah-disclosure" aria-expanded="${S.pop}" aria-controls="pop-models" aria-label="${s.models.length?`${s.models.length} models. Show model and token detail`:'Models not reported'}" ${s.models.length?'':'disabled'}><span class="cap">Models ${s.models.length?ic('down'):''}</span><span class="val">${s.models.length?`<span class="num">${s.models.length}</span>`:'<span class="num unk">—</span>'}</span>
+   <span class="sub"><span class="grow">${s.models.length?`${esc(s.models[0].n)}${s.models.length>1?` +${s.models.length-1}`:''}`:''}</span></span></button>
+  ${b?tile('Budget. '+btip,btip,`<span class="cap">Budget${lanes?'<i class="sw s1" style="margin:0 0 0 2px"></i>':''} ${bt!=='gold'?cue(bt==='err'?99:85):''}</span><span class="val">${num(bp+'%',b.mk,btip)}</span>
+   <span class="sub"><span class="bar ${bt}" data-component="ptah-meter" role="meter" aria-label="Session budget used, SDK usage only" aria-valuenow="${bp}" aria-valuemin="0" aria-valuemax="100" aria-valuetext="${esc(btip)}"><i style="width:${Math.min(100,bp)}%"></i></span></span>`):''}
+ </div>
+ ${S.pop&&s.models.length?models(T):''}
+ ${lanes?`<div class="legend" data-component="scoped legend (no shared ptah-legend)" aria-hidden="true"><span><i class="sw s1"></i>SDK<b>${t.sdk==null?'—':tok(t.sdk)}</b></span><span><i class="sw s2"></i>CLI<b>${t.cli==null?'—':mkHtml(t.cmk)+tok(t.cli)}</b></span>${t.miss?`<span><i class="sw sx"></i>${t.miss} unreported</span>`:''}</div>`:''}
+ </section>`}
+/* Inline disclosure (not an overlay): per-model categories, SDK subtotal, CLI subtotal, cost basis and lane coverage. */
+function models(T){const s=F.s,k=s.cats,tt=s.models.reduce((n,m)=>n+m.t,0)||1,t=T.tok,c=T.cost,p=(v,m)=>tok(v*m.t/tt);
+ return `<div class="pop" id="pop-models" role="region" aria-label="Models and token detail" data-component="ptah-disclosure > ptah-table + ptah-description-list">
+ <table><thead class="sr"><tr><th>Model</th><th>Tokens</th><th>Cost</th></tr></thead>
+ ${s.models.map(m=>`<tr><td>${esc(m.n)}${k?`<small>in ${p(k.in,m)} · out ${p(k.out,m)} · cache r ${p(k.cr,m)} · w ${p(k.cw,m)}</small>`:''}</td><td class="r">${num(tok(m.t),null,m.t.toLocaleString()+' tokens')}</td><td class="r">${num(usd(m.c),null,m.c==null?'No price for this model':usd(m.c))}</td></tr>`).join('')}
+ <tr class="sum"><td><i class="sw s1"></i>SDK subtotal</td><td class="r">${num(tok(t.sdk),t.smk,t.sdk==null?'SDK tokens not reported':'')}</td><td class="r">${num(usd(c.sdk),c.smk,c.sdk==null?'SDK cost not reported':c.cause||'')}</td></tr>
+ ${t.n?`<tr><td><i class="sw s2"></i>CLI lanes</td><td class="r">${num(tok(t.cli),t.cmk,t.cli==null?'No lane reported tokens':'')}</td><td class="r">${num(usd(c.cli),c.miss&&c.cli!=null?(c.cmk==='est'?'both':'low'):c.cmk,c.cli==null?'No lane reported cost':cap1(why({...c,cause:'',smk:null},'cost')))}</td></tr>`:''}</table>
+ <dl class="strip"><div><dt>Cost basis</dt><dd>${esc(s.basis||'—')}</dd></div>${t.n?`<div><dt>Lanes with tokens</dt><dd>${t.n-t.miss}/${t.n}</dd></div><div><dt>with cost</dt><dd>${c.n-c.miss}/${c.n}</dd></div>`:''}</dl></div>`}
+
+function cacheHtml(ch){if(!ch)return '';const st=ch.state||'ok',left=ch.live||ch.s==null?'':`, ${clock(ch.s)} left`;
+ const tip={unknown:'Prompt cache state not reported',expired:`Prompt cache (${ch.ttl}) expired`,idle:`Prompt cache (${ch.ttl}) timer paused${left}`,low:`Prompt cache (${ch.ttl}) expires soon${left}`,est:`Prompt cache (${ch.ttl}) expiry is estimated${left}`,ok:`Prompt cache (${ch.ttl})${left}, idle in ${ch.idle}`}[st];
+ return `<span class="x cch c-${st}" data-component="ptah-countdown (inspector cache state)" data-tip="${esc(tip)}">${ic('glass')}<span class="num">${st==='est'?'<i class="mk">~</i>':''}<span ${ch.live?`data-live="-1" data-cache="1" data-s="${ch.s}"`:''}>${st==='unknown'?'—':st==='expired'?'0:00':clock(ch.s)}</span></span><span class="sr">${esc(tip)}</span></span>`}
+function agentRow(a,T){const [tc,ti,tl]=ST[a.st],sel=S.sel===a.id,orch=a.k==='orch',cli=a.k==='cli',av=orch?'net':cli?'term':'bot',x=F.ctx;
+ let {t,c,tmk,cmk,tcause,ccause,d,live}=a;
+ if(orch){const o=orchUse(),sd=F.s&&F.s.sdk||{};t=o.t;c=o.c;tmk=t==null?null:o.derived?'est':sd.tmk;cmk=c==null?null:o.derived?'est':sd.cmk;
+  tcause=t==null?(F.s?'Not derivable: the SDK total or a subagent row is missing':'No usage yet'):o.derived?'SDK total minus subagent rows':'';
+  ccause=c==null?(F.s?'Not derivable: the SDK cost or a subagent cost is missing':'No usage yet'):o.derived?'SDK total minus subagent rows':'';d=F.s?F.s.time:null;live=F.s&&F.s.liveTime}
+ const ttip=t==null?(tcause||'Tokens not reported'):cap1(`${tmk?MKW[tmk]+' ':''}${Math.round(t).toLocaleString()} tokens${tcause?'. '+tcause:''}`);
+ const ctip=c==null?(ccause||'Cost not reported'):cap1(`${cmk?MKW[cmk]+' ':''}${usd(c)}${ccause?'. '+ccause:''}`);
+ /* Share: row tokens / deduplicated whole-session tokens. Hidden when the row or the total is unknown or only a lower bound. */
+ const den=T&&T.tok,ok=t!=null&&tmk!=='low'&&tmk!=='both'&&den&&den.v>0&&den.mk!=='low'&&den.mk!=='both',sh=ok?Math.min(100,t/den.v*100):0;
+ const shTip=ok?`${tmk||den.mk?'About ':''}${sh>0&&sh<1?'under 1':Math.round(sh)}% of session tokens`:'';
+ const bar=ok?`<span class="bar" data-component="ptah-meter" role="img" aria-label="${shTip}" data-tip="${shTip}"><i class="${cli?'s2':'s1'}" style="width:${sh}%"></i></span>`:'<span class="bar off" aria-hidden="true"></span>';
+ const kind=orch?'':cli?'CLI lane, ':'Subagent, ';
+ const full=`${a.n} · ${a.m}${a.role?` · ${a.role}`:''}${a.start?` · started ${a.start}`:''} · ${tl}`;
+ const ctx=orch?`<span class="x" data-tip="${x.pct==null?'Main request context not reported':`Main request context ${x.pct}%: ${x.used} of ${x.cap}, ${x.comp} compaction${x.comp===1?'':'s'}`}">${ring(x.pct,'sm')}<span class="num ${x.pct==null?'unk':''}">${x.pct==null?'—':x.pct+'%'}</span>${x.pct!=null?cue(x.pct):''}</span>`:'';
+ const spoken=`${kind}${a.n}, ${a.m}${a.role?', '+a.role:''}, ${tl}${orch?(x.pct==null?', context unknown':`, context ${x.pct} percent${x.pct>=95?', at limit':x.pct>=80?', near limit':''}`):''}${a.req?', needs your answer':''}`;
+ const name=`<td><button class="agent" aria-current="${sel}" aria-expanded="${sel}" aria-label="${esc(spoken)}" data-tip="${esc(full)}" data-row="${a.id}"><span class="av">${ic(av)}<span class="bd ${tc}">${ic(ti)}</span></span><span class="nm"><b>${esc(a.n)}</b><small><span class="mdl">${esc(a.m)}</span>${a.role&&!orch?`<span class="rl">${esc(a.role)}</span>`:''}${ctx}${orch?cacheHtml(F.cache):''}</small></span></button></td>`;
+ const cells=`<td ptahNumeric><span class="tokc">${num(tok(t),tmk,ttip,'td[ptahNumeric] + ptah-meter')}${bar}</span></td><td ptahNumeric>${num(usd(c),cmk,ctip,'td[ptahNumeric]')}</td><td ptahNumeric>${time(d,live,F.s?'Duration not recorded':'No activity yet',1)}</td>`;
+ let exp='';
+ if(sel){const dl=r=>r.length?`<dl class="strip" data-component="ptah-description-list">${r.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`:'',sd=F.s&&F.s.sdk,ch=F.cache;
+  const strip=dl(orch?[...(x.pct!=null?[['Context',`${x.used} / ${x.cap}`],['Compactions',x.comp]]:[]),...(ch&&ch.ttl?[['Cache',`${ch.ttl}${ch.idle&&ch.state!=='expired'?', idle in '+ch.idle:''}${ch.state&&ch.state!=='ok'?' · '+ch.state:''}`]]:[]),...(sd&&sd.t!=null?[['SDK total',`${tok(sd.t)}${sd.c!=null?' · '+usd(sd.c):''}`]]:[])]
+   :[...(a.role?[['Role',esc(a.role)]]:[]),...(a.start?[['Started',a.start]]:[]),...(a.io?[['In',a.io[0]],['Out',a.io[1]],['Cache',a.io[2]]]:[])]);
+  const act=a.st==='running'||a.st==='needs',r=a.req;
+  exp=`<tr class="exp"><td colspan="4">${r?`<div class="rq" role="group" aria-label="Request from ${esc(a.n)}" data-component="ptah-inspector-request-panel"><div class="line"><span class="cue">${ic('alert')}</span><span class="grow" data-tip="${esc(r.q)}">${esc(r.q)}</span></div>${r.out?`<pre class="out" tabindex="0" aria-label="Request output">${esc(r.out)}</pre>`:''}<div class="line">${r.opts.map(o=>`<button class="btn-xs" data-ans="${o}">${o}</button>`).join('')}</div></div>`:''}${strip}
+   ${act?`<form class="steer" onsubmit="return false" data-component="${cli?'lane composer (inspector-agents-section)':'steer input (inspector-agents-section)'}"><input aria-label="${cli?'Message':'Steer'} ${esc(a.n)}" placeholder="${cli?'Message':'Steer'} ${esc(a.n)}" id="steer-in"><button class="ib" aria-label="Send" data-act="send">${ic('send')}</button><button class="ib" type="button" id="menu-btn" aria-label="Agent actions" aria-haspopup="menu" aria-expanded="${S.menu}">${ic('dots')}</button>
+    ${S.menu?`<div class="menu" role="menu" aria-label="Agent actions" data-component="ptah-inspector-agent-actions-menu"><button role="menuitem" data-m="steer">Steer</button><button role="menuitem" data-m="bg">Background</button><button role="menuitem" class="danger" data-m="stop">Stop</button></div>`:''}</form>
+    ${S.err?`<div class="alert" role="alert">${ic('alert')}<span>Not delivered</span><button class="link" data-act="retry">Retry</button></div>`:''}`:''}</td></tr>`;
+  if(!strip&&!act&&!r)exp='';}
+ return `<tr class="row ${sel?'sel':''}" data-row="${a.id}">${name}${cells}</tr>${exp}`}
+function agents(){const A=F.agents;
+ if(F.loading)return `<section class="sec" aria-busy="true" aria-label="Agents, loading"><div class="sec-h"><h3>Agents</h3></div>${'<div class="line" style="margin:10px 0"><span class="sk" style="width:26px;height:26px;border-radius:50%"></span><span class="sk grow"></span><span class="sk" style="width:120px"></span></div>'.repeat(4)}</section>`;
+ const T=totals(),rank=a=>a.k==='orch'?0:a.st==='needs'?1:a.st==='running'?2:3,ord=A.map((a,i)=>[a,i]).sort((p,q)=>rank(p[0])-rank(q[0])||p[1]-q[1]).map(p=>p[0]);
+ const run=A.filter(a=>a.st==='running'||a.st==='needs').length,sub=A.filter(a=>a.k==='sub').length,cli=A.filter(a=>a.k==='cli').length;
+ const vis=S.more?ord:ord.filter((a,i)=>i<VISIBLE||a.id===S.sel),hid=ord.length-vis.length;
+ return `<section class="sec" data-inspector-section="agents" data-component="ptah-surface-section" aria-labelledby="h-a">
+ <div class="sec-h"><h3 id="h-a" tabindex="-1">Agents</h3><span class="meta">${[run?`${run} running`:'',sub?`${sub} sub`:'',cli?`${cli} CLI`:''].filter(Boolean).join(' · ')}</span></div>
+ <table class="ag" data-component="ptah-table"><colgroup><col><col class="c-tok"><col class="c-cost"><col class="c-time"></colgroup>
+ <thead><tr><th scope="col">Agent</th><th scope="col">Tokens</th><th scope="col">Cost</th><th scope="col">Time</th></tr></thead>
+ <tbody>${vis.map(a=>agentRow(a,T)).join('')}</tbody></table>
+ ${sub+cli===0?'<p class="meta none">No subagents or CLI lanes yet</p>':''}
+ ${hid>0||S.more&&ord.length>VISIBLE?`<button class="more" id="more" aria-expanded="${S.more}">${ic('down')}${S.more?'Show fewer':`Show ${hid} more`}</button>`:''}</section>`}
+
+/* PLAN LIMITS: provider > optional model group > one line per window. A provider without data is one line. */
+function limits(){const l=F.limits;if(!l||F.loading)return '';
+ const win=(p,g,w)=>{const t=w.state==='limit'||w.pct>=100?'err':w.state==='warn'||w.pct>=75?'warn':'ok',lab=`${p.n}${g.n?', '+g.n:''}, ${w.full} window: ${w.pct}% used${t==='err'?', limit reached':t==='warn'?', near limit':''}, resets ${w.reset}`;
+  return `<div class="win" data-tip="${esc(lab)}"><span class="wl">${w.l}</span><span class="bar ${t}" data-component="ptah-meter" role="meter" aria-label="${esc(lab)}" aria-valuenow="${w.pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100,w.pct)}%"></i></span><span class="num pct">${t!=='ok'?cue(t==='err'?99:85):''}${w.pct}%</span><span class="meta rs">${w.reset}</span></div>`};
+ return `<section class="sec" data-inspector-section="limits" data-component="ptah-surface-section" aria-labelledby="h-l"><div class="sec-h"><h3 id="h-l" tabindex="-1">Plan limits</h3><span class="meta">${l.providers.length} provider${l.providers.length===1?'':'s'}</span></div>
+ ${l.notice?`<p class="notice" role="status" style="margin-top:0">${ic('alert')}${esc(l.notice)}</p>`:''}
+ <div class="rows">${l.providers.map(p=>`<div class="lim" role="group" aria-label="${p.n} plan limits${p.off?', usage unavailable':''}" data-component="ptah-inspector-limits-lanes / provider limit tile">
+  <div class="line"><span class="ttl">${p.n}</span><span class="muted mono grow" ${p.acct?`data-tip="${p.n} account ${p.acct}"`:''}>${p.acct||''}</span>${p.off?`<span class="meta off" data-tip="${esc(p.off)}">usage unavailable</span>`:''}<span class="chip" data-component="span[ptahBadge]" data-tip="Source: ${p.src==='API'?'provider API':'CLI report'}"><span>${p.src}</span></span></div>
+  ${p.off?'':p.groups.map(g=>`${g.n?`<div class="gl">${g.n}</div>`:''}${g.w.map(w=>win(p,g,w)).join('')}`).join('')}</div>`).join('')}</div></section>`}
+
+function rail(){const s=F.s,x=F.ctx,T=s&&!F.loading?totals():null,A=F.agents,need=A.filter(a=>a.st==='needs').length;
+ const lim=F.limits?Math.max(0,...F.limits.providers.flatMap(p=>p.off?[]:p.groups.flatMap(g=>g.w.map(w=>w.state==='limit'?100:w.pct)))):0;
+ const rb=(capn,m,f,what)=>{const sp=m.v==null?`Session ${what} not reported`:`Session ${what} ${m.mk?MKW[m.mk]+' ':''}${f(m.v)}`;return `<button class="rb" aria-label="${sp}. Open session details" data-act="expand" data-target="session" data-tip="${sp}"><span class="cap">${capn}</span><span class="num${m.v==null?' unk':''}" aria-hidden="true">${m.v==null?'—':mkHtml(m.mk)+f(m.v)}</span></button>`};
+ return `<aside class="rail" aria-label="Session details" ${F.loading?'aria-busy="true"':''}><button class="rb" aria-label="Expand session details" data-act="expand" data-tip="Expand">${ic('left')}</button>
+ <button class="rb" data-act="expand" data-target="agents" aria-label="${A.length} agents${need?`, ${need} need you`:''}. Open agents" data-tip="${A.length} agents${need?`, ${need} need you`:''}">${A.slice(0,3).map(a=>{const [tc,ti]=ST[a.st];return `<span class="av">${ic(a.k==='orch'?'net':a.k==='cli'?'term':'bot')}<span class="bd ${tc}">${ic(ti)}</span></span>`}).join('')}
+ ${A.length>3?`<span class="meta">+${A.length-3}</span>`:''}${need?`<span class="att">${need}</span>`:''}</button><hr>
+ ${F.loading?'<span class="sk" style="width:32px;margin:12px 0"></span><span class="sk" style="width:32px;margin:12px 0"></span>':T?rb('Tok',T.tok,tok,'tokens')+rb('Cost',T.cost,usdR,'cost'):''}
+ <button class="rb" aria-label="Main request context ${x.pct==null?'unknown':x.pct+' percent'}${x.pct>=95?', at limit':x.pct>=80?', near limit':''}. Open agents" data-act="expand" data-target="agents" data-tip="Main request context${x.pct==null?' not reported':' '+x.pct+'%'}">${ring(x.pct)}<span class="num ${x.pct==null?'unk':''}" aria-hidden="true">${x.pct==null?'—':Math.round(x.pct)+'%'}</span>${x.pct!=null?cue(x.pct):''}</button>
+ ${lim>=75?`<button class="rb" data-act="expand" data-target="limits" aria-label="Plan limit ${lim>=100?'reached':'near'}: ${lim} percent. Open plan limits" data-tip="Plan limit ${lim}%"><span class="cue ${lim>=100?'err':''}">${ic('alert')}</span><span class="num" aria-hidden="true">${lim}%</span></button>`:''}</aside>`}
+
+function task(){const t=F.task;if(F.loading)return '';
+ if(!t)return '';
+ const [tc,ti]=ST[t.st],ds=t.ds||'ok',d=ds==='ok'?t.digest:null,busy=ds==='loading',fail=ds==='failed';
+ const U='<span class="num unk" aria-label="not available">—</span>';
+ const VD={APPROVED:['t-done','check','Approved'],REVISE:['t-need','bang','Revise']};
+ const p=d&&d.progress;
+ const prog=p?`<span class="bar" data-component="ptah-meter" role="progressbar" aria-label="${p.done} of ${p.total} tasks complete, from ${p.source}" aria-valuenow="${p.done}" aria-valuemin="0" aria-valuemax="${p.total}"><i style="width:${p.done/p.total*100}%"></i></span><span class="meta" data-tip="Task progress from ${p.source}"><b class="num">${p.done}/${p.total}</b> tasks</span>`
+  :`<span class="bar" data-component="ptah-meter" role="img" aria-label="Task progress not available"></span><span class="meta">${U} tasks</span>`;
+ const sk='<span class="sk" style="width:28px;height:14px;margin:5px 0"></span>';
+ const tile=(cap,v,o={})=>{const on=v>0&&o.tone;return `<div class="tile ${on?o.tone:''}" data-component="ptah-stat" role="group" aria-label="${o.name||cap}: ${busy?'loading':v==null?'not available':v}"${o.tip?` data-tip="${o.tip}"`:''}><span class="cap" aria-hidden="true">${on&&o.icon?ic(o.icon):''}${cap}</span><span class="val" aria-hidden="true">${busy?sk:v==null?'<span class="num unk">—</span>':`<span class="num${v===0&&o.tone?' unk':''}">${v}</span>`}</span></div>`};
+ const dc=d&&d.decisions;
+ const stats=tile('Decisions',dc?dc.rows:null,{tip:'Rows in decisions.md'})+tile('Pending you',dc?dc.pendingUser:null,{tone:'t-need',icon:'bang',tip:'Decisions waiting for you'})
+  +tile('Questions',d?d.openQuestions??null:null,{tone:'t-run',name:'Open questions',tip:'Open questions'})+tile('Entries',d?d.entryCount:null,{tip:'Top-level files and folders in the task folder'});
+ const meta=busy?'<div class="meta tmeta"><span class="sk" style="width:96px;margin:3px 0"></span></div>':`<div class="meta tmeta"><span data-tip="Last change ${d&&d.lastModifiedAbs||'not available'}">changed ${d&&d.lastModified?`<b class="num">${d.lastModified}</b>`:U}</span>${d&&d.truncated?` <span data-tip="Counts are lower bounds (limit reached: ${d.truncatedReasons.join(', ')})">· partial</span>`:''}</div>`;
+ const chip=x=>{const n=x.name,rv=x.kind==='reviews';
+  if(x.readable===false)return `<button class="chip" disabled aria-label="${n}, unreadable">${ic('file')}<span>${n}</span><span class="vd">unreadable</span></button>`;
+  let cue='',name=`Open ${n}`;
+  if(rv){const r=d&&(d.reviews||[]).find(r=>r.file===n),v=r&&VD[r.verdict],c=r&&r.serious!=null;
+   cue=v?`<span class="vd ${v[0]}">${ic(v[1])}${v[2]}</span>`:`<span class="vd muted">—</span>`;
+   if(c)cue+=`<span class="vd mono muted" aria-hidden="true">${r.serious}·${r.moderate}·${r.minor}</span>`;
+   name+=v?`, review verdict ${v[2]}`:', review verdict not available';if(c)name+=`, ${r.serious} serious, ${r.moderate} moderate, ${r.minor} minor findings`}
+  return `<button class="chip" aria-pressed="${S.docs===n}" aria-label="${name}" data-doc="${n}" data-tip="${name}">${ic('file')}<span>${n}</span>${cue}</button>`};
+ const more=t.more.length?`<span class="mw"><button class="chip" id="t-more" aria-haspopup="menu" aria-expanded="${!!S.tm}" aria-controls="t-more-menu" aria-label="${t.more.length} more task documents"><span>+${t.more.length} more</span></button>${S.tm?`<div class="menu" id="t-more-menu" role="menu" aria-label="More task documents">${t.more.map(n=>`<button role="menuitem" data-doc="${n}" aria-label="Open ${n}">${n}</button>`).join('')}</div>`:''}</span>`:'';
+ const dir=x=>`<li class="line">${ic('folder')}<span class="mono grow" data-tip="${x.name}/">${x.name}/</span>${x.files==null?'<span class="meta">not counted</span>':`<span class="meta">${[x.markdown&&`${x.markdown} md`,x.images&&`${x.images} img`].filter(Boolean).join(' · ')}</span><span class="meta"><b class="num">${x.truncated?'≥':''}${x.files}</b> files</span>`}</li>`;
+ const nd=t.chips.length+t.more.length,rvs=d&&d.reviews||[],nrev=rvs.filter(r=>r.verdict==='REVISE').length,napp=rvs.filter(r=>r.verdict==='APPROVED').length;
+ const dsub=busy?'<span class="sk" style="width:60px"></span>':!d?`reviews ${U}`:rvs.length?`${rvs.length} review${rvs.length>1?'s':''}${nrev?` · <span class="vd t-need">${ic('bang')}${nrev} revise</span>`:napp===rvs.length?` · <span class="vd t-done">${ic('check')}approved</span>`:''}`:'no reviews';
+ const dtile=`<button class="tile" id="t-docs" data-component="ptah-stat + ptah-disclosure" aria-expanded="${!!S.td}" aria-controls="task-docs" aria-label="${nd} documents${d&&rvs.length?`, ${rvs.length} reviews, ${nrev} revise`:''}. ${S.td?'Hide':'Show'} documents"><span class="cap">Documents ${ic('down')}</span><span class="val"><span class="num">${nd}</span></span><span class="sub">${dsub}</span></button>`;
+ const dirs=d&&d.directories||[],nf=dirs.reduce((a,x)=>a+(x.files||0),0),ge=dirs.some(x=>x.truncated||x.files==null)?'≥':'';
+ const ftile=dirs.length?`<button class="tile" id="t-dirs" data-component="ptah-stat + ptah-disclosure" aria-expanded="${!!S.tf}" aria-controls="task-dirs" aria-label="${dirs.length} folders, ${ge?'at least ':''}${nf} files. ${S.tf?'Hide':'Show'} folders"><span class="cap">Folders ${ic('down')}</span><span class="val"><span class="num">${dirs.length}</span></span><span class="sub"><span><b class="num">${ge}${nf}</b> files</span></span></button>`
+  :busy||fail?`<button class="tile" id="t-dirs" disabled aria-label="Folders ${busy?'loading':'not available'}"><span class="cap">Folders</span><span class="val">${busy?sk:'<span class="num unk">—</span>'}</span><span class="sub">${busy?'<span class="sk" style="width:44px"></span>':`files ${U}`}</span></button>`:'';
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-t" ${busy?'aria-busy="true"':''}><div class="sec-h"><h3 id="h-t">Task</h3><span class="hx"><span class="chip st ${tc}" data-component="ptah-badge">${ic(ti)}<span>${t.label}</span></span><span class="chip mono" data-component="ptah-badge" data-tip="${t.id}"><span>${t.id}</span></span></span></div>
+ <div class="line"><span class="ttl grow" data-tip="${esc(t.title)}">${esc(t.title)}</span></div>
+ <div class="prog"><span class="meta">${t.stage}</span>${prog}</div>
+ <div class="tiles t4" role="group" aria-label="Task statistics${busy?', loading':fail?', not available':''}">${stats}</div>
+ ${meta}
+ ${fail?`<div class="notice tnote" role="status">${ic('alert')}<span class="grow">Task statistics unavailable</span><button class="btn-xs" data-act="tretry" aria-label="Retry loading task statistics">Retry</button></div>`:''}
+ <div class="tiles t2">${dtile}${ftile}</div>
+ ${S.td?`<div class="pop" id="task-docs" role="region" aria-label="Task documents" data-component="ptah-disclosure"><div class="docs">${t.chips.map(chip).join('')}${more}${t.related?`<button class="chip" aria-expanded="false" aria-label="${t.related} related tasks"><span>+${t.related} related</span></button>`:''}</div></div>`:''}
+ ${S.tf&&dirs.length?`<div class="pop" id="task-dirs" role="region" aria-label="Task folders, file counts only" data-component="ptah-disclosure"><ul class="tdirs">${dirs.map(dir).join('')}</ul></div>`:''}</section>`}
+/* TASK disclosures: ?open=docs,dirs pre-expands the Documents / Folders tiles (screenshots) */
+{const o=(P.get('open')||'').split(',');S.td=o.includes('docs');S.tf=o.includes('dirs')}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.tm){S.tm=false;render();document.getElementById('t-more')?.focus()}});
+function git(){if(F.loading)return '';const g=F.git;
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-g"><div class="sec-h"><h3 id="h-g">Git</h3>${g?'<button class="link">Review changes</button>':''}</div>
+ ${g?`<div class="line"><span class="muted" style="display:flex">${ic('branch')}</span><span class="mono grow" data-tip="${g.branch}">${g.branch}</span>${g.detached?'<span class="chip" data-component="span[ptahBadge]"><span>detached</span></span>':''}<span class="num" data-tip="Uncommitted changes"><span class="add">+${g.add}</span> <span class="del">−${g.del}</span></span></div>`
+   :`<div class="line muted">${ic('branch')}<span>Not a git repository</span></div>`}</section>`}
+function linked(){if(F.loading||!F.linked.length)return '';
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-k"><div class="sec-h"><h3 id="h-k">Linked sessions</h3><span class="meta">${F.linked.length}</span></div>
+ <div role="list">${F.linked.map(l=>`<div role="listitem"><button class="lk" aria-current="${!!l.cur}"><span class="grow">${esc(l.t)}</span><span class="meta">${l.rel}</span></button></div>`).join('')}</div></section>`}
+
+
+function render(){document.documentElement.dataset.theme=S.theme==='light'?'anubis-light':'anubis';
+ const root=document.getElementById('root');
+ if(S.w==='rail'){root.innerHTML=rail();root.style.width='56px';return}
+ root.style.width=S.w+'px';
+ root.innerHTML=`<aside class="insp" aria-label="This session" data-inspector-pane>${header()}${session()}${agents()}${limits()}${task()}${git()}${linked()}</aside>`;
+ S.enter=false;if(S.focus){const h=root.querySelector(`[data-inspector-section="${S.focus}"] h3`);if(h){h.focus();say(h.textContent+' section')}S.focus=null}}
+function say(t){const l=document.getElementById('live');if(l)l.textContent=t}
+function sync(){const q=new URLSearchParams({w:S.w,theme:S.theme,fx:S.fx});if(document.body.classList.contains('bare'))q.set('chrome','0');history.replaceState(null,'','?'+q)}
+
+/* ---------- interactions ---------- */
+document.addEventListener('click',e=>{const t=e.target;
+ const an=t.closest('[data-ans]');if(an){const a=F.agents.find(a=>a.id===S.sel);if(a){F.requests=F.requests.filter(r=>r.row!==a.id);a.req=null;a.st='running';render();say(an.dataset.ans+' sent to '+a.n);document.querySelector(`button[data-row="${a.id}"]`)?.focus()}return}
+ const go=t.closest('[data-goto]');if(go){S.sel=go.dataset.goto;S.more=true;render();document.querySelector('.rq [data-ans]')?.focus();return}
+ const act=t.closest('[data-act]');
+ if(act){const a=act.dataset.act;if(a==='rail'){S.back=S.w;S.w='rail'}else if(a==='expand'){S.w=S.back||'400';S.focus=act.dataset.target||null}else if(a==='send'){S.err=!document.getElementById('steer-in').value.trim();if(!S.err)say('Steer sent')}else if(a==='retry'){S.err=false}
+  document.getElementById('c-w').value=S.w;sync();render();return}
+ if(t.closest('.menu [data-m]')){const m=t.closest('[data-m]').dataset.m;S.menu=false;render();if(m==='steer')document.getElementById('steer-in')?.focus();else{say(m==='stop'?'Stop requested':'Moved to background');document.getElementById('menu-btn')?.focus()}return}
+ if(t.closest('#menu-btn')){S.menu=!S.menu;render();(S.menu?document.querySelector('.menu button'):document.getElementById('menu-btn'))?.focus();return}
+ if(t.closest('#t-models')){S.pop=!S.pop;render();document.getElementById('t-models').focus();return}
+ if(t.closest('#more')){S.more=!S.more;render();document.getElementById('more').focus();return}
+ for(const [id,k] of [['t-docs','td'],['t-dirs','tf']])if(t.closest('#'+id)){S[k]=!S[k];S.tm=false;render();document.getElementById(id)?.focus();return}
+ if(t.closest('#t-more')){S.tm=!S.tm;render();document.getElementById('t-more')?.focus();return}
+ if(t.closest('[data-act="tretry"]')){F.task.ds='loading';render();say('Loading task statistics');return}
+ if(t.closest('[data-doc]')){S.tm=false;const d=t.closest('[data-doc]').dataset.doc;S.docs=S.docs===d?null:d;render();return}
+ if(t.closest('.exp')||t.closest('.pop'))return;
+ const row=t.closest('tr.row');
+ if(row){S.sel=S.sel===row.dataset.row?null:row.dataset.row;S.menu=false;S.err=false;render();document.querySelector(`button[data-row="${row.dataset.row}"]`)?.focus();return}
+ if(S.pop||S.menu){S.pop=S.menu=false;render()}});
+document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
+ if(S.menu){S.menu=false;render();document.getElementById('menu-btn')?.focus()}
+ else if(S.pop){S.pop=false;render();document.getElementById('t-models')?.focus()}});
+const tip=document.getElementById('tip');
+function showTip(el){tip.textContent=el.dataset.tip;tip.classList.add('on');const r=el.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;
+ tip.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';tip.style.top=(r.top-h-6<4?r.bottom+6:r.top-h-6)+'px'}
+document.addEventListener('mouseover',e=>{const el=e.target.closest('[data-tip]');el?showTip(el):tip.classList.remove('on')});
+document.addEventListener('focusin',e=>{const el=e.target.closest('[data-tip]')||e.target.querySelector?.('[data-tip]');el?showTip(el):tip.classList.remove('on')});
+setInterval(()=>document.querySelectorAll('[data-live]').forEach(el=>{const s=Math.max(0,+el.dataset.s+ +el.dataset.live);el.dataset.s=s;el.textContent=(el.dataset.short?dur:clock)(s);
+ const id=el.closest('tr')?.dataset.row,a=F.agents.find(a=>a.id===id);if(el.dataset.cache&&F.cache)F.cache.s=s;else if(a&&a.k!=='orch')a.d=s;else if(F.s)F.s.time=s}),1000);
+for(const k of ['w','theme','fx']){const el=document.getElementById('c-'+k);el.value=S[k];el.addEventListener('change',()=>{S[k]=el.value;if(k==='fx'){F=FX[S.fx]();S.sel=null;S.more=S.pop=S.menu=S.err=false;S.enter=true}sync();render();if(k==='fx')say('Session: '+F.header.title)})}
+render();
+</script>
+</body>
+</html>

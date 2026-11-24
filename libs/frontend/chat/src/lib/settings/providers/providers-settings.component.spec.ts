@@ -60,7 +60,7 @@ import { isDisabledControl } from '../feedback/busy-disabled.testing';
 const toastMessage = () =>
   TestBed.inject(SettingsSaveFeedbackService).toast()?.message ?? null;
 
-// jsdom has no <dialog> modal API (the catalog modal mounts with the page); the real behaviour is asserted in Playwright.
+// jsdom has no native modal API for the drawer confirmation dialogs.
 beforeAll(() => {
   HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
     this.setAttribute('open', '');
@@ -94,6 +94,12 @@ class WizardStub {
   readonly workspaceName = input<string | null>(null);
   readonly mainRouteExists = input(false);
   readonly defaultsResolvable = input(false);
+  readonly providersWithDefaults = input<ReadonlySet<string>>(new Set());
+  readonly connectedProviderIds = input<ReadonlySet<string>>(new Set());
+  readonly connectionsStatus = input<'loading' | 'ready' | 'error'>('ready');
+  readonly saving = input(false);
+  readonly retryConnectionsRequested = output<void>();
+  readonly signInShortcut = output<string>();
   readonly commitState = input<WizardCommitState>('idle');
   readonly closed = output<void>();
   readonly commitRequested = output<ProviderWizardCommit>();
@@ -339,22 +345,8 @@ describe('ProvidersSettingsComponent', () => {
       .query(By.directive(WizardStub))
       .injector.get(WizardStub);
   }
-  const catalogDialog = () =>
-    element.querySelector<HTMLDialogElement>(
-      'ptah-provider-catalog-modal dialog',
-    );
-  /** "Connect provider" opens the catalog; its custom endpoint row opens the wizard with nothing preselected. */
-  async function openWizardThroughCatalog(
-    trigger = button('Connect provider'),
-  ) {
-    trigger.focus();
+  async function openWizard(trigger = button('Connect provider')) {
     trigger.click();
-    await render();
-    element
-      .querySelector<HTMLButtonElement>(
-        '[aria-label="Configure a custom endpoint"]',
-      )
-      ?.click();
     await render();
   }
 
@@ -1347,7 +1339,7 @@ describe('ProvidersSettingsComponent', () => {
   it('passes the Kimi Code sign-in progress to the wizard only for Kimi Code', async () => {
     state.kimiCodeLogin.set({ status: 'starting' });
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().providerChanged.emit('first');
     await render();
     expect(wizard().signInProgress()).toBeNull();
@@ -1360,7 +1352,7 @@ describe('ProvidersSettingsComponent', () => {
       ready([connection('first'), { ...connection('second'), hasKey: false }]),
     );
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().providerChanged.emit('first');
     await render();
     expect(wizard().existingCredentialPresent()).toBe(true);
@@ -1462,7 +1454,7 @@ describe('ProvidersSettingsComponent', () => {
       ).toBeTruthy();
       expect(element.querySelector('[data-read-loading]')).toBeNull();
     });
-    it('the header counts configured and catalog providers, and the primary "Connect provider" opens the catalog', async () => {
+    it('the header counts configured and catalog providers, and "Connect provider" starts setup', async () => {
       state.connections.set(
         ready([
           connection('first'),
@@ -1489,16 +1481,7 @@ describe('ProvidersSettingsComponent', () => {
       expect(connect?.textContent?.trim()).toBe('Connect provider');
       connect?.click();
       await render();
-      expect(catalogDialog()?.hasAttribute('open')).toBe(true);
-      const search = element.querySelector<HTMLInputElement>(
-        '[data-testid="provider-catalog-search"]',
-      );
-      expect(search).not.toBeNull();
-      const searchField = search?.closest('ptah-field');
-      expect(searchField).not.toBeNull();
-      const searchLabel = searchField?.querySelector('label');
-      expect(searchLabel).not.toBeNull();
-      expect(searchLabel?.htmlFor).toBe(search?.id);
+      expect(wizard().deepLinkProviderId()).toBe('');
     });
     it('the filter narrows the cards by name, says when nothing matches, and Clear filter restores them', async () => {
       state.connections.set(
@@ -1571,7 +1554,7 @@ describe('ProvidersSettingsComponent', () => {
       );
       await render();
       expect(hint?.getAttribute('aria-expanded')).toBe('false');
-      // One way into the catalog: the header button carries the more-providers focus hook; the grid tile is gone.
+      // The header button carries the more-providers focus hook.
       expect(
         element
           .querySelector('[data-focus="more-providers"]')
@@ -1676,131 +1659,120 @@ describe('ProvidersSettingsComponent', () => {
     ).toBeNull();
     expect(element.querySelector('[data-read-error="cli-models"]')).toBeNull();
   });
-  it('the more-providers route focuses "Connect provider" and opens the catalog modal (Batch 27)', async () => {
+  it('the more-providers route opens a blank wizard and returns focus to Connect provider', async () => {
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
-    expect(document.activeElement).toBe(
-      element.querySelector('[data-focus="more-providers"]'),
-    );
-    expect(
-      element.querySelector('[data-focus="more-providers"]')?.textContent,
-    ).toContain('Connect provider');
-    expect(catalogDialog()?.hasAttribute('open')).toBe(true);
-    expect(
-      element.querySelector('[data-testid="provider-catalog-modal"]'),
-    ).not.toBeNull();
-  });
-  it('the header "Connect provider" button opens the catalog; closing it keeps the page', async () => {
-    state.connections.set(
-      ready([
-        connection('first'),
-        {
-          ...connection('openrouter'),
-          name: 'OpenRouter',
-          configured: false,
-          hasKey: false,
-        },
-      ]),
-    );
-    await render();
-    expect(
-      element.querySelector('[data-testid="catalog-hint"]')?.textContent,
-    ).toContain('1 available in catalog');
-    element
-      .querySelector<HTMLButtonElement>('[data-testid="catalog-hint"]')
-      ?.click();
-    await render();
-    expect(
-      element.querySelector('[data-testid="catalog-hint-text"]')?.textContent,
-    ).toContain('OpenRouter');
-    element
-      .querySelector<HTMLButtonElement>('[data-testid="catalog-hint"]')
-      ?.click();
-    await render();
-    for (const opener of [
-      button('Connect provider'),
-      element.querySelector<HTMLButtonElement>('[data-focus="more-providers"]'),
-    ]) {
-      opener?.click();
-      await render();
-      expect(catalogDialog()?.hasAttribute('open')).toBe(true);
-      catalogDialog()?.dispatchEvent(new Event('cancel'));
-      await render();
-      expect(catalogDialog()?.hasAttribute('open')).toBe(false);
-    }
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
-  });
-  it('choosing a catalog provider closes the modal and opens the wizard for it; its sign-in goes to the external action', async () => {
-    state.connections.set(
-      ready([
-        connection('first'),
-        {
-          ...connection('openrouter'),
-          name: 'OpenRouter',
-          configured: false,
-          hasKey: false,
-        },
-        {
-          ...connection('github-copilot'),
-          name: 'GitHub Copilot',
-          authMode: 'oauth',
-          configured: false,
-          hasKey: false,
-        },
-      ]),
-    );
-    await render();
-    button('Connect provider').click();
-    await render();
-    element
-      .querySelector<HTMLButtonElement>('[aria-label="Connect OpenRouter"]')
-      ?.click();
-    await render();
-    expect(catalogDialog()?.hasAttribute('open')).toBe(false);
-    expect(wizard().deepLinkProviderId()).toBe('openrouter');
+    expect(wizard().deepLinkProviderId()).toBe('');
     wizard().closed.emit();
     await render();
-    button('Connect provider').click();
-    await render();
-    element
-      .querySelector<HTMLButtonElement>(
-        '[aria-label="Sign in to GitHub Copilot"]',
-      )
-      ?.click();
-    await render();
-    expect(catalogDialog()?.hasAttribute('open')).toBe(false);
-    expect(state.performExternalAuth).toHaveBeenCalledWith(
-      'github-copilot',
-      'sign-in',
-    );
+    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.activeElement).toBe(button('Connect provider'));
   });
-  it('a failed connections read (incl. custom providers) is said in the catalog with Retry (Batch 2b)', async () => {
-    state.connections.set({
-      status: 'error',
-      data: null,
-      error: 'Could not load this section. Retry.',
-    });
+
+  it('opens the wizard directly from the header and restores focus on close', async () => {
     await render();
-    // The caption never reads "0 providers" for a failed read; "Connect provider" still opens the catalog.
-    expect(
-      element.querySelector('[data-testid="catalog-hint"]')?.textContent,
-    ).toContain('The provider catalog could not be loaded.');
-    element
-      .querySelector<HTMLButtonElement>('[data-focus="more-providers"]')
-      ?.click();
+    await openWizard();
+    expect(wizard().deepLinkProviderId()).toBe('');
+    wizard().closed.emit();
     await render();
-    const alert = element.querySelector(
-      '[data-testid="provider-catalog-error"]',
-    );
-    expect(alert?.textContent).toContain(
-      'Custom providers could not be loaded. Your saved settings have not changed.',
-    );
-    (alert?.querySelector('button') as HTMLButtonElement).click();
-    expect(state.refreshConnections).toHaveBeenCalled();
+    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.activeElement).toBe(button('Connect provider'));
   });
+
+  it('derives wizard badges from the displayed connection state, and passes defaults separately', async () => {
+    state.connections.set(ready([connection('first'), connection('unverified')]));
+    state.route.set(ready(route));
+    await render();
+    await openWizard();
+    expect([...wizard().connectedProviderIds()]).toEqual(['first']);
+    expect(wizard().providersWithDefaults().has('first')).toBe(true);
+  });
+
+  it('keeps the wizard open for step 2 sign-in and closes it for the row shortcut', async () => {
+    await render();
+    await openWizard();
+    wizard().externalActionRequested.emit({ providerId: 'openai-codex', action: 'sign-in' });
+    expect(state.performExternalAuth).toHaveBeenLastCalledWith('openai-codex', 'sign-in');
+    await render();
+    expect(wizard().open()).toBe(true);
+
+    state.commit.set({ ...idle, status: 'saving' });
+    await render();
+    expect(wizard().saving()).toBe(true);
+    wizard().signInShortcut.emit('github-copilot');
+    expect(state.performExternalAuth).toHaveBeenCalledTimes(1);
+
+    state.commit.set(idle);
+    state.connections.set({ status: 'error', data: null, error: 'Read failed' });
+    await render();
+    expect(wizard().connectionsStatus()).toBe('error');
+    const announce = jest.spyOn(TestBed.inject(SettingsSaveFeedbackService), 'announce');
+    wizard().retryConnectionsRequested.emit();
+    expect(state.refreshConnections).toHaveBeenCalledTimes(1);
+    wizard().signInShortcut.emit('github-copilot');
+    await render();
+    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(state.performExternalAuth).toHaveBeenLastCalledWith('github-copilot', 'sign-in');
+    expect(announce).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(button('Connect provider'));
+  });
+
+  it('explains the Connect provider gate in precedence order and opens after recovery', async () => {
+    const loadedScopes = state.scopes();
+    const loadedConnections = state.connections();
+    const failed = { status: 'error', data: null, error: 'Read failed' } as const;
+    state.commit.set({ ...idle, status: 'saving' });
+    state.scopes.set(failed);
+    state.connections.set(failed);
+    fixture.componentRef.setInput('focusTarget', 'more-providers');
+    await render();
+    const connect = button('Connect provider');
+    const expectBlocked = (reason: string) => {
+      expect(connect.disabled).toBe(false);
+      expect(connect.getAttribute('aria-disabled')).toBe('true');
+      const reasonId = connect.getAttribute('aria-describedby');
+      const text = element.querySelector('#' + reasonId)?.textContent?.replace(/\s+/g, ' ').trim();
+      expect(text).toBe(reason);
+      expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    };
+    expect(document.activeElement).toBe(connect);
+    expectBlocked('Providers could not be loaded. Your saved settings have not changed.');
+    expect(element.querySelector('[data-read-error="connections"] [role="alert"]')).not.toBeNull();
+    button('Retry providers').click();
+    expect(state.refreshConnections).toHaveBeenCalledTimes(1);
+
+    state.connections.set({ ...loadedConnections, status: 'loading' });
+    await render();
+    expectBlocked('Loading the provider catalog…');
+    state.connections.set(loadedConnections);
+    await render();
+    expectBlocked('Setting sources could not be loaded. Your saved settings have not changed.');
+    expect(button('Retry setting sources')).not.toBeNull();
+    state.scopes.set(unloaded());
+    await render();
+    expectBlocked('Loading settings…');
+    state.scopes.set(loadedScopes);
+    await render();
+    expectBlocked('Wait for the current save to finish.');
+    const filter = element.querySelector<HTMLInputElement>('[data-testid="connections-filter"]');
+    filter?.focus();
+    connect.click();
+    await render();
+    expect(document.activeElement).toBe(connect);
+    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+
+    state.commit.set(idle);
+    await render();
+    expect(connect.hasAttribute('aria-disabled')).toBe(false);
+    expect(connect.hasAttribute('aria-describedby')).toBe(false);
+    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    await openWizard(connect);
+    expect(wizard().deepLinkProviderId()).toBe('');
+  });
+
   it('passes the actual cancellation result and rejects missing verification results', async () => {
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     expect(
       await wizard().cancelDraftVerification()({ probeId: 'old' }),
     ).toEqual({ cancelled: false });
@@ -1824,7 +1796,7 @@ describe('ProvidersSettingsComponent', () => {
       });
     });
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     const child = wizard();
     child.commitRequested.emit(draft);
     await render();
@@ -1854,7 +1826,7 @@ describe('ProvidersSettingsComponent', () => {
       });
     });
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().commitRequested.emit(draft);
     await render();
     expect(wizard().commitState()).toBe('failed');
@@ -1865,7 +1837,7 @@ describe('ProvidersSettingsComponent', () => {
       state.commit.set({ ...idle, status: 'saved', refreshFailed: true });
     });
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().commitRequested.emit(draft);
     await render();
     expect(wizard().commitState()).toBe('saved');
@@ -1890,7 +1862,7 @@ describe('ProvidersSettingsComponent', () => {
         ]),
       );
     });
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().commitRequested.emit(draft);
     await render();
     expect(wizard().commitState()).toBe('saved');
@@ -1911,7 +1883,7 @@ describe('ProvidersSettingsComponent', () => {
     state.connectProvider.mockImplementation(async () => {
       state.commit.set({ ...idle, status: 'failed', unsaved: ['Credential'] });
     });
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().commitRequested.emit(draft);
     await render();
     expect(input.value).toBe('first');
@@ -1931,7 +1903,7 @@ describe('ProvidersSettingsComponent', () => {
   it('cancels without committing and restores the invoking control', async () => {
     await render();
     const trigger = button('Connect provider');
-    await openWizardThroughCatalog(trigger);
+    await openWizard(trigger);
     wizard().closed.emit();
     await render();
     expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
@@ -1941,7 +1913,7 @@ describe('ProvidersSettingsComponent', () => {
   });
   it('forwards the wizard provider identity with its login event', async () => {
     await render();
-    await openWizardThroughCatalog();
+    await openWizard();
     wizard().externalActionRequested.emit({
       providerId: 'github-copilot',
       action: 'sign-in',
@@ -2090,10 +2062,7 @@ describe('ProvidersSettingsComponent', () => {
     // Each card's details trigger covers the whole card (≥ 40px): the card is its target.
     const cardTrigger = (node: Element) =>
       node.getAttribute('data-testid') === 'provider-card-details-trigger';
-    // The catalog modal's controls are asserted in its own spec (closed here; the backdrop is the modal primitive's).
-    const actions = Array.from(element.querySelectorAll('button')).filter(
-      (node) => !node.closest('ptah-provider-catalog-modal'),
-    );
+    const actions = Array.from(element.querySelectorAll('button'));
     expect(actions.some((node) => cardAction(node) && !cardTrigger(node))).toBe(
       true,
     );

@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { insideNotesWorkspace } from './subagent-notes-path';
+import { rekeyScopedMap } from './subagent-scope-key';
 
 const MAX_DECLARED = 20;
 const fileInput = z.object({ file_path: z.string().min(1) });
@@ -72,5 +73,6 @@ export class SubagentDeliverables {
   }
   rekey(from: string, to: string): void {
     for (const entry of this.agents.values()) if (entry.sessionId === from) entry.sessionId = to;
+    rekeyScopedMap(this.agents, from, to);
   }
 }

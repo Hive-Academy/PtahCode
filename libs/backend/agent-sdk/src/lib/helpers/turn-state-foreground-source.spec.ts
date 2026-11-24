@@ -4,6 +4,7 @@ import {
   STALE_GENERATING_CEILING_MS,
   TurnStateForegroundSource,
   type ForegroundSourceClock,
+  type PromptWaitSource,
 } from './turn-state-foreground-source';
 
 /**
@@ -184,5 +185,173 @@ describe('TurnStateForegroundSource', () => {
     unsubscribe();
     expect(registry.listeners.size).toBe(0);
     expect(clock.pendingCount).toBe(0);
+  });
+});
+
+/**
+ * A session blocked on a permission / AskUserQuestion prompt is not foreground
+ * work: the benchmark kept the code indexer deferred behind such waits.
+ */
+describe('TurnStateForegroundSource — prompt waits', () => {
+  function setupWithPrompts() {
+    const logger = createLogger();
+    const clock = createClock(10_000);
+    const registry = createRegistry();
+    const waiting = new Set<string>();
+    const promptListeners = new Set<() => void>();
+    const prompts: PromptWaitSource = {
+      isSessionWaitingOnPrompt: (id) => waiting.has(id),
+      onPromptWaitChange: (listener) => {
+        promptListeners.add(listener);
+        return () => {
+          promptListeners.delete(listener);
+        };
+      },
+    };
+    const source = new TurnStateForegroundSource(
+      registry.source,
+      logger as unknown as Logger,
+      clock.clock,
+      undefined,
+      () => prompts,
+    );
+    const setWaiting = (id: string, on: boolean) => {
+      if (on) waiting.add(id);
+      else waiting.delete(id);
+      for (const listener of [...promptListeners]) listener();
+    };
+    return { logger, clock, registry, source, setWaiting, promptListeners };
+  }
+
+  it('is not busy while the only generating session waits on a prompt', () => {
+    const { registry, source, setWaiting } = setupWithPrompts();
+    registry.set([{ sessionId: 's1', since: 10_000 }]);
+    expect(source.isForegroundBusy()).toBe(true);
+    setWaiting('s1', true);
+    expect(source.isForegroundBusy()).toBe(false);
+  });
+
+  it('is busy again, and notifies, when the prompt is answered', () => {
+    const { registry, source, setWaiting } = setupWithPrompts();
+    const listener = jest.fn(() => source.isForegroundBusy());
+    source.onForegroundChange(listener);
+    registry.set([{ sessionId: 's1', since: 10_000 }]);
+    setWaiting('s1', true);
+    expect(listener).toHaveLastReturnedWith(false);
+    setWaiting('s1', false);
+    expect(listener).toHaveLastReturnedWith(true);
+    expect(source.isForegroundBusy()).toBe(true);
+  });
+
+  it('stays busy for a working session beside a waiting one', () => {
+    const { registry, source, setWaiting } = setupWithPrompts();
+    registry.set([
+      { sessionId: 'waiting', since: 10_000 },
+      { sessionId: 'working', since: 10_000 },
+    ]);
+    setWaiting('waiting', true);
+    expect(source.isForegroundBusy()).toBe(true);
+    registry.set([{ sessionId: 'waiting', since: 10_000 }]);
+    expect(source.isForegroundBusy()).toBe(false);
+  });
+
+  it('does not arm the stale timer for a waiting session, and re-arms on answer', () => {
+    const { registry, source, clock, setWaiting } = setupWithPrompts();
+    source.onForegroundChange(() => undefined);
+    registry.set([{ sessionId: 's1', since: 10_000 }]);
+    setWaiting('s1', true);
+    expect(source.isForegroundBusy()).toBe(false);
+    expect(clock.pendingCount).toBe(0);
+    setWaiting('s1', false);
+    expect(source.isForegroundBusy()).toBe(true);
+    expect(clock.pendingCount).toBe(1);
+  });
+
+  it('subscribes to prompt changes once and unsubscribes with the last listener', () => {
+    const { source, promptListeners } = setupWithPrompts();
+    const offA = source.onForegroundChange(() => undefined);
+    const offB = source.onForegroundChange(() => undefined);
+    expect(promptListeners.size).toBe(1);
+    offA();
+    expect(promptListeners.size).toBe(1);
+    offB();
+    expect(promptListeners.size).toBe(0);
+  });
+
+  it('falls back to the plain turn signal when the prompt source cannot be built', () => {
+    const logger = createLogger();
+    const registry = createRegistry();
+    const source = new TurnStateForegroundSource(
+      registry.source,
+      logger as unknown as Logger,
+      createClock(10_000).clock,
+      undefined,
+      () => {
+        throw new Error('handler unavailable');
+      },
+    );
+    registry.set([{ sessionId: 's1', since: 10_000 }]);
+    expect(source.isForegroundBusy()).toBe(true);
+    expect(source.isForegroundBusy()).toBe(true);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not warn when an idle read finds the prompt source not built yet', () => {
+    const logger = createLogger();
+    const registry = createRegistry();
+    const source = new TurnStateForegroundSource(
+      registry.source,
+      logger as unknown as Logger,
+      createClock(10_000).clock,
+      undefined,
+      () => {
+        throw new Error('webview manager not registered yet');
+      },
+    );
+    expect(source.isForegroundBusy()).toBe(false);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('subscribes on a later read when the prompt source was not ready at subscription', () => {
+    const logger = createLogger();
+    const registry = createRegistry();
+    const waiting = new Set<string>();
+    const promptListeners = new Set<() => void>();
+    let ready = false;
+    const prompts: PromptWaitSource = {
+      isSessionWaitingOnPrompt: (id) => waiting.has(id),
+      onPromptWaitChange: (listener) => {
+        promptListeners.add(listener);
+        return () => {
+          promptListeners.delete(listener);
+        };
+      },
+    };
+    const provider = jest.fn(() => {
+      if (!ready) throw new Error('webview manager not registered yet');
+      return prompts;
+    });
+    const source = new TurnStateForegroundSource(
+      registry.source,
+      logger as unknown as Logger,
+      createClock(10_000).clock,
+      undefined,
+      provider,
+    );
+    const listener = jest.fn(() => source.isForegroundBusy());
+    source.onForegroundChange(listener);
+    expect(promptListeners.size).toBe(0);
+
+    ready = true;
+    registry.set([{ sessionId: 's1', since: 10_000 }]);
+    expect(source.isForegroundBusy()).toBe(true);
+    expect(promptListeners.size).toBe(1);
+
+    waiting.add('s1');
+    for (const notify of [...promptListeners]) notify();
+    expect(listener).toHaveLastReturnedWith(false);
+    // Resolved once the source is ready, not on every read.
+    source.isForegroundBusy();
+    expect(provider).toHaveBeenCalledTimes(2);
   });
 });

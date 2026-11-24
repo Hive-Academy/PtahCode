@@ -75,6 +75,7 @@ export {
   type TurnStopSnapshot,
   type TurnFailureSnapshot,
 } from './session-turn-state.registry';
+export { AgentNoticeCallbackRegistry } from './agent-notice-callback-registry';
 export {
   SessionIdResolvedCallbackRegistry,
   type SessionIdResolvedPayload,

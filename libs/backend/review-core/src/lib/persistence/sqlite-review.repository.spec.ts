@@ -191,6 +191,20 @@ describe('SqliteReviewRepository', () => {
     } finally { db.close(); }
   });
 
+  it('stops automatic retries of a head whose failure every attempt repeats', async () => {
+    const { db, repository } = setup();
+    try {
+      const first = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+      await repository.claimNext('owner', at(1), at(100));
+      await repository.saveFailure(first.attemptId, { stage: 'context', code: 'diff-too-large', message: "Diff exceeds GitHub's 20,000-line limit" });
+      expect(await repository.release(first.attemptId, 'owner', 'failed', at(2))).toBe(true);
+      expect(db.prepare('SELECT failure_count, next_eligible_at FROM review_heads').get()).toEqual({ failure_count: 3, next_eligible_at: null });
+      expect(await repository.enqueueDiscovered(head(1, 'a'), at(10_000_000))).toMatchObject({ skipped: true });
+      const manual = await repository.enqueueManual(head(1, 'a'), 'manual-retry', at(10_000_001));
+      expect((await repository.claimNext('owner', at(10_000_002), at(20_000_000)))?.attemptId).toBe(manual.attemptId);
+    } finally { db.close(); }
+  });
+
   it('records a draft head without an attempt and enqueues it when it becomes eligible', async () => {
     const { db, repository } = setup();
     try {
@@ -212,6 +226,25 @@ describe('SqliteReviewRepository', () => {
       await expect(repository.enqueueManual(head(1, 'a'), 'manual-1', at(2))).rejects.toThrow();
       await repository.saveCheckpoint(manual.attemptId, 'checks', 0, { done: ['lint'], version: 1 });
       expect(await repository.getCheckpoint(manual.attemptId, 'checks', 0)).toEqual({ done: ['lint'], version: 1 });
+    } finally { db.close(); }
+  });
+
+  it('writes the stage family and a lane record that a later stage save keeps (Req 4.7)', async () => {
+    const { db, repository } = setup();
+    try {
+      const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+      const row = { attemptId: attempt.attemptId, stage: 'lens:security-privacy', ordinal: 0, state: 'running' as const,
+        startedAt: at(1), endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
+      await repository.saveStage(row);
+      const use = { lane: 'ptah-cli:pc-1', model: 'model-a', family: 'anthropic',
+        fallback: [{ source: 'pin' as const, lane: 'codex', model: null, reason: 'at-limit' as const }] };
+      await repository.saveStageLane(attempt.attemptId, row.stage, 0, use);
+      await repository.saveStage({ ...row, state: 'completed', endedAt: at(2), outcome: 'completed' });
+      expect(db.prepare(`SELECT family FROM review_stages WHERE attempt_id = ? AND stage = ? AND ordinal = 0`)
+        .get(attempt.attemptId, row.stage)).toEqual({ family: 'anthropic' });
+      expect(await repository.getCheckpoint(attempt.attemptId, `lane:${row.stage}`, 0)).toEqual({ version: 1, ...use });
+      // A lane record never shadows the stage's own checkpoint.
+      expect(await repository.getCheckpoint(attempt.attemptId, row.stage, 0)).toBeNull();
     } finally { db.close(); }
   });
 });

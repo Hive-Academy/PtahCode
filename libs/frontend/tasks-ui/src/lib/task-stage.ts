@@ -17,6 +17,7 @@ import {
   IMPLEMENTATION_PLAN_FILE,
   LEGACY_BATCHES_FILE,
   TASK_DESCRIPTION_FILE,
+  TASK_HANDOFF_FILE_PATTERN,
   TEST_REPORT_FILE,
   VISUAL_DESIGN_SPECIFICATION_FILE,
   VISUAL_REVIEW_FILE,
@@ -89,9 +90,6 @@ export function deriveTaskStage(
   return null;
 }
 
-/** `handoff-N.md`, capturing N. Not a contract document: N is open-ended. */
-const HANDOFF_FILE_PATTERN = /^handoff-(\d+)\.md$/;
-
 /**
  * The order a task's documents are listed in:
  *
@@ -115,7 +113,7 @@ export function orderTaskDocuments(artifacts: readonly string[]): string[] {
 
   const handoffs: { file: string; n: number }[] = [];
   for (const file of remaining) {
-    const match = HANDOFF_FILE_PATTERN.exec(file);
+    const match = TASK_HANDOFF_FILE_PATTERN.exec(file);
     if (match) handoffs.push({ file, n: Number(match[1]) });
   }
   handoffs.sort((a, b) => a.n - b.n || compareText(a.file, b.file));

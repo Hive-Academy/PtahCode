@@ -24,6 +24,7 @@ import type {
   CliTarget,
   CliType,
 } from '@ptah-extension/shared';
+import { renderLaneToolTable } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 import type { CliCommandOptions } from './cli-adapter.interface';
 import { renderLaneCompletionContract } from '../lane-reporting-contract';
@@ -444,20 +445,7 @@ You are a Ptah coding lane in the supplied workspace. Follow the task's scope an
 
 Use Ptah tools when present:
 Ptah tools may appear under your CLI's MCP naming (for example a server prefix); search your tool list for "ptah_" and call them by the name your CLI shows.
-Need                                      | Prefer
-Understand workspace                      | ptah_workspace_analyze
-Find files by path                        | ptah_search_files
-Find function/class/method                 | ptah_code_search_symbols
-Find text/constant/usage (not grep/rg)     | ptah_grep
-Read function or line range (not sed/cat)  | ptah_read_symbol
-Inspect source structure before full read | ptah_ast_analyze
-Inspect signatures/API                    | ptah_context_enrich_file
-Find symbol usages                        | ptah_lsp_references after locating file/line/col
-Check impact before editing               | ptah_get_dependents
-Check errors after editing                | ptah_get_diagnostics scoped to changed files
-Recall earlier decisions                  | ptah_memory_search for "last time"/"previously"
-Check current external facts              | ptah_web_search
-Check rendered UI                         | ptah_browser_navigate and ptah_browser_screenshot
+${renderLaneToolTable()}
 
 If a Ptah tool is absent, errors, or has no usable index result, use the closest native tool and name the fallback. Ptah file tools are read-only; write with native file-edit tools. For UI work, render the result and inspect a screenshot. For an in-workspace HTML artifact, use ptah_browser_navigate on its in-workspace file:// URL and ptah_browser_screenshot before reporting. State what you checked against the design reference. Do not infer visual quality from source or type checks.
 

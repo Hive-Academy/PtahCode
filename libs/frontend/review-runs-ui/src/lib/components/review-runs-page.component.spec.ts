@@ -1,8 +1,10 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewRunsPageComponent } from './review-runs-page.component';
+import { ReviewSettingsDrawerComponent } from './review-settings-drawer.component';
 
 const run: ReviewRun = {
   repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 428,
@@ -188,7 +190,7 @@ describe('ReviewRunsPageComponent', () => {
     fixture.detectChanges();
     fixture.nativeElement.querySelector('#review-page-resume-confirm')?.parentElement?.querySelectorAll('button')[1]?.click();
     await fixture.whenStable();
-    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: false }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: false }, { timeout: 15_000 });
     store.settings.set({ repositories: [], maintainerLogins: ['maintainer'], pollMinutes: 10,
       globalPublicationPaused: false, laneCapPerPr: 6, confidenceFloor: 0.8, maxNewInline: 10, fallbackFamilies: [] });
     fixture.detectChanges();
@@ -196,7 +198,7 @@ describe('ReviewRunsPageComponent', () => {
     pauseButton().click();
     await fixture.whenStable();
     expect(fixture.nativeElement.textContent).not.toContain('Resume live publication?');
-    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: true }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: true }, { timeout: 15_000 });
   });
 
   it('loads and renders findings for the run opened from the list', async () => {
@@ -208,7 +210,7 @@ describe('ReviewRunsPageComponent', () => {
           ? { runs: [run], nextCursor: null, poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null } }
           : method === 'review:getRun' ? run
             : method === 'review:listFindings' ? { findings: [finding] }
-              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted' }
+              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted', lanes: { pool: [], pins: {} } }
                 : null,
     }));
     TestBed.configureTestingModule({ imports: [ReviewRunsPageComponent], providers: [{ provide: ClaudeRpcService, useValue: { call } }] });
@@ -220,7 +222,7 @@ describe('ReviewRunsPageComponent', () => {
     (runRows(fixture.nativeElement)[0] as HTMLButtonElement).click();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(call).toHaveBeenCalledWith('review:listFindings', { attemptId: run.attemptId }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:listFindings', { attemptId: run.attemptId }, { timeout: 15_000 });
     expect(fixture.nativeElement.textContent).toContain('src/settings.ts:42');
     expect(fixture.nativeElement.textContent).toContain('Major');
   });
@@ -239,7 +241,7 @@ describe('ReviewRunsPageComponent', () => {
           : method === 'review:listRuns'
             ? { runs: [run], nextCursor: null, poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null } }
             : method === 'review:getRun' ? run
-              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted' }
+              : method === 'review:getSettings' ? { settings: null, hasToken: false, tokenStorage: 'encrypted', lanes: { pool: [], pins: {} } }
                 : null,
       });
     });
@@ -263,5 +265,63 @@ describe('ReviewRunsPageComponent', () => {
     expect(findingsCalls).toHaveLength(2);
     expect(findingsCalls[1][1]).toEqual({ attemptId: run.attemptId });
     expect(fixture.nativeElement.textContent).toContain('src/settings.ts:42');
+  });
+
+  it('opens the settings drawer with the lane draft, loads lanes, and restores focus on close', async () => {
+    const savedLanes = { pool: [{ lane: 'claude-code', model: null }], pins: {} };
+    const listing = {
+      lanes: [{ id: 'claude-code', label: 'Claude Code', family: 'anthropic', limitState: 'confirmed-room',
+        catalog: { status: 'read', models: ['haiku'], truncated: false, verifiable: true } }],
+      blockedModels: [],
+    };
+    const call = jest.fn().mockImplementation((method: string) => Promise.resolve({
+      isSuccess: () => true,
+      data: method === 'review:listRepositories' ? []
+        : method === 'review:listRuns'
+          ? { runs: [], nextCursor: null, poll: { status: null, error: null, lastSuccessAt: null, lastErrorAt: null } }
+          : method === 'review:getSettings'
+            ? { settings: { repositories: [], maintainerLogins: [], pollMinutes: 10, globalPublicationPaused: false,
+              laneCapPerPr: 6, confidenceFloor: 0.8, maxNewInline: 10, fallbackFamilies: [] },
+              hasToken: false, tokenStorage: 'encrypted', lanes: savedLanes }
+            : method === 'review:listLanes' ? listing
+              : method === 'review:getBotIdentity' ? null : null,
+    }));
+    TestBed.configureTestingModule({ imports: [ReviewRunsPageComponent], providers: [{ provide: ClaudeRpcService, useValue: { call } }] });
+    const fixture = TestBed.createComponent(ReviewRunsPageComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const store = TestBed.inject(ReviewRunsStore);
+    const opener = Array.from(fixture.nativeElement.querySelectorAll('header button') as NodeListOf<HTMLButtonElement>)
+      .find((button) => button.textContent?.includes('Review settings')) as HTMLButtonElement;
+    expect(opener).toBeInstanceOf(HTMLButtonElement);
+    opener.focus();
+    call.mockClear();
+    opener.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(call).toHaveBeenCalledWith('review:listLanes', {}, expect.anything());
+    expect(store.laneListState()).toBe('ready');
+    const drawer = fixture.debugElement.query(By.directive(ReviewSettingsDrawerComponent))
+      .componentInstance as ReviewSettingsDrawerComponent;
+    expect(drawer.lanes()).toEqual(savedLanes);
+    expect(drawer.laneListing()).toEqual(listing);
+    expect(drawer.laneListState()).toBe('ready');
+    expect(fixture.nativeElement.querySelector('[role="dialog"][aria-label="Review settings"]')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Review lanes');
+
+    const edited = { pool: [], pins: {} };
+    drawer.lanesChanged.emit(edited);
+    expect(store.draftLanes()).toEqual(edited);
+    call.mockClear();
+    drawer.retryLanes.emit();
+    await fixture.whenStable();
+    expect(call).toHaveBeenCalledWith('review:listLanes', {}, expect.anything());
+
+    (fixture.nativeElement.querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(ReviewSettingsDrawerComponent))).toBeNull();
+    expect(document.activeElement).toBe(opener);
   });
 });

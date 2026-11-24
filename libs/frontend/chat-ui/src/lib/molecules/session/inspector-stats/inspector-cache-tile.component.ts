@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import type { SessionStatsEntry } from '@ptah-extension/shared';
 import { WallClockService, injectWallClock } from '@ptah-extension/core';
+import { PtahMeterComponent, type PtahMeterTone } from '@ptah-extension/ui';
 
 type Cache = NonNullable<SessionStatsEntry['cache']>;
 const IDLE_FIRE_LATENESS_MS = 60_000;
@@ -30,13 +31,14 @@ function countdown(ms: number, showHours = true): string {
 @Component({
   selector: 'ptah-inspector-cache-tile',
   standalone: true,
+  imports: [PtahMeterComponent],
   host: { class: 'flex min-w-0 flex-1 flex-col' },
   template: `
-    <!-- Same metric cell as Context / Tokens / Cost: label, value, subline, bar. -->
     <div
       class="flex min-w-0 flex-1 flex-col"
       role="group"
       data-testid="inspector-cache-tile"
+      [class.gap-1]="variant() === 'detail'"
       [title]="estimateTitle"
       [attr.aria-label]="accessibleText()"
     >
@@ -45,7 +47,7 @@ function countdown(ms: number, showHours = true): string {
       </div>
       <div
         class="text-base font-semibold leading-tight tabular-nums"
-        [style.color]="expired() ? ink() : null"
+        [class.text-state-err]="expired()"
       >
         {{ countdownText() }}
       </div>
@@ -53,35 +55,32 @@ function countdown(ms: number, showHours = true): string {
         class="truncate text-[10.5px] text-base-content-muted tabular-nums"
         [textContent]="subline()"
       ></p>
-      <div
-        class="mt-auto h-1 shrink-0 rounded-full bg-[var(--surface-border-strong)]"
+      @if (warning()) {
+        <p class="text-xs text-base-content-muted">Expires soon</p>
+      }
+      <ptah-meter
+        class="mt-auto"
+        data-testid="cache-bar"
         aria-hidden="true"
-      >
-        <span
-          class="bar block h-full rounded-full"
-          data-testid="cache-bar"
-          [style.width.%]="remainingPercent()"
-          [style.background-color]="ink()"
-        ></span>
-      </div>
+        label="Prompt cache remaining"
+        [value]="remainingPercent()"
+        [max]="100"
+        [tone]="tone()"
+        [hideLabel]="true"
+        [showValue]="false"
+        size="xs"
+        track="thin"
+      />
+      @if (variant() === 'detail') {
+        <p class="text-xs text-base-content-muted">{{ estimateTitle }}</p>
+      }
     </div>
   `,
-  styles: [
-    `
-      .bar {
-        transition: width 400ms var(--ptah-ease-soft);
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .bar {
-          transition: none;
-        }
-      }
-    `,
-  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class InspectorCacheTileComponent {
   readonly cache = input.required<Cache>();
+  readonly variant = input<'tile' | 'detail'>('tile');
   private readonly clockNow = inject(WallClockService).now('second');
   private readonly clockActive = computed(() => {
     const cache = this.cache();
@@ -102,12 +101,9 @@ export class InspectorCacheTileComponent {
     const ttlMs = this.cache().ttl === '1h' ? 3_600_000 : 300_000;
     return Math.max(0, Math.min(100, (this.remainingMs() / ttlMs) * 100));
   });
-  protected readonly ink = computed(() =>
-    this.remainingMs() <= 0
-      ? 'var(--state-ink-err)'
-      : this.remainingPercent() <= 20
-        ? 'var(--state-ink-need)'
-        : 'var(--ptah-gold, var(--ptah-accent-ink))',
+  protected readonly warning = computed(() => !this.expired() && this.remainingPercent() <= 20);
+  protected readonly tone = computed<PtahMeterTone>(() =>
+    this.expired() ? 'err' : this.warning() ? 'warn' : 'gold',
   );
   protected readonly countdownText = computed(() =>
     this.remainingMs() <= 0 ? 'Expired' : countdown(this.remainingMs()),
@@ -136,6 +132,7 @@ export class InspectorCacheTileComponent {
       remaining > 0
         ? `Cache expires in ${wholeMinutes(remaining)} (estimated).`
         : 'Cache expired.',
+      ...(this.warning() ? ['Expires soon.'] : []),
       ...(idle ? [idle] : []),
       ESTIMATE_TITLE,
     ].join(' ');

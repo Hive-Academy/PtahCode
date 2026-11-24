@@ -48,6 +48,10 @@ import {
       --ptah-kind-cli-ink: #1d4ed8;
       --ptah-kind-ptah-ink: #7a5900;
     }
+    ptah-lane-row-identity .ptah-table-row-title-secondary-line {
+      max-width: 100%;
+      min-height: 1rem;
+    }
     ptah-lane-row-identity .ptah-table-row-title-secondary[class] {
       font-size: 0.75rem;
       line-height: 1rem;
@@ -100,10 +104,6 @@ import {
       );
     }
     ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-kind {
-      position: static;
-      flex-basis: 100%;
-      order: 1;
-      justify-self: start;
       line-height: 1rem;
       font-family: var(--ptah-font-sans);
     }
@@ -113,7 +113,7 @@ import {
     }
     ptah-lane-row-identity[data-collapsed='true']
       .ptah-table-row-title-primary[class] {
-      /* Keep icon/name/info gaps intrinsic; kind takes its own flex line. */
+      /* Keep icon/name/info gaps intrinsic. */
       display: flex;
       flex-wrap: wrap;
       justify-content: start;
@@ -127,21 +127,6 @@ import {
       overflow: visible;
       overflow-wrap: normal;
       word-break: normal;
-    }
-    @container (max-width: 13rem) {
-      ptah-lane-row-identity:not([data-collapsed='true'])
-        .ptah-table-row-title-kind {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        line-height: 1rem;
-        font-family: var(--ptah-font-sans);
-      }
-      ptah-lane-row-identity:not([data-collapsed='true'])
-        .ptah-table-row-title-secondary[class] {
-        margin-left: 5rem;
-        max-width: calc(100% - 5rem);
-      }
     }
   `,
   host: {
@@ -171,7 +156,7 @@ import {
         />
       } @else {
         <span
-          ptahRowInfo
+          ptahRowSecondary
           class="ptah-table-row-title-kind"
           [class.kind-cli]="row.kind === 'system'"
           [class.kind-ptah]="row.kind === 'instance'"

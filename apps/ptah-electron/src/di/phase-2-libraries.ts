@@ -100,6 +100,7 @@ import {
   LANE_ROUTING_TOKENS,
   PhaseDefinitionFileReader,
   registerLaneRoutingServices,
+  type LaneModelListing,
 } from '@ptah-extension/lane-routing';
 import {
   LANE_OUTCOME_TOKENS,
@@ -593,6 +594,18 @@ export function registerPhase2Libraries(
           }
         },
         logger,
+        () => {
+          try {
+            return provider.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING);
+          } catch (error) {
+            // degradation-audit: reported - logged at warn here; review lanes
+            // read no model catalogs (undefined), so saved models pass unchecked.
+            logger.warn('[Electron DI] Review lanes cannot resolve the lane model listing', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+            return undefined;
+          }
+        },
       ),
     });
     container.register(ReviewFiles, {

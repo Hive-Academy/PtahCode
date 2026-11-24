@@ -1,4 +1,5 @@
-import { basename, extname } from 'node:path';
+import { access, readdir, stat } from 'node:fs/promises';
+import { basename, dirname, extname, relative } from 'node:path';
 
 import { NESTED_WORKSPACE_PATH_RULES } from '@ptah-extension/shared';
 import type {
@@ -10,7 +11,10 @@ import type {
 } from '@ptah-extension/platform-core';
 import {
   classifyFileForCoverage,
-  DEFAULT_WORKSPACE_EXCLUDES,
+  CODE_INDEX_EXCLUDES,
+  hasTypeScriptSourceTwin,
+  isCodeIndexExcluded,
+  isJavaScriptPath,
 } from '@ptah-extension/workspace-intelligence';
 
 /**
@@ -103,8 +107,144 @@ const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'] as const;
  * A path with no such extension — a directory, `.md`, a database file — is
  * not a per-file index target.
  */
-function isIndexerSourcePath(filePath: string): boolean {
-  return classifyFileForCoverage(filePath, 'codeIndex') === 'eligible';
+function isIndexerSourcePath(root: string, filePath: string): boolean {
+  return (
+    classifyFileForCoverage(filePath, 'codeIndex') === 'eligible' &&
+    !isCodeIndexExcluded(
+      relative(normalizeSymbolPath(root), normalizeSymbolPath(filePath)),
+    )
+  );
+}
+
+const IGNORE_CASE = process.platform === 'win32';
+const TYPESCRIPT_SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts']);
+const JAVASCRIPT_TWIN_EXTENSIONS = ['.js', '.jsx', '.mjs', '.cjs'] as const;
+const DECLARATION_SUFFIX = /\.d\.(?:ts|mts|cts)$/;
+
+/** Resolves `true` only for a regular file spelled exactly as asked. */
+type SourceFileProbe = (filePath: string) => Promise<boolean>;
+
+/**
+ * One probe per batch. Directory listings are cached per directory, so N
+ * candidates in one folder cost one `readdir`. A failed listing rejects every
+ * probe in that folder for this batch, which callers read as "no file".
+ */
+function createSourceFileProbe(): SourceFileProbe {
+  const listings = new Map<string, Promise<ReadonlySet<string>>>();
+  const namesIn = (directory: string): Promise<ReadonlySet<string>> => {
+    let listing = listings.get(directory);
+    if (!listing) {
+      listing = readdir(directory).then((names) => new Set(names));
+      listings.set(directory, listing);
+    }
+    return listing;
+  };
+  return async (filePath) => {
+    await access(filePath);
+    if (!(await stat(filePath)).isFile()) return false;
+    if (IGNORE_CASE) return true;
+    // Access can also succeed for differently cased names on macOS volumes.
+    return (await namesIn(dirname(filePath))).has(basename(filePath));
+  };
+}
+
+function needsTwinProbe(change: WorkspaceChange): boolean {
+  return change.kind !== 'delete' && isJavaScriptPath(change.path);
+}
+
+/**
+ * Same-stem JavaScript paths whose twin status a TypeScript source path
+ * decides (the inverse of `typeScriptTwinCandidates`). Declarations decide
+ * nothing. Extension case follows the indexer's platform rule.
+ */
+function javaScriptTwinCandidates(path: string): readonly string[] {
+  const extension = extname(path);
+  const folded = IGNORE_CASE ? extension.toLowerCase() : extension;
+  if (!TYPESCRIPT_SOURCE_EXTENSIONS.has(folded)) return [];
+  if (DECLARATION_SUFFIX.test(IGNORE_CASE ? path.toLowerCase() : path)) {
+    return [];
+  }
+  const stem = path.slice(0, path.length - extension.length);
+  return JAVASCRIPT_TWIN_EXTENSIONS.map((twin) => stem + twin);
+}
+
+/** A created or deleted TypeScript source can shadow or expose a JS twin. */
+function isTwinTransition(change: WorkspaceChange): boolean {
+  return (
+    change.kind !== 'update' && javaScriptTwinCandidates(change.path).length > 0
+  );
+}
+
+async function probeQuietly(
+  probe: SourceFileProbe,
+  filePath: string,
+): Promise<boolean> {
+  try {
+    return await probe(filePath);
+  } catch {
+    // degradation-audit: optional-capability - a failed twin probe cannot prove the file exists, so no twin is scheduled; the next event or full run re-decides it.
+    return false;
+  }
+}
+
+/**
+ * JavaScript twins on disk whose rows a TypeScript create or delete changes.
+ * A create shadows the twin; `reindexFile` only skips a shadowed file and
+ * keeps its rows, so the twin is fed as a delete once a twin is proven. A
+ * delete may expose the twin; it is fed as an update so `reindexFile`
+ * applies its own twin rule (another `.tsx` twin can still shadow it).
+ */
+async function javaScriptTwinChanges(
+  root: string,
+  change: WorkspaceChange,
+  probe: SourceFileProbe,
+): Promise<readonly WorkspaceChange[]> {
+  const changes = await Promise.all(
+    javaScriptTwinCandidates(change.path).map(
+      async (candidate): Promise<WorkspaceChange | null> => {
+        if (!isIndexerSourcePath(root, candidate)) return null;
+        if (!(await probeQuietly(probe, candidate))) return null;
+        if (change.kind === 'delete')
+          return { path: candidate, kind: 'update' };
+        return (await hasTypeScriptSourceTwin(candidate, probe))
+          ? { path: candidate, kind: 'delete' }
+          : null;
+      },
+    ),
+  );
+  return changes.filter((twin) => twin !== null);
+}
+
+function batchKey(filePath: string): string {
+  const path = normalizeSymbolPath(filePath);
+  return IGNORE_CASE ? path.toLowerCase() : path;
+}
+
+/**
+ * One entry per path. A batch event for the twin wins over a derived
+ * re-evaluation, except that a proven shadow (derived delete) replaces a
+ * non-delete event: the twin probe would only drop that event and leave
+ * the shadowed rows behind.
+ */
+function mergeTwinChanges(
+  kept: readonly WorkspaceChange[],
+  twins: readonly WorkspaceChange[],
+): WorkspaceChange[] {
+  const merged = [...kept];
+  const indexByKey = new Map<string, number>();
+  merged.forEach((change, index) =>
+    indexByKey.set(batchKey(change.path), index),
+  );
+  for (const twin of twins) {
+    const key = batchKey(twin.path);
+    const index = indexByKey.get(key);
+    if (index === undefined) {
+      indexByKey.set(key, merged.push(twin) - 1);
+    } else if (twin.kind === 'delete' && merged[index]?.kind !== 'delete') {
+      merged[index] = twin;
+    }
+  }
+  return merged;
 }
 
 function isDatabaseArtifact(
@@ -149,13 +289,12 @@ export function workspaceSymbolIndexFrom(
 }
 
 /**
- * Same exclude policy as the workspace file index watcher
- * (`folder-index-live-sync.ts`): globs plus nested-workspace segment rules.
+ * Symbol-index globs plus the shared nested-workspace segment rules.
  * Directory-name excludes stay empty because the globs already name them.
  */
 export function defaultSymbolWatchOptions(): WorkspaceWatchOptions {
   return {
-    excludeGlobs: DEFAULT_WORKSPACE_EXCLUDES,
+    excludeGlobs: CODE_INDEX_EXCLUDES,
     excludeDirNames: [],
     excludeSegmentRules: NESTED_WORKSPACE_PATH_RULES,
     nestedRepoDetection: true,
@@ -196,6 +335,7 @@ export class WorkspaceIndexLifecycleService {
   private readonly deleteRunCooldownMs: number;
 
   private subscription: IDisposable | undefined;
+  private pendingBatch: Promise<void> | undefined;
   private readonly pending = new Map<string, PendingFile>();
   private runAbort: AbortController | undefined;
   private fullRun: Promise<void> | undefined;
@@ -261,12 +401,31 @@ export class WorkspaceIndexLifecycleService {
   }
 
   private onBatch(batch: WorkspaceChangeBatch): void {
+    // A delete arriving during an earlier probe must be applied after that
+    // batch, so that an older update cannot replace it in the debounce queue.
+    const processing = this.pendingBatch
+      ? this.pendingBatch.then(() => this.processBatch(batch))
+      : this.processBatch(batch);
+    if (!processing) return;
+    const pending = processing
+      .catch((error: unknown) => this.report(WATCH_FAILURE, error))
+      .finally(() => {
+        if (this.pendingBatch === pending) this.pendingBatch = undefined;
+      });
+    this.pendingBatch = pending;
+  }
+
+  private processBatch(batch: WorkspaceChangeBatch): void | Promise<void> {
     if (this.disposed) return;
+    if (batch.overflow || batch.truncated) {
+      this.requestFullRun();
+      return;
+    }
     const kept: WorkspaceChange[] = [];
     let directoryDelete = false;
     for (const change of batch.changes) {
       if (isDatabaseArtifact(change.path, this.databasePath)) continue;
-      const source = isIndexerSourcePath(change.path);
+      const source = isIndexerSourcePath(this.workspaceRoot, change.path);
       if (change.kind === 'delete' && !source) {
         // The path is already gone, so it cannot be stat'ed. A non-empty
         // `path.extname` is a file the indexer never stored (`.md`, `.json`):
@@ -280,12 +439,68 @@ export class WorkspaceIndexLifecycleService {
       if (!source) continue;
       kept.push(change);
     }
-    if (
-      batch.overflow ||
-      batch.truncated ||
-      kept.length >= this.stormThreshold ||
-      this.pending.size + kept.length >= this.stormThreshold
-    ) {
+    // Decide a storm BEFORE the twin probes: a branch checkout that touches
+    // thousands of files must not cost a few filesystem probes per path only to
+    // become one full run (the full run re-decides every twin anyway).
+    const needsProbes =
+      kept.some(needsTwinProbe) || kept.some(isTwinTransition);
+    if (kept.some(isTwinTransition) && this.isStorm(kept.length)) {
+      this.requestFullRun();
+      return;
+    }
+    if (needsProbes) {
+      return this.resolveTwins(kept).then((changes) =>
+        this.scheduleBatch(changes, directoryDelete),
+      );
+    }
+    this.scheduleBatch(kept, directoryDelete);
+  }
+
+  /**
+   * Adds the JavaScript twins a TypeScript create or delete re-decides, then
+   * drops JavaScript changes a TypeScript twin shadows. One probe (and one
+   * `readdir` per directory) serves the whole batch.
+   */
+  private async resolveTwins(
+    kept: readonly WorkspaceChange[],
+  ): Promise<WorkspaceChange[]> {
+    const probe = createSourceFileProbe();
+    const transitions = kept.filter(isTwinTransition);
+    // Skip the await when nothing transitions, so JS probes start in this
+    // turn and a later batch stays queued behind them (`onBatch`).
+    const twins =
+      transitions.length === 0
+        ? []
+        : await Promise.all(
+            transitions.map((change) =>
+              javaScriptTwinChanges(this.workspaceRoot, change, probe),
+            ),
+          );
+    const changes = mergeTwinChanges(kept, twins.flat());
+    const resolved = await Promise.all(
+      changes.map(async (change) =>
+        needsTwinProbe(change) &&
+        (await hasTypeScriptSourceTwin(change.path, probe))
+          ? null
+          : change,
+      ),
+    );
+    return resolved.filter((change) => change !== null);
+  }
+
+  private isStorm(keptCount: number): boolean {
+    return (
+      keptCount >= this.stormThreshold ||
+      this.pending.size + keptCount >= this.stormThreshold
+    );
+  }
+
+  private scheduleBatch(
+    kept: readonly WorkspaceChange[],
+    directoryDelete: boolean,
+  ): void {
+    if (this.disposed) return;
+    if (this.isStorm(kept.length)) {
       this.requestFullRun();
       return;
     }

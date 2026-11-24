@@ -85,10 +85,21 @@ describe('InspectorSessionActionsComponent', () => {
     fixture.componentInstance.running.set(true);
     fixture.detectChanges();
     expect(button('stop')?.disabled).toBe(true);
+    expect(button('stop')?.title).toBe('Session not yet saved');
     persisted();
     fixture.detectChanges();
-    expect(button('rename')).not.toBeNull();
-    expect(button('organize')).not.toBeNull();
+    for (const [action, name] of [
+      ['rename', 'Rename session'],
+      ['organize', 'Organize session'],
+      ['stop', 'Stop session'],
+    ]) {
+      const control = button(action);
+      expect(control?.getAttribute('data-density')).toBe('compact');
+      expect(control?.getAttribute('aria-label')).toBe(name);
+      expect(control?.tabIndex).toBe(0);
+    }
+    expect(button('stop')?.getAttribute('data-tone')).toBe('danger');
+    expect(button('stop')?.title).toBe('Stop session');
     button('stop')?.click();
     expect(abortWithConfirmationFor).toHaveBeenCalledWith('inspector-tab', 'session-inspector');
     available.set(false);
@@ -156,6 +167,35 @@ describe('InspectorSessionActionsComponent', () => {
     await Promise.resolve();
     expect(document.activeElement).toBe(button('rename'));
     root.remove();
+  });
+
+  it('keeps Stop in the compact More menu and dispatches it for the active session', async () => {
+    const { fixture, root, button } = await create();
+    fixture.componentInstance.running.set(true);
+    await setWidth(fixture, 280);
+    const more = button('more');
+    expect(more?.getAttribute('aria-label')).toBe('More session actions');
+    expect(more?.getAttribute('data-density')).toBe('compact');
+    more?.click();
+    fixture.detectChanges();
+
+    const stop = root.querySelector<HTMLButtonElement>('[data-inspector-menu-action="stop"]');
+    expect(stop?.textContent?.trim()).toBe('Stop session');
+    expect(stop?.getAttribute('role')).toBe('menuitem');
+    expect(stop?.getAttribute('data-tone')).toBe('danger');
+    expect(stop?.getAttribute('data-density')).toBe('compact');
+    expect(stop?.disabled).toBe(true);
+    expect(stop?.title).toBe('Session not yet saved');
+    expect(abortWithConfirmationFor).not.toHaveBeenCalled();
+
+    persisted();
+    fixture.detectChanges();
+    expect(stop?.disabled).toBe(false);
+    expect(stop?.title).toBe('Stop session');
+    stop?.click();
+    fixture.detectChanges();
+    expect(abortWithConfirmationFor).toHaveBeenCalledWith('inspector-tab', 'session-inspector');
+    expect(more?.getAttribute('aria-expanded')).toBe('false');
   });
 
   it('navigates the More menu with arrow keys and dismisses it on focus loss and outside pointer', async () => {

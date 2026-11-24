@@ -912,12 +912,6 @@ export class AgentProcessManager {
       request.attachMcp !== false && adapter.supportsMcp !== false
         ? await this.spawnEnvironment.mcpPort()
         : undefined;
-    // A transport without MCP (agy stream-json) expects no handshake and gets
-    // no lane token; the port still reaches the adapter for its notice.
-    const expectsMcp =
-      request.attachMcp !== false &&
-      adapter.supportsMcp !== false &&
-      (await adapter.attachesMcp?.(detection.path)) !== false;
     timing.mark('mcpPortMs');
     const gated = request.resumeSessionId
       ? await this.gateResume(request.task, request.resumeSessionId, cli)
@@ -951,7 +945,7 @@ export class AgentProcessManager {
       roleChannel: adapter.roleChannel,
       binaryPath: detection.path,
       mcpPort,
-      expectsMcp,
+      expectsMcp: request.attachMcp !== false && adapter.supportsMcp !== false,
       cliVersion: detection.version,
       effectivePolicy,
       requestedPolicy: {
@@ -1478,7 +1472,7 @@ export class AgentProcessManager {
       }
       const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
-        mcpPort && expectsMcp !== false && laneMcpCapability
+        mcpPort && laneMcpCapability
           ? issueLaneMcpToken(
               this.mcpCredentials,
               this.logger,

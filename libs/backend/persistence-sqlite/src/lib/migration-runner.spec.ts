@@ -106,6 +106,82 @@ describe('SqliteMigrationRunner', () => {
     expect(runner.readAppliedVersions()).toEqual(new Set([1, 2, 3]));
   });
 
+  // TASK_2026_2312_c3ef review: Electron and the CLI read the ledger before
+  // either takes the write lock. A version a peer applied meanwhile is
+  // skipped under the lock, not replayed (ADD COLUMN would fail the open).
+  it('skips a migration that a peer applied after the ledger read', async () => {
+    const db = new FakeSqliteDatabase();
+    const runner = new SqliteMigrationRunner(db, createMockLogger());
+    const originalExec = db.exec.bind(db);
+    let locks = 0;
+    jest.spyOn(db, 'exec').mockImplementation((sql) => {
+      originalExec(sql);
+      if (sql === 'BEGIN IMMEDIATE' && ++locks === 2) {
+        // The peer committed version 2 while this connection waited.
+        db.insertMigrationRow(2, 0);
+      }
+    });
+
+    const result = await runner.applyAll(FIXTURE_MIGRATIONS);
+
+    expect(result.appliedVersions).toEqual([1, 3]);
+    expect(result.skippedVersions).toEqual([2]);
+    expect(result.finalVersion).toBe(3);
+    expect(db.tables.has('t2')).toBe(false);
+    expect(db.tables.has('t3')).toBe(true);
+  });
+
+  // TASK_2026_2312_c3ef review: a version a peer recorded after the ledger
+  // read is in the ledger after the run, so it counts toward finalVersion.
+  it('counts a peer-applied highest version in finalVersion', async () => {
+    const db = new FakeSqliteDatabase();
+    const runner = new SqliteMigrationRunner(db, createMockLogger());
+    const originalExec = db.exec.bind(db);
+    let locks = 0;
+    jest.spyOn(db, 'exec').mockImplementation((sql) => {
+      if (sql === 'BEGIN IMMEDIATE' && ++locks === 3) {
+        // The peer committed version 3 while this connection waited.
+        db.insertMigrationRow(3, 0);
+        originalExec('PRAGMA user_version = 3');
+      }
+      originalExec(sql);
+    });
+
+    const result = await runner.applyAll(FIXTURE_MIGRATIONS);
+
+    expect(result.appliedVersions).toEqual([1, 2]);
+    expect(result.skippedVersions).toEqual([3]);
+    expect(result.finalVersion).toBe(3);
+    expect(runner.lastAppliedVersion).toBe(3);
+    expect(db.tables.has('t3')).toBe(false);
+  });
+
+  it('reports the peer-applied version when a peer applied every pending one', async () => {
+    const db = new FakeSqliteDatabase();
+    db.insertMigrationRow(1, 0);
+    const runner = new SqliteMigrationRunner(db, createMockLogger());
+    const originalExec = db.exec.bind(db);
+    let peerRan = false;
+    jest.spyOn(db, 'exec').mockImplementation((sql) => {
+      if (sql === 'BEGIN IMMEDIATE' && !peerRan) {
+        // The peer applied versions 2 and 3 after this connection's ledger read.
+        peerRan = true;
+        db.insertMigrationRow(2, 0);
+        db.insertMigrationRow(3, 0);
+      }
+      originalExec(sql);
+    });
+
+    const result = await runner.applyAll(FIXTURE_MIGRATIONS);
+
+    expect(result.appliedVersions).toEqual([]);
+    expect(result.skippedVersions).toEqual([1, 2, 3]);
+    expect(result.finalVersion).toBe(3);
+    expect(runner.lastAppliedVersion).toBe(3);
+    expect(db.tables.has('t2')).toBe(false);
+    expect(db.tables.has('t3')).toBe(false);
+  });
+
   it('is a no-op on second run', async () => {
     const db = new FakeSqliteDatabase();
     const runner = new SqliteMigrationRunner(db, createMockLogger());

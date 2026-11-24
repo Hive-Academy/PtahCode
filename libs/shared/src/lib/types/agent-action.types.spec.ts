@@ -7,6 +7,8 @@ import {
   formatBudgetPauseNotice,
   formatBudgetReadOnlyCeilingDeny,
   formatActivityOverdue,
+  formatSessionOverdue,
+  formatBudgetAskNotice,
   formatChildPauseNotice,
   formatChildRuntimeAsk,
   formatExplicitUserStopContext,
@@ -247,5 +249,40 @@ describe('P2 watchdog and child cap copy', () => {
     expect(formatAgentActionNotice(pause, { childSession: true, audience: 'agent' })).toContain(
       'paused new work tools',
     );
+  });
+});
+
+describe('notice copy for the UI (TASK_2026_2310)', () => {
+  it('tells the person that a session looks overdue and stays running', () => {
+    const text = formatSessionOverdue(['2 open tasks (monitor)', 'compaction']);
+    expect(text).toContain('2 open tasks (monitor), compaction');
+    expect(text).toContain('may be stuck');
+    expect(text).not.toMatch(/stopped|aborted|killed/i);
+  });
+
+  it('lists each wait once and caps the list', () => {
+    expect(formatSessionOverdue(['Bash', 'Bash', 'Bash'])).toBe(
+      'Ptah watchdog is still waiting for Bash. The provider may be stuck.',
+    );
+    const many = formatSessionOverdue(['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+    expect(many).toContain('a, b, c, d, e and 2 more');
+  });
+
+  it('falls back to a neutral phrase without operations', () => {
+    expect(formatSessionOverdue([])).toContain('open work');
+  });
+
+  it('words a subagent ask for the person and keeps the execution live', () => {
+    const ask: AgentActionNotice = {
+      actor: 'ptah-budget',
+      action: 'asked-handoff',
+      reason: 'context-budget',
+      nextStep: 'write-notes-and-return',
+      measured: 130_000,
+      limit: 150_000,
+    };
+    const text = formatBudgetAskNotice(ask, 'a1');
+    expect(text).toContain('asked a1 for a handoff');
+    expect(text).toContain('The execution remains live.');
   });
 });

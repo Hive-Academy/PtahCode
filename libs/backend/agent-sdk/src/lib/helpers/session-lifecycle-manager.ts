@@ -75,6 +75,7 @@ import {
 import type { ContextUsageReading, IContextUsagePort } from './compaction/context-usage.port';
 import { SessionControl } from './session-lifecycle/session-control.service';
 import { SessionBudgetService } from './session-budget/session-budget.service';
+import type { AgentNoticeCallbackRegistry } from './agent-notice-callback-registry';
 import type { SessionEndCallbackRegistry } from './session-end-callback-registry';
 import type { SessionEndCause } from './session-end-callback-registry';
 import type { SdkAdapterEvents } from './sdk-adapter-events.service';
@@ -450,6 +451,8 @@ export class SessionLifecycleManager {
     private readonly idleCompaction: IdleCompactionFacadePort | null = null,
     @inject(SDK_TOKENS.SDK_ADAPTER_EVENTS, { isOptional: true })
     private readonly adapterEvents: SdkAdapterEvents | null = null,
+    @inject(SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY, { isOptional: true })
+    private readonly agentNotices: AgentNoticeCallbackRegistry | null = null,
   ) {
     this._registry = new SessionRegistry(this.logger, (id) => this.adapterEvents?.clearStopCause(id));
     this._streamPump = new SessionStreamPump(
@@ -473,6 +476,7 @@ export class SessionLifecycleManager {
       this.contextUsagePort,
       this.subagentBudgetMonitor,
       this.idleCompaction,
+      this.agentNotices,
     );
     const compactionProvider = this.compactionConfigProvider;
     this._control = new SessionControl(

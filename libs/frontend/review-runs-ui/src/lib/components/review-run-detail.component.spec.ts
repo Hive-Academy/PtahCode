@@ -35,6 +35,7 @@ describe('ReviewRunDetailComponent', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } }] });
     const fixture = TestBed.createComponent(ReviewRunDetailComponent);
     fixture.componentRef.setInput('run', run);
+    fixture.componentRef.setInput('findings', [{ ...finding, verification: 'same-family-weaker' }]);
     const close = jest.fn(); fixture.componentInstance.closed.subscribe(close);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Coverage limited');
@@ -175,6 +176,92 @@ describe('ReviewRunDetailComponent', () => {
     expect(retry).toBeInstanceOf(HTMLButtonElement);
     retry?.click();
     expect(retryFindings).toHaveBeenCalledTimes(1);
+  });
+  describe('lane lines (Req 4.7, 4.8)', () => {
+    const storeStub = () => ({ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } });
+    const render = (value: ReviewRun, findings: readonly ReviewFinding[] = []) => {
+      TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [storeStub()] });
+      const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+      fixture.componentRef.setInput('run', value);
+      fixture.componentRef.setInput('findings', findings);
+      fixture.detectChanges();
+      const host: HTMLElement = fixture.nativeElement;
+      const cards = (id: string): string[] => Array.from(host.querySelectorAll(`[data-testid="${id}"] li`)).map(item => item.textContent?.replace(/\s+/g, ' ').trim() ?? '');
+      return { host, stages: cards('review-detail-stages'), lenses: cards('review-detail-lenses') };
+    };
+
+    it('shows lane, model, triage family and fallback notes on a run recorded after lane pools', () => {
+      const { host, stages, lenses } = render({ ...run, stages: [
+        { name: 'discovery', status: 'succeeded', family: null, scope: null, durationMs: 100, error: null, artifactPath: null, lane: null, model: null, fallback: null },
+        { name: 'triage', status: 'succeeded', family: 'claude', scope: null, durationMs: 900, error: null, artifactPath: null, lane: 'claude', model: 'claude-sonnet-4-5', fallback: [
+          { source: 'pin', lane: 'gemini', model: 'gemini-2.5-pro', reason: 'model-blocked' },
+        ] },
+        { name: 'lenses', status: 'succeeded', family: 'codex', scope: 'security-privacy', durationMs: 2000, error: null, artifactPath: null, lane: 'codex', model: null, fallback: [
+          { source: 'pool', lane: 'copilot', model: null, reason: 'at-limit' },
+        ] },
+        { name: 'verification', status: 'succeeded', family: 'gemini', scope: null, durationMs: 300, error: null, artifactPath: null, lane: 'gemini', model: 'gemini-2.5-flash', fallback: null },
+      ] });
+      expect(stages[0]).toBe('DiscoveryCompleted · 0s');
+      expect(stages[1]).toContain('claude · claude-sonnet-4-5 · family claude');
+      expect(stages[1]).toContain('Fallback: pinned gemini / gemini-2.5-pro was unavailable (model blocked). Ran on claude.');
+      expect(stages[2]).toContain('gemini · gemini-2.5-flash · family gemini');
+      expect(lenses[0]).toContain('codex · lane default');
+      expect(lenses[0]).not.toContain('family codex');
+      expect(lenses[0]).toContain('Family: codex · Verifier family: gemini');
+      expect(lenses[0]).toContain('Fallback: pool entry copilot skipped (at limit). Ran on codex.');
+      expect(host.querySelectorAll('[data-testid="review-stage-lane"]')).toHaveLength(3);
+      expect(host.querySelectorAll('[data-testid="review-stage-fallback"]')).toHaveLength(2);
+      expect(host.querySelector('[data-testid="review-stage-lane"] .font-mono')?.textContent).toBe('claude');
+    });
+
+    it('renders a run recorded before lane pools with the family only', () => {
+      const { host, stages, lenses } = render({ ...run, stages: [
+        { name: 'triage', status: 'succeeded', family: 'claude', scope: null, durationMs: 900, error: null, artifactPath: null },
+        { name: 'lenses', status: 'succeeded', family: 'codex', scope: 'security-privacy', durationMs: 2000, error: null, artifactPath: null, lane: null, model: null, fallback: null },
+        { name: 'verification', status: 'succeeded', family: 'gemini', scope: null, durationMs: 300, error: null, artifactPath: null, lane: null, model: null, fallback: null },
+      ] });
+      expect(stages[0]).toContain('Family: claude');
+      expect(stages[1]).toContain('Family: gemini');
+      expect(lenses[0]).toContain('Family: codex · Verifier family: gemini');
+      expect(host.querySelector('[data-testid="review-stage-lane"]')).toBeNull();
+      expect(host.querySelector('[data-testid="review-stage-fallback"]')).toBeNull();
+    });
+
+    it('adds nothing to stages that run no lane', () => {
+      const { host, stages } = render({ ...run, stages: [
+        { name: 'context', status: 'succeeded', family: null, scope: null, durationMs: 500, error: null, artifactPath: null },
+        { name: 'publication', status: 'succeeded', family: null, scope: null, durationMs: 200, error: null, artifactPath: null, lane: null, model: null, fallback: null },
+      ] });
+      expect(stages).toEqual(['ContextCompleted · 1s', 'PublicationCompleted · 0s']);
+      expect(host.querySelector('[data-testid="review-stage-family"]')).toBeNull();
+    });
+  });
+
+  describe('same-family verification badge (D14)', () => {
+    const sameFamilyRun: ReviewRun = { ...run, stages: [
+      { name: 'lenses', status: 'succeeded', family: 'codex', scope: 'security-privacy', durationMs: 2000, error: null, artifactPath: null },
+      { name: 'verification', status: 'succeeded', family: 'codex', scope: null, durationMs: 300, error: null, artifactPath: null },
+    ] };
+    const render = (findings: readonly ReviewFinding[]): string => {
+      TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: { rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn() } }] });
+      const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+      fixture.componentRef.setInput('run', sameFamilyRun);
+      fixture.componentRef.setInput('findings', findings);
+      fixture.detectChanges();
+      return fixture.nativeElement.textContent;
+    };
+
+    it('shows the badge when one finding is marked same-family-weaker', () => {
+      expect(render([finding, { ...finding, title: 'Second', verification: 'same-family-weaker' }])).toContain('Weaker evidence · same-family verification');
+    });
+
+    it('hides the badge when the verifier family equals a lens family but no finding is same-family-weaker', () => {
+      expect(render([finding])).not.toContain('Weaker evidence');
+    });
+
+    it('hides the badge when the run has no findings', () => {
+      expect(render([])).not.toContain('Weaker evidence');
+    });
   });
   it('asks before starting a live rerun', () => {
     TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {

@@ -111,3 +111,23 @@ export function firstByteTimeoutEnv(
     [SDK_FIRST_BYTE_TIMEOUT_ENV]: userValue || String(SDK_FIRST_BYTE_TIMEOUT_MS),
   };
 }
+
+/**
+ * The SDK first-byte wait when no value reaches the SDK, for example a named run
+ * whose certified env drops the key. The CLI reads it natively; incident
+ * 2026-11-23 (child f7ea7de9) recorded `waited_ms: 181000` with no value set.
+ */
+export const SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS = 181_000;
+
+/**
+ * The first-byte wait that the SDK will use with `env`: the value that
+ * `firstByteTimeoutEnv` passes on, or the SDK default when that value is not a
+ * positive number. A user value can be longer than the no-activity watchdog
+ * window, so the watchdog must size its window from this value.
+ */
+export function sdkFirstByteTimeoutMs(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  const ms = Number(firstByteTimeoutEnv(env)[SDK_FIRST_BYTE_TIMEOUT_ENV]);
+  return Number.isFinite(ms) && ms > 0 ? ms : SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS;
+}

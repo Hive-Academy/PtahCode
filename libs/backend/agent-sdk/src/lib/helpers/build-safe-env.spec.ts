@@ -1,12 +1,14 @@
 import 'reflect-metadata';
 import {
+  SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS,
   SDK_FIRST_BYTE_TIMEOUT_ENV,
   SDK_FIRST_BYTE_TIMEOUT_MS,
   buildSafeEnv,
   experimentalBetaEnv,
   firstByteTimeoutEnv,
+  sdkFirstByteTimeoutMs,
 } from './build-safe-env';
-import { NO_ACTIVITY_TIMEOUT_MS } from './no-activity-watchdog';
+import { NO_ACTIVITY_TIMEOUT_MS, noActivityWindowMs } from './no-activity-watchdog';
 
 describe('experimentalBetaEnv', () => {
   const KEY = 'PTAH_ENABLE_EXPERIMENTAL_BETAS';
@@ -105,5 +107,27 @@ describe('firstByteTimeoutEnv (TASK_2026_2288 A)', () => {
         String(SDK_FIRST_BYTE_TIMEOUT_MS),
       );
     });
+  });
+});
+
+describe('sdkFirstByteTimeoutMs (incident 2026-11-23)', () => {
+  it('returns the Ptah default when no value is set', () => {
+    expect(sdkFirstByteTimeoutMs({})).toBe(SDK_FIRST_BYTE_TIMEOUT_MS);
+  });
+
+  it('returns a user value that is longer than the guard window', () => {
+    const env = { [SDK_FIRST_BYTE_TIMEOUT_ENV]: ' 240000 ' };
+    expect(sdkFirstByteTimeoutMs(env)).toBe(240_000);
+    // The guard then waits longer than the SDK, so it cannot end the SDK retry.
+    expect(noActivityWindowMs(sdkFirstByteTimeoutMs(env))).toBeGreaterThan(240_000);
+  });
+
+  it('falls back to the SDK default for a value that is not a positive number', () => {
+    for (const value of ['abc', '0', '-5']) {
+      expect(sdkFirstByteTimeoutMs({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: value }))
+        .toBe(SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS);
+    }
+    expect(noActivityWindowMs(SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS))
+      .toBeGreaterThan(NO_ACTIVITY_TIMEOUT_MS);
   });
 });

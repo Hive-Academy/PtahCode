@@ -265,13 +265,6 @@ ptah-lanes-table
   justify-content: start;
 }
 ptah-lanes-table
-  .ptah-table[data-collapsed='true'][data-model-column='true']
-  ptah-lane-row-identity[data-collapsed='true']
-  .ptah-table-row-title-kind {
-  flex-basis: auto;
-  order: 0;
-}
-ptah-lanes-table
   .lane-default-value
   [data-popover-kind='effort'][data-ptah-button]:is(.btn, #ptah-button) {
   border: var(--ptah-border-width) solid var(--ptah-card-border-faint);
@@ -419,12 +412,10 @@ ptah-lanes-table
     grid-column: 3;
     grid-row: 1;
   }
+  /* The badge sits beside the version on line 2 and stays content-sized. */
   & ptah-lane-row-identity .ptah-table-row-title-kind {
-    grid-column: 1 / -1;
-    grid-row: 2;
     width: max-content;
     flex: none;
-    justify-self: start;
   }
   & th[scope='row'] .lane-model-value {
     margin-block-start: 0.1875rem;

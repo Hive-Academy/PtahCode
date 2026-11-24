@@ -29,3 +29,24 @@ describe('ptah-meter marker and stripes a11y', () => {
     expect(create({ value: 40, stripes: true, tone: 'err' }).textContent).toContain('40 / 100');
   });
 });
+
+it('uses one accessible value for a segmented meter with partial coverage and a marker', () => {
+  const spoken = '20 input, 20 output. Cache usage was not reported.';
+  const el = create({
+    value: 40,
+    marker: 80,
+    unreported: 'partial',
+    segments: [
+      { value: 20, tone: 'info', label: 'Input' },
+      { value: 20, tone: 'ok', label: 'Output' },
+    ],
+    valueText: spoken,
+  });
+  const bar = el.querySelector('[role="meter"]');
+  expect(bar?.getAttribute('aria-valuetext')).toBe(spoken);
+  expect(bar?.getAttribute('aria-valuenow')).toBe('40');
+  expect(bar?.querySelector('[data-meter-marker]')?.getAttribute('aria-hidden')).toBe('true');
+  const stub = el.querySelector('.ptah-meter-unreported');
+  expect(stub?.getAttribute('aria-hidden')).toBe('true');
+  expect(stub?.parentElement).toBe(bar?.parentElement);
+});

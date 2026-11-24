@@ -1,0 +1,81 @@
+[
+ {
+  "id": "read-symbol-tab-manager-find-by-session",
+  "kind": "read-symbol",
+  "question": "How does the tab manager find the tab of a session id?",
+  "expect": [
+   "findTabBySessionId(sessionId: string): TabState | null {",
+   "const activeTab = this._tabs().find((t) => t.claudeSessionId === sessionId);"
+  ],
+  "expectFile": "libs/frontend/chat-state/src/lib/tab-manager.service.ts"
+ },
+ {
+  "id": "read-range-permission-handler-levels",
+  "kind": "read-range",
+  "question": "Show lines 348-372 of the SDK permission handler (level and pending counters).",
+  "expect": [
+   "setPermissionLevel(level: PermissionLevel): void {",
+   "getPendingCliAgentPermissions(): AgentPermissionRequest[] {"
+  ],
+  "expectFile": "libs/backend/agent-sdk/src/lib/sdk-permission-handler.ts"
+ },
+ {
+  "id": "usages-text-abort-reason-superseded",
+  "kind": "find-usages-text",
+  "question": "Where is the ABORT_REASON_SUPERSEDED constant used?",
+  "expect": [
+   "libs/frontend/chat/src/lib/services/message-sender.service.ts",
+   "libs/frontend/chat-state/src/lib/tab-manager.service.ts"
+  ]
+ },
+ {
+  "id": "concept-clamp-read-tail",
+  "kind": "find-by-concept",
+  "question": "Which function clamps the tail size of a child session read?",
+  "expect": [
+   "function clampTail(tailKiB: number | undefined): number {",
+   "return SESSION_READ_DEFAULT_TAIL_KIB;"
+  ],
+  "expectFile": "libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts"
+ },
+ {
+  "id": "outline-indexing-control",
+  "kind": "outline",
+  "question": "What is the public surface of the indexing control service?",
+  "expect": [
+   "getStatus",
+   "isRunning",
+   "dismissStale",
+   "acknowledgeDisclosure"
+  ],
+  "expectFile": "libs/backend/memory-curator/src/lib/control/indexing-control.service.ts"
+ },
+ {
+  "id": "usages-symbol-pending-permission-count",
+  "kind": "find-usages-symbol",
+  "question": "Who calls getPendingPermissionCount?",
+  "expect": [
+   "libs/backend/agent-sdk/src/lib/helpers/session-lifecycle/session-query-executor.service.ts",
+   "libs/shared/src/lib/types/permission.types.ts"
+  ]
+ },
+ {
+  "id": "files-session-handoff",
+  "kind": "find-files",
+  "question": "Which session-children files implement the session handoff?",
+  "expect": [
+   "libs/backend/cli-agent-runtime/src/lib/session-children/session-handoff.service.ts",
+   "libs/backend/cli-agent-runtime/src/lib/session-children/session-handoff-chain.store.ts"
+  ]
+ },
+ {
+  "id": "concept-release-attach-claim",
+  "kind": "find-by-concept",
+  "question": "Where is the worktree attach claim of a child start released?",
+  "expect": [
+   "private releaseAttachClaim(reservation: SessionChildReservation): void {",
+   "this.attachClaims.delete(claimed);"
+  ],
+  "expectFile": "libs/backend/cli-agent-runtime/src/lib/session-children/session-spawner.service.ts"
+ }
+]

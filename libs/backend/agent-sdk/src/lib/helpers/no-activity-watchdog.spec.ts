@@ -18,8 +18,10 @@ import {
   API_RETRY_MARGIN_MS,
   API_RETRY_MAX_ACCOUNTED_MS,
   BACKGROUND_TASK_QUIET_TIMEOUT_MS,
+  NO_ACTIVITY_TIMEOUT_MS,
   NoActivityWatchdog,
   ProviderTurnEndError,
+  noActivityWindowMs,
 } from './no-activity-watchdog';
 import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 import type {
@@ -575,6 +577,57 @@ describe('NoActivityWatchdog', () => {
     expect(timeout).toHaveBeenCalledWith('provider-no-response');
   });
 
+  it('reports recovery once after an overdue report when activity resumes', async () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue, recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    expect(overdue).toHaveBeenCalledTimes(1);
+    expect(recovered).not.toHaveBeenCalled();
+
+    await fireHook(wd, { hook_event_name: 'PostCompact' });
+    expect(recovered).toHaveBeenCalledTimes(1);
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    expect(recovered).toHaveBeenCalledTimes(1);
+    expect(timeout).not.toHaveBeenCalled();
+  });
+
+  it('reports recovery when the session stops after an overdue report', async () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    wd.stop();
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports recovery when a hold starts: waiting for a person is not a hang', async () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    wd.hold();
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reports recovery without an overdue report', () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    wd.kick();
+    wd.stop();
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
   it('keeps a root UserPromptSubmit hook open for two watchdog windows', () => {
     const timeout = jest.fn();
     const overdue = jest.fn();
@@ -881,5 +934,102 @@ describe('NoActivityWatchdog', () => {
       jest.advanceTimersByTime(1);
       expect(onTimeout).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('guard window versus the SDK first-byte wait (incident 2026-11-23, child f7ea7de9)', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  const SDK_WAIT = 181_000;
+
+  function toolTurn(wd: NoActivityWatchdog): void {
+    wd.beginTurn();
+    wd.start();
+    wd.observe({
+      ...ENVELOPE,
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        id: 'm-1', type: 'message', role: 'assistant', model: 'm',
+        content: [{ type: 'tool_use', id: 'jest', name: 'Bash', input: {} }],
+        stop_reason: null, stop_sequence: null, usage: {},
+      },
+    } as unknown as SDKMessage);
+    // The tool ends; the SDK then sends the next request and waits for its
+    // first byte. Nothing is open, so only the guard window is left.
+    wd.observe({
+      ...ENVELOPE,
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'jest', content: 'passed' }],
+      },
+    } as unknown as SDKMessage);
+  }
+
+  it('sizes the window above the SDK wait plus the retry margin', () => {
+    expect(noActivityWindowMs(SDK_WAIT)).toBe(SDK_WAIT + API_RETRY_MARGIN_MS);
+    expect(noActivityWindowMs(150_000)).toBe(NO_ACTIVITY_TIMEOUT_MS);
+    expect(noActivityWindowMs(Number.NaN)).toBe(NO_ACTIVITY_TIMEOUT_MS);
+    // No clamp: a long user value still leaves the guard behind the SDK.
+    expect(noActivityWindowMs(1_200_000)).toBe(1_200_000 + API_RETRY_MARGIN_MS);
+  });
+
+  it('reproduces the stop: a 180 s guard fires before the SDK retry frame', () => {
+    const onTimeout = jest.fn();
+    const wd = new NoActivityWatchdog(NO_ACTIVITY_TIMEOUT_MS, onTimeout);
+    toolTurn(wd);
+    jest.advanceTimersByTime(NO_ACTIVITY_TIMEOUT_MS);
+    // The SDK reports its own first-byte timeout only at 181 s: too late.
+    expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('lets the SDK announce and run its own retry with the sized window', () => {
+    const onTimeout = jest.fn();
+    const wd = new NoActivityWatchdog(noActivityWindowMs(SDK_WAIT), onTimeout);
+    toolTurn(wd);
+
+    jest.advanceTimersByTime(SDK_WAIT);
+    expect(onTimeout).not.toHaveBeenCalled();
+    wd.observe({
+      ...ENVELOPE,
+      type: 'system',
+      subtype: 'api_retry',
+      attempt: 1,
+      max_retries: 1,
+      retry_delay_ms: 0,
+      error_status: null,
+      error: 'unknown',
+      no_response: { waited_ms: SDK_WAIT, retry_wait_ms: 599_000 },
+    } as SDKAPIRetryMessage);
+
+    jest.advanceTimersByTime(599_000 + API_RETRY_MARGIN_MS - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    // A real hang after the SDK retry still gets the clear Ptah reason.
+    jest.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('still ends a real hang when the SDK sends no retry frame', () => {
+    const onTimeout = jest.fn();
+    const window = noActivityWindowMs(SDK_WAIT);
+    const wd = new NoActivityWatchdog(window, onTimeout);
+    toolTurn(wd);
+    jest.advanceTimersByTime(window - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the real window in the Ptah-labeled reason', () => {
+    const window = noActivityWindowMs(SDK_WAIT);
+    const sized = new ProviderTurnEndError('provider-no-response', window).message;
+    const plain = new ProviderTurnEndError('provider-no-response').message;
+    expect(sized).not.toBe(plain);
+    expect(sized).toMatch(/Ptah/);
+    expect(sized).not.toMatch(/the user/i);
   });
 });

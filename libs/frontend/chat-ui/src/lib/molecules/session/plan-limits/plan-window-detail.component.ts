@@ -6,6 +6,7 @@ import {
 } from '@angular/core';
 import { NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { PtahMeterComponent, type PtahMeterTone } from '@ptah-extension/ui';
+import { windowMeter } from './plan-limit-tiles';
 import { chipClass, sourceChipClass } from './stats-tile.styles';
 import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
 
@@ -20,8 +21,7 @@ import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
  * face already shows the label, usage bar, chip, used value and source
  * chips, so its panel adds only the reset facts and the note; a lane
  * subgroup keeps the default and shows everything. Unknown is never 0:
- * without a percent no meter is drawn and the full row reads "Used: unknown". The meter fill is neutral; the stripes on a hot
- * window are decoration.
+ * without a reported value no meter is drawn and the full row reads "Used: unknown".
  */
 @Component({
   selector: 'ptah-plan-window-detail',
@@ -43,17 +43,17 @@ import type { PlanWindowDetailModel } from './stats-limit-view-model.types';
           }
         </div>
       }
-      @if (showSummary() && percent() !== null) {
+      @if (showSummary() && meter(); as range) {
         <div class="flex items-center gap-2 mt-1">
           <ptah-meter
             class="block flex-1"
-            [value]="percent() ?? 0"
-            [max]="100"
+            [value]="range.value"
+            [max]="range.max"
             [label]="w.label + ' used'"
             [valueText]="w.usedText"
             [tone]="meterTone()"
             [stripes]="hot()"
-            [marker]="nearLimitPercent"
+            [marker]="w.amount ? undefined : nearLimitPercent"
             size="sm"
             [showValue]="false"
             [hideLabel]="true"
@@ -99,17 +99,11 @@ export class PlanWindowDetailComponent {
   protected readonly chipClass = chipClass;
   protected readonly sourceChipClass = sourceChipClass;
 
-  /** Meter value clamped to 0-100; `null` when the used value is unknown. */
-  protected readonly percent = computed(() => {
-    const value = this.window().percent;
-    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-    return Math.min(100, Math.max(0, Math.round(value)));
-  });
+  protected readonly meter = computed(() => windowMeter(this.window()));
 
-  /** Tone of the meter from the chip: error and warning carry state, the rest is neutral. */
   protected readonly meterTone = computed<PtahMeterTone>(() => {
-    const tone = this.window().chip?.tone;
-    return tone === 'error' ? 'err' : tone === 'warning' ? 'warn' : 'neutral';
+    const state = this.window().state;
+    return state === 'limit-reached' ? 'err' : state === 'near-limit' ? 'warn' : 'neutral';
   });
 
   /** Stripes decorate a window that is near or at its limit. */

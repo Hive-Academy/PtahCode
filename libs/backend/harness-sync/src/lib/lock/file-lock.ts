@@ -2,11 +2,14 @@
  * The lock mechanism, with no opinion about what is being locked.
  *
  * `workspace-lock.ts` was the only caller until TASK_2026_285 put a SECOND
- * writer on an MCP config file that lives in `$HOME` — `AntigravityCliAdapter`
- * writes Ptah's own server into `~/.gemini/config/mcp_config.json` before every
- * spawn, while the reconciler writes the user's servers into the same file. The
- * workspace lock cannot serialize those two: the file is not in the workspace,
- * and two workspaces have two different locks anyway.
+ * writer on an MCP config file that lives in `$HOME` — the former writer,
+ * `AntigravityCliAdapter` (per-spawn write removed in TASK_2026_2322), wrote
+ * Ptah's own server into `~/.gemini/config/mcp_config.json` while the
+ * reconciler wrote the user's servers into the same file. Any concurrent
+ * mutation of such a file (the retired-entry sweep in `CodeExecutionMCP`,
+ * another Ptah process, the user) still needs this: the workspace lock cannot
+ * serialize them, because the file is not in the workspace and two workspaces
+ * have two different locks anyway.
  *
  * So the policy (WHICH file, and where its lock file lives) moved out to the
  * callers and the mechanism stayed here, unchanged:

@@ -27,6 +27,7 @@ import {
   InMemoryTaskIndexStore,
 } from '../task-index.store';
 import { TASK_INDEX_CLOCK, TaskIndexService } from '../task-index.service';
+import { TaskDigestService } from '../task-digest/task-digest.service';
 import { TASK_INDEX_NOTIFIER_TOKEN } from '../task-index.port';
 import { TASK_FOLDER_VISIBILITY_TOKEN } from '../task-folder-visibility.port';
 import {
@@ -94,6 +95,7 @@ export function registerTaskSpecsServices(
 
   // Index service — lazy start + watcher + debounce + onDidChangeIndex.
   container.registerSingleton(TaskIndexService);
+  container.registerSingleton(TASK_SPECS_TOKENS.TASK_DIGEST, TaskDigestService);
   container.register(TASK_SPECS_TOKENS.TASK_INDEX_SERVICE, {
     useToken: TaskIndexService,
   });

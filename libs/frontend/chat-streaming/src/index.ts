@@ -55,6 +55,7 @@ export {
 export { BackgroundTaskStore } from './lib/background-task.store';
 export {
   AgentMonitorStore,
+  LIVE_SUBAGENT_STATUSES,
   subagentUsageView,
   type AgentCacheState,
   type AgentUsageView,

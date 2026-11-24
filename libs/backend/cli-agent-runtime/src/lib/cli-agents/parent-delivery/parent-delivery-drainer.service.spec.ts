@@ -712,17 +712,56 @@ describe('ParentDeliveryDrainerService child session reports', () => {
     await expect(h.store.getBody('lane-delivery:partial')).resolves.toBe('body partial');
   });
 
-  it('cancels when a committed edge hands the recipient off to the current owner', async () => {
+  it('does not send when a handoff reparents the child between the owner check and the send', async () => {
+    const registry = registryWith({ parentSessionId: parent });
+    const { h, drainer } = await sessionDrainer(registry);
+    await drainer.enqueue(sessionReport('fence', parent));
+    const original = h.store.markDispatching.bind(h.store);
+    // The reparent lands while the durable dispatch mark is written.
+    jest.spyOn(h.store, 'markDispatching').mockImplementationOnce(async (id, attemptId) => {
+      registry.reparent(child, other, undefined);
+      return original(id, attemptId);
+    });
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalledWith(parent, expect.anything(), expect.anything());
+    expect(h.store.find('fence')).toMatchObject({
+      state: 'blocked-retryable', lastError: 'owner-changed-during-claim',
+    });
+    expect(h.store.find('fence')?.dispatchStarted).toBeUndefined();
+  });
+
+  it('holds a report whose reroute does not apply instead of looping at zero delay', async () => {
+    const timer = jest.spyOn(global, 'setTimeout');
+    try {
+      const { h, drainer } = await sessionDrainer(
+        registryWith({ parentSessionId: other }),
+        acks([{ predecessorTabId: parent, predecessorSdkId: null, successorTabId: other,
+          successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }]));
+      jest.spyOn(h.store, 'rerouteReport').mockResolvedValue(undefined);
+      await drainer.enqueue(sessionReport('frozen-target', parent));
+      await drainer.drain(parent);
+      expect(h.send).not.toHaveBeenCalled();
+      expect(h.store.find('frozen-target')?.parentSessionId).toBe(parent);
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 5_000);
+      expect(timer).not.toHaveBeenCalledWith(expect.any(Function), 0);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
+  it('reroutes a queued report to the owner when a committed edge hands the recipient off to it', async () => {
     const { h, drainer } = await sessionDrainer(
       registryWith({ parentSessionId: other }),
       acks([{ predecessorTabId: parent, predecessorSdkId: null, successorTabId: other,
         successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }]));
     await drainer.enqueue(sessionReport('handed-off', parent));
     await drainer.drain(parent);
-    expect(h.send).not.toHaveBeenCalled();
-    expect(h.store.find('handed-off')).toMatchObject({
-      state: 'cancelled', lastError: 'owner-changed',
-    });
+    // Not sent to the predecessor and not lost: the row now belongs to the successor owner.
+    expect(h.send).not.toHaveBeenCalledWith(parent, expect.anything(), expect.anything());
+    expect(h.store.find('handed-off')?.parentSessionId).toBe(other);
+    await drainer.drain(other);
+    expect(h.send).toHaveBeenCalledWith(other, 'body handed-off', expect.anything());
+    expect(h.store.find('handed-off')?.state).toBe('delivered');
   });
 
   it('cancels an unverified-lineage report after 24 hours', async () => {

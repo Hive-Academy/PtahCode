@@ -9,8 +9,11 @@ import {
   agentAccessibleLabel,
   formatCost,
   formatTokenCount,
+  formatUsageCost,
+  formatUsageTokens,
   NOT_PRICED,
   type AgentStatusWord,
+  type UsageAmount,
 } from '@ptah-extension/chat-ui';
 import { formatDuration } from '@ptah-extension/ui';
 import type { SessionAgent } from '../../../services/session-agents/session-agent-roster';
@@ -19,6 +22,7 @@ import type { InspectorRequest } from '../../../services/session-inspector';
 
 export const NOT_REPORTED_VALUE = '—';
 export const NOT_REPORTED_TITLE = 'not reported';
+export const UNKNOWN_AGENT_DURATION = '--:--';
 
 const STATUS_INK: Readonly<Record<AgentStatusWord, string>> = {
   starting: 'text-info',
@@ -74,16 +78,13 @@ export interface AgentRowInput {
   readonly secondaryTitle: string | null;
   readonly usage: AgentUsageFigures;
   readonly durationMs: number | null;
+  readonly usageAmounts?: {
+    readonly tokens: UsageAmount;
+    readonly cost: UsageAmount;
+  };
   readonly requests: readonly InspectorRequest[];
   readonly tray: TrayAgentContext | null;
   readonly hasActions: boolean;
-}
-
-export interface AgentListTotal {
-  readonly tokens: string;
-  readonly cost: string;
-  readonly title: string;
-  readonly ariaLabel: string;
 }
 
 function finite(value: number | null | undefined): value is number {
@@ -101,60 +102,6 @@ function costText(usage: AgentUsageFigures): string | null {
   return `${usage.costPartial ? '≥ ' : ''}${usage.costEstimated ? '~' : ''}${formatCost(usage.cost)}`;
 }
 
-/** Sum the complete list, including rows hidden by the section's display limit. */
-export function agentListTotal(rows: readonly AgentListRow[]): AgentListTotal {
-  let tokens = 0;
-  let cost = 0;
-  let tokenCount = 0;
-  let costCount = 0;
-  let tokensPartial = false;
-  let costPartial = false;
-  let costEstimated = false;
-  for (const row of rows) {
-    const usage = row.usage;
-    if (finite(usage.tokens)) {
-      tokens += usage.tokens;
-      tokenCount++;
-      tokensPartial ||= usage.tokensPartial;
-    } else {
-      tokensPartial = true;
-    }
-    if (finite(usage.cost)) {
-      cost += usage.cost;
-      costCount++;
-      costPartial ||= usage.costPartial;
-      costEstimated ||= usage.costEstimated;
-    } else {
-      costPartial = true;
-    }
-  }
-  const tokensValue = tokenCount
-    ? (tokensText(tokens, tokensPartial) ?? NOT_REPORTED_VALUE)
-    : NOT_REPORTED_VALUE;
-  const allNotPriced =
-    rows.length > 0 && rows.every((row) => row.usage.costNotPriced === true);
-  const costValue = costCount
-    ? (costText({
-        tokens: null,
-        tokensPartial: false,
-        cost,
-        costPartial,
-        costEstimated,
-        input: null,
-        output: null,
-      }) ?? NOT_REPORTED_VALUE)
-    : allNotPriced
-      ? NOT_PRICED
-      : NOT_REPORTED_VALUE;
-  const title = `Total of ${rows.length} agents · ${rows.length - tokenCount} without token data · ${rows.length - costCount} without cost data`;
-  return {
-    tokens: tokensValue,
-    cost: costValue,
-    title,
-    ariaLabel: `Total for all agents: ${tokensValue} tokens, ${costValue} cost`,
-  };
-}
-
 /** `In 1.1M · Out 48.0k`; one unknown side shows `—`, both unknown is `null`. */
 export function inOutText(
   input: number | null,
@@ -170,8 +117,12 @@ export function inOutText(
 export function agentListRow(input: AgentRowInput): AgentListRow {
   const { agent, usage } = input;
   const name = input.name ?? agent.name;
-  const tokens = tokensText(usage.tokens, usage.tokensPartial);
-  const cost = costText(usage);
+  const tokens = input.usageAmounts && usage.tokens !== null
+    ? formatUsageTokens(input.usageAmounts.tokens)
+    : tokensText(usage.tokens, usage.tokensPartial);
+  const cost = input.usageAmounts && usage.cost !== null
+    ? formatUsageCost(input.usageAmounts.cost)
+    : costText(usage);
   const inOut = inOutText(usage.input, usage.output);
   const usageFacts = `${
     tokens === null
@@ -212,7 +163,7 @@ export function agentListRow(input: AgentRowInput): AgentListRow {
     usage,
     time:
       input.durationMs === null
-        ? NOT_REPORTED_VALUE
+        ? UNKNOWN_AGENT_DURATION
         : formatDuration(input.durationMs),
     usageLabel,
     ariaLabel: `${label}. ${model}${usageLabel}${startedAtTitle ? `. ${startedAtTitle}` : ''}`,
@@ -235,28 +186,25 @@ export function agentKindLine(agent: SessionAgent): string {
   return AGENT_KIND_LABEL[agent.kind];
 }
 
-function isLive(row: AgentListRow): boolean {
-  const status = row.agent.status;
-  return (
-    row.requests.length > 0 ||
-    status === 'starting' ||
-    status === 'running' ||
-    status === 'waiting' ||
-    status === 'queued'
-  );
-}
-
-/**
- * Running (and waiting / queued / asking) agents first, then the
- * Orchestrator, then the rest. Lane rows keep the store's recency order.
- */
+/** Orchestrator, needs you, live, then remaining lanes in store order. */
 export function orderAgentList(
   orchestrator: AgentListRow | null,
   lanes: readonly AgentListRow[],
 ): AgentListRow[] {
-  const live = lanes.filter(isLive);
-  const rest = lanes.filter((row) => !isLive(row));
-  return [...live, ...(orchestrator ? [orchestrator] : []), ...rest];
+  const needsYou: AgentListRow[] = [];
+  const live: AgentListRow[] = [];
+  const rest: AgentListRow[] = [];
+  for (const row of lanes) {
+    const status = row.agent.status;
+    if (row.requests.length || row.agent.openRequestIds.length || status === 'waiting') {
+      needsYou.push(row);
+    } else if (status === 'running' || status === 'starting' || status === 'queued') {
+      live.push(row);
+    } else {
+      rest.push(row);
+    }
+  }
+  return [...(orchestrator ? [orchestrator] : []), ...needsYou, ...live, ...rest];
 }
 
 /**

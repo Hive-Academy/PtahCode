@@ -1,4 +1,5 @@
 import type { Logger } from '@ptah-extension/vscode-core';
+import { rekeyScopedMap } from './subagent-scope-key';
 
 /** Keep diagnostic context, excluding quoted data and path-like tokens. */
 export function notesWarningError(error: unknown): string {
@@ -31,5 +32,6 @@ export class SubagentNotesWarnings {
   }
   rekey(from: string, to: string): void {
     for (const entry of this.failures.values()) if (entry.sessionId === from) entry.sessionId = to;
+    rekeyScopedMap(this.failures, from, to);
   }
 }

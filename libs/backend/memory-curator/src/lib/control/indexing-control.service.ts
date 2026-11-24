@@ -103,6 +103,12 @@ export interface IndexingRunDeps {
     options?: {
       signal?: AbortSignal;
       onProgress?: (progress: IndexingRunProgress) => void;
+      /**
+       * Parse every file, also one whose stored fingerprint shows no change
+       * (TASK_2026_2312_c3ef D5). Only an explicit user-forced start sets it;
+       * boot, watcher, lazy, resume and CLI runs never do.
+       */
+      force?: boolean;
     },
   ) => Promise<IndexingRunStats | void> & {
     /** Set synchronously when this call joins an active symbols census. */
@@ -589,6 +595,7 @@ export class IndexingControlService {
           participant.record,
           fp,
           signal,
+          force,
         );
         if (symbols.kind === 'aborted') {
           outcome = symbols;
@@ -677,8 +684,10 @@ export class IndexingControlService {
    * Run a background (lifecycle / watcher) full index for `workspaceRoot`
    * inside the shared census registry. `run` receives the record's progress
    * handler and its resolution or rejection is returned unchanged. This never
-   * writes `last_indexed_at` or `last_error`; the record's single settle
-   * writes `lastRun` and pushes complete/failed.
+   * writes `last_error`; the record's single settle writes `lastRun`, pushes
+   * complete/failed and, for a succeeded background run, records
+   * `last_indexed_at` and the HEAD sha so the derived state is not
+   * `never-indexed`.
    */
   async trackBackgroundRun<T>(
     workspaceRoot: string,
@@ -909,10 +918,12 @@ export class IndexingControlService {
       (o) => o.origin === 'background' && o.outcome.kind !== 'aborted',
     );
     let decided: ParticipantOutcome | null = null;
+    let decidedBackground = false;
     if (manual && manual.outcome.kind !== 'aborted') {
       decided = manual.outcome;
     } else if (background) {
       decided = background.outcome;
+      decidedBackground = true;
     } else if (
       manual &&
       manual.outcome.kind === 'aborted' &&
@@ -974,6 +985,29 @@ export class IndexingControlService {
     }
 
     if (decided.kind === 'succeeded' && persisted) {
+      // A manual run writes `last_indexed_at` itself. A background run (the
+      // lifecycle / watcher full index) did not, so `indexing:getStatus` kept
+      // reporting `never-indexed` for a fully indexed workspace. Record the
+      // completion time, the HEAD it indexed (never overwrite a stored sha
+      // with null: a non-git root or an unreadable HEAD would disable the
+      // stale check) and clear an older failure: this run succeeded after it.
+      // `symbols_cursor` stays untouched, it belongs to a paused run.
+      if (decidedBackground) {
+        const saved = this.upsertRow(record.fp, {
+          last_indexed_at: finishedAt,
+          last_error: null,
+          ...(record.gitHeadSha === null
+            ? {}
+            : { git_head_sha: record.gitHeadSha }),
+        });
+        if (!saved) {
+          // upsertRow warned with the cause; the push below still goes out.
+          this.logger.warn(
+            '[indexing-control] background run succeeded but its completion time could not be saved',
+            { workspaceRoot: record.workspaceRoot },
+          );
+        }
+      }
       const completeEvent: IndexingCompleteEvent = {
         workspaceRoot: record.workspaceRoot,
         workspaceFingerprint: record.fp,
@@ -1129,7 +1163,11 @@ export class IndexingControlService {
     if (chosen === null) {
       // A manual start still in its setup reads: report it as running.
       return pending
-        ? { origin: 'manual', startedAt: pending.startedAt, force: pending.force }
+        ? {
+            origin: 'manual',
+            startedAt: pending.startedAt,
+            force: pending.force,
+          }
         : null;
     }
     // A pending manual start joins the open record once its setup ends.
@@ -1333,10 +1371,14 @@ export class IndexingControlService {
   /**
    * Internal symbol-indexing loop with progress events and cooperative abort.
    *
-   * Passes the abort signal and the census record's progress handler to
-   * deps.runSymbols. A settlement that is not an abort closes the record. On
-   * abort, persists the cursor (except for a cancel, which clears it) and
-   * reports the abort cause.
+   * Passes the abort signal, the census record's progress handler and this
+   * run's `force` flag to deps.runSymbols (TASK_2026_2312_c3ef D5). The
+   * caller's force is forwarded, not the joined record's: a forced start
+   * that joins an open boot census still reports `force`, so the forced
+   * follow-up the `indexing:start` handler starts after the join keeps it.
+   * A settlement that is not an abort closes the record. On abort, persists
+   * the cursor (except for a cancel, which clears it) and reports the abort
+   * cause.
    */
   private async runSymbolsIndexWithProgress(
     workspaceRoot: string,
@@ -1344,6 +1386,7 @@ export class IndexingControlService {
     record: CensusRecord,
     fp: string,
     signal: AbortSignal,
+    force: boolean,
   ): Promise<
     | { readonly kind: 'succeeded'; readonly stats: IndexingRunStats | null }
     | { readonly kind: 'aborted'; readonly cause: AbortCause }
@@ -1353,6 +1396,7 @@ export class IndexingControlService {
       result = await deps.runSymbols(workspaceRoot, {
         signal,
         onProgress: record.onProgress,
+        force,
       });
     } catch (error: unknown) {
       if (isAbortError(error) || signal.aborted) {
@@ -1403,7 +1447,8 @@ export class IndexingControlService {
       const stmt = this.sqlite.db.prepare(
         'SELECT * FROM indexing_state WHERE workspace_fingerprint = ?',
       );
-      const row = (stmt.get(fingerprint) as IndexingStateRow | undefined) ?? null;
+      const row =
+        (stmt.get(fingerprint) as IndexingStateRow | undefined) ?? null;
       return { ok: true, row };
     } catch (error: unknown) {
       // degradation-audit: reported - the error is returned to the caller;

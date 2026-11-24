@@ -52,6 +52,31 @@ describe('MemoryStoreSymbolSink', () => {
     ]);
   });
 
+  it('forwards the candidate and root validation to the store', async () => {
+    const replace = jest.fn(async () => undefined);
+    const unchanged = jest.fn(() => true);
+    const validate = jest.fn();
+    const store = {
+      replaceFileSymbols: replace,
+      isFileUnchanged: unchanged,
+      markRootValidated: validate,
+    } as unknown as CodeSymbolStore;
+    const sink = new MemoryStoreSymbolSink(store);
+    const { workspaceRoot, filePath } = base;
+
+    await sink.replaceFileSymbols(
+      workspaceRoot, filePath, [{ ...base, subject: 'code:function:D:/ws/src/a.ts:run' }],
+      'candidate',
+    );
+    expect(replace).toHaveBeenCalledWith(
+      workspaceRoot, filePath, [expect.objectContaining({ symbolName: 'run' })], 'candidate',
+    );
+    expect(sink.isFileUnchanged(workspaceRoot, filePath, 'candidate')).toBe(true);
+    expect(unchanged).toHaveBeenCalledWith(workspaceRoot, filePath, 'candidate');
+    sink.markRootValidated(workspaceRoot);
+    expect(validate).toHaveBeenCalledWith(workspaceRoot);
+  });
+
   it('still parses kind and name from the subject when the producer omits them', async () => {
     const { sink, rows } = sinkWithCapture();
 

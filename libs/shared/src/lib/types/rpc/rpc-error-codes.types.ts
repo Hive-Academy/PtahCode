@@ -112,6 +112,10 @@ export const RPC_USER_ERROR_CODES = [
    * are refused.
    */
   'ROLE_RETIRED',
+  /** `review:updateSettings` lane settings are invalid; nothing was saved (`ReviewLaneErrorCode`). */
+  'REVIEW_LANES_INVALID',
+  /** The review operator settings were saved but the lane write failed (`ReviewLaneErrorCode`). */
+  'REVIEW_LANES_NOT_SAVED',
 ] as const;
 
 export type RpcUserErrorCode = (typeof RPC_USER_ERROR_CODES)[number];

@@ -1426,6 +1426,44 @@ describe('AgentReportRouter.deliver — session child', () => {
       e.drainer.dispose();
     });
 
+    it('returns the saved receipt when the same owner gains its SDK alias after the report was queued', async () => {
+      const d = await durableSession();
+      d.registry.reparent(CHILD, PARENT, undefined);
+      const first = await d.router.deliver({ childSessionId: CHILD, message: 'alias' });
+      expect(first).toMatchObject({ queued: true });
+      d.registry.reparent(CHILD, PARENT, PARENT_SDK);
+      const repeat = await d.router.deliver({ childSessionId: CHILD, message: 'alias' });
+      expect(repeat).toMatchObject({ queued: true, receiptId: first.receiptId });
+      expect(d.store.list()).toHaveLength(1);
+      d.drainer.dispose();
+    });
+
+    it('still finds the receipt of a report saved under the legacy alias-scoped key', async () => {
+      const d = await durableSession();
+      const legacyKey = (
+        AgentReportRouter as unknown as {
+          legacySessionReportKey(id: string, binding: { tab: string; sdk?: string }, message: string): string;
+        }
+      ).legacySessionReportKey(CHILD, { tab: PARENT, sdk: PARENT_SDK }, 'legacy');
+      expect(legacyKey).toMatch(/^session-report:v2:/);
+      const seeded = await d.store.enqueue({
+        id: `lane-delivery:${legacyKey}`,
+        dedupeKey: legacyKey,
+        agentId: CHILD,
+        parentSessionId: PARENT_SDK,
+        kind: 'report',
+        body: '<agent-report>old</agent-report>',
+        createdAt: Date.now(),
+        originName: 'session · old',
+        originKind: 'session',
+      });
+      if ('refused' in seeded) throw new Error('seed failed');
+      const repeat = await d.router.deliver({ childSessionId: CHILD, message: 'legacy' });
+      expect(repeat).toMatchObject({ queued: true, receiptId: seeded.id });
+      expect(d.store.list()).toHaveLength(1);
+      d.drainer.dispose();
+    });
+
     it('returns the same receipt for a repeat outside the duplicate window', async () => {
       const d = await durableSession();
       const first = await d.router.deliver({
@@ -1652,11 +1690,15 @@ describe('AgentReportRouter.deliver — session child', () => {
             ): string;
           }
         ).sessionReportKey;
-        expect(key(CHILD, { tab: PARENT, sdk: 'a\0b' }, 'c')).not.toBe(
-          key(CHILD, { tab: PARENT, sdk: 'a' }, 'b\0c'),
+        expect(key(CHILD, { tab: 'a\0b' }, 'c')).not.toBe(
+          key(CHILD, { tab: 'a' }, 'b\0c'),
         );
         expect(key(CHILD, { tab: PARENT, sdk: PARENT_SDK }, 'm')).toMatch(
-          /^session-report:v2:/,
+          /^session-report:v3:/,
+        );
+        // The SDK alias is not part of the owner identity.
+        expect(key(CHILD, { tab: PARENT, sdk: PARENT_SDK }, 'm')).toBe(
+          key(CHILD, { tab: PARENT }, 'm'),
         );
         d.drainer.dispose();
       });

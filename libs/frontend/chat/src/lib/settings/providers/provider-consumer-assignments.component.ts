@@ -37,7 +37,10 @@ import {
   type ProvidersEditContext,
   type ProvidersSettingsPatch,
 } from '@ptah-extension/core';
-import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import {
+  SettingsSaveFeedbackService,
+  settingNotSavedMessage,
+} from '../feedback/settings-save-feedback.service';
 import {
   SettingScopeRowComponent,
   type SettingScopeDisplay,
@@ -51,6 +54,7 @@ import {
   type BackgroundConsumerRow,
 } from './provider-consumer-rows';
 import { DecisionModelRowComponent } from './decision-model-row.component';
+import { DRAWER_WRITE_NO_CONTEXT } from './connection-drawer/drawer-write';
 const FOCUS =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
 const ACTION = `btn btn-ghost btn-sm px-2 text-xs font-medium text-base-content underline underline-offset-2 ${FOCUS}`;
@@ -205,6 +209,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         ''
                       "
                       fallback="Bot"
+                      size="sm"
                     />
                     <span
                       class="min-w-0 flex-1 truncate text-left"
@@ -249,7 +254,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         [requiresToolUse]="row.requiresToolUse"
                         [extraProviders]="extraProviders()"
                         [excludedProviders]="row.unsupportedProviders"
-                        [disabled]="busy() || disabled()"
+                        [disabled]="disabled() || (busy() && !assignmentSaving())"
                         (selectionChange)="onDraftChange(row.id, $event)"
                         [attr.data-testid]="'picker-' + row.id"
                       />
@@ -558,6 +563,7 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly currentDraft = signal<{ provider: string; model: string }>(
     { provider: '', model: '' },
   );
+  protected readonly assignmentSaving = signal(false);
   protected readonly isEditingTimeout = signal<boolean>(false);
   protected readonly timeoutDraftSec = signal<number>(0);
   private readonly timeoutInputRef =
@@ -588,7 +594,9 @@ export class ProviderConsumerAssignmentsComponent {
       }
     });
   }
-  protected readonly busy = this.feedback.saving;
+  protected readonly busy = computed(
+    () => this.assignmentSaving() || this.feedback.saving(),
+  );
   protected readonly extraProviders = computed<
     readonly ProviderIdentityOption[]
   >(() =>
@@ -645,15 +653,18 @@ export class ProviderConsumerAssignmentsComponent {
     ),
   );
   protected readonly draftProviderReadiness = computed(() => {
-    const id = this.activeEditId();
-    if (!id) return null;
+    const row = this.rows().find((r) => r.id === this.activeEditId());
+    return row ? this.readinessFor(row) : null;
+  });
+  private readinessFor(row: BackgroundConsumerRow) {
+    const route = this.state.route().data;
     return providerReadiness(
       this.currentDraft().provider,
-      this.state.route().data?.providers ?? [],
-      !!this.state.activeProviderId(),
-      this.rows().find((r) => r.id === id)?.unsupportedProviders ?? [],
+      route?.providers ?? [],
+      route?.route !== 'unresolved' && !!route?.driverProviderId,
+      row.unsupportedProviders,
     );
-  });
+  }
   protected toggleEdit(id: ProviderConsumerId): void {
     if (this.activeEditId() === id) {
       this.cancelEdit();
@@ -669,7 +680,6 @@ export class ProviderConsumerAssignmentsComponent {
   protected cancelEdit(): void {
     const id = this.activeEditId();
     this.activeEditId.set(null);
-    this.currentDraft.set({ provider: '', model: '' });
     if (!id) return;
     afterNextRender(
       () =>
@@ -683,39 +693,76 @@ export class ProviderConsumerAssignmentsComponent {
     id: ProviderConsumerId,
     selection: ProviderModelSelection,
   ): void {
+    if (this.activeEditId() !== id) return;
     this.currentDraft.set({
       provider: selection.provider,
       model: selection.model,
     });
-    if (this.draftProviderReadiness()?.blocking) return;
     void this.saveDraft(id);
   }
   protected onSetupProvider(providerId: string): void {
     this.setupProviderRequested.emit(providerId);
   }
   protected async saveDraft(id: ProviderConsumerId): Promise<void> {
-    const row = this.rows().find((r) => r.id === id);
-    const draft = this.currentDraft(),
-      context = this.context;
-    if (!row || !context || this.busy() || this.disabled()) return;
-    if (draft.provider === row.provider && draft.model === row.model) return;
-    // This save's own result decides the revert, never `commit()` (an earlier save may have left it `saved`).
-    const result = await this.feedback.save({
-      label: `${row.name} assignment`,
-      scope: SAVE_SCOPE,
-      write: () =>
-        this.writeAssignment(id, draft.provider, draft.model, context),
-      undo: () => this.writeAssignment(id, row.provider, row.model, context),
-    });
-    if (this.activeEditId() !== id || result === 'saved') return;
-    if (result === 'failed' && this.state.commit().status === 'blocked')
-      this.context = this.state.reviewContext();
-    const current = this.rows().find((r) => r.id === id);
-    if (current)
-      this.currentDraft.set({
-        provider: current.provider,
-        model: current.model,
-      });
+    if (this.busy() || this.disabled()) return;
+    this.assignmentSaving.set(true);
+    let savedAssignment = false;
+    try {
+      while (!this.disabled()) {
+        // Each write (and its Undo) starts from the latest refreshed row.
+        const row = this.rows().find((r) => r.id === id);
+        if (!row) return;
+        if (this.readinessFor(row)?.blocking) {
+          if (savedAssignment) this.revertDraft(id);
+          return;
+        }
+        const draft = this.currentDraft();
+        if (draft.provider === row.provider && draft.model === row.model)
+          return;
+        const label = `${row.name} assignment`;
+        const context = this.context ?? this.state.reviewContext();
+        if (!context) {
+          this.feedback.announce(
+            `${settingNotSavedMessage(label)} ${DRAWER_WRITE_NO_CONTEXT}`,
+            'alert',
+          );
+          break;
+        }
+        this.context = context;
+        const result = await this.feedback.save({
+          label,
+          scope: SAVE_SCOPE,
+          write: () =>
+            this.writeAssignment(id, draft.provider, draft.model, context),
+          undo: () => this.writeAssignment(id, row.provider, row.model, context),
+        });
+        if (result === 'saved') savedAssignment = true;
+        if (result === 'failed' && this.state.commit().status === 'blocked')
+          this.context = this.state.reviewContext();
+        if (this.currentDraft() === draft) {
+          if (result === 'saved') return;
+          break;
+        }
+      }
+      this.revertDraft(id);
+    } finally {
+      this.assignmentSaving.set(false);
+    }
+  }
+  private revertDraft(id: ProviderConsumerId): void {
+    if (this.activeEditId() !== id) return;
+    const rejected = this.currentDraft();
+    // Let the picker receive the rejected inputs before resetting them to their original values.
+    afterNextRender(
+      () => {
+        if (this.activeEditId() !== id || this.currentDraft() !== rejected)
+          return;
+        const row = this.rows().find((r) => r.id === id);
+        if (row)
+          this.currentDraft.set({ provider: row.provider, model: row.model });
+      },
+      { injector: this.injector },
+    );
   }
   private async writeAssignment(
     id: ProviderConsumerId,

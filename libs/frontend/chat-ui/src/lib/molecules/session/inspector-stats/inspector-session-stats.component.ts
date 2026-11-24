@@ -5,39 +5,30 @@ import {
   inject,
   input,
 } from '@angular/core';
-import { NgTemplateOutlet } from '@angular/common';
 import { ModelStateService } from '@ptah-extension/core';
-import { PtahMeterComponent, type PtahMeterTone } from '@ptah-extension/ui';
 import {
-  resolveModelDisplayName,
-  type SessionBudgetStage,
-} from '@ptah-extension/shared';
-import {
-  formatCost,
-  formatDuration,
-  formatOptionalTokens,
-  formatTokens,
-} from '../session-stats-format';
-import {
-  costBudgetSuffix,
-  costBudgetText,
-  tokensBudgetSuffix,
-} from '../session-budget-format';
+  PtahDisclosureComponent,
+  PtahMeterComponent,
+  PtahStatComponent,
+  PtahTimerComponent,
+  SurfaceSectionComponent,
+  formatAbsolute,
+  type PtahMeterSegment,
+  type PtahTimeInput,
+} from '@ptah-extension/ui';
+import { resolveModelDisplayName } from '@ptah-extension/shared';
+import { formatExpandedUsageCost, inspectorBudgetDisplay, SDK_BUDGET_SCOPE } from '../session-budget-format';
+import { SessionModelBreakdownComponent } from '../session-model-breakdown.component';
 import { StatsTileExpansionState } from '../plan-limits/stats-tile-expansion.state';
-import { InspectorCacheTileComponent } from './inspector-cache-tile.component';
+import { formatUsageTokens, usageDetailsText } from '../session-usage-format';
+import { sdkContribution, sessionTotal, usageState, type UsageContribution, type UsageMetric, type UsageTotal } from '../session-usage-totals';
 import {
-  STATS_EMPTY,
-  contextDetailsText,
-  costDetailsText,
-  nullCostLabel,
-  nullCostValue,
+  DURATION_NOT_RECORDED,
   durationMsOf,
-  formatModelCost,
-  formatModelTotal,
-  isKnownCost,
-  knownSubtotalOf,
-  tokenDetailsText,
+  sessionDurationText,
+  USAGE_ACCURACY,
   type SessionStatsInputs,
+  type SessionUsageTotals,
 } from '../session-stats-view';
 
 let nextSessionId = 0;
@@ -45,473 +36,382 @@ let nextSessionId = 0;
 @Component({
   selector: 'ptah-inspector-session-stats',
   standalone: true,
-  imports: [NgTemplateOutlet, InspectorCacheTileComponent, PtahMeterComponent],
+  imports: [
+    PtahDisclosureComponent,
+    PtahMeterComponent,
+    PtahStatComponent,
+    PtahTimerComponent,
+    SessionModelBreakdownComponent,
+    SurfaceSectionComponent,
+  ],
   template: `
-    @let s = stats();
-    <section
-      class="px-4 py-3"
+    <ptah-surface-section
+      class="session-section block"
+      padding="md"
+      role="region"
+      [attr.aria-labelledby]="headingId"
+      data-inspector-section="session"
       data-testid="inspector-session-stats"
-      aria-label="Session statistics"
     >
-      @if (s.snapshot?.provisional) {
-        <div class="mb-2 text-right">
-          <span class="text-[10.5px] text-base-content-muted"
-            >~ = estimate</span
-          >
-        </div>
-      }
-      <!-- One row of totals split by vertical rules (rev 3 "B+"). Every cell has
-           the same height and its bar sits on the cell's bottom edge. -->
-      <div class="grid grid-cols-3" data-testid="inspector-stats-grid">
-        <div class="flex min-h-[4rem] min-w-0 flex-col pr-2">
-          <ng-container
-            [ngTemplateOutlet]="label"
-            [ngTemplateOutletContext]="{
-              name: 'Context',
-              key: 'sd-context',
-              text: contextDetails(),
-              id: contextLabelId,
-            }"
-          />
-          <div
-            class="text-base font-semibold leading-tight tabular-nums"
-            [class.text-base-content-muted]="!s.context.known"
-            [attr.aria-label]="!s.context.known ? empty.context : null"
-            [attr.title]="!s.context.known ? notReported : null"
-          >
-            {{ s.context.label }}
-          </div>
-          @if (s.compactionCount > 0) {
-            <p class="mt-0.5 text-[10.5px] text-base-content-muted">
-              {{ s.compactionCount }}
-              {{ s.compactionCount === 1 ? 'compaction' : 'compactions' }}
-            </p>
-          } @else {
-            <p class="mt-0.5 min-h-4 text-[10.5px] text-base-content-muted">&nbsp;</p>
-          }
-          @if (s.context.known && s.context.percent !== null) {
-            <ptah-meter
-              class="mt-auto shrink-0"
-              [value]="clampPercent(s.context.percent)"
-              [max]="100"
-              label="Context"
-              size="xs"
-              tone="gold"
-              [animate]="false"
-              barRole="progressbar"
-              [ariaLabelledby]="contextLabelId"
-              [valueText]="
-                s.context.usedTokens !== null
-                  ? s.context.label +
-                    ' of the context window, ' +
-                    formatTokens(s.context.usedTokens) +
-                    ' tokens used'
-                  : s.context.label + ' of the context window'
-              "
-              [hideLabel]="true"
-              [showValue]="false"
-            />
-          }
-        </div>
-        <div class="flex min-h-[4rem] min-w-0 flex-col border-l border-surface-border px-2">
-          <ng-container
-            [ngTemplateOutlet]="label"
-            [ngTemplateOutletContext]="{
-              name: 'Tokens',
-              key: 'sd-tokens',
-              text: tokenDetails(),
-            }"
-          />
-          <div
-            class="text-base font-semibold leading-tight tabular-nums"
-            [class.text-base-content-muted]="
-              (s.snapshot?.tokenCount ?? null) === null
-            "
-            [attr.aria-label]="
-              (s.snapshot?.tokenCount ?? null) === null ? empty.tokens : null
-            "
-            [attr.title]="
-              (s.snapshot?.tokenCount ?? null) === null ? notReported : null
-            "
-          >
-            @if (s.snapshot?.provisional) {
-              <span aria-hidden="true">~</span
-              ><span class="sr-only">estimated </span>
-            }
-            {{ tokenLabel() }}
-          </div>
-          @if (tokensBudgetSuffix(s.budget); as suffix) {
-            <p class="text-[10.5px] text-base-content-muted">
-              of {{ suffix.slice(2) }} budget
-            </p>
-          } @else {
-            <p class="text-[10.5px] text-base-content-muted">all agents</p>
-          }
-          @if ((s.budget?.measure === 'tokens' || s.budget?.measure === 'weighted-tokens') && s.budget?.percent !== null) {
-            <ptah-meter
-              class="mt-auto shrink-0"
-              [value]="clampPercent(s.budget!.percent!)"
-              [max]="100"
-              [label]="s.budget?.measure === 'weighted-tokens' ? 'Weighted session tokens' : 'Raw session tokens'"
-              size="xs"
-              [tone]="budgetTone(s.budget!.stage)"
-              [animate]="false"
-              barRole="progressbar"
-              [valueText]="
-                floor(s.budget!.percent!) +
-                '% of the ' +
-                formatTokens(s.budget!.limit) +
-                ' token budget'
-              "
-              [hideLabel]="true"
-              [showValue]="false"
-            />
-          }
-        </div>
-        <div class="flex min-h-[4rem] min-w-0 flex-col border-l border-surface-border pl-2">
-          <ng-container
-            [ngTemplateOutlet]="label"
-            [ngTemplateOutletContext]="{
-              name: 'Cost',
-              key: 'sd-cost',
-              text: costDetails(),
-            }"
-          />
-          <div class="text-base font-semibold leading-tight tabular-nums">
-            @if (s.snapshot?.provisional) {
-              <span aria-hidden="true">~</span
-              ><span class="sr-only">estimated </span>
-            }
-            @if (costBudgetText(s.budget); as text) {
-              {{ text }}
-            } @else if ((s.snapshot?.totalCost ?? null) === null) {
-              <span
-                class="text-base-content-muted"
-                [attr.aria-label]="nullCostLabel(s.snapshot)"
-                [attr.title]="notReported"
-                >{{ nullCostValue(s.snapshot) }}</span
-              >
-            } @else {
-              {{ formatCost(s.snapshot!.totalCost) }}
-            }
-          </div>
-          @if (costBudgetSuffix(s.budget); as suffix) {
-            <p class="text-[10.5px] text-base-content-muted">
-              of {{ suffix.slice(2) }} budget
-            </p>
-          } @else if (!costBudgetText(s.budget) && knownSubtotal()) {
-            <p class="text-[10.5px] text-base-content-muted">
-              known subtotal {{ formatCost(knownSubtotal()!.value) }}
-            </p>
-          } @else {
-            <p class="text-[10.5px] text-base-content-muted">this session</p>
-          }
-          @if (s.budget?.measure === 'cost' && s.budget?.percent !== null) {
-            <ptah-meter
-              class="mt-auto shrink-0"
-              [value]="clampPercent(s.budget!.percent!)"
-              [max]="100"
-              label="Session cost budget"
-              size="xs"
-              [tone]="budgetTone(s.budget!.stage)"
-              [animate]="false"
-              barRole="progressbar"
-              [valueText]="
-                floor(s.budget!.percent!) +
-                '% of the ' +
-                costBudgetSuffix(s.budget)!.slice(2) +
-                ' cost budget'
-              "
-              [hideLabel]="true"
-              [showValue]="false"
-            />
-          }
-        </div>
+      <div section-header class="flex items-baseline justify-between gap-2">
+        <h3 [id]="headingId" tabindex="-1" class="text-xs font-semibold uppercase tracking-wide">Session</h3>
+        @if (hasCli()) {
+          <span class="text-xs text-base-content-muted">SDK + CLI</span>
+        }
       </div>
-      @for (d of openDetails(); track d.key) {
-        <div
-          [id]="detailId(d.key)"
-          role="region"
-          [attr.aria-label]="d.name + ' details'"
-          class="mt-2 border-t border-surface-border pt-2 text-[10.5px] text-base-content-muted whitespace-pre-line"
-          [textContent]="d.text"
-        ></div>
-      }
-      <!-- Second row: Time | Model | Cache, the same metric cells as above. -->
-      <div
-        class="mt-2 grid grid-cols-3 border-t border-surface-border pt-2"
-        data-testid="inspector-stats-grid-2"
-      >
-        <div class="flex min-h-[3.75rem] min-w-0 flex-col pr-2" data-testid="inspector-session-time">
-          <div class="text-[10.5px] text-base-content-muted">Time</div>
-          @if (duration(); as ms) {
-            <div class="text-base font-semibold leading-tight tabular-nums">
-              {{ formatDuration(ms) }}
-            </div>
-          } @else {
-            <div
-              class="text-base font-semibold leading-tight text-base-content-muted"
-              [attr.title]="notReported"
-            >
-              {{ empty.value }}
-            </div>
-          }
-          @if (turns() !== null) {
-            <p class="text-[10.5px] text-base-content-muted tabular-nums">
-              {{ turns() }} {{ turns() === 1 ? 'turn' : 'turns' }}
-            </p>
-          }
-        </div>
-        <div class="flex min-h-[3.75rem] min-w-0 flex-col border-l border-surface-border px-2">
-          @if (modelNames().length >= 2) {
-            <button
-              type="button"
-              class="block w-fit self-start cursor-pointer text-left text-[10.5px] leading-4 text-base-content-muted underline decoration-dotted underline-offset-2 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
-              [attr.aria-expanded]="isOpen('sd-models')"
-              [attr.aria-controls]="modelsPanelId"
-              [title]="
-                isOpen('sd-models')
-                  ? 'Hide per-model breakdown'
-                  : 'Show per-model breakdown'
-              "
-              (click)="toggle('sd-models')"
-              (keydown.escape)="closeOnEscape($event, 'sd-models')"
-            >
-              Models
-            </button>
-          } @else {
-            <div class="text-[10.5px] text-base-content-muted">Model</div>
-          }
-          <div
-            class="truncate text-base font-semibold leading-tight"
-            [class.text-base-content-muted]="modelNames().length === 0"
-            [attr.title]="primaryModel() ?? notReported"
+      <div class="grid grid-cols-3 gap-y-0" data-testid="inspector-stats-grid">
+        @for (metric of metrics(); track metric.id) {
+          <ptah-stat
+            class="metric border-b border-surface-border pb-2"
+            [class.border-l]="metric.id === 'cost'"
+            [class.pl-2]="metric.id === 'cost'"
+            [label]="metric.label"
+            [value]="metric.value"
+            [accuracy]="accuracy[metric.total.state]"
+            [valueTone]="metric.total.value === null ? 'muted' : undefined"
+            [accessibleValue]="metric.detail"
+            [detail]="metric.detail"
+            [attr.aria-label]="metric.detail"
+            [attr.data-testid]="'session-' + metric.id"
+            role="group"
+            appearance="plain"
+            size="sm"
           >
-            {{ modelNames()[0] ?? empty.value }}
-          </div>
-          @if (modelNames().length >= 2) {
-            <p class="text-[10.5px] text-base-content-muted">
-              +{{ modelNames().length - 1 }} more
-            </p>
-          }
-        </div>
-        <div class="flex min-h-[3.75rem] min-w-0 flex-col border-l border-surface-border pl-2">
-          @if (s.cache; as cache) {
-            <ptah-inspector-cache-tile [cache]="cache" />
-          } @else {
-            <div class="text-[10.5px] text-base-content-muted">Cache</div>
-            <div
-              class="text-base font-semibold leading-tight text-base-content-muted"
-              [attr.title]="notReported"
-            >
-              {{ empty.value }}
-            </div>
-          }
-        </div>
-      </div>
-      @if (modelNames().length >= 2) {
-        <div
-          [id]="modelsPanelId"
-          class="mt-2 grid gap-1.5"
-          [hidden]="!isOpen('sd-models')"
-          role="list"
-          aria-label="Per-model usage"
-        >
-          @if (isOpen('sd-models')) {
-            @for (row of s.snapshot?.modelUsageList ?? []; track row.model) {
-              <div
-                role="listitem"
-                class="rounded-md border border-surface-border bg-surface-1 p-1.5"
-                data-glass-surface="tile"
-              >
-                <div
-                  class="flex items-center justify-between gap-2 text-[13px] font-semibold"
-                >
-                  <span class="min-w-0 truncate" [title]="row.model">{{
-                    formatModelName(row.model)
-                  }}</span>
-                  <span
-                    class="tabular-nums"
-                    [class.text-base-content-muted]="!isKnownCost(row.costUSD)"
-                    [attr.title]="isKnownCost(row.costUSD) ? null : notReported"
-                    >{{ formatModelCost(row.costUSD, s.snapshot) }}</span
-                  >
-                </div>
-                <div class="grid grid-cols-2 gap-1 text-[11px] sm:grid-cols-4">
-                  <span title="Uncached input tokens"
-                    >In {{ formatOptionalTokens(row.inputTokens) }}</span
-                  >
-                  <span title="Output tokens"
-                    >Out {{ formatOptionalTokens(row.outputTokens) }}</span
-                  >
-                  <span title="Cache read tokens"
-                    >Cache read {{ formatOptionalTokens(row.cacheRead) }}</span
-                  >
-                  <span title="Cache creation tokens"
-                    >Cache creation
-                    {{ formatOptionalTokens(row.cacheCreation) }}</span
-                  >
-                </div>
-              </div>
+            @if (hasCli()) {
+              <ptah-meter
+                class="mt-0.5"
+                [value]="metric.total.value ?? 0"
+                [max]="metric.total.value || 1"
+                [label]="metric.label + ' by source'"
+                [segments]="metric.segments"
+                [unreported]="metric.unreported"
+                [valueText]="metric.sourceText"
+                [hideLabel]="true"
+                [showValue]="false"
+                [animate]="false"
+                size="xs"
+                track="thin"
+              />
             }
-            <div
-              class="flex justify-between border-t border-surface-border pt-2 text-xs font-semibold"
-            >
-              <span>Total</span
-              ><span>{{ formatModelTotal(s.snapshot) }}</span>
-            </div>
+          </ptah-stat>
+        }
+        <ptah-stat
+          class="metric border-b border-l border-surface-border pb-2 pl-2"
+          label="Time"
+          value=""
+          placeholder=""
+          [detail]="timeDetail()"
+          [accessibleValue]="timeDetail()"
+          [attr.aria-label]="timeDetail()"
+          [hint]="turnText()"
+          appearance="plain"
+          size="sm"
+          role="group"
+          data-testid="session-time"
+        >
+          <ptah-timer
+            ptahStatMedia
+            class="text-lg font-semibold tabular-nums"
+            aria-hidden="true"
+            [startedAt]="duration() === null ? null : startedAt()"
+            [durationMs]="duration()"
+            [description]="timeDetail()"
+            [unknownReason]="durationUnknownReason()"
+          />
+        </ptah-stat>
+
+        <ptah-stat
+          class="metric pt-2"
+          label="Agents"
+          [value]="agentCount() ?? '—'"
+          [valueTone]="agentCount() === null ? 'muted' : undefined"
+          [hint]="liveAgentText()"
+          [detail]="agentDetail()"
+          [attr.aria-label]="agentDetail()"
+          role="group"
+          appearance="plain"
+          size="sm"
+        />
+
+        <ptah-disclosure
+          class="models contents"
+          [class.models-wide]="!budget()"
+          label="Models"
+          size="sm"
+          [region]="true"
+          [open]="modelsOpen()"
+          (openChange)="setModelsOpen($event)"
+          (keydown.escape)="closeModels($event, modelsHost)"
+        >
+          <span ptahDisclosureSummary class="col-span-2 grid min-w-0">
+            <span class="text-lg font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
+              {{ modelNames().length || '—' }}
+            </span>
+            @if (modelSummary(); as summary) {
+              <span class="truncate text-xs font-normal text-base-content-muted">{{ summary }}</span>
+            }
+          </span>
+          <div #modelsHost>
+            @if (modelsOpen()) {
+              <ptah-session-model-breakdown
+                class="block pt-2"
+                [snapshot]="stats().snapshot"
+                [sources]="metrics()"
+              />
+            }
+          </div>
+        </ptah-disclosure>
+
+        @if (budget(); as view) {
+          <ptah-stat
+            class="metric col-start-3 row-start-2 border-l border-surface-border pl-2 pt-2"
+            label="Budget"
+            [value]="view.percentText"
+            [accuracy]="view.lowerBound ? 'lower-bound' : 'exact'"
+            [valueTone]="view.percentText === '—' ? 'muted' : undefined"
+            [detail]="view.detail"
+            [accessibleValue]="view.detail"
+            [attr.aria-label]="view.detail"
+            role="group"
+            appearance="plain"
+            size="sm"
+            data-testid="session-budget"
+          >
+            @if (hasCli()) {
+              <span ptahStatIcon class="source-swatch sdk-swatch" aria-hidden="true"></span>
+            }
+            @if (view.percent !== null) {
+              <ptah-meter
+                class="mt-0.5"
+                [value]="view.percent"
+                [max]="100"
+                [label]="budgetScope"
+                [valueText]="view.detail"
+                [tone]="view.tone"
+                [hideLabel]="true"
+                [showValue]="false"
+                [animate]="false"
+                size="xs"
+                track="thin"
+              />
+            }
+            <span class="text-xs text-base-content-muted">{{ view.numerator }} / {{ view.limitText }}</span>
+            @if (view.stage !== 'normal') {
+              <span class="text-xs capitalize text-base-content-muted">{{ view.stage }}</span>
+            }
+            @if (stats().budget?.measure === 'weighted-fallback') {
+              <span class="text-xs text-base-content-muted">{{ view.label }}</span>
+            }
+          </ptah-stat>
+        }
+      </div>
+      @if (hasCli() || showEstimates() || showBounds()) {
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] text-base-content-muted"
+          [attr.data-testid]="hasCli() ? 'session-source-legend' : null">
+          @if (hasCli()) {
+            @let tokens = metrics()[0];
+            <span class="whitespace-nowrap"><i class="source-swatch sdk-swatch" aria-hidden="true"></i> SDK {{ tokens.sdkLabel }}</span>
+            <span class="whitespace-nowrap"><i class="source-swatch cli-swatch" aria-hidden="true"></i> CLI {{ tokens.cliLabel }}</span>
+            @if (sharedUnreportedCount(); as count) {
+              <span class="whitespace-nowrap" title="Unreported for both tokens and cost" data-testid="session-unreported">
+                {{ count }} unreported<span class="sr-only"> for both tokens and cost</span>
+              </span>
+            }
+            @for (metric of metrics(); track metric.id) {
+              @if (!sharedUnreportedCount() && metric.unreportedCount) {
+                <span class="whitespace-nowrap">{{ metric.unreportedCount }} unreported ({{ metric.id }})</span>
+              }
+              @if (metric.incomparableCount) {
+                <span>{{ metric.incomparableCount }} on a different basis ({{ metric.id }})</span>
+              }
+            }
+          }
+          @if (showEstimates() || showBounds()) {
+            <span class="inline-flex flex-wrap gap-x-2 gap-y-1" data-testid="session-accuracy-key">
+              @if (showEstimates()) { <span class="whitespace-nowrap">~ = estimate</span> }
+              @if (showBounds()) { <span class="whitespace-nowrap">≥ = lower bound</span> }
+            </span>
           }
         </div>
       }
-    </section>
-    <!-- A metric label: dotted underline with the details text as its tooltip; a click or Enter shows the text under the row. -->
-    <ng-template
-      #label
-      let-name="name"
-      let-key="key"
-      let-text="text"
-      let-id="id"
-    >
-      @if (text) {
-        <button
-          type="button"
-          [attr.id]="id ?? null"
-          class="block w-fit self-start text-left text-[10.5px] leading-4 text-base-content-muted underline decoration-dotted underline-offset-2 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-base-content"
-          [title]="text"
-          [attr.aria-label]="name + ' details'"
-          [attr.aria-expanded]="isOpen(key)"
-          [attr.aria-controls]="isOpen(key) ? detailId(key) : null"
-          (click)="toggle(key)"
-          (keydown.escape)="closeOnEscape($event, key)"
-        >
-          {{ name }}
-        </button>
-      } @else {
-        <div
-          [attr.id]="id ?? null"
-          class="text-[10.5px] leading-4 text-base-content-muted"
-        >
-          {{ name }}
-        </div>
-      }
-    </ng-template>
+    </ptah-surface-section>
+  `,
+  styles: `
+    .metric { min-width: 0; padding-inline-end: 0.5rem; }
+    .session-section ::ng-deep > section { padding: 0.75rem; gap: 0.5rem; border-radius: 0; }
+    .models { display: contents; }
+    .models ::ng-deep > div:first-child {
+      grid-area: 2 / 2 / 3 / 3;
+      min-width: 0;
+      border-inline-start: 1px solid var(--surface-border);
+      padding: 0.5rem;
+      align-items: start;
+    }
+    .models-wide ::ng-deep > div:first-child { grid-column-end: 4; }
+    .models ::ng-deep > div:first-child > button {
+      display: grid;
+      grid-template-columns: auto auto;
+      justify-content: start;
+      column-gap: 0.25rem;
+      row-gap: 0.125rem;
+      font-weight: normal;
+    }
+    .models ::ng-deep > div:first-child > button > svg {
+      grid-column: 2;
+      grid-row: 1;
+      width: 0.75rem;
+      height: 0.75rem;
+    }
+    .models ::ng-deep > div:first-child > button > span:nth-child(2) {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    .models ::ng-deep > div:last-child { grid-area: 3 / 1 / 4 / -1; min-width: 0; }
+    .source-swatch { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 0.125rem; }
+    .sdk-swatch { background: var(--ptah-gold, var(--ptah-accent-ink)); }
+    .cli-swatch { background: var(--state-ink-run); }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class InspectorSessionStatsComponent {
   readonly stats = input.required<SessionStatsInputs>();
+  readonly totals = input<SessionUsageTotals | null>(null);
+  readonly cliContributions = input<readonly UsageContribution[]>([]);
   readonly turns = input<number | null>(null);
+  readonly startedAt = input<PtahTimeInput | null>(null);
+  readonly durationUnknownReason = input(DURATION_NOT_RECORDED);
+  readonly agentCount = input<number | null>(null);
+  readonly liveAgentCount = input<number | null>(null);
+
   private readonly modelState = inject(ModelStateService);
   private readonly expansion =
-    inject(StatsTileExpansionState, { optional: true }) ??
-    new StatsTileExpansionState();
-  private readonly instanceId = ++nextSessionId;
-  protected readonly contextLabelId = `ptah-context-l-${this.instanceId}`;
-  protected readonly modelsPanelId = `ptah-models-p-${this.instanceId}`;
-  protected readonly empty = STATS_EMPTY;
-  protected readonly notReported = 'not reported';
-  protected readonly formatCost = formatCost;
-  protected readonly formatModelCost = formatModelCost;
-  protected readonly formatModelTotal = formatModelTotal;
-  protected readonly isKnownCost = isKnownCost;
-  protected readonly nullCostLabel = nullCostLabel;
-  protected readonly nullCostValue = nullCostValue;
-  protected readonly formatDuration = formatDuration;
-  protected readonly formatOptionalTokens = formatOptionalTokens;
-  protected readonly formatTokens = formatTokens;
-  protected readonly costBudgetSuffix = costBudgetSuffix;
-  protected readonly costBudgetText = costBudgetText;
-  protected readonly tokensBudgetSuffix = tokensBudgetSuffix;
-  protected readonly floor = Math.floor;
-  protected readonly knownSubtotal = computed(() =>
-    knownSubtotalOf(this.stats().snapshot),
-  );
-  protected readonly duration = computed(() =>
-    durationMsOf(this.stats().snapshot),
-  );
-  protected readonly tokenLabel = computed(() => {
-    const count = this.stats().snapshot?.tokenCount;
-    return typeof count === 'number' ? formatTokens(count) : STATS_EMPTY.value;
+    inject(StatsTileExpansionState, { optional: true }) ?? new StatsTileExpansionState();
+  private readonly sessionKey = computed(() => this.expansion.sessionKey(this, this.stats().sessionId));
+  private readonly sdk = computed(() => sdkContribution(this.stats().snapshot));
+  private readonly lanes = computed(() => this.cliContributions().filter(({ source }) => source === 'cli'));
+  private readonly displayedTotals = computed(() => {
+    const supplied = this.totals();
+    if (supplied) return supplied;
+    const contributions = [this.sdk(), ...this.lanes()];
+    const coverage = { complete: true, causes: [] };
+    return {
+      tokens: sessionTotal(contributions, coverage, 'tokens'),
+      cost: sessionTotal(contributions, coverage, 'cost'),
+    };
   });
-  protected readonly contextDetails = computed(() =>
-    contextDetailsText(
-      this.stats().liveModelStats,
-      this.stats().compactionCount,
-    ),
+
+  protected readonly headingId = `ptah-session-heading-${++nextSessionId}`;
+  protected readonly budgetScope = SDK_BUDGET_SCOPE;
+  protected readonly accuracy = USAGE_ACCURACY;
+  protected readonly hasCli = computed(() => this.lanes().length > 0);
+  protected readonly metrics = computed(() => {
+    const totals = this.displayedTotals();
+    return [this.metric('tokens', totals.tokens), this.metric('cost', totals.cost)] as const;
+  });
+  protected readonly sharedUnreportedCount = computed(() => {
+    // Combine only when the same lanes miss both metrics, not merely the same number of lanes.
+    const sameLanes = this.lanes().every(({ tokens, cost }) => (tokens.value === null) === (cost.value === null));
+    return sameLanes ? this.metrics()[0].unreportedCount : 0;
+  });
+  protected readonly budget = computed(() => {
+    const budget = this.stats().budget;
+    return budget ? inspectorBudgetDisplay(budget) : null;
+  });
+  protected readonly showEstimates = computed(() =>
+    this.metrics().some(({ total }) => total.state === 'estimate' || total.state === 'both'),
   );
-  protected readonly tokenDetails = computed(() =>
-    tokenDetailsText(this.stats().snapshot, this.stats().budget),
+  protected readonly showBounds = computed(() =>
+    this.budget()?.lowerBound || this.metrics().some(({ total }) => total.state === 'lower-bound' || total.state === 'both'),
   );
-  protected readonly costDetails = computed(() =>
-    costDetailsText(this.stats().snapshot, this.stats().budget),
-  );
-  /** Details texts the user opened from a metric label, in row order. */
-  protected readonly openDetails = computed(() =>
-    [
-      { key: 'sd-context', name: 'Context', text: this.contextDetails() },
-      { key: 'sd-tokens', name: 'Tokens', text: this.tokenDetails() },
-      { key: 'sd-cost', name: 'Cost', text: this.costDetails() },
-    ].filter(
-      (detail): detail is { key: string; name: string; text: string } =>
-        !!detail.text && this.isOpen(detail.key),
-    ),
-  );
-  protected readonly primaryModel = computed(
-    () =>
-      this.stats().liveModelStats?.model ??
-      this.stats().snapshot?.model ??
-      this.stats().snapshot?.modelUsageList?.[0]?.model ??
-      null,
-  );
+
+  protected readonly duration = computed(() => durationMsOf(this.stats().snapshot));
+  protected readonly timeDetail = computed(() => {
+    const startedAt = this.startedAt();
+    const start = startedAt === null ? '' : formatAbsolute(startedAt);
+    const turns = this.turnText();
+    return [
+      'Time',
+      sessionDurationText(this.duration(), this.durationUnknownReason()),
+      ...(start ? [`Started ${start}`] : []),
+      ...(turns ? [turns] : []),
+    ].join('. ');
+  });
+  protected readonly turnText = computed(() => {
+    const turns = this.turns() ?? this.stats().snapshot?.turnCount;
+    return turns == null ? undefined : `${turns} ${turns === 1 ? 'turn' : 'turns'}`;
+  });
+  protected readonly liveAgentText = computed(() => {
+    const live = this.liveAgentCount();
+    return live === null ? undefined : `${live} live`;
+  });
+  protected readonly agentDetail = computed(() => {
+    const count = this.agentCount();
+    const live = this.liveAgentText();
+    return count === null ? 'Agents unavailable' : `Agents: ${count}${live ? `, ${live}` : ''}`;
+  });
+
+  protected readonly modelsOpen = computed(() => this.expansion.isOpen(this.sessionKey(), 'models'));
   protected readonly modelNames = computed(() => {
-    const rows = this.stats().snapshot?.modelUsageList ?? [];
-    const primary = this.primaryModel();
-    const ids = rows.length
-      ? rows.map((row) => row.model)
-      : primary
-        ? [primary]
-        : [];
-    return ids.map((id) => this.formatModelName(id));
+    const { snapshot, liveModelStats } = this.stats();
+    const primary = liveModelStats?.model ?? snapshot?.model;
+    const rows = snapshot?.modelUsageList;
+    const ids = rows?.length ? rows.map(({ model }) => model) : primary ? [primary] : [];
+    return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
   });
-  protected formatModelName(id: string): string {
-    return resolveModelDisplayName(id, this.modelState.availableModels());
+  protected readonly modelSummary = computed(() => {
+    const [first, ...other] = this.modelNames();
+    return other.length ? `${first} +${other.length}` : first;
+  });
+
+  protected setModelsOpen(open: boolean): void {
+    this.expansion.setOpen(this.sessionKey(), 'models', open);
   }
-  protected detailId(key: string): string {
-    return `${key}-${this.instanceId}`;
-  }
-  protected isOpen(key: string): boolean {
-    return this.expansion.isOpen(
-      this.expansion.sessionKey(this, this.stats().sessionId),
-      key,
-    );
-  }
-  protected toggle(key: string): void {
-    this.expansion.toggle(
-      this.expansion.sessionKey(this, this.stats().sessionId),
-      key,
-    );
-  }
-  protected close(key: string): void {
-    this.expansion.setOpen(
-      this.expansion.sessionKey(this, this.stats().sessionId),
-      key,
-      false,
-    );
-  }
-  protected closeOnEscape(event: Event, key: string): void {
-    if (!this.isOpen(key)) return;
+
+  protected closeModels(event: Event, body: HTMLElement): void {
+    if (!this.modelsOpen()) return;
     event.preventDefault();
     event.stopPropagation();
-    this.close(key);
+    this.setModelsOpen(false);
+    body.closest('ptah-disclosure')?.querySelector('button')?.focus();
   }
-  protected clampPercent(percent: number): number {
-    return Math.min(100, Math.max(0, Math.floor(percent)));
-  }
-  protected budgetTone(stage: SessionBudgetStage): PtahMeterTone {
-    return stage === 'limit'
-      ? 'err'
-      : stage === 'tighten' || stage === 'handoff'
-        ? 'warn'
-        : 'gold';
+
+  private metric(id: UsageMetric, total: UsageTotal) {
+    const label = id === 'tokens' ? 'Tokens' : 'Cost';
+    const format = id === 'tokens' ? formatUsageTokens : formatExpandedUsageCost;
+    const sdk = { ...this.sdk()[id], value: total.sdk };
+    const laneAmounts = this.lanes().map((lane) => lane[id]);
+    const reported = laneAmounts.filter(({ value, comparable }) => value !== null && comparable);
+    const unreportedCount = laneAmounts.filter(({ value }) => value === null).length;
+    const cli = {
+      value: total.cli,
+      state: usageState({
+        estimated: reported.some(({ estimated }) => estimated),
+        lowerBound: reported.length !== laneAmounts.length || reported.some(({ lowerBound }) => lowerBound),
+      }),
+      causes: [],
+    };
+    const sdkFigure = { value: sdk.value, state: usageState(sdk), causes: [] };
+    const detail = usageDetailsText(total, id, `Whole-session ${id}`);
+    const sourceText = [
+      usageDetailsText(sdkFigure, id, 'SDK subtotal'),
+      ...(laneAmounts.length ? [usageDetailsText(cli, id, 'CLI lanes')] : []),
+      ...total.causes,
+    ].join('. ');
+    const segments: readonly PtahMeterSegment[] = [
+      { value: total.sdk ?? 0, tone: 'gold', label: 'SDK' },
+      { value: total.cli ?? 0, tone: 'info', label: 'CLI lanes' },
+    ];
+    // The hatch follows the total's own bound, so a "≥" value always shows it.
+    const unreported = total.value === null ? 'missing' : total.coverage === 'full' ? 'none' : 'partial';
+    return {
+      id, label, total, detail, sourceText, segments, unreported,
+      value: format(total).replace(/^[≥~ ]+/, ''),
+      sdkLabel: format(sdkFigure),
+      cliLabel: format(cli),
+      reported: reported.length,
+      unreportedCount,
+      incomparableCount: laneAmounts.length - reported.length - unreportedCount,
+      laneCount: laneAmounts.length,
+    } as const;
   }
 }

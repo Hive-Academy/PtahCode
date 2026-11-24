@@ -46,6 +46,7 @@ import {
   TASK_ESTIMATES,
   TASK_STATUSES,
   TASK_TYPES,
+  withToolCue,
 } from '@ptah-extension/shared';
 
 /**
@@ -446,7 +447,7 @@ export function buildWorkspaceAnalyzeTool(): MCPToolDefinition {
   return {
     name: 'ptah_workspace_analyze',
     description:
-      'Analyze the entire workspace in one call. Returns project type, frameworks, directory structure, and architecture overview. Use this FIRST when starting any task to understand the project.',
+      'Analyze the workspace in one call: project type, frameworks, directory structure, architecture overview. Use it for a broad overview of an unknown project, not as a first step before a focused search.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -502,7 +503,7 @@ export function buildSearchFilesTool(): MCPToolDefinition {
 export function buildReadSymbolTool(): MCPToolDefinition {
   return {
     name: READ_SYMBOL_TOOL_NAME,
-    description: `Read code without reading the whole file. Two forms: \`name\` returns that declaration (function, method, class; \`Class.method\` works) with its doc comment and 1-based line numbers, or lists the matches when the name is ambiguous; \`startLine\`/\`endLine\` returns that range (any text file). At most \`maxLines\` lines (default ${READ_SYMBOL_DEFAULT_MAX_LINES}, max ${READ_SYMBOL_HARD_MAX_LINES}) and about ${READ_SYMBOL_MAX_CHARS} chars; a cut result says where to continue.`,
+    description: withToolCue(READ_SYMBOL_TOOL_NAME, `Read code without reading the whole file. Two forms: \`name\` returns that declaration (function, method, class; \`Class.method\` works) with its doc comment and 1-based line numbers, or lists the matches when the name is ambiguous; \`startLine\`/\`endLine\` returns that range (any text file). At most \`maxLines\` lines (default ${READ_SYMBOL_DEFAULT_MAX_LINES}, max ${READ_SYMBOL_HARD_MAX_LINES}) and about ${READ_SYMBOL_MAX_CHARS} chars; a cut result says where to continue.`),
     inputSchema: {
       type: 'object',
       properties: {
@@ -560,13 +561,14 @@ export function buildReadSymbolTool(): MCPToolDefinition {
 export function buildGrepTool(): MCPToolDefinition {
   return {
     name: GREP_TOOL_NAME,
-    description: `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal by default; smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. Use ptah_code_search_symbols to find a declaration by name.`,
+    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal unless the pattern has clear regex syntax (see \`regex\`); smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name.`),
     inputSchema: {
       type: 'object',
       properties: {
         pattern: {
           type: 'string',
-          description: 'Text to find (literal unless `regex` is true).',
+          description:
+            'Text to find. Literal, or a regex when it has clear regex syntax (see `regex`).',
         },
         path: {
           type: 'string',
@@ -580,7 +582,8 @@ export function buildGrepTool(): MCPToolDefinition {
         },
         regex: {
           type: 'boolean',
-          description: 'Treat `pattern` as a regular expression.',
+          description:
+            'Optional. Omit it and a pattern with regex syntax (a|b, \\b, \\d, [a-z], .*, ^, $) runs as a regex; a literal-looking pattern, lookaround, back-references, `x || y` or a Windows path stays literal. Set true or false to force.',
         },
         caseSensitive: {
           type: 'boolean',
@@ -603,6 +606,11 @@ export function buildGrepTool(): MCPToolDefinition {
           type: 'boolean',
           description:
             'Also search ignored and hidden paths such as node_modules. Needs a scoped `path`.',
+        },
+        inlineBody: {
+          type: 'boolean',
+          description:
+            'Default true. A result of at most 3 matches in at most 2 functions/classes also shows each enclosing body (max 60 lines each, 150 in all; a cut names the lines left out). Pass false for match lines only.',
         },
         workspaceRoot: {
           type: 'string',

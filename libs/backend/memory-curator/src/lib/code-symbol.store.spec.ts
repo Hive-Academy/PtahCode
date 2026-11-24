@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -156,9 +157,11 @@ describe('CodeSymbolStore — workspaceRoot tri-state (SQL shape)', () => {
       expect(prepared[0]).toContain('COUNT(*)');
       expect(prepared[0]).toContain('MAX(updated_at)');
       expect(prepared[0]).toContain('WHERE workspace_root = ?');
-      expect(boundArgs[0]).toEqual(['/ws/a']);
-      // The stub row carries no `newest` column: a missing max reads as null.
-      expect(freshness).toEqual({ symbolCount: 0, newestUpdatedAt: null });
+      expect(prepared[0]).toContain('SELECT validated_at FROM code_index_roots');
+      expect(boundArgs[0]).toEqual(['/ws/a', '/ws/a']);
+      expect(freshness).toEqual({
+        symbolCount: 0, newestUpdatedAt: null, validatedAt: null,
+      });
     });
   });
 
@@ -219,12 +222,14 @@ describe('CodeSymbolStore — workspaceRoot tri-state (SQL shape)', () => {
   });
 
   describe('purgeMissing', () => {
-    it('lists distinct file_path scoped to workspace_root', () => {
+    it('lists file paths from symbols and file records scoped to the same root', () => {
       const { store, prepared, boundArgs } = makeSqlCapturingStore();
       store.purgeMissing('/ws/a', ['/ws/a/src/keep.ts']);
-      expect(prepared[0]).toContain('SELECT DISTINCT file_path');
-      expect(prepared[0]).toContain('WHERE workspace_root = ?');
-      expect(boundArgs[0]).toEqual(['/ws/a']);
+      const paths = prepared.findIndex((sql) => sql.includes('UNION'));
+      expect(paths).toBeGreaterThanOrEqual(0);
+      expect(prepared[paths]).toContain('FROM code_symbols WHERE workspace_root = ?');
+      expect(prepared[paths]).toContain('FROM code_symbol_files WHERE workspace_root = ?');
+      expect(boundArgs[paths]).toEqual(['/ws/a', '/ws/a']);
     });
   });
 
@@ -232,20 +237,23 @@ describe('CodeSymbolStore — workspaceRoot tri-state (SQL shape)', () => {
     it('null scopes the DELETE to unscoped rows', () => {
       const { store, prepared } = makeSqlCapturingStore();
       store.purgeJunk(null);
-      expect(prepared[0]).toContain('AND workspace_root IS NULL');
+      const sql = prepared.find((query) => query.includes('DELETE FROM code_symbols'));
+      expect(sql).toContain('AND workspace_root IS NULL');
     });
 
     it('a string scopes the DELETE to that workspace', () => {
       const { store, prepared, boundArgs } = makeSqlCapturingStore();
       store.purgeJunk('/ws/a');
-      expect(prepared[0]).toContain('AND workspace_root IS ?');
-      expect(boundArgs[0][1]).toBe('/ws/a');
+      expect(prepared).toContainEqual(expect.stringContaining('AND workspace_root IS ?'));
+      expect(boundArgs).toContainEqual([expect.any(String), '/ws/a']);
     });
 
-    it('undefined deletes across every workspace (raw store capability)', () => {
+    it('undefined purges across every workspace (raw store capability)', () => {
       const { store, prepared } = makeSqlCapturingStore();
       store.purgeJunk();
-      expect(prepared[0]).not.toContain('workspace_root');
+      const sql = prepared.find((query) => query.includes('DELETE FROM code_symbols'));
+      expect(sql).toBeDefined();
+      expect(sql).not.toContain('workspace_root');
     });
   });
 });
@@ -1621,6 +1629,7 @@ describe('CodeSymbolStore (native-gated)', () => {
         expect(await store.getIndexFreshness(WS)).toEqual({
           symbolCount: 0,
           newestUpdatedAt: null,
+          validatedAt: null,
         });
 
         nowSpy.mockReturnValue(1_000);
@@ -1628,6 +1637,8 @@ describe('CodeSymbolStore (native-gated)', () => {
           sym('alpha', 'src/a.ts', 'function alpha() {}'),
           sym('beta', 'src/b.ts', 'function beta() {}'),
         ]);
+        nowSpy.mockReturnValue(2_000);
+        store.markRootValidated(WS);
         nowSpy.mockReturnValue(5_000);
         await store.insertBatch([
           sym('gamma', 'src/c.ts', 'function gamma() {}'),
@@ -1646,10 +1657,24 @@ describe('CodeSymbolStore (native-gated)', () => {
         expect(await store.getIndexFreshness(WS)).toEqual({
           symbolCount: 3,
           newestUpdatedAt: 5_000,
+          validatedAt: 2_000,
+        });
+        store.markRootValidated(WS);
+        expect(await store.getIndexFreshness(WS)).toEqual({
+          symbolCount: 3,
+          newestUpdatedAt: 9_000,
+          validatedAt: 9_000,
+        });
+        store.markRootValidated('/ws/empty');
+        expect(await store.getIndexFreshness('/ws/empty')).toEqual({
+          symbolCount: 0,
+          newestUpdatedAt: 9_000,
+          validatedAt: 9_000,
         });
         expect(await store.getIndexFreshness('/ws/none')).toEqual({
           symbolCount: 0,
           newestUpdatedAt: null,
+          validatedAt: null,
         });
       } finally {
         nowSpy.mockRestore();
@@ -1766,15 +1791,15 @@ describe('CodeSymbolStore (native-gated)', () => {
             subject: 'code:/test/ws/src/a.ts#old',
           }),
         ]);
-        // ONE transaction for the whole file: a failed insert keeps the
-        // previous rows, and no reader sees a half-written file.
+        // One donor read transaction and one write transaction for the
+        // whole file, regardless of its symbol count.
         const transactionSpy = jest.spyOn(service.db, 'transaction');
         await store.replaceFileSymbols(
           '/test/ws',
           '/test/ws/src/a.ts',
           entries,
         );
-        expect(transactionSpy).toHaveBeenCalledTimes(1);
+        expect(transactionSpy).toHaveBeenCalledTimes(2);
         transactionSpy.mockRestore();
 
         const stored = service.db
@@ -1936,6 +1961,456 @@ describe('CodeSymbolStore (native-gated)', () => {
         .get('code-symbols-vec-stale') as { n: number }
     ).n;
   }
+
+  async function openPeer(dbPath: string, embedder = makeDeterministicEmbedder()) {
+    const logger = makeLogger();
+    const service = new SqliteConnectionService(dbPath, logger);
+    await service.openAndMigrate();
+    return {
+      service,
+      store: new CodeSymbolStore(logger, service, embedder, new VecStatusService(logger, service)),
+    };
+  }
+
+  function setStaleMarker(service: SqliteConnectionService): void {
+    service.db.prepare('INSERT INTO indexing_state (workspace_fingerprint) VALUES (?)')
+      .run('code-symbols-vec-stale');
+  }
+
+  function readTextHash(service: SqliteConnectionService, subject: string): string {
+    const row = service.db.prepare('SELECT text_hash FROM code_symbols WHERE subject = ?')
+      .get(subject) as { text_hash: string };
+    return row.text_hash;
+  }
+
+  function expectedTextHash(embedder: IEmbedder, text: string): string {
+    return createHash('sha256').update(`${embedder.modelId}\0${text}`).digest('hex');
+  }
+
+  maybe('round trips a fingerprint with the model id and deletes it on an unrecorded write', async () => {
+    const { service, store, embedder } = await bootstrap();
+    const entry = makeEntry();
+    const { workspaceRoot: root, filePath: file } = entry;
+    try {
+      await store.replaceFileSymbols(root, file, [entry], 'candidate');
+      expect(service.db.prepare('SELECT fingerprint FROM code_symbol_files').get())
+        .toEqual({ fingerprint: `candidate:${embedder.modelId}` });
+      expect(store.isFileUnchanged(root, file, 'candidate')).toBe(true);
+      expect(store.isFileUnchanged(root, file, 'different')).toBe(false);
+      expect(readTextHash(service, entry.subject)).toBe(expectedTextHash(embedder, entry.text));
+      await store.replaceFileSymbols(root, file, [entry]);
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('a model change on the same file misses both the fingerprint and the donor', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const embedder = { ...makeDeterministicEmbedder(), modelId: 'test/upgraded' };
+    const peer = await openPeer(dbPath, embedder);
+    const entry = makeEntry();
+    const { workspaceRoot: root, filePath: file } = entry;
+    try {
+      await store.replaceFileSymbols(root, file, [entry], 'candidate');
+      expect(peer.store.isFileUnchanged(root, file, 'candidate')).toBe(false);
+      await peer.store.replaceFileSymbols(root, file, [entry], 'candidate');
+      expect(embedder.embed).toHaveBeenCalledTimes(1);
+      expect(embedder.embed).toHaveBeenCalledWith([entry.text]);
+      expect(readTextHash(service, entry.subject)).toBe(expectedTextHash(embedder, entry.text));
+      expect(peer.store.isFileUnchanged(root, file, 'candidate')).toBe(true);
+      expect(store.isFileUnchanged(root, file, 'candidate')).toBe(false);
+    } finally {
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  maybe('a missing vector clears the file record while writing all symbols', async () => {
+    const { service, store, embedder } = await bootstrap();
+    const entry = makeEntry();
+    const missing = makeEntry({ subject: 'code:missing', text: 'missing vector' });
+    const { workspaceRoot: root, filePath: file } = entry;
+    try {
+      await store.replaceFileSymbols(root, file, [entry], 'before');
+      jest.mocked(embedder.embed).mockResolvedValueOnce([]);
+      await store.replaceFileSymbols(root, file, [entry, missing], 'candidate');
+      expect(countTable(service, 'code_symbols')).toBe(2);
+      expect(countTable(service, 'code_symbols_vec')).toBe(1);
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+      expect(store.isFileUnchanged(root, file, 'candidate')).toBe(false);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('the unchanged lookup warns once and misses on repeated errors', async () => {
+    const { service } = await bootstrap();
+    const logger = makeLogger();
+    const reader = new CodeSymbolStore(
+      logger, service, makeDeterministicEmbedder(), new VecStatusService(logger, service),
+    );
+    const originalPrepare = service.db.prepare.bind(service.db);
+    const spy = jest.spyOn(service.db, 'prepare').mockImplementation((sql) => {
+      if (sql.includes('SELECT 1 AS present FROM code_symbol_files')) {
+        throw new Error('record lookup failed');
+      }
+      return originalPrepare(sql);
+    });
+    try {
+      expect(reader.isFileUnchanged('/test/ws', '/test/ws/a.ts', 'candidate')).toBe(false);
+      expect(reader.isFileUnchanged('/test/ws', '/test/ws/a.ts', 'candidate')).toBe(false);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+      service.close();
+    }
+  });
+
+  maybe('a warm skip recovers a marker written by a peer and keeps rows written after recovery', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const peer = await openPeer(dbPath);
+    const entry = makeEntry();
+    const { workspaceRoot: root, filePath: file } = entry;
+    try {
+      await store.replaceFileSymbols(root, file, [entry], 'candidate');
+      store.markRootValidated(root);
+      expect(store.isFileUnchanged(root, file, 'candidate')).toBe(true);
+      setVecAvailable(peer.service, false);
+      await peer.store.replaceFileSymbols(root, file, [entry], 'peer');
+      expect(staleMarkerCount(service)).toBe(1);
+      expect(countTable(service, 'code_symbol_files')).toBe(1);
+      expect(peer.store.isFileUnchanged(root, file, 'peer')).toBe(false);
+      expect(store.isFileUnchanged(root, file, 'peer')).toBe(false);
+      expect(countTable(service, 'code_symbols_vec')).toBe(0);
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+      expect(countTable(service, 'code_index_roots')).toBe(0);
+      expect(staleMarkerCount(service)).toBe(0);
+
+      await store.replaceFileSymbols(root, file, [entry], 'recovered');
+      store.markRootValidated(root);
+      expect(store.isFileUnchanged(root, file, 'peer')).toBe(false);
+      expect(store.isFileUnchanged(root, file, 'recovered')).toBe(true);
+      expect(countTable(service, 'code_symbols_vec')).toBe(1);
+      expect(countTable(service, 'code_symbol_files')).toBe(1);
+      expect(countTable(service, 'code_index_roots')).toBe(1);
+    } finally {
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  maybe('recovery rechecks the marker after a peer has already recovered and written a record', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const peer = await openPeer(dbPath);
+    const entry = makeEntry();
+    const { workspaceRoot: root, filePath: file } = entry;
+    const exec = service.db.exec.bind(service.db);
+    let intercepted = false;
+    const spy = jest.spyOn(service.db, 'exec').mockImplementation((sql) => {
+      if (sql === 'BEGIN IMMEDIATE' && !intercepted) {
+        intercepted = true;
+        expect(peer.store.isFileUnchanged(root, file, 'before')).toBe(false);
+        peer.service.db.prepare('INSERT INTO code_symbol_files VALUES (?, ?, ?, ?)')
+          .run(root, file, 'after:test/deterministic', 1);
+      }
+      return exec(sql);
+    });
+    try {
+      await store.replaceFileSymbols(root, file, [entry], 'before');
+      setStaleMarker(peer.service);
+      expect(store.isFileUnchanged(root, file, 'after')).toBe(true);
+      expect(intercepted).toBe(true);
+      expect(staleMarkerCount(service)).toBe(0);
+    } finally {
+      spy.mockRestore();
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  for (const operation of ['replace', 'search'] as const) {
+    maybe(`a warm ${operation} recovers a marker written by a peer`, async () => {
+      const { service, store, embedder, dbPath } = await bootstrap();
+      const peer = await openPeer(dbPath);
+      const entry = makeEntry();
+      const { workspaceRoot: root, filePath: file } = entry;
+      try {
+        await store.replaceFileSymbols(root, file, [entry], 'before');
+        store.markRootValidated(root);
+        await store.searchSymbols(entry.symbolName, 10, root);
+        setStaleMarker(peer.service);
+        jest.mocked(embedder.embed).mockClear();
+        if (operation === 'replace') {
+          const target = makeEntry({ filePath: '/test/ws/b.ts', subject: 'code:target' });
+          await store.replaceFileSymbols(root, target.filePath, [target], 'after');
+          expect(embedder.embed).toHaveBeenCalledTimes(1);
+          expect(embedder.embed).toHaveBeenCalledWith([entry.text]);
+          expect(countTable(service, 'code_symbols_vec')).toBe(1);
+          expect(store.isFileUnchanged(root, target.filePath, 'after')).toBe(true);
+        } else {
+          await store.searchSymbols(entry.symbolName, 10, root);
+          expect(countTable(service, 'code_symbols_vec')).toBe(0);
+        }
+        expect(staleMarkerCount(service)).toBe(0);
+        expect(countTable(service, 'code_index_roots')).toBe(0);
+        expect(store.isFileUnchanged(root, file, 'before')).toBe(false);
+      } finally {
+        peer.service.close();
+        service.close();
+      }
+    });
+  }
+
+  maybe('donor reads miss when a peer sets the marker after reconciliation', async () => {
+    const { service, store, embedder, dbPath } = await bootstrap();
+    const peer = await openPeer(dbPath);
+    const donor = makeEntry();
+    const target = { ...donor, subject: 'code:target', filePath: '/test/ws/b.ts' };
+    const prepare = service.db.prepare.bind(service.db);
+    const spy = jest.spyOn(service.db, 'prepare');
+    try {
+      await store.insertBatch([donor]);
+      jest.mocked(embedder.embed).mockClear();
+      let markerReads = 0;
+      spy.mockImplementation((sql) => {
+        if (sql.includes('SELECT 1 AS present FROM indexing_state') && ++markerReads === 2) {
+          setStaleMarker(peer.service);
+        }
+        return prepare(sql);
+      });
+
+      await store.replaceFileSymbols(target.workspaceRoot, target.filePath, [target], 'candidate');
+      expect(markerReads).toBe(2);
+      expect(embedder.embed).toHaveBeenCalledTimes(1);
+      expect(embedder.embed).toHaveBeenCalledWith([target.text]);
+      expect(staleMarkerCount(service)).toBe(1);
+      expect(store.isFileUnchanged(target.workspaceRoot, target.filePath, 'candidate')).toBe(false);
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+    } finally {
+      spy.mockRestore();
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  maybe('file, missing-path, junk, workspace and stale-root purges remove record-only entries', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const root = '/test/ws';
+    const gone = path.join(path.dirname(dbPath), 'file-only-root');
+    const validatedOnly = path.join(path.dirname(dbPath), 'validation-only-root');
+    const file = (name: string) => `${root}/${name}.ts`;
+    try {
+      for (const name of ['delete', 'missing', 'keep', 'dist/junk']) {
+        await store.replaceFileSymbols(root, file(name), [], 'candidate');
+      }
+      expect(store.deleteByFile(root, file('delete'))).toBe(0);
+      expect(countTable(service, 'code_symbol_files')).toBe(3);
+      expect(store.purgeMissing(root, [file('keep'), file('dist/junk')])).toBe(0);
+      expect(countTable(service, 'code_symbol_files')).toBe(2);
+      expect(store.purgeJunk(root)).toBe(0);
+      expect(countTable(service, 'code_symbol_files')).toBe(1);
+      expect(store.isFileUnchanged(root, file('keep'), 'candidate')).toBe(true);
+
+      store.markRootValidated(root);
+      expect(store.purgeWorkspace(root)).toBe(0);
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+      expect(countTable(service, 'code_index_roots')).toBe(0);
+
+      await store.replaceFileSymbols(gone, `${gone}/a.ts`, [], 'candidate');
+      store.markRootValidated(validatedOnly);
+      expect(await store.purgeStaleRoots()).toEqual({ roots: 2, rows: 0 });
+      expect(countTable(service, 'code_symbol_files')).toBe(0);
+      expect(countTable(service, 'code_index_roots')).toBe(0);
+    } finally {
+      service.close();
+    }
+  });
+
+  for (const operation of ['replace', 'insertBatch'] as const) {
+    maybe(`${operation} moves a conflicting subject, invalidates both records and updates the hash`, async () => {
+      const { service, store, embedder } = await bootstrap();
+      const original = makeEntry();
+      const { workspaceRoot: root, filePath: oldPath } = original;
+      const newPath = '/test/ws/b.ts';
+      const moved = { ...original, filePath: newPath, text: 'changed text' };
+      try {
+        await store.replaceFileSymbols(root, oldPath, [original], 'old');
+        await store.replaceFileSymbols(root, newPath, [], 'new');
+        const priorRowid = symbolRowid(service, original.subject);
+        expect(vecEmbedding(service, priorRowid)).toBeDefined();
+        jest.mocked(embedder.embed).mockResolvedValueOnce([new Float32Array(1)]);
+        if (operation === 'replace') {
+          await store.replaceFileSymbols(root, newPath, [moved], 'changed');
+        } else {
+          await store.insertBatch([moved]);
+        }
+        expect(store.count(root)).toBe(1);
+        expect(symbolRowid(service, moved.subject)).toBe(priorRowid);
+        expect(vecEmbedding(service, priorRowid)).toBeUndefined();
+        expect(countTable(service, 'code_symbol_files')).toBe(0);
+        expect(readTextHash(service, moved.subject)).toBe(expectedTextHash(embedder, moved.text));
+      } finally {
+        service.close();
+      }
+    });
+  }
+
+  maybe('G6 uses the indexed rowid donor query and embeds unique misses across roots', async () => {
+    const { service, store, embedder } = await bootstrap();
+    const donor = makeEntry();
+    const prepare = jest.spyOn(service.db, 'prepare');
+    try {
+      await store.insertBatch([donor]);
+      expect(readTextHash(service, donor.subject)).toBe(expectedTextHash(embedder, donor.text));
+      const original = vecEmbedding(service, symbolRowid(service, donor.subject));
+      const root = '/worktree';
+      const file = '/worktree/a.ts';
+      const target = makeEntry({ workspaceRoot: root, filePath: file, subject: 'code:copy' });
+      const miss = { ...target, subject: 'code:miss', text: 'new text' };
+      jest.mocked(embedder.embed).mockClear();
+      await store.replaceFileSymbols(root, file, [
+        target, { ...target, subject: 'code:copy2' }, miss, { ...miss, subject: 'code:miss2' },
+      ], 'candidate');
+      expect(embedder.embed).toHaveBeenCalledTimes(1);
+      expect(embedder.embed).toHaveBeenCalledWith([miss.text]);
+      expect(original).toBeDefined();
+      expect(vecEmbedding(service, symbolRowid(service, target.subject))).toEqual(original);
+      expect(store.isFileUnchanged(root, file, 'candidate')).toBe(true);
+
+      const sql = prepare.mock.calls.find(([sql]) => sql.includes('CROSS JOIN code_symbols_vec'))?.[0];
+      expect(sql).toBeDefined();
+      const plan = service.db.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(expectedTextHash(embedder, donor.text), embedder.dim * 4) as Array<{ detail: string }>;
+      const pointRead = service.db
+        .prepare('EXPLAIN QUERY PLAN SELECT embedding FROM code_symbols_vec WHERE rowid = ?')
+        .get(1) as { detail: string };
+      expect(plan.map(({ detail }) => detail)).toEqual([
+        'SEARCH s USING COVERING INDEX idx_code_symbols_text_hash (text_hash=?)',
+        pointRead.detail.replace('code_symbols_vec', 'v'),
+      ]);
+      process.stdout.write(`B2 donor query plan: ${JSON.stringify(plan)}\n`);
+    } finally {
+      prepare.mockRestore();
+      service.close();
+    }
+  });
+
+  maybe('rejects a donor BLOB whose byte length differs from the requested dimension', async () => {
+    const { service, store, dbPath } = await bootstrap();
+    const embedder = makeDeterministicEmbedder(2);
+    const peer = await openPeer(dbPath, embedder);
+    const donor = makeEntry();
+    const target = { ...donor, subject: 'code:target', filePath: '/test/ws/b.ts' };
+    try {
+      await store.insertBatch([donor]);
+      expect(vecEmbedding(service, symbolRowid(service, donor.subject))).toHaveLength(384 * 4);
+      jest.mocked(embedder.embed).mockResolvedValueOnce([]);
+      await peer.store.replaceFileSymbols(target.workspaceRoot, target.filePath, [target]);
+      expect(embedder.embed).toHaveBeenCalledTimes(1);
+      expect(embedder.embed).toHaveBeenCalledWith([target.text]);
+      expect(vecEmbedding(service, symbolRowid(service, target.subject))).toBeUndefined();
+    } finally {
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  maybe('finds a valid donor after four vectorless rows with the same hash', async () => {
+    const { service, store, embedder } = await bootstrap();
+    const donor = makeEntry();
+    try {
+      jest.mocked(embedder.embed).mockResolvedValueOnce([]);
+      await store.insertBatch(Array.from({ length: 4 }, (_, i) => ({
+        ...donor, subject: `code:vectorless-${i}`,
+      })));
+      await store.insertBatch([donor]);
+      const target = { ...donor, filePath: '/test/ws/b.ts', subject: 'code:target' };
+      jest.mocked(embedder.embed).mockClear();
+      await store.replaceFileSymbols(target.workspaceRoot, target.filePath, [target]);
+      expect(embedder.embed).not.toHaveBeenCalled();
+      const original = vecEmbedding(service, symbolRowid(service, donor.subject));
+      expect(original).toBeDefined();
+      expect(vecEmbedding(service, symbolRowid(service, target.subject))).toEqual(original);
+    } finally {
+      service.close();
+    }
+  });
+
+  maybe('keeps an owned donor vector when the peer deletes the donor during embedding', async () => {
+    const { service, store, embedder, dbPath } = await bootstrap();
+    const peer = await openPeer(dbPath);
+    const donor = makeEntry();
+    const target = { ...donor, filePath: '/test/ws/b.ts', subject: 'code:target' };
+    const miss = { ...target, subject: 'code:miss', text: 'miss' };
+    try {
+      await store.insertBatch([donor]);
+      const original = vecEmbedding(service, symbolRowid(service, donor.subject));
+      const embedMiss = makeDeterministicEmbedder().embed;
+      jest.mocked(embedder.embed).mockImplementationOnce(async (texts) => {
+        await Promise.resolve();
+        expect(peer.store.deleteByFile(donor.workspaceRoot, donor.filePath)).toBe(1);
+        return embedMiss(texts);
+      });
+      await store.replaceFileSymbols(target.workspaceRoot, target.filePath, [target, miss], 'candidate');
+      expect(embedder.embed).toHaveBeenLastCalledWith([miss.text]);
+      expect(original).toBeDefined();
+      expect(vecEmbedding(service, symbolRowid(service, target.subject))).toEqual(original);
+      expect(store.isFileUnchanged(target.workspaceRoot, target.filePath, 'candidate')).toBe(true);
+    } finally {
+      peer.service.close();
+      service.close();
+    }
+  });
+
+  maybe('all donor reads share a snapshot when a peer changes a later donor between reads', async () => {
+    const { service, store, embedder, dbPath } = await bootstrap();
+    const peer = await openPeer(dbPath);
+    const first = makeEntry();
+    const second = { ...first, subject: 'code:second', text: 'second text' };
+    const prepare = service.db.prepare.bind(service.db);
+    const spy = jest.spyOn(service.db, 'prepare');
+    try {
+      await store.insertBatch([first, second]);
+      const rowid = symbolRowid(service, second.subject);
+      const original = vecEmbedding(service, rowid);
+      const foreign = Buffer.from(new Float32Array(embedder.dim).fill(1).buffer);
+      let reads = 0;
+      spy.mockImplementation((sql) => {
+        const stmt = prepare(sql);
+        if (!sql.includes('CROSS JOIN code_symbols_vec')) return stmt;
+        return {
+          get: (...args: unknown[]) => {
+            const row = stmt.get(...args);
+            if (++reads === 1) {
+              peer.service.db.transaction(() => {
+                peer.service.db.prepare('UPDATE code_symbols SET text = ?, text_hash = ? WHERE rowid = ?')
+                  .run('foreign', expectedTextHash(embedder, 'foreign'), rowid);
+                peer.service.db.prepare('DELETE FROM code_symbols_vec WHERE rowid = ?').run(rowid);
+                peer.service.db.prepare('INSERT INTO code_symbols_vec(rowid, embedding) VALUES (CAST(? AS INTEGER), ?)')
+                  .run(rowid, foreign);
+              })();
+            }
+            return row;
+          },
+        } as typeof stmt;
+      });
+      jest.mocked(embedder.embed).mockClear();
+      const targets = [first, second].map((entry) => ({
+        ...entry, filePath: '/test/ws/b.ts', subject: `${entry.subject}:copy`,
+      }));
+      await store.replaceFileSymbols(first.workspaceRoot, targets[0].filePath, targets);
+      expect(reads).toBe(2);
+      expect(embedder.embed).not.toHaveBeenCalled();
+      expect(vecEmbedding(service, rowid)).toEqual(foreign);
+      expect(original).toBeDefined();
+      expect(vecEmbedding(service, symbolRowid(service, targets[1].subject))).toEqual(original);
+    } finally {
+      spy.mockRestore();
+      peer.service.close();
+      service.close();
+    }
+  });
 
   maybe(
     'vec outage leaves symbol-less vec rows, and the next vec-available call removes them',

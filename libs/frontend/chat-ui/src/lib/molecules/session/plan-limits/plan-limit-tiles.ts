@@ -50,6 +50,7 @@ export const PLAN_EMPTY = { usage: 'Plan usage unavailable', account: 'Account n
 
 export interface SessionPlan {
   readonly owner?: QuotaOwnerRef;
+  readonly source?: PlanLimitOwnerSnapshot['source'];
   readonly tiles: readonly PlanLimitTileModel[];
   readonly indicator?: StatsLimitIndicator;
   /** Windows a plan tile renders (A2), keyed by window key. */
@@ -124,6 +125,7 @@ export function sessionPlan(
   const indicator = indicatorFor(result, ctx);
   return {
     owner: snapshot.owner,
+    ...(snapshot.source && { source: snapshot.source }),
     tiles,
     ...(indicator && { indicator }),
     renderedWindows: new Map(
@@ -252,13 +254,15 @@ function statusTiles(
     ];
   }
   if (snapshot.status === 'no-usage-source') {
+    const reason = planLimitReasonLabel(snapshot.statusReason, snapshot.owner.providerId);
     return [
       {
         id,
         kind: 'status',
         label: 'Usage',
         ...caption,
-        value: 'No usage source',
+        value: reason ?? 'No usage source',
+        unavailableReason: reason ?? 'No usage source',
         resetLine: 'plan usage is not reported',
         tone: 'neutral',
         sourceChips: [],
@@ -317,7 +321,7 @@ export function planUnavailableCause(snapshot: PlanLimitOwnerSnapshot): string {
 function unavailableTile(
   id: string,
   label: string,
-  resetLine: string,
+  reason: string,
   detailLines: readonly string[],
 ): PlanLimitTileModel {
   return {
@@ -327,10 +331,11 @@ function unavailableTile(
     captionLead: '',
     caption: '',
     value: 'Unavailable',
+    unavailableReason: reason,
     resetLine: '',
     tone: 'neutral',
     sourceChips: [],
-    detailLines: [resetLine, ...detailLines],
+    detailLines: [reason, ...detailLines],
   };
 }
 
@@ -498,10 +503,25 @@ export function windowDetail(
         ? formatted
         : `${formatted} used`,
     ...(percent !== undefined && { percent }),
+    ...(shown.used?.kind === 'amount' && { amount: { value: shown.used.amount, max: shown.used.limit } }),
     resetFacts: windowResetFacts(entry, snapshot, ctx),
     ...(note && { note }),
     sourceChips: formatSourceChips(shown),
   };
+}
+
+/** A meter uses the underlying scale of the reported value. */
+export function windowMeter(
+  window: PlanWindowDetailModel | undefined,
+): { readonly value: number; readonly max: number } | null {
+  if (window?.amount) {
+    const { value, max } = window.amount;
+    return Number.isFinite(value) && value >= 0 && Number.isFinite(max) && max > 0
+      ? window.amount : null;
+  }
+  const percent = window?.percent;
+  return percent !== undefined && Number.isFinite(percent) && percent >= 0
+    ? { value: percent, max: 100 } : null;
 }
 
 function windowNote(

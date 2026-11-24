@@ -1,13 +1,27 @@
+import type { Stats } from 'node:fs';
+import { access, readdir, stat } from 'node:fs/promises';
+import { posix } from 'node:path';
 import type {
   WorkspaceChangeBatch,
   WorkspaceChangeListener,
 } from '@ptah-extension/platform-core';
+import { CODE_INDEX_EXCLUDES } from '@ptah-extension/workspace-intelligence';
 
 import {
   WorkspaceIndexLifecycleService,
   workspaceSymbolIndexFrom,
   type WorkspaceSymbolIndex,
 } from './workspace-index-lifecycle';
+
+jest.mock('node:fs/promises', () => ({
+  ...jest.requireActual('node:fs/promises'),
+  access: jest.fn(jest.requireActual('node:fs/promises').access),
+  readdir: jest.fn(jest.requireActual('node:fs/promises').readdir),
+  stat: jest.fn(jest.requireActual('node:fs/promises').stat),
+}));
+
+const readDirectoryNames: (path: string) => Promise<string[]> = readdir;
+const statTwin: (path: string) => Promise<Stats> = stat;
 
 interface Release {
   resolve: () => void;
@@ -69,6 +83,11 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
+/** Deep enough for a batch's twin probes, which chain several awaits. */
+async function flushProbes(): Promise<void> {
+  for (let i = 0; i < 40; i++) await Promise.resolve();
+}
+
 function batchPaths(
   paths: readonly string[],
   kind: 'create' | 'update' | 'delete' = 'update',
@@ -79,10 +98,25 @@ function batchPaths(
 describe('WorkspaceIndexLifecycleService', () => {
   beforeEach(() => {
     jest.useFakeTimers();
+    // No test path exists on disk. A mocked rejection settles in microtasks,
+    // where a real probe would wait on I/O that fake timers do not drive.
+    jest.mocked(access).mockRejectedValue(new Error('absent'));
   });
 
   afterEach(() => {
     jest.useRealTimers();
+    jest
+      .mocked(access)
+      .mockReset()
+      .mockImplementation(jest.requireActual('node:fs/promises').access);
+    jest
+      .mocked(readDirectoryNames)
+      .mockReset()
+      .mockImplementation(jest.requireActual('node:fs/promises').readdir);
+    jest
+      .mocked(statTwin)
+      .mockReset()
+      .mockImplementation(jest.requireActual('node:fs/promises').stat);
   });
 
   function start(opts?: {
@@ -269,6 +303,7 @@ describe('WorkspaceIndexLifecycleService', () => {
         { path: '/ws/src/b.ts', kind: 'create' },
       ],
     });
+    await flushProbes();
     jest.advanceTimersByTime(499);
     expect(indexer.reindexFile).not.toHaveBeenCalled();
     expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
@@ -288,6 +323,115 @@ describe('WorkspaceIndexLifecycleService', () => {
     expect(indexer.reindexFile).toHaveBeenCalledTimes(2);
   });
 
+  it('subscribes with the symbol index exclude globs', () => {
+    const { watcher } = start();
+    expect(watcher.watch).toHaveBeenCalledWith(
+      '/ws',
+      expect.objectContaining({ excludeGlobs: CODE_INDEX_EXCLUDES }),
+      expect.any(Function),
+    );
+  });
+
+  it('filters harness source events before counting changes toward a full run', async () => {
+    const { indexer, watcher } = start({ stormThreshold: 2 });
+    indexer.releases[0]?.resolve();
+    await flush();
+
+    watcher.emit({ changes: batchPaths(['/ws/.claude/x.ts', '/ws/src/a.ts']) });
+    jest.advanceTimersByTime(500);
+    await flush();
+
+    expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/a.ts', '/ws');
+  });
+
+  it('keeps lone JavaScript updates and forwards deletes of JavaScript with twins', async () => {
+    const probe = jest.mocked(access);
+    probe.mockImplementation(async (path) => {
+      if (path !== '/ws/src/x.ts') throw new Error('absent');
+    });
+    jest.mocked(readDirectoryNames).mockResolvedValue(['x.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => true } as Stats);
+    const { indexer, watcher } = start({ stormThreshold: 2 });
+    indexer.releases[0]?.resolve();
+    await flush();
+
+    watcher.emit({
+      changes: batchPaths(['/ws/src/x.js', '/ws/src/y.js']),
+    });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/y.js', '/ws');
+    expect(probe).toHaveBeenCalledWith('/ws/src/x.ts');
+    probe.mockClear();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'delete') });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+      '/ws/src/x.js',
+      '/ws',
+    );
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('uses the platform stem case rule even if access accepts a different case', async () => {
+    jest
+      .mocked(access)
+      .mockRejectedValue(new Error('absent'))
+      .mockResolvedValueOnce(undefined);
+    jest.mocked(readDirectoryNames).mockResolvedValue(['X.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => true } as Stats);
+    const { indexer, watcher } = start();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'create') });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(
+      process.platform === 'win32' ? 0 : 1,
+    );
+  });
+
+  it('keeps JavaScript when the sibling name denotes a directory', async () => {
+    jest
+      .mocked(access)
+      .mockRejectedValue(new Error('absent'))
+      .mockResolvedValueOnce(undefined);
+    jest.mocked(readDirectoryNames).mockResolvedValue(['x.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => false } as Stats);
+    const { indexer, watcher } = start();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js']) });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.js', '/ws');
+  });
+
+  it('preserves event order when a delete arrives during an earlier JS probe', async () => {
+    const probe = jest.mocked(access);
+    let finishProbe!: () => void;
+    probe.mockRejectedValue(new Error('absent')).mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          finishProbe = () => reject(new Error('absent'));
+        }),
+    );
+    const { indexer, watcher } = start();
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js']) });
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'delete') });
+    finishProbe();
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).not.toHaveBeenCalled();
+    expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+      '/ws/src/x.js',
+      '/ws',
+    );
+  });
+
   it('deletes a supported file during a held full run through the indexer lock', async () => {
     const { indexer, watcher } = start();
     expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
@@ -295,6 +439,7 @@ describe('WorkspaceIndexLifecycleService', () => {
     watcher.emit({
       changes: [{ path: String.raw`D:\ws\gone.ts`, kind: 'delete' }],
     });
+    await flushProbes();
     jest.advanceTimersByTime(500);
     await flush();
 
@@ -366,6 +511,7 @@ describe('WorkspaceIndexLifecycleService', () => {
     watcher.emit({
       changes: [{ path: String.raw`D:\ws\gone.ts`, kind: 'delete' }],
     });
+    await flushProbes();
     jest.advanceTimersByTime(500);
     expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(1);
     expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
@@ -547,6 +693,223 @@ describe('WorkspaceIndexLifecycleService', () => {
     jest.advanceTimersByTime(29_500);
     expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
     expect(indexer.deleteFileSymbols).not.toHaveBeenCalled();
+  });
+
+  describe('TypeScript twin transitions', () => {
+    it('turns a TypeScript storm into one full run without probing the disk', async () => {
+      const { indexer, watcher } = start({ stormThreshold: 3 });
+      indexer.releases[0]?.resolve();
+      await flush();
+      indexer.indexWorkspace.mockClear();
+      jest.mocked(access).mockClear();
+      jest.mocked(readdir).mockClear();
+
+      watcher.emit({
+        changes: batchPaths(['/ws/a.ts', '/ws/b.ts', '/ws/c.ts'], 'create'),
+      });
+      expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).not.toHaveBeenCalled();
+      expect(access).not.toHaveBeenCalled();
+      expect(readdir).not.toHaveBeenCalled();
+    });
+
+    const itPosix = process.platform === 'win32' ? it.skip : it;
+
+    /** Only `files` exist; each is a regular file listed by its folder. */
+    function useFiles(files: readonly string[]): void {
+      const present = new Set(files);
+      jest.mocked(access).mockImplementation(async (path) => {
+        if (!present.has(String(path))) throw new Error('absent');
+      });
+      jest
+        .mocked(statTwin)
+        .mockImplementation(async () => ({ isFile: () => true }) as Stats);
+      jest
+        .mocked(readDirectoryNames)
+        .mockImplementation(async (directory) =>
+          files
+            .filter((file) => posix.dirname(file) === directory)
+            .map((file) => posix.basename(file)),
+        );
+    }
+
+    async function settle(): Promise<void> {
+      await flushProbes();
+      await jest.advanceTimersByTimeAsync(500);
+    }
+
+    it('purges the JavaScript twin when its TypeScript source is created', async () => {
+      useFiles(['/ws/src/x.ts', '/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.ts'], 'create') });
+      await settle();
+
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.ts', '/ws');
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(1);
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+        '/ws/src/x.js',
+        '/ws',
+      );
+    });
+
+    it('reindexes the JavaScript twin when its TypeScript source is deleted', async () => {
+      useFiles(['/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.ts'], 'delete') });
+      await settle();
+
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(1);
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+        '/ws/src/x.ts',
+        '/ws',
+      );
+      // Absent candidates (`x.jsx`, `x.mjs`, `x.cjs`) are not scheduled.
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.js', '/ws');
+    });
+
+    it('keeps the JavaScript twin out when another TypeScript twin remains', async () => {
+      useFiles(['/ws/src/x.tsx', '/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.ts'], 'delete') });
+      await settle();
+
+      expect(indexer.reindexFile).not.toHaveBeenCalled();
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(1);
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+        '/ws/src/x.ts',
+        '/ws',
+      );
+    });
+
+    it('ignores declaration files', async () => {
+      useFiles(['/ws/src/x.d.ts', '/ws/src/x.d.js', '/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.d.ts'], 'create') });
+      watcher.emit({ changes: batchPaths(['/ws/src/x.d.ts'], 'delete') });
+      await settle();
+
+      expect(jest.mocked(access)).not.toHaveBeenCalled();
+      expect(indexer.reindexFile).not.toHaveBeenCalledWith(
+        expect.stringMatching(/\.js$/),
+        '/ws',
+      );
+      expect(indexer.deleteFileSymbols).not.toHaveBeenCalledWith(
+        expect.stringMatching(/\.js$/),
+        '/ws',
+      );
+    });
+
+    it('does not probe twins for a TypeScript modification', async () => {
+      useFiles(['/ws/src/x.ts', '/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.ts'], 'update') });
+      await settle();
+
+      expect(jest.mocked(access)).not.toHaveBeenCalled();
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.ts', '/ws');
+      expect(indexer.deleteFileSymbols).not.toHaveBeenCalled();
+    });
+
+    it('dedupes a twin that is already in the batch', async () => {
+      useFiles(['/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({
+        changes: [
+          { path: '/ws/src/x.ts', kind: 'delete' },
+          { path: '/ws/src/x.js', kind: 'update' },
+        ],
+      });
+      await settle();
+
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.js', '/ws');
+    });
+
+    it('replaces a shadowed twin update with the purge in the same batch', async () => {
+      useFiles(['/ws/src/x.ts', '/ws/src/x.js']);
+      const { indexer, watcher } = start();
+
+      watcher.emit({
+        changes: [
+          { path: '/ws/src/x.js', kind: 'update' },
+          { path: '/ws/src/x.ts', kind: 'create' },
+        ],
+      });
+      await settle();
+
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.ts', '/ws');
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(1);
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+        '/ws/src/x.js',
+        '/ws',
+      );
+    });
+
+    it('counts derived twins toward the storm threshold', async () => {
+      useFiles([
+        '/ws/src/a.ts',
+        '/ws/src/a.js',
+        '/ws/src/b.ts',
+        '/ws/src/b.js',
+      ]);
+      const { indexer, watcher } = start({ stormThreshold: 4 });
+      indexer.releases[0]?.resolve();
+      await flush();
+
+      watcher.emit({
+        changes: batchPaths(['/ws/src/a.ts', '/ws/src/b.ts'], 'create'),
+      });
+      await settle();
+
+      expect(indexer.indexWorkspace).toHaveBeenCalledTimes(2);
+      expect(indexer.reindexFile).not.toHaveBeenCalled();
+      expect(indexer.deleteFileSymbols).not.toHaveBeenCalled();
+    });
+
+    itPosix('reads each directory once per batch', async () => {
+      const stems = ['a', 'b', 'c', 'd', 'e'];
+      useFiles(
+        stems.flatMap((stem) => [`/ws/src/${stem}.ts`, `/ws/src/${stem}.js`]),
+      );
+      const { indexer, watcher } = start();
+
+      watcher.emit({
+        changes: batchPaths(
+          stems.map((stem) => `/ws/src/${stem}.ts`),
+          'create',
+        ),
+      });
+      await settle();
+
+      expect(jest.mocked(readDirectoryNames)).toHaveBeenCalledTimes(1);
+      expect(jest.mocked(readDirectoryNames)).toHaveBeenCalledWith('/ws/src');
+      expect(indexer.deleteFileSymbols).toHaveBeenCalledTimes(stems.length);
+    });
+
+    itPosix('schedules no twin when the directory read fails', async () => {
+      useFiles(['/ws/src/x.ts', '/ws/src/x.js']);
+      jest.mocked(readDirectoryNames).mockRejectedValue(new Error('EACCES'));
+      const { indexer, watcher, onError } = start();
+
+      watcher.emit({ changes: batchPaths(['/ws/src/x.ts'], 'create') });
+      await settle();
+
+      expect(jest.mocked(readDirectoryNames)).toHaveBeenCalledTimes(1);
+      expect(indexer.deleteFileSymbols).not.toHaveBeenCalled();
+      expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+      expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.ts', '/ws');
+      expect(onError).not.toHaveBeenCalled();
+    });
   });
 });
 

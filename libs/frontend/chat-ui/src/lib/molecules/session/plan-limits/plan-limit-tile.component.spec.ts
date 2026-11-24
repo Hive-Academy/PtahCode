@@ -215,9 +215,9 @@ describe('PlanLimitTileComponent', () => {
     expect(fill?.style.width).toBe('94%');
   });
 
-  it('fills the bar by severity: success below 75%, warning from 75%', () => {
+  it('fills by classified state and leaves aged high usage neutral', () => {
     const calm = render(
-      windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, percent: 40 } }),
+      windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, state: 'ok', percent: 40 } }),
     );
     expect(
       fillOf(calm)?.className,
@@ -225,11 +225,22 @@ describe('PlanLimitTileComponent', () => {
     TestBed.resetTestingModule();
 
     const hot = render(
-      windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, percent: 75 } }),
+      windowTile({ tone: 'neutral', window: { ...NEAR_WINDOW, state: 'aged', percent: 100 } }),
     );
     expect(
       fillOf(hot)?.className,
-    ).toContain('bg-state-need');
+    ).not.toMatch(/bg-state-(need|err)/);
+  });
+
+  it('uses the reported amount and limit on the plan row meter', () => {
+    const root = render(windowTile({
+      value: '12 of 40 requests',
+      window: { ...NEAR_WINDOW, usedText: '12 of 40 requests', amount: { value: 12, max: 40 } },
+    }));
+    const meter = root.querySelector('[role="progressbar"]');
+    expect(meter?.getAttribute('aria-valuenow')).toBe('12');
+    expect(meter?.getAttribute('aria-valuemax')).toBe('40');
+    expect(meter?.getAttribute('aria-valuetext')).toBe('12 of 40 requests');
   });
 
   it('omits the caption and the shared source chips the section header shows', () => {
@@ -452,7 +463,7 @@ describe('PlanLimitTileComponent', () => {
   });
 
   it('uses semantic colour only for the row accent and the bar fill, never text', () => {
-    const root = render(windowTile({ tone: 'error' }));
+    const root = render(windowTile({ tone: 'error', window: { ...NEAR_WINDOW, state: 'limit-reached' } }));
     const fill = fillOf(root);
 
     expect(button(root).className).toContain('border-error');
@@ -811,7 +822,7 @@ describe('PlanLimitTileComponent (variant="inspector")', () => {
   });
 
   it('uses semantic colour only for the card accent and the bar fill, never text', () => {
-    const root = render(windowTile({ tone: 'error' }));
+    const root = render(windowTile({ tone: 'error', window: { ...NEAR_WINDOW, state: 'limit-reached' } }));
 
     expect(byTestId(root, 'plan-limit-card').classList).toContain(
       'border-l-error',

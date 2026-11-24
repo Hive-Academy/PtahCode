@@ -108,7 +108,7 @@ describe('migration 0060_provider_account_lease_epoch', () => {
       name: '0060_provider_account_lease_epoch',
       sql,
     });
-    expect(Math.max(...MIGRATIONS.map((entry) => entry.version))).toBe(76);
+    expect(MIGRATIONS.findIndex((m) => m.version === 60)).toBe(59);
   });
 
   it('adds lease epoch, route revision and state columns and a NULL identity_ref', () => {

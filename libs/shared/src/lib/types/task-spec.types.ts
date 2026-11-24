@@ -1,3 +1,5 @@
+import type { BATCHES_FILE, LEGACY_BATCHES_FILE } from './task-spec.contract';
+
 /**
  * Task-spec plain types (TASK_2026_157).
  *
@@ -198,6 +200,76 @@ export interface TaskSpecDetail extends TaskSpecSummary {
   /** filenames present in the folder (context.md, tasks.md, ...). */
   artifacts: string[];
   entries?: Array<{ name: string; kind: 'file' | 'directory' | 'symlink' | 'other' }>;
+}
+
+export type TaskDocumentKind =
+  | 'carrier'
+  | 'handoff'
+  | 'requirements'
+  | 'design'
+  | 'plan'
+  | 'batches'
+  | 'decisions'
+  | 'reviews'
+  | 'reports'
+  | 'other';
+
+export type TaskDigestExtraction = 'none' | 'ok' | 'capped' | 'skipped' | 'failed';
+
+export interface TaskDigestDocument {
+  name: string;
+  kind: TaskDocumentKind;
+  group: string;
+  revision: number;
+  latest: boolean;
+  openable: boolean;
+  /** Null until this digest attempts a content read. */
+  readable: boolean | null;
+  extraction: TaskDigestExtraction;
+  size: number;
+  mtime: number;
+}
+
+export interface TaskDigest {
+  task: TaskSpecSummary;
+  truncated: boolean;
+  truncatedReasons: ('entries' | 'nested' | 'depth' | 'reads' | 'bytes')[];
+  /** Exact number of top-level entries. */
+  entryCount: number;
+  /** Newest stat'ed mtime in milliseconds, if any. */
+  lastModified: number | null;
+  documents: TaskDigestDocument[];
+  /** Counts over stat'ed entries. These can be lower bounds when truncated. */
+  counts: Record<TaskDocumentKind, number>;
+  directories?: {
+    name: string;
+    files: number;
+    markdown: number;
+    images: number;
+    directories: number;
+    symlinks: number;
+    truncated: boolean;
+    /** False when the folder was not listed, so its counts are unknown and not zero. */
+    counted: boolean;
+  }[];
+  reviews?: {
+    file: string;
+    subject: string;
+    revision: number;
+    round: number;
+    verdict: 'APPROVED' | 'REVISE' | null;
+    serious: number;
+    moderate: number;
+    minor: number;
+    extraction: TaskDigestExtraction;
+  }[];
+  decisions?: { rows: number; pendingUser: number };
+  progress?: {
+    done: number;
+    total: number;
+    source: typeof BATCHES_FILE | typeof LEGACY_BATCHES_FILE;
+  };
+  openQuestions?: number;
 }
 
 /** Typed exclusion — folders that never enter index/registry/board (R1.2). */

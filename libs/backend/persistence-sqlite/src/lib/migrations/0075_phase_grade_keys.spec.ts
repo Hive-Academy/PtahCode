@@ -45,7 +45,7 @@ describe('migration 0075_phase_grade_keys', () => {
       name: '0075_phase_grade_keys',
       sql,
     });
-    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(76);
+    expect(MIGRATIONS.findIndex((m) => m.version === 75)).toBe(74);
     expect(sql).not.toContain('${');
     expect(sql).not.toMatch(/\b(DELETE|UPDATE|INSERT|DROP)\b/i);
   });

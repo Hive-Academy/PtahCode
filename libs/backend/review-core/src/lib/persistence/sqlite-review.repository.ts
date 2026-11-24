@@ -6,6 +6,13 @@ import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/per
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type { ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueHead } from '../review-queue.service';
 import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord, ReviewStatusSyncRecord } from './review-repository.interface';
+import { NON_RETRYABLE_REVIEW_FAILURE_CODES } from '../review-failure-retry';
+import type { ReviewLaneUse } from '../lanes/review-lane.runner';
+
+/** Version of the `checkpoint:lane:<stage>` JSON document; `ReviewQueryRepository` reads it. */
+export const REVIEW_STAGE_LANE_RECORD_VERSION = 1;
+const UPSERT_CHECKPOINT = `INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES (?, ?, ?, 'completed', ?)
+      ON CONFLICT(attempt_id, stage, ordinal) DO UPDATE SET state = 'completed', outcome = excluded.outcome`;
 
 const attemptRow = z.object({ attempt_id: z.string(), repo_id: z.string(), pr_number: z.number(), head_sha: z.string(),
   attempt_number: z.number(), trigger: z.enum(['automatic', 'manual']), state: z.enum(['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']),
@@ -244,6 +251,14 @@ export class SqliteReviewRepository implements IReviewRepository {
           WHERE (repo_id, pr_number, head_sha) IN
             (SELECT repo_id, pr_number, head_sha FROM review_attempts WHERE attempt_id = ? AND trigger = 'automatic')`)
           .run(ms(now) + 600_000, ms(now) + 1_800_000, ms(now) + 7_200_000, attemptId);
+        // The orchestrator saves the failure before release. A failure that every attempt repeats stops automatic retries.
+        const failure = z.object({ failure_code: z.string().nullable() }).safeParse(
+          db.prepare(`SELECT failure_code FROM review_attempts WHERE attempt_id = ?`).get(attemptId));
+        if (failure.success && NON_RETRYABLE_REVIEW_FAILURE_CODES.some((code) => code === failure.data.failure_code)) {
+          db.prepare(`UPDATE review_heads SET failure_count = MAX(failure_count, 3), next_eligible_at = NULL
+            WHERE (repo_id, pr_number, head_sha) IN
+              (SELECT repo_id, pr_number, head_sha FROM review_attempts WHERE attempt_id = ? AND trigger = 'automatic')`).run(attemptId);
+        }
       }
       return updated;
     })();
@@ -302,9 +317,18 @@ export class SqliteReviewRepository implements IReviewRepository {
     const db = this.sqlite.db;
     const payload = JSON.stringify(data);
     if (payload === undefined) throw new Error('Checkpoint must be JSON serializable');
-    db.transaction(() => db.prepare(`INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES (?, ?, ?, 'completed', ?)
-      ON CONFLICT(attempt_id, stage, ordinal) DO UPDATE SET state = 'completed', outcome = excluded.outcome`)
-      .run(attemptId, `checkpoint:${stage}`, ordinal, payload))();
+    db.transaction(() => db.prepare(UPSERT_CHECKPOINT).run(attemptId, `checkpoint:${stage}`, ordinal, payload))();
+  }
+
+  async saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse): Promise<void> {
+    const db = this.sqlite.db;
+    const payload = JSON.stringify({ version: REVIEW_STAGE_LANE_RECORD_VERSION, lane: use.lane, model: use.model,
+      family: use.family, fallback: use.fallback });
+    db.transaction(() => {
+      db.prepare(`UPDATE review_stages SET family = ? WHERE attempt_id = ? AND stage = ? AND ordinal = ?`)
+        .run(use.family, attemptId, stage, ordinal);
+      db.prepare(UPSERT_CHECKPOINT).run(attemptId, `checkpoint:lane:${stage}`, ordinal, payload);
+    })();
   }
 
   async getCheckpoint(attemptId: string, stage: string, ordinal: number): Promise<unknown | null> {

@@ -37,7 +37,11 @@ import {
   type MainAgentScopeField,
 } from './main-agent-scope-badges.component';
 import { ProviderConnectionCardComponent } from './provider-connection-card.component';
-import type { ProviderConnectionCardStatus } from './provider-connection-card.state';
+import {
+  applyRecordedCheck,
+  resolveConnectionState,
+  type ProviderConnectionCardStatus,
+} from './provider-connection-card.state';
 import {
   ProviderSetupWizardComponent,
   type ProviderWizardCommit,
@@ -49,7 +53,6 @@ import {
   MainAgentReassignPopoverComponent,
   type MainAgentFocus,
 } from './main-agent-reassign-popover.component';
-import { ProviderCatalogModalComponent } from './provider-catalog-modal.component';
 import { connectedAccountCount } from './accounts/account-presentation';
 import {
   connectionKind,
@@ -116,7 +119,6 @@ const CONTROL =
     ConnectionDetailDrawerComponent,
     MainAgentSectionComponent,
     MainAgentReassignPopoverComponent,
-    ProviderCatalogModalComponent,
     KimiCodeLoginProgressComponent,
     PtahButtonDirective,
     PtahFieldComponent,
@@ -338,7 +340,9 @@ const CONTROL =
                   type="button"
                   ptahButton
                   variant="primary"
-                  (click)="openCatalog()"
+                  (click)="openWizard('')"
+                  [attr.aria-disabled]="canStartSetup() ? null : 'true'"
+                  [attr.aria-describedby]="setupBlockReasonId()"
                   data-testid="connect-provider"
                   data-focus="more-providers"
                 >
@@ -375,7 +379,9 @@ const CONTROL =
                 class="text-xs text-base-content-muted"
                 data-testid="catalog-hint"
               >
-                <p data-testid="catalog-hint-text">{{ catalogHint().lead }}</p>
+                <p id="provider-setup-connections-loading" data-testid="catalog-hint-text">
+                  {{ catalogHint().lead }}
+                </p>
               </div>
             }
             @if (state.connections().status === 'error') {
@@ -385,7 +391,7 @@ const CONTROL =
                 live="assertive"
                 data-read-error="connections"
               >
-                <p class="min-w-0">
+                <p id="provider-setup-connections-error" class="min-w-0">
                   Providers could not be loaded. Your saved settings have not
                   changed.
                 </p>
@@ -394,11 +400,16 @@ const CONTROL =
                   type="button"
                   ptahButton
                   variant="ghost"
-                  (click)="state.refreshConnections()"
+                  (click)="retryProviderConnections($event)"
                 >
                   Retry providers
                 </button>
               </ptah-alert>
+            }
+            @if (setupBlockReason(); as reason) {
+              <p id="provider-setup-block-reason" class="text-xs text-base-content-muted">
+                {{ reason }}
+              </p>
             }
             @if (
               state.connections().status === 'ready' &&
@@ -480,21 +491,6 @@ const CONTROL =
             </div>
           </section>
         </div>
-        <!-- Catalog modal: deferred (eager route at its bundle budget); the native <dialog> traps focus and returns it. -->
-        @defer (on immediate) {
-          <ptah-provider-catalog-modal
-            [open]="catalogOpen()"
-            [providers]="catalog()"
-            [status]="catalogStatus()"
-            [canSetUp]="canStartSetup()"
-            (closed)="catalogOpen.set(false)"
-            (providerChosen)="chooseCatalog($event)"
-            (customChosen)="chooseCatalog('')"
-            (signInRequested)="catalogSignIn($event)"
-            (retryRequested)="state.refreshConnections()"
-          />
-        }
-
         @if (state.externalAuth().data?.message; as message) {
           <p role="status" class="break-words text-sm">{{ message }}</p>
         }
@@ -595,6 +591,12 @@ const CONTROL =
             [workspaceName]="workspaceName()"
             [mainRouteExists]="mainRouteExists()"
             [defaultsResolvable]="wizardDefaults()"
+            [providersWithDefaults]="providersWithDefaults()"
+            [connectedProviderIds]="connectedProviderIds()"
+            [connectionsStatus]="catalogStatus()"
+            [saving]="saving()"
+            (retryConnectionsRequested)="state.refreshConnections()"
+            (signInShortcut)="wizardSignInShortcut($event)"
             [externalAuth]="wizardExternalAuth()"
             [externalMessage]="state.externalAuth().data?.message ?? null"
             [signInProgress]="wizardSignInProgress()"
@@ -761,8 +763,6 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   );
   protected readonly focusRing =
     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
-  /** The provider catalog modal is open. */
-  protected readonly catalogOpen = signal(false);
   protected readonly catalogHintOpen = signal(false);
   protected readonly toggle = (open: boolean): boolean => !open;
   protected readonly wizardOpen = signal(false);
@@ -856,8 +856,6 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     return commitToast(this.state.commit())?.message ?? '';
   });
   private returnFocus: HTMLElement | null = null;
-  /** What opened the catalog modal (the "Connect provider" button, or a deep link). */
-  private catalogOpener: HTMLElement | null = null;
   /** Deep-linked provider handed to the open wizard and not yet accepted by it. */
   private deepLinkAwaitingAcceptance: string | null = null;
   protected readonly saving = computed(
@@ -877,6 +875,20 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
       this.state.scopes().status === 'ready' &&
       !this.saving(),
   );
+  protected readonly setupBlockReason = computed(() => {
+    if (this.state.connections().status !== 'ready') return null;
+    const scopes = this.state.scopes().status;
+    if (scopes === 'error')
+      return 'Setting sources could not be loaded. Your saved settings have not changed.';
+    if (scopes !== 'ready') return 'Loading settings…';
+    return this.saving() ? 'Wait for the current save to finish.' : null;
+  });
+  protected readonly setupBlockReasonId = computed(() => {
+    const connections = this.state.connections().status;
+    if (connections === 'error') return 'provider-setup-connections-error';
+    if (connections !== 'ready') return 'provider-setup-connections-loading';
+    return this.setupBlockReason() ? 'provider-setup-block-reason' : null;
+  });
   protected readonly mainRouteExists = computed(
     () =>
       this.state.route().status === 'ready' &&
@@ -913,6 +925,33 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
           Number(left.id === this.activeId()),
       );
   });
+  protected readonly connectedProviderIds = computed(() => {
+    if (this.state.connections().status !== 'ready') return new Set<string>();
+    return new Set(
+      this.connections()
+        .filter((entry) => {
+          const status = applyRecordedCheck(
+            resolveConnectionState(
+              this.connectionStatus(entry),
+              this.hasProbeEvidence(entry.id),
+              this.activeId() === entry.id,
+              this.isBlocked(entry.id),
+            ),
+            this.lastCheckOf(entry.id),
+            this.state.route().data?.probedAt ?? null,
+          );
+          return status === 'connected' || status === 'active';
+        })
+        .map((entry) => entry.id),
+    );
+  });
+  protected readonly providersWithDefaults = computed(
+    () => new Set(
+      (this.state.connections().data ?? [])
+        .filter((entry) => entry.defaultsResolvable)
+        .map((entry) => entry.id),
+    ),
+  );
   protected readonly catalog = computed(() => {
     const configured = new Set(this.connections().map((entry) => entry.id));
     return (this.state.connections().data ?? []).filter(
@@ -922,11 +961,8 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   /** A failed connections read (it includes `provider:listCustomEntries`) is shown in the catalog, never as empty. */
   protected readonly catalogStatus = computed(() => {
     const connections = this.state.connections();
-    return connections.status === 'error'
-      ? 'error'
-      : connections.data === null
-        ? 'loading'
-        : 'ready';
+    if (connections.status === 'error') return 'error';
+    return connections.status === 'ready' ? 'ready' : 'loading';
   });
   /** The hint strip's sentence: never "0 providers" for a failed or pending read. */
   protected readonly catalogHint = computed(() => {
@@ -1190,13 +1226,9 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         untracked(() => this.openMainPopover(target));
         return;
       }
-      // `more-providers` lands on the catalog modal; focus returns to "Connect provider" when it closes.
       if (target === 'more-providers') {
-        this.element.nativeElement
-          .querySelector<HTMLElement>('[data-focus="more-providers"]')
-          ?.focus();
         this.focusedTarget = target;
-        untracked(() => this.openCatalog());
+        untracked(() => this.openWizard(''));
         return;
       }
       const node = this.element.nativeElement.querySelector<HTMLElement>(
@@ -1419,7 +1451,8 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.openWizard(providerId);
   }
   protected openWizard(providerId: string): void {
-    if (!this.canStartSetup()) return;
+    if (!providerId) this.focusConnectProvider();
+    if (!this.canStartSetup() || this.wizardOpen()) return;
     this.wizardContext.set(this.state.reviewContext());
     this.returnFocus = this.element.nativeElement.ownerDocument
       .activeElement as HTMLElement | null;
@@ -1493,13 +1526,13 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.deepLinkAwaitingAcceptance = null;
     this.requestedProviderConsumed.emit(provider);
   }
-  protected closeWizard(): void {
+  protected closeWizard(announceClose = true): void {
     // A deep link the wizard could not select (e.g. an unknown id) is still handled once dismissed.
     this.consumeDeepLink();
     this.wizardOpen.set(false);
     this.wizardContext.set(null);
     // A saved setup already said so when it committed.
-    if (this.wizardCommitState() !== 'saved')
+    if (announceClose && this.wizardCommitState() !== 'saved')
       this.feedback.announce(
         'Setup closed. External sign-in, if completed, remains available.',
         'status',
@@ -1520,24 +1553,20 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   ): void {
     void this.state.performExternalAuth(providerId, action);
   }
-  /**
-   * Opens the catalog modal; the native dialog returns focus to the opener when it closes. Opening is a read, so the
-   * openers stay enabled: a failed connections read is shown inside (with Retry), and setup is gated by `canSetUp`.
-   */
-  protected openCatalog(): void {
-    const active = this.element.nativeElement.ownerDocument.activeElement;
-    this.catalogOpener = active instanceof HTMLElement ? active : null;
-    this.catalogOpen.set(true);
+  private focusConnectProvider(): void {
+    this.element.nativeElement
+      .querySelector<HTMLButtonElement>('[data-focus="more-providers"]')
+      ?.focus();
   }
-  /** A catalog choice: the modal closes, then the unchanged wizard opens (`''` = custom endpoint, nothing preselected). */
-  protected chooseCatalog(providerId: string): void {
-    this.catalogOpen.set(false);
-    this.openWizard(providerId);
-    // Closing the wizard returns focus to what opened the catalog, not to the (gone) modal button.
-    this.returnFocus = this.catalogOpener;
+  protected retryProviderConnections(event: MouseEvent): void {
+    if (event.currentTarget === this.element.nativeElement.ownerDocument.activeElement) {
+      this.focusConnectProvider();
+    }
+    void this.state.refreshConnections();
   }
-  protected catalogSignIn(providerId: string): void {
-    this.catalogOpen.set(false);
+  protected wizardSignInShortcut(providerId: string): void {
+    if (this.saving()) return;
+    this.closeWizard(false);
     this.externalAction(providerId, 'sign-in');
   }
   /** Opens the Main Agent popover (the node's "Reassign", a `main-*` deep link focused on that control). */

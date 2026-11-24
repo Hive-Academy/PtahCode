@@ -8,6 +8,7 @@ import {
 import { NgTemplateOutlet } from '@angular/common';
 import { ChevronDown, ChevronUp, LucideAngularModule } from 'lucide-angular';
 import { PtahCountdownComponent, PtahMeterComponent } from '@ptah-extension/ui';
+import { windowMeter } from './plan-limit-tiles';
 import { PlanWindowDetailComponent } from './plan-window-detail.component';
 import { sameSources } from './stats-limit-sections';
 import {
@@ -16,7 +17,6 @@ import {
   newPanelId,
   planCardClass,
   planRowClass,
-  BAR_WARNING_PERCENT,
   sourceChipClass,
 } from './stats-tile.styles';
 import type { PlanLimitTileModel } from './stats-limit-view-model.types';
@@ -128,15 +128,15 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
             data-testid="plan-limit-status"
             >{{ t.value }}@if (t.resetLine) { · {{ t.resetLine }} }</span
           >
-        } @else if (hasBar()) {
+        } @else if (meter(); as range) {
           <span
             class="mt-2 flex min-w-0 items-center gap-2"
             data-testid="plan-limit-card-centre"
           >
             <ptah-meter
               class="block min-w-8 flex-1"
-              [value]="progressPercent() ?? 0"
-              [max]="100"
+              [value]="range.value"
+              [max]="range.max"
               [label]="t.label + ' plan usage'"
               [valueText]="t.value"
               [tone]="meterTone()"
@@ -230,11 +230,11 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
               data-testid="plan-limit-status"
               >{{ t.value }}@if (t.resetLine) { · {{ t.resetLine }} }</span
             >
-          } @else if (hasBar()) {
+          } @else if (meter(); as range) {
             <ptah-meter
               class="block min-w-8 flex-1"
-              [value]="progressPercent() ?? 0"
-              [max]="100"
+              [value]="range.value"
+              [max]="range.max"
               [label]="t.label + ' plan usage'"
               [valueText]="t.value"
               [tone]="meterTone()"
@@ -276,7 +276,7 @@ import type { PlanLimitTileModel } from './stats-limit-view-model.types';
             </span>
           }
         </span>
-        @if (hasBar() && t.resetLine) {
+        @if (meter() && t.resetLine) {
           <span
             class="block pl-[4.5rem] text-[11px] leading-tight text-base-content-muted"
             >{{ t.resetLine }}</span
@@ -365,22 +365,14 @@ export class PlanLimitTileComponent {
     const own = this.tile().sourceChips;
     return sameSources(own, this.sharedSources()) ? [] : own;
   });
-  /** Clamped to 0-100; `null` (no bar) when the used value is unknown. */
-  protected readonly progressPercent = computed<number | null>(() => {
-    const percent = this.tile().window?.percent;
-    return typeof percent === 'number' && Number.isFinite(percent)
-      ? Math.max(0, Math.min(100, percent))
-      : null;
+  protected readonly meter = computed(() => {
+    const tile = this.tile();
+    return tile.kind === 'status' ? null : windowMeter(tile.window);
   });
-  protected readonly hasBar = computed(
-    () => this.tile().kind !== 'status' && this.progressPercent() !== null,
-  );
-  /** Owner tone of the usage bar: error row is `err`, 75% or more is `warn`, else `ok`. */
-  protected readonly meterTone = computed<'ok' | 'warn' | 'err'>(() =>
-    this.tile().tone === 'error'
-      ? 'err'
-      : (this.progressPercent() ?? 0) >= BAR_WARNING_PERCENT
-        ? 'warn'
-        : 'ok',
-  );
+  protected readonly meterTone = computed<'ok' | 'warn' | 'err' | 'neutral'>(() => {
+    const state = this.tile().window?.state;
+    if (state === 'limit-reached') return 'err';
+    if (state === 'near-limit') return 'warn';
+    return state === 'ok' ? 'ok' : 'neutral';
+  });
 }

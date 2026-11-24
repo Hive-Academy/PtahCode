@@ -2,10 +2,11 @@
  * `~/.gemini/config/mcp_config.json` — the one MCP config file with TWO writers
  * (TASK_2026_285).
  *
- * The reconciler installs the USER's servers into it; `AntigravityCliAdapter`
- * writes Ptah's own ephemeral `ptah` server into it before every spawn and
- * removes that key after `done`. Both go through this facet, so this spec is
- * where the file's schema and the key partition are pinned:
+ * The reconciler installs the USER's servers into it; a second writer puts
+ * Ptah's own `ptah` server into it (`CodeExecutionMCP` today; the former
+ * per-spawn writer `AntigravityCliAdapter` stopped in TASK_2026_2322). Both go
+ * through this facet, so this spec is where the file's schema and the key
+ * partition are pinned:
  *
  * 1. The schema `agy` actually reads — `mcpServers`, `{command,args,env}` for
  *    stdio, `{serverUrl}` (NOT `url`) for remote, no `type` discriminant.
@@ -219,7 +220,7 @@ describe('Antigravity MCP facet (TASK_2026_285)', () => {
 
   it('a reconcile write and a spawn write issued concurrently both land — neither read-modify-write is lost', async () => {
     // Two facet INSTANCES, because the two writers are two call sites: the
-    // reconciler's target and the CLI adapter. Sharing one object would test
+    // reconciler's target and the `ptah`-key writer. Sharing one object would test
     // nothing about the lock.
     const reconcilerFacet = makeFacet();
     const adapterFacet = makeFacet();

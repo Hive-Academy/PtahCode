@@ -12,6 +12,7 @@
 
 import type {
   ExcludedTaskFolder,
+  TaskDigest,
   TaskEstimate,
   TaskSpecSummary,
   TaskSpecDetail,
@@ -57,6 +58,13 @@ export interface TasksGetParams extends TasksWorkspaceScopedParams {
 }
 export interface TasksGetResult {
   task: TaskSpecDetail | null;
+}
+
+export interface TasksGetDigestParams extends TasksWorkspaceScopedParams {
+  taskId: string;
+}
+export interface TasksGetDigestResult {
+  digest: TaskDigest | null;
 }
 
 /**

@@ -17,6 +17,7 @@
  * reindex that pretends to have scanned it.
  */
 
+import { realpath } from 'fs/promises';
 import * as path from 'path';
 import type {
   CodeIndexFreshness,
@@ -35,6 +36,16 @@ import {
   supportedLanguagesFor,
   type CodeSymbolIndexer,
 } from '@ptah-extension/workspace-intelligence';
+import type { AstCodeInsights } from '../types';
+import {
+  handleGrep,
+  type GrepArgs,
+  type GrepReply,
+} from '../mcp-core/nav/grep';
+import {
+  handleReadSymbol,
+  type ReadSymbolArgs,
+} from '../mcp-core/nav/read-symbol';
 import {
   shapeSymbolHits,
   symbolCandidateCount,
@@ -66,6 +77,14 @@ export interface CodeNamespaceDependencies {
    * only when the searched root is exactly one of these.
    */
   getHostWorkspaceRoots: () => readonly string[];
+  /**
+   * Root of `grep` and `readSymbol`: the session root, or `undefined` when no
+   * workspace is open. Unlike `getWorkspaceRoot` there is no home-directory
+   * fallback, so a free-text search never walks the home directory.
+   */
+  getNavWorkspaceRoot?: () => string | undefined;
+  /** Tree-sitter outline of an absolute file path, for `grep` and `readSymbol`. */
+  analyze?: (absolutePath: string) => Promise<AstCodeInsights>;
   logger: {
     warn(message: string, metadata?: Record<string, unknown>): void;
   };
@@ -161,8 +180,10 @@ export interface CodeNamespace {
 
   /**
    * `filePath` reindexes one file and waits; no `filePath` starts a full run
-   * in the background. A file the index cannot hold is answered
-   * `unsupported-language`: nothing is deleted and nothing is counted.
+   * in the background. A full run is forced (TASK_2026_2312_c3ef D5): every
+   * file is parsed even when its stored fingerprint shows no change. A file
+   * the index cannot hold is answered `unsupported-language`: nothing is
+   * deleted and nothing is counted.
    */
   reindex(options?: {
     filePath?: string;
@@ -175,7 +196,24 @@ export interface CodeNamespace {
    * background reindex without waiting for it. Never rejects.
    */
   ensureIndexFresh(): Promise<IndexFreshnessStatus>;
+
+  /**
+   * Free-text search of the workspace, the same engine and plain-text answer
+   * as the `ptah_grep` tool. The root is the session workspace;
+   * `workspaceRoot` is refused. Throws the tool's error text on a failed call.
+   */
+  grep(args: NavCallArgs<GrepArgs>): Promise<string>;
+
+  /**
+   * Reads one declaration by name, or a line range, the same as the
+   * `ptah_read_symbol` tool. The root is the session workspace;
+   * `workspaceRoot` is refused. Throws the tool's error text on a failed call.
+   */
+  readSymbol(args: NavCallArgs<ReadSymbolArgs>): Promise<string>;
 }
+
+/** Arguments of a Code Mode nav call: those of the tool, minus `workspaceRoot`. */
+export type NavCallArgs<T> = Omit<T, 'workspaceRoot'>;
 
 export function buildCodeNamespace(
   deps: CodeNamespaceDependencies,
@@ -186,9 +224,97 @@ export function buildCodeNamespace(
     getSymbolIndexer,
     getWorkspaceRoot,
     getHostWorkspaceRoots,
+    getNavWorkspaceRoot,
+    analyze,
     logger,
   } = deps;
   const now = deps.now ?? Date.now;
+
+  /**
+   * The canonical path of `root` when it is a host-recorded root or a
+   * directory inside one, else `undefined`. The caller uses the returned
+   * path, so the checked location is the one that is searched.
+   */
+  async function resolveInsideHostRoot(
+    root: string,
+  ): Promise<string | undefined> {
+    const canonical = async (value: string): Promise<string> => {
+      try {
+        return await realpath(value);
+      } catch {
+        return path.resolve(value);
+      }
+    };
+    const target = await canonical(root);
+    for (const host of getHostWorkspaceRoots()) {
+      const relative = path.relative(await canonical(host), target);
+      // A parent segment is `..` or `..` plus a separator: a folder whose
+      // name only starts with two dots (`..project`) is a valid descendant.
+      const leavesRoot =
+        relative === '..' ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative);
+      if (!leavesRoot) {
+        return target;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * One nav call: the tool's own handler, so the tool and Code Mode cannot
+   * drift. `workspaceRoot` is refused because the MCP tool checks it against
+   * the open folders and a Code Mode call has no such check.
+   */
+  async function runNav(
+    toolName: string,
+    handler: (
+      args: unknown,
+      navDeps: {
+        analyze: (absolutePath: string) => Promise<AstCodeInsights>;
+        defaultWorkspaceRoot: () => Promise<string | undefined>;
+      },
+    ) => Promise<GrepReply>,
+    args: unknown,
+  ): Promise<string> {
+    if (!analyze || !getNavWorkspaceRoot) {
+      throw new Error(`ptah.code: ${toolName} is not available in this host`);
+    }
+    // One read of the caller's object: a getter or Proxy cannot show a
+    // different `workspaceRoot` to this check and to the handler's schema.
+    const snapshot: unknown =
+      typeof args === 'object' && args !== null ? { ...args } : args;
+    if (
+      typeof snapshot === 'object' &&
+      snapshot !== null &&
+      (snapshot as { workspaceRoot?: unknown }).workspaceRoot !== undefined
+    ) {
+      throw new Error(
+        `ptah.code: "workspaceRoot" is not supported; ${toolName} runs in the current workspace`,
+      );
+    }
+    // The session root can come from a caller-declared tier (an MCP URL
+    // segment). The MCP tools refuse a declared root outside the open
+    // folders; so does this call, rather than search the wrong tree.
+    const declaredRoot = getNavWorkspaceRoot();
+    const root =
+      declaredRoot === undefined
+        ? undefined
+        : await resolveInsideHostRoot(declaredRoot);
+    if (declaredRoot !== undefined && root === undefined) {
+      throw new Error(
+        `ptah.code: the workspace '${declaredRoot}' is not an open folder of this host or a directory inside one, so ${toolName} did not run`,
+      );
+    }
+    const reply = await handler(snapshot, {
+      analyze,
+      defaultWorkspaceRoot: async () => root,
+    });
+    if (reply.isError) {
+      throw new Error(reply.text);
+    }
+    return reply.text;
+  }
 
   /** When the last background run for a root started (epoch ms). */
   const lastRunStartedAt = new Map<string, number>();
@@ -250,9 +376,14 @@ export function buildCodeNamespace(
     return Math.max(0, now() - freshness.newestUpdatedAt);
   }
 
-  /** Empty, or older than the threshold. An unknown age is never stale. */
+  /** Empty without a validated run, or older than the threshold. An unknown age is never stale. */
   function isStale(freshness: CodeIndexFreshness): boolean {
-    if (freshness.symbolCount === 0) return true;
+    if (freshness.symbolCount === 0) {
+      // A root a complete run validated — even one that wrote no symbols —
+      // is not stale (TASK_2026_2312_c3ef D2): without this, every tool call
+      // on a zero-symbol root would start another run.
+      return (freshness.validatedAt ?? null) === null;
+    }
     const age = ageOf(freshness);
     return age !== null && age > CODE_INDEX_STALE_MS;
   }
@@ -264,6 +395,11 @@ export function buildCodeNamespace(
    * A lazy run is `userInitiated: false` and so waits on the background-work
    * governor before each batch; it is never awaited from inside a tool call,
    * which would make the generating turn wait for itself (TASK_2026_437).
+   *
+   * A user-initiated full reindex also sets `force` (TASK_2026_2312_c3ef D5):
+   * an agent asked for it, so every file is parsed even when its stored
+   * fingerprint shows no change. The lazy run never forces, so its options
+   * stay exactly as before.
    *
    * `indexWorkspace` is called synchronously (inside the executor), because
    * it begins its run before its first `await`: coverage read right after
@@ -277,7 +413,12 @@ export function buildCodeNamespace(
   ): void {
     lastRunStartedAt.set(root, now());
     void new Promise<unknown>((resolve) =>
-      resolve(indexer.indexWorkspace(root, { userInitiated })),
+      resolve(
+        indexer.indexWorkspace(root, {
+          userInitiated,
+          ...(userInitiated ? { force: true } : {}),
+        }),
+      ),
     ).catch((error: unknown) => {
       // degradation-audit: reported — a background reindex failure is logged
       // at warn and never reaches the tool call that started it. Fixed text:
@@ -530,6 +671,10 @@ export function buildCodeNamespace(
     },
 
     ensureIndexFresh,
+
+    grep: (args) => runNav('grep', handleGrep, args),
+
+    readSymbol: (args) => runNav('readSymbol', handleReadSymbol, args),
   };
 }
 

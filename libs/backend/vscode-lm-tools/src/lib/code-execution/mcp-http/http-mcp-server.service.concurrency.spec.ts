@@ -288,7 +288,7 @@ describe('retired Antigravity slots (TASK_2026_2297)', () => {
     expect(servers(wsFile())).toEqual({ docs });
   });
 
-  it("keeps a running stream-json lane's entry and a user's own `ptah` server", async () => {
+  it("removes a leftover stream-json lane entry and keeps a user's own `ptah` server", async () => {
     const lane = {
       serverUrl: `http://localhost:${PORT}/auth/${TOKEN}/agent/a1/workspace/${encodeURIComponent(workspaceRoot)}`,
     };
@@ -298,7 +298,7 @@ describe('retired Antigravity slots (TASK_2026_2297)', () => {
 
     await agyService.ensureRegisteredForSubagents();
 
-    expect(servers(homeFile())).toEqual({ ptah: lane });
+    expect(servers(homeFile())).toEqual({});
     expect(servers(wsFile())).toEqual({ ptah: userPtah });
   });
 

@@ -896,6 +896,8 @@ import type {
   TasksListResult,
   TasksGetParams,
   TasksGetResult,
+  TasksGetDigestParams,
+  TasksGetDigestResult,
   TasksGetArtifactParams,
   TasksGetArtifactResult,
   TasksReadFolderMarkdownParams,
@@ -2969,6 +2971,7 @@ export interface RpcMethodRegistry
   };
   'tasks:list': { params: TasksListParams; result: TasksListResult };
   'tasks:get': { params: TasksGetParams; result: TasksGetResult };
+  'tasks:getDigest': { params: TasksGetDigestParams; result: TasksGetDigestResult };
   'tasks:getArtifact': {
     params: TasksGetArtifactParams;
     result: TasksGetArtifactResult;
@@ -4165,6 +4168,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'review:listFindings': true,
   'review:listRepositories': true,
   'review:getSettings': true,
+  'review:listLanes': true,
   'review:updateSettings': true,
   'review:setPublicationPause': true,
   'review:retryHead': true,
@@ -4237,6 +4241,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
 
   'tasks:list': true,
   'tasks:get': true,
+  'tasks:getDigest': true,
   'tasks:getArtifact': true,
   'tasks:readFolderMarkdown': true,
   'tasks:listFolderEntries': true,

@@ -60,7 +60,7 @@ describe('migration 0052_memory_boot_scan_failures — registry and static SQL',
   });
 
   it('keeps the bundled-version ratchet current', () => {
-    expect(Math.max(...MIGRATIONS.map((m) => m.version))).toBe(76);
+    expect(MIGRATIONS.findIndex((m) => m.version === 52)).toBe(51);
   });
 });
 

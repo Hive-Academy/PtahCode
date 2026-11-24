@@ -7,6 +7,49 @@
 import * as path from 'path';
 import type { WalkSlice } from './cooperative-yield';
 
+/** Checks for the directory of a repository or the pointer file of a worktree. */
+export async function holdsGitEntry(
+  directory: string,
+  exists: (filePath: string) => Promise<boolean>,
+  onError?: (error: unknown) => void,
+): Promise<boolean> {
+  try {
+    return (await exists(path.join(directory, '.git'))) === true;
+  } catch (error: unknown) {
+    // degradation-audit: optional-capability - a `.git` probe that cannot run
+    // treats the directory as a plain folder; `onError` lets the caller log it.
+    onError?.(error);
+    return false;
+  }
+}
+
+/** Finds the closest repository or worktree between a file and the workspace root. */
+export async function findNestedRepoAncestor(
+  root: string,
+  file: string,
+  exists: (filePath: string) => Promise<boolean>,
+): Promise<string | null> {
+  const relative = path.relative(root, file);
+  if (
+    !relative ||
+    relative === '..' ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return null;
+  }
+
+  for (
+    let parent = path.dirname(relative);
+    parent !== '.';
+    parent = path.dirname(parent)
+  ) {
+    const directory = path.resolve(root, parent);
+    if (await holdsGitEntry(directory, exists)) return directory;
+  }
+  return null;
+}
+
 /**
  * Every directory holding one of `files`, and each of its ancestors, once
  * (root-relative, `/`-joined). Walking up stops at the first directory already

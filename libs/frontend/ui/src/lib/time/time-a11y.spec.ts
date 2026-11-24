@@ -136,3 +136,20 @@ describe('timer owners accessibility', () => {
     expect(PTAH_COUNTDOWN_STYLES).not.toMatch(/@keyframes/);
   });
 });
+
+it('exposes the reason for an unknown elapsed time without a live announcement or tab stop', () => {
+  const clock = new FakePtahClock(NOW);
+  TestBed.configureTestingModule({ providers: [clock.provide()] });
+  const fixture = TestBed.createComponent(PtahTimerComponent);
+  fixture.componentRef.setInput('startedAt', null);
+  fixture.componentRef.setInput('label', 'Run time');
+  fixture.componentRef.setInput('unknownReason', 'No duration reported');
+  fixture.detectChanges();
+
+  const timer = fixture.nativeElement as HTMLElement;
+  expect(timer.getAttribute('aria-label')).toBe('Run time: No duration reported');
+  expect(timer.getAttribute('aria-live')).toBe('off');
+  expect(timer.hasAttribute('tabindex')).toBe(false);
+  expect(timer.querySelector('[aria-live="polite"]')?.textContent).toBe('');
+  expect(timer.querySelector('time')?.textContent).toBe('--:--');
+});

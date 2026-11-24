@@ -17,11 +17,27 @@ export const API_RETRY_MAX_ACCOUNTED_MS = 900_000;
 
 export type WatchdogTimeoutCause = 'provider-no-response';
 
+/**
+ * The quiet window of the provider-hang guard for an SDK whose first-byte wait
+ * is `firstByteTimeoutMs`. The SDK announces its own retry (`api_retry`) only
+ * when that wait ends, so the guard must wait longer than the SDK, plus the
+ * retry margin. A shorter guard ended child f7ea7de9 1.6 s before the SDK
+ * retry (incident 2026-11-23: guard 180 s, SDK wait 181 s).
+ */
+export function noActivityWindowMs(firstByteTimeoutMs: number): number {
+  // No upper clamp: a guard shorter than the SDK wait recreates the race.
+  return Math.max(
+    NO_ACTIVITY_TIMEOUT_MS,
+    nonNegativeMs(firstByteTimeoutMs) + API_RETRY_MARGIN_MS,
+  );
+}
+
 export class ProviderTurnEndError extends Error {
   readonly startedAt = Date.now();
 
   constructor(
     readonly endCause: WatchdogTimeoutCause | 'provider-input-closed',
+    windowMs: number = NO_ACTIVITY_TIMEOUT_MS,
   ) {
     super(
       endCause === 'provider-input-closed'
@@ -31,7 +47,7 @@ export class ProviderTurnEndError extends Error {
             action: 'ended',
             reason: endCause,
             nextStep: 'retry-first-turn',
-            measured: NO_ACTIVITY_TIMEOUT_MS,
+            measured: windowMs,
             unit: 'milliseconds',
           }),
     );
@@ -144,7 +160,25 @@ export class NoActivityWatchdog {
     private readonly onTimeout: (cause: WatchdogTimeoutCause) => void,
     private readonly onOverdue: (operations: readonly string[]) => void = () =>
       undefined,
+    /**
+     * Called once after an overdue report when the session shows activity again, closes its
+     * turn or stops. Lets the host withdraw the overdue notice. Never stops the session.
+     */
+    private readonly onRecovered: () => void = () => undefined,
   ) {}
+
+  /** An overdue report is outstanding and the host has not yet been told it cleared. */
+  private overdueReported = false;
+
+  private recovered(): void {
+    if (!this.overdueReported) return;
+    this.overdueReported = false;
+    try {
+      this.onRecovered();
+    } catch {
+      // The notice is informational; a failing subscriber never changes the watchdog.
+    }
+  }
 
   get firedCause(): WatchdogTimeoutCause | null {
     return this.terminalError?.endCause === 'provider-no-response' ? 'provider-no-response' : null;
@@ -181,6 +215,7 @@ export class NoActivityWatchdog {
   }
 
   endTurn(): void {
+    this.recovered();
     this.turnOpen = false;
     this.tools.clear();
     this.finishedTools.clear();
@@ -196,6 +231,7 @@ export class NoActivityWatchdog {
   }
 
   kick(): void {
+    this.recovered();
     this.quietUntil = performance.now() + this.timeoutMs;
     this.toolNoticeAt = this.quietUntil;
     this.arm();
@@ -204,6 +240,8 @@ export class NoActivityWatchdog {
   hold(): void {
     if (this.stopped) return;
     this.holds += 1;
+    // A hold is a wait for the person (a permission or an approval), not a hang.
+    this.recovered();
     this.clear();
   }
 
@@ -314,7 +352,10 @@ export class NoActivityWatchdog {
           changed = true;
         }
       }
-      if (changed) this.arm();
+      if (changed) {
+        this.recovered();
+        this.arm();
+      }
       return;
     }
     switch (message.type) {
@@ -414,6 +455,7 @@ export class NoActivityWatchdog {
         const task = this.tasks.get(message.task_id);
         if (!task || (message.run_id && task.runId && message.run_id !== task.runId)) return;
         task.overdue = overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+        this.recovered();
         this.arm();
         return;
       }
@@ -554,7 +596,10 @@ export class NoActivityWatchdog {
       return;
     }
     try {
-      if (operations.size) this.onOverdue([...operations]);
+      if (operations.size) {
+        this.overdueReported = true;
+        this.onOverdue([...operations]);
+      }
     } finally {
       this.arm();
     }

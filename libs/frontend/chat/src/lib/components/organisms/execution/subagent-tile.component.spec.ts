@@ -87,6 +87,49 @@ describe('SubagentTileComponent', () => {
     expect(fixture.nativeElement.querySelector('[data-testid="subagent-status"]').textContent).toBe('Completed');
   });
 
+  it('shows a Ptah notice chip outside the open button while the subagent is live (TASK_2026_2310)', () => {
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'asked-handoff',
+      reason: 'weighted-budget',
+      nextStep: 'return-report',
+    } as const;
+    records.set(
+      new Map([
+        [
+          'task-1',
+          {
+            parentToolUseId: 'task-1',
+            agentId: 'agent-7',
+            status: 'running',
+            actionNotice: notice,
+            actionNoticeText: 'Ptah budget monitor asked agent-7 for a handoff.',
+          } as SubagentRecord,
+        ],
+      ]),
+    );
+    const fixture = TestBed.createComponent(SubagentTileComponent);
+    fixture.componentRef.setInput('node', makeNode());
+    fixture.detectChanges();
+    const el = fixture.nativeElement as HTMLElement;
+    const chip = el.querySelector('[data-testid="subagent-action-notice"]');
+    expect(chip?.textContent).toContain('Handoff requested');
+    expect(chip?.textContent).toContain('Notice:');
+    expect(chip?.getAttribute('title')).toBe('Ptah budget monitor asked agent-7 for a handoff.');
+    expect(el.querySelector('[data-testid="subagent-open"]')?.contains(chip)).toBe(false);
+
+    records.set(
+      new Map([
+        [
+          'task-1',
+          { parentToolUseId: 'task-1', agentId: 'agent-7', status: 'completed', actionNotice: notice } as SubagentRecord,
+        ],
+      ]),
+    );
+    fixture.detectChanges();
+    expect(el.querySelector('[data-testid="subagent-action-notice"]')).toBeNull();
+  });
+
   it('shows Loading during replay for a nonterminal record without a spinner', () => {
     replayingTabIds.set(new Set(['tab-1']));
     const fixture = TestBed.createComponent(SubagentTileComponent);

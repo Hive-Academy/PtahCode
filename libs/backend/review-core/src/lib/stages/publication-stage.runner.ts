@@ -26,8 +26,9 @@ export class PublicationStageRunner {
     @inject(ReviewPublicationService) private readonly publication: ReviewPublicationService | null = null,
   ) {}
 
+  /** `triageFamily` is the family of the lane that completed triage; the summary reports it (requirement 3.6). */
   async run(claim: ReviewQueueClaim, context: ContextStageResult, lenses: LensStageResult,
-    verdicts: VerificationResult[], signal?: AbortSignal, triageCompleted = true): Promise<PublicationResult> {
+    verdicts: VerificationResult[], signal?: AbortSignal, triageCompleted = true, triageFamily: string | null = null): Promise<PublicationResult> {
     if (signal?.aborted) throw new Error('Review publication aborted');
     const operatorSettings = await this.environment.settings();
     const baseConfig = await this.environment.baseConfig(claim.repo, context.baseSha);
@@ -63,7 +64,7 @@ export class PublicationStageRunner {
     const preview: ReviewPreviewInput = {
       headSha: claim.headSha, walkthrough, accepted, suppressed,
       verification: verdicts.map(({ finding, verification }) => ({ finding, label: verification })),
-      selectedLenses: [{ lens: 'triage', family: 'coordinator', scope: context.coverage.join('; '),
+      selectedLenses: [{ lens: 'triage', family: triageCompleted && triageFamily ? triageFamily : 'unavailable', scope: context.coverage.join('; '),
         outcome: triageCompleted ? 'completed' : 'unavailable' },
         ...lenses.map(({ lens, result }) => ({ lens, family: result.status === 'completed' ? result.family : 'unavailable',
           scope: context.coverage.join('; '), outcome: result.status === 'completed' ? 'completed' : `unavailable: ${result.reason}` }))],

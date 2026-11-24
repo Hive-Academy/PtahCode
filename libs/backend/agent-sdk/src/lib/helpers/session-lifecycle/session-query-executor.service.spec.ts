@@ -1639,6 +1639,66 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     }
   });
 
+  it('applies a resumed run start without a tool_use id to the spawn that owns the task', async () => {
+    const logger = makeLogger();
+    const monitor = new SubagentBudgetMonitor(
+      logger,
+      {
+        getAgentBudgetSettings: () => ({
+          warnRatio: 0.85, handoffContextTokens: 150_000, stopWeightedTokens: 3_000_000, maxDurationMin: 90,
+        }),
+      } as unknown as CompactionConfigProvider,
+      {
+        pushParentMessage: jest.fn().mockResolvedValue(undefined),
+        postMainThreadNotice: jest.fn(),
+        withdrawMainThreadNotice: jest.fn(),
+        postSubagentNotice: jest.fn(),
+        withdrawSubagentNotice: jest.fn(),
+      },
+      {
+        get: () => ({ agentId: 'a1', agentType: 'Explore', taskId: 'task-1', status: 'running', isBackground: true }),
+        getToolCallIdByAgentId: () => undefined,
+        update: jest.fn(),
+      } as unknown as SubagentRegistryService,
+      noHandoffFiles,
+      { ...memoryHandoffRecords, workspaceOf: () => '/ws' },
+      noHandoffIndex,
+      new SubagentBudgetStopCallbackRegistry(logger),
+      new SubagentStopNotices(),
+      jest.fn().mockResolvedValue(undefined),
+    );
+    const { executor } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
+    const run = await executor.executeQuery(makeConfig('tab_resume_toolless'));
+    const send = async (message: SDKMessage) => {
+      run.activityWatchdog.observe(message);
+      await run.onMessage(message);
+    };
+    try {
+      await send(init());
+      await send(taskStarted({ tool_use_id: 'toolu_1', run_id: 'run-1', is_backgrounded: true }));
+      await send(msg({
+        type: 'user', session_id: REAL, parent_tool_use_id: null,
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Async agent launched' }] },
+      }));
+      await send(msg({
+        type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_1',
+        message: { id: 'usage-frame', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 310_000, output_tokens: 1 }, content: [] },
+      }));
+      expect(monitor.notesGatePhase('a1', REAL)).toBe('paused');
+      // The resumed run 2 starts without a tool_use id: the executor must not drop it.
+      await send(taskStarted({ run_id: 'run-2', is_backgrounded: true }));
+      expect(monitor.notesGatePhase('a1', REAL)).toBeUndefined();
+      // The stale terminal of run 1 is ignored; the terminal of run 2 is accepted.
+      await send(msg({
+        type: 'system', subtype: 'task_notification', session_id: REAL,
+        task_id: 'task-1', run_id: 'run-1', tool_use_id: 'toolu_1', status: 'failed',
+      }));
+      expect(monitor.getAgentBudgetState('a1', REAL)?.sdkOutcome).toBeUndefined();
+    } finally {
+      run.abortController.abort();
+    }
+  });
+
   describe('task_started (TASK_2026_627 R5)', () => {
     it('records the task id of an agent task under the real session id', async () => {
       const { monitor, recordTaskStarted, observe } = makeMonitor();
@@ -1670,7 +1730,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       run.abortController.abort();
     });
 
-    it('passes a non-agent task through (the monitor ignores its id) and skips one without a tool_use id', async () => {
+    it('passes a non-agent task through (the monitor ignores its id) and forwards one without a tool_use id', async () => {
       const { monitor, recordTaskStarted } = makeMonitor();
       const { executor } = makeHarness('ask', {} as AuthEnv, {
         subagentMonitor: monitor,
@@ -1682,10 +1742,21 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         taskStarted({ tool_use_id: 'toolu_bash', task_type: 'local_bash' }),
       );
       feed(run, taskStarted({ task_type: 'local_workflow' }));
-      expect(recordTaskStarted).toHaveBeenCalledTimes(1);
-      expect(recordTaskStarted).toHaveBeenCalledWith(
+      expect(recordTaskStarted).toHaveBeenCalledTimes(2);
+      expect(recordTaskStarted).toHaveBeenNthCalledWith(
+        1,
         REAL,
         'toolu_bash',
+        'task-1',
+        undefined,
+        undefined,
+        undefined,
+      );
+      // The monitor resolves the missing id from the task id.
+      expect(recordTaskStarted).toHaveBeenNthCalledWith(
+        2,
+        REAL,
+        undefined,
         'task-1',
         undefined,
         undefined,

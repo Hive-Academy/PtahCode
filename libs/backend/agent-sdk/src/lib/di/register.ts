@@ -110,6 +110,7 @@ import {
   CompactionCallbackRegistry,
   CompactionBoundaryGenerationRegistry,
   SessionIdResolvedCallbackRegistry,
+  AgentNoticeCallbackRegistry,
   SessionMcpStatusCallbackRegistry,
   McpServerBackoffService,
   SessionTurnStateRegistry,
@@ -259,7 +260,11 @@ export function registerSdkServices(
   options: {
     readonly devHost?: boolean;
     readonly env?: NodeJS.ProcessEnv;
-    readonly windowsJobs?: { assigner: IWindowsJobAssigner; binaryPath: string; setting: () => boolean };
+    readonly windowsJobs?: {
+      assigner: IWindowsJobAssigner;
+      binaryPath: string;
+      setting: () => boolean;
+    };
   } = {},
 ): void {
   const overrides = readDevOverrides(
@@ -578,16 +583,18 @@ export function registerSdkServices(
     { lifecycle: Lifecycle.Singleton },
   );
 
-  container.register(
-    SDK_TOKENS.SDK_PROCESS_SPAWNER,
-    { useFactory: instanceCachingFactory((c: DependencyContainer) => {
+  container.register(SDK_TOKENS.SDK_PROCESS_SPAWNER, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const spawner = c.resolve(OffThreadProcessSpawner);
-      if (options.windowsJobs) spawner.configureWindowsJobs(
-        options.windowsJobs.assigner, options.windowsJobs.binaryPath, options.windowsJobs.setting,
-      );
+      if (options.windowsJobs)
+        spawner.configureWindowsJobs(
+          options.windowsJobs.assigner,
+          options.windowsJobs.binaryPath,
+          options.windowsJobs.setting,
+        );
       return spawner;
-    }) },
-  );
+    }),
+  });
 
   container.register(
     SDK_TOKENS.SDK_QUERY_RUNNER,
@@ -721,6 +728,9 @@ export function registerSdkServices(
         );
       const notices = c.resolve(MainThreadNoticeQueue);
       const subagentNotices = c.resolve(SubagentNoticeQueue);
+      const agentNotices = c.resolve<AgentNoticeCallbackRegistry>(
+        SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY,
+      );
       const logger = c.resolve<Logger>(TOKENS.LOGGER);
       // Resolved on first use, like the dispatcher: the lifecycle manager
       // injects this monitor.
@@ -747,6 +757,14 @@ export function registerSdkServices(
             subagentNotices.post(agentId, text),
           withdrawSubagentNotice: (agentId) =>
             subagentNotices.withdraw(agentId),
+          announceSubagentNotice: (sessionId, agentId, notice, text) =>
+            agentNotices.notifyAll({
+              kind: 'subagent-notice',
+              sessionId,
+              agentId,
+              notice,
+              text,
+            }),
         },
         c.resolve<SubagentRegistryService>(TOKENS.SUBAGENT_REGISTRY_SERVICE),
         handoffFiles,
@@ -788,6 +806,12 @@ export function registerSdkServices(
   container.register(
     SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
     { useClass: SessionIdResolvedCallbackRegistry },
+    { lifecycle: Lifecycle.Singleton },
+  );
+
+  container.register(
+    SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY,
+    { useClass: AgentNoticeCallbackRegistry },
     { lifecycle: Lifecycle.Singleton },
   );
 
@@ -859,7 +883,8 @@ export function registerSdkServices(
   );
   // Foreground source for the background-work governor (TASK_2026_437 C14):
   // background lanes yield while any session is generating (a record stuck in
-  // `generating` past the stale ceiling stops counting). The governor lives in
+  // `generating` past the stale ceiling, or one blocked on a permission /
+  // AskUserQuestion prompt, stops counting). The governor lives in
   // vscode-core, which this lib already depends on; vscode-core cannot see the
   // registry, so the source implements the structural `ForegroundActivitySource`.
   // Every host registers the governor in `registerVsCodeCorePlatformAgnostic`
@@ -869,7 +894,23 @@ export function registerSdkServices(
     container
       .resolve<BackgroundWorkGovernor>(TOKENS.BACKGROUND_WORK_GOVERNOR)
       .addForegroundSource(
-        new TurnStateForegroundSource(turnStateRegistry, logger),
+        new TurnStateForegroundSource(
+          turnStateRegistry,
+          logger,
+          undefined,
+          undefined,
+          // A session blocked on a permission or AskUserQuestion prompt is
+          // not foreground work. Resolved lazily and retried by the source on
+          // every read: in Electron the webview manager the handler needs is
+          // registered AFTER these services, so resolving at subscription
+          // time fails; the first turn transition (a read) succeeds.
+          () =>
+            container.isRegistered(SDK_TOKENS.SDK_PERMISSION_HANDLER, true)
+              ? container.resolve<SdkPermissionHandler>(
+                  SDK_TOKENS.SDK_PERMISSION_HANDLER,
+                )
+              : undefined,
+        ),
       );
   }
   container

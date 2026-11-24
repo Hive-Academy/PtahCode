@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { ShaSchema, ReviewPathSchema } from './review-finding.schema';
+import {
+  REVIEW_LANE_POOL_MAX,
+  ReviewLaneFallbackSchema,
+  ReviewLaneIdSchema,
+  ReviewModelIdSchema,
+} from './review-lanes.schema';
 
 export const RepoIdentitySchema = z
   .object({
@@ -32,7 +38,7 @@ export const ReviewStateSchema = z.enum([
   'interrupted',
 ]);
 export const ReviewFailureStageSchema = z.enum(['discovery', 'context', 'lanes', 'verification', 'publication', 'other']);
-export const ReviewFailureCodeSchema = z.enum(['checkout-missing', 'head-missing', 'git-timeout', 'git-failed', 'command-scope', 'github-auth', 'github-rate-limit', 'github-http', 'publication-blocked', 'lane-unavailable', 'lane-timeout', 'lane-failed', 'prompt-too-large', 'schema-invalid', 'persistence', 'unknown']);
+export const ReviewFailureCodeSchema = z.enum(['checkout-missing', 'head-missing', 'git-timeout', 'git-failed', 'command-scope', 'github-auth', 'github-rate-limit', 'github-http', 'diff-too-large', 'publication-blocked', 'lane-unavailable', 'lane-timeout', 'lane-failed', 'prompt-too-large', 'schema-invalid', 'persistence', 'unknown']);
 export const ReviewFailureSchema = z.object({ stage: ReviewFailureStageSchema, code: ReviewFailureCodeSchema, message: z.string().max(300) }).strict();
 export const ReviewHeadRetrySchema = z.object({ failureCount: z.number().int().min(0), nextEligibleAt: z.string().datetime().nullable(), automaticRetriesStopped: z.boolean() }).strict();
 export const ReviewLaneAvailabilitySchema = z
@@ -58,6 +64,10 @@ export const StageRecordSchema = z
     durationMs: z.number().int().min(0).max(86_400_000).nullable(),
     error: z.string().max(2000).nullable(),
     artifactPath: ReviewPathSchema.nullable(),
+    /** Lane, model and skipped pin/pool entries; absent on records written before lane pools. */
+    lane: ReviewLaneIdSchema.nullable().optional(),
+    model: ReviewModelIdSchema.nullable().optional(),
+    fallback: z.array(ReviewLaneFallbackSchema).max(REVIEW_LANE_POOL_MAX + 1).nullable().optional(),
   })
   .strict();
 export type StageRecord = z.infer<typeof StageRecordSchema>;

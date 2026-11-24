@@ -266,7 +266,8 @@ export class MainAgentReassignPopoverComponent {
         .data?.find((entry) => entry.id === providerId)?.name;
       return mainAgentDefaultModelLabel(providerId, name);
     }
-    return this.state.route().data?.resolvedModel.kind === 'unresolved'
+    return providerId === this.driverId() &&
+      this.state.route().data?.resolvedModel.kind === 'unresolved'
       ? mainAgentDefaultModelLabel(providerId, null)
       : 'Provider default';
   });
@@ -289,8 +290,7 @@ export class MainAgentReassignPopoverComponent {
     () => this.effortDraft() ?? this.currentEffort(),
   );
   private readonly modelChanged = computed(
-    () =>
-      !!this.selectedModel() && this.selectedModel() !== this.currentModel(),
+    () => this.selectedModel() !== this.currentModel(),
   );
   private readonly effortChanged = computed(
     () => this.selectedEffort() !== this.currentEffort(),
@@ -466,7 +466,10 @@ export class MainAgentReassignPopoverComponent {
     }
   }
   protected onProvider(id: string): void {
-    if (id !== this.providerId()) this.modelDraft.set(null);
+    if (id !== this.providerId()) {
+      this.modelDraft.set(!id || id === this.driverId() ? null : '');
+      this.manual.set(false);
+    }
     this.providerChoice.set(id || null);
     this.providerConfirmed.set(false);
   }
@@ -494,8 +497,10 @@ export class MainAgentReassignPopoverComponent {
     if (
       this.providerChoice() !== null &&
       this.providerChoice() !== this.driverId()
-    )
+    ) {
       this.modelDraft.set(null);
+      this.manual.set(false);
+    }
     this.providerChoice.set(null);
     this.rescope.set(false);
     this.providerConfirmed.set(false);
@@ -517,7 +522,7 @@ export class MainAgentReassignPopoverComponent {
       );
       return;
     }
-    this.modelDraft.set(value || null);
+    this.modelDraft.set(value || (this.providerId() === this.driverId() ? null : ''));
   }
   protected applyManual(): void {
     const model = this.manualDraft().trim();
@@ -709,8 +714,9 @@ export class MainAgentReassignPopoverComponent {
     const context = this.context;
     const model = this.modelChanged() ? this.selectedModel() : null;
     const effort = this.effortChanged() ? this.selectedEffort() : null;
-    const previousModel = this.currentModel(),
-      previousEffort = this.currentEffort();
+    // Undoing a provider switch's default would restore the old provider's model ID.
+    const undoModel = model ? this.currentModel() : null;
+    const previousEffort = this.currentEffort();
     const label =
       model !== null && effort !== null
         ? 'main agent model and reasoning effort'
@@ -743,12 +749,12 @@ export class MainAgentReassignPopoverComponent {
       write: () =>
         this.state.saveSettings(this.patch(model, effort, applyTo), context),
       undo:
-        model !== null && !previousModel
+        undoModel === '' || (undoModel === null && effort === null)
           ? null
           : () =>
               this.state.saveSettings(
                 this.patch(
-                  model !== null ? previousModel : null,
+                  undoModel,
                   effort !== null ? previousEffort : null,
                   applyTo,
                 ),

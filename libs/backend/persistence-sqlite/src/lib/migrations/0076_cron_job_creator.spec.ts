@@ -39,7 +39,7 @@ describe('migration 0076_cron_job_creator', () => {
       name: '0076_cron_job_creator',
       sql,
     });
-    expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(76);
+    expect(MIGRATIONS.findIndex((m) => m.version === 76)).toBe(75);
     expect(sql).not.toContain('${');
     expect(sql).not.toMatch(/\b(DELETE|UPDATE|INSERT|DROP)\b/i);
   });

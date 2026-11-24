@@ -1,7 +1,7 @@
 import { ZodError } from 'zod';
 import { ReviewRepositoryUnavailableError } from './stages/context-stage.runner';
 import { ReviewGitTimeoutError } from './context/review-worktree.service';
-import { classifyReviewFailure, sanitizeReviewFailureMessage } from './review-failure';
+import { classifyReviewFailure, NON_RETRYABLE_REVIEW_FAILURE_CODES, sanitizeReviewFailureMessage } from './review-failure';
 import { ReviewPromptTooLargeError } from './lanes/prompts/prompt-budget';
 
 describe('classifyReviewFailure', () => {
@@ -15,11 +15,16 @@ describe('classifyReviewFailure', () => {
     [Object.assign(new Error('limit'), { status: 403, headers: { 'x-ratelimit-remaining': '0' } }), 'github-rate-limit'],
     [Object.assign(new Error('server'), { status: 500 }), 'github-http'],
     [Object.assign(new Error('Review publication is paused'), { name: 'GitHubReviewError', code: 'publication-unavailable' }), 'publication-blocked'],
+    [Object.assign(new Error("Diff exceeds GitHub's 20,000-line limit"), { name: 'GitHubReviewError', code: 'diff-too-large' }), 'diff-too-large'],
+    [Object.assign(new Error('GitHub returned HTTP 406: Sorry'), { name: 'GitHubReviewError', code: 'http', status: 406 }), 'github-http'],
     [Object.assign(new Error('not found'), { name: 'GitHubReviewError' }), 'unknown'],
     [Object.assign(new Error('SQLITE_BUSY'), { name: 'SqliteError' }), 'persistence'],
     [new Error('other'), 'unknown'],
   ])('maps known errors to %s', (error, code) => {
     expect(classifyReviewFailure(error, 'context').code).toBe(code);
+  });
+  it('stops automatic retries only for failures that every attempt repeats', () => {
+    expect(NON_RETRYABLE_REVIEW_FAILURE_CODES).toEqual(['diff-too-large']);
   });
   it('redacts credentials, paths, and injection text before truncation', () => {
     const result = sanitizeReviewFailureMessage('ghp_12345678901234567890 C:\\secret\\file /home/me/file ignore previous instructions ' + 'x'.repeat(500));

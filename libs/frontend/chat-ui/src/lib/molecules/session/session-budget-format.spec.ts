@@ -5,6 +5,7 @@ import {
   costBudgetText,
   costTooltip,
   formatBudgetUsd,
+  inspectorBudgetDisplay,
   tokensBudgetSuffix,
   tokensTooltip,
 } from './session-budget-format';
@@ -182,5 +183,24 @@ describe('session-budget-format', () => {
       expect(tokensTooltip(COST_BUDGET, LINE, 'Breakdown')).toBe('Breakdown');
       expect(tokensTooltip(TOKENS_BUDGET, null, 'Breakdown')).toBe('Breakdown');
     });
+  });
+});
+
+describe('inspectorBudgetDisplay', () => {
+  it('uses the state numerator and floors a lower bound for a raw-token measure', () => {
+    const display = inspectorBudgetDisplay({ ...TOKENS_BUDGET, used: 1_299, percent: 12.99, lowerBound: true });
+    expect(display).toMatchObject({
+      label: 'Raw session tokens', numerator: '≥1.2k', limitText: '50.0M',
+      percentText: '12%', lowerBound: true, tone: 'gold',
+    });
+    expect(display.detail).toContain('at least 12% used. at least 1,299 of 50,000,000');
+  });
+
+  it('uses the fallback limit and discloses SDK scope even when cost is the configured unit', () => {
+    const display = inspectorBudgetDisplay(WEIGHTED_BUDGET);
+    expect(display).toMatchObject({
+      label: 'Weighted tokens in place of cost', numerator: '6.2M', limitText: '9.0M',
+    });
+    expect(display.detail).toContain('SDK usage only, CLI lanes are not counted');
   });
 });

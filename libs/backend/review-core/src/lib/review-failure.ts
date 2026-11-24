@@ -4,8 +4,9 @@ import { ReviewGitTimeoutError } from './context/review-worktree.service';
 import { ReviewGitHeadMissingError, ReviewGitWorktreeError } from './context/review-worktree.service';
 import { sanitizeReviewFailureMessage } from './review-failure-sanitizer';
 export { sanitizeReviewFailureMessage } from './review-failure-sanitizer';
+export { NON_RETRYABLE_REVIEW_FAILURE_CODES } from './review-failure-retry';
 
-export const REVIEW_FAILURE_CODES = ['checkout-missing', 'head-missing', 'git-timeout', 'git-failed', 'command-scope', 'github-auth', 'github-rate-limit', 'github-http', 'publication-blocked', 'lane-unavailable', 'lane-timeout', 'lane-failed', 'prompt-too-large', 'schema-invalid', 'persistence', 'unknown'] as const;
+export const REVIEW_FAILURE_CODES = ['checkout-missing', 'head-missing', 'git-timeout', 'git-failed', 'command-scope', 'github-auth', 'github-rate-limit', 'github-http', 'diff-too-large', 'publication-blocked', 'lane-unavailable', 'lane-timeout', 'lane-failed', 'prompt-too-large', 'schema-invalid', 'persistence', 'unknown'] as const;
 export type ReviewFailureCode = typeof REVIEW_FAILURE_CODES[number];
 export const REVIEW_FAILURE_STAGES = ['discovery', 'context', 'lanes', 'verification', 'publication', 'other'] as const;
 export type ReviewFailureStage = typeof REVIEW_FAILURE_STAGES[number];
@@ -21,6 +22,7 @@ export function classifyReviewFailure(error: unknown, stage: ReviewFailureStage)
   if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'prompt-too-large') code = 'prompt-too-large';
   else if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'review-command-cwd-outside-roots') code = 'command-scope';
   else if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'publication-unavailable') code = 'publication-blocked';
+  else if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'diff-too-large') code = 'diff-too-large';
   else if (error instanceof ReviewRepositoryUnavailableError) code = 'checkout-missing';
   else if (error instanceof ReviewGitHeadMissingError) code = 'head-missing';
   else if (error instanceof ReviewGitTimeoutError) code = 'git-timeout';

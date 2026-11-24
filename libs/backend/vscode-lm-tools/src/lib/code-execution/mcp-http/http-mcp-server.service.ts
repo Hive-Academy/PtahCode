@@ -439,8 +439,9 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Take back the persistent `ptah` entries an earlier Ptah wrote into
-   * Antigravity config files (TASK_2026_2297), and drop their credentials.
+   * Take back the `ptah` entries an earlier Ptah wrote into Antigravity config
+   * files (TASK_2026_2297): the persistent slots and any entry a stream-json
+   * lane of an older build left behind. Drop their credentials too.
    * Kept as is under D-U5 Option 1, including its linked-worktree skip.
    * It never rejects: failures are logged and retried by the next sweep.
    * See `retired-ptah-mcp-slots.ts`.

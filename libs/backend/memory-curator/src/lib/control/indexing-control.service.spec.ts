@@ -1091,10 +1091,76 @@ describe('IndexingControlService.trackBackgroundRun alone', () => {
         filesScanned: 4,
       }),
     ]);
-    // Background runs never write the per-call columns.
+    // A succeeded background run records its completion time, never an error.
+    const row = [...rows.values()][0];
+    expect(row['last_indexed_at']).toEqual(expect.any(Number));
+    expect(row['last_error']).toBeNull();
+    const after = await service.getStatus(ROOT);
+    expect(after.state).not.toBe('never-indexed');
+    expect(after.lastIndexedAt).toBe(row['last_indexed_at']);
+  });
+
+  it('success: clears an older failure and records the HEAD it indexed', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const { workspaceFingerprint } = await service.getStatus(ROOT);
+    const row: Record<string, unknown> = {
+      workspace_fingerprint: workspaceFingerprint,
+      git_head_sha: null,
+      last_indexed_at: null,
+      symbols_enabled: 1,
+      memory_enabled: 1,
+      symbols_cursor: null,
+      disclosure_acknowledged_at: null,
+      last_dismissed_stale_sha: null,
+      last_error: null,
+    };
+    rows.set(workspaceFingerprint, row);
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    row['last_error'] = 'earlier manual failure';
+    indexer.succeed(STATS);
+    await bg;
+    expect(row['last_error']).toBeNull();
+    expect(row['git_head_sha']).toBe(VALID_SHA_A);
+    expect((await service.getStatus(ROOT)).state).toBe('indexed');
+  });
+
+  it('success: a null HEAD does not overwrite the stored sha', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const { workspaceFingerprint } = await service.getStatus(ROOT);
+    const row: Record<string, unknown> = {
+      workspace_fingerprint: workspaceFingerprint,
+      git_head_sha: null,
+      last_indexed_at: null,
+      symbols_enabled: 1,
+      memory_enabled: 1,
+      symbols_cursor: null,
+      disclosure_acknowledged_at: null,
+      last_dismissed_stale_sha: null,
+      last_error: null,
+    };
+    rows.set(workspaceFingerprint, row);
+    jest
+      .spyOn(fingerprintModule, 'deriveGitHeadSha')
+      .mockResolvedValueOnce(null);
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    row['git_head_sha'] = VALID_SHA_A;
+    indexer.succeed(STATS);
+    await bg;
+    expect(row['git_head_sha']).toBe(VALID_SHA_A);
+    expect(row['last_indexed_at']).toEqual(expect.any(Number));
+  });
+
+  it('failure: records no completion time', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    indexer.fail(new Error('census broke'));
+    await expect(bg).rejects.toThrow('census broke');
     const row = [...rows.values()][0];
     expect(row['last_indexed_at']).toBeNull();
-    expect(row['last_error']).toBeNull();
+    expect((await service.getStatus(ROOT)).lastIndexedAt).toBeNull();
   });
 
   it('failure: one INDEXING_FAILED, and the rejection passes through unchanged', async () => {
@@ -1495,6 +1561,90 @@ describe('IndexingControlService census join (F5)', () => {
     expect(pushes(webviewManager, MESSAGE_TYPES.INDEXING_FAILED)).toHaveLength(
       0,
     );
+  });
+});
+
+describe('IndexingControlService force plumbing (TASK_2026_2312_c3ef D5)', () => {
+  it('start({ force: true }) forwards force to runSymbols', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    await service.start('symbols', ROOT, deps, { force: true });
+
+    expect(deps.runSymbols as jest.Mock).toHaveBeenCalledTimes(1);
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+      signal?: AbortSignal;
+      onProgress?: (progress: IndexingRunProgress) => void;
+    };
+    expect(options.force).toBe(true);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(options.onProgress).toBeInstanceOf(Function);
+  });
+
+  it('start() without force forwards force: false to runSymbols', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    await service.start('symbols', ROOT, deps);
+
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+    };
+    expect(options.force).toBe(false);
+  });
+
+  it('a forced start that joins an open background census still forwards force (the forced follow-up keeps it)', async () => {
+    const { service, indexer } = buildCensusService();
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+
+    const seen: Array<{ force?: boolean; onProgress?: unknown }> = [];
+    const deps: IndexingRunDeps = {
+      runSymbols: (root, options) => {
+        seen.push({
+          force: options?.force,
+          onProgress: options?.onProgress,
+        });
+        return indexer.index(root, options);
+      },
+    };
+    const manual = service.start('symbols', ROOT, deps, { force: true });
+    await waitFor(() => indexer.calls() === 2);
+
+    // The joined record was opened by the background run, but the caller's
+    // force still reaches runSymbols: the `indexing:start` handler re-sends
+    // these options for its forced follow-up after the join settles.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ force: true });
+    expect(seen[0].onProgress).toBeInstanceOf(Function);
+
+    indexer.succeed(STATS);
+    await manual;
+    await bg;
+  });
+
+  it('resume never forces', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    // No stored cursor → resume() runs a fresh, non-forced start.
+    await service.resume(ROOT, deps);
+
+    expect(deps.runSymbols as jest.Mock).toHaveBeenCalledTimes(1);
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+    };
+    expect(options.force).toBe(false);
   });
 });
 

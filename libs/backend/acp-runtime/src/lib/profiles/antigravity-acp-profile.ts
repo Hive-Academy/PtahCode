@@ -8,10 +8,10 @@
  *   shared, signed-in profile (default `--app-data-dir`). An unattended lane
  *   (resolved yolo, or no permission with auto-approve on) adds
  *   `--dangerously-skip-permissions`, and every lane adds
- *   `--add-dir <workingDirectory>`, as the stream-json lane does
+ *   `--add-dir <workingDirectory>`, which adds it to the agy workspace
  *   (`agy acp --help` 1.5.14 lists both).
- * - Windows: `NODE_PTY_USE_CONPTY=0` and a hidden console, the same as the
- *   stream-json lane; agy's shell tool runs through a pty.
+ * - Windows: `NODE_PTY_USE_CONPTY=0` and a hidden console, because agy's
+ *   shell tool runs through a pty.
  * - Instructions: `session/new` `_meta.antigravity.systemPrompt.append`
  *   when `initialize` advertises that hook ({@link antigravityInstructionsMeta});
  *   not re-sent on restore (`instructionsOnRestore: 'none'`): agy stores the
@@ -132,8 +132,8 @@ export const ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX = `mcp_${ANTIGRAVITY_ACP_PTAH_
  * auto-approve on. Only then does `agy acp` get
  * `--dangerously-skip-permissions`, and only then may the lane's headless
  * sink grant a `session/request_permission` (`plan` and `auto-edit` lanes
- * pass `autoApprove: false` from this rule, so they are refused, as the
- * stream-json lane never granted them).
+ * pass `autoApprove: false` from this rule, so their permission requests
+ * are refused).
  */
 export function antigravitySkipsPermissions(
   options: Pick<AcpSessionOptions, 'permission' | 'autoApprove' | 'consumer'>,

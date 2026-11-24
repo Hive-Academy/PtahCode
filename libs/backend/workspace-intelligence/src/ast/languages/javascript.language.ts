@@ -295,7 +295,8 @@ export const FILE_EDGES: GraphEdgesCapability = {
 export const JAVASCRIPT_LANGUAGE: LanguageModule = {
   id: 'javascript',
   extensions: ['.js', '.jsx'],
-  recognitionOnlyExtensions: ['.mjs', '.cjs'],
+  moduleFlavourExtensions: ['.mjs', '.cjs'],
+  recognitionOnlyExtensions: [],
   grammarFile: 'tree-sitter-javascript.wasm',
   queries: {
     functionQuery: JS_TS_FUNCTION_QUERY,

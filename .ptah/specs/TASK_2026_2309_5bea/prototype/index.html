@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stats sidebar redesign - prototype (TASK_2026_2309_5bea)</title>
+<style>
+/* Tokens: anubis (dark) and anubis-light, values from tailwind.config.js / ptah-tokens.css */
+:root, [data-theme="dark"] {
+  --b1:#131317; --b2:#1a1a20; --b3:#242430; --bc:#e8e6e1;
+  --bcm:oklch(66.51% .0074 31.09);
+  --run:#3b82f6; --need:#f97316; --err:#ef4444; --done:#16a34a; --idle:#9ca3af;
+  --gold:#d4af37; --warn:#f97316; --errfill:#ef4444;
+  --track:rgb(232 230 225 / .14); --track-edge:transparent;
+  --border:rgb(255 255 255 / .06); --border-strong:rgb(255 255 255 / .11);
+  --sel-fill:rgb(232 230 225 / .03);
+}
+[data-theme="light"] {
+  --b1:oklch(97.788% .004 56.375); --b2:oklch(93.982% .007 61.449); --b3:oklch(91.586% .006 53.44);
+  --bc:oklch(23.574% .066 313.189); --bcm:oklch(48.955% .0448 348.48);
+  --run:#2a56c6; --need:#8f5200; --err:#b4232a; --done:#13713a; --idle:#6b6570;
+  --gold:oklch(58% .132 75); --warn:oklch(55% .17 45); --errfill:#b4232a;
+  --track:color-mix(in oklab, var(--bc) 6%, transparent); --track-edge:color-mix(in oklab, var(--bc) 50%, transparent);
+  --border:color-mix(in oklab, var(--bc) 8%, transparent); --border-strong:color-mix(in oklab, var(--bc) 14%, transparent);
+  --sel-fill:color-mix(in oklab, var(--bc) 3%, transparent);
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--b1); color:var(--bc); font:13px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif; }
+:focus-visible { outline:2px solid var(--bc); outline-offset:-2px; border-radius:4px; }
+button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; padding:0; text-align:left; }
+.muted { color:var(--bcm); }
+.tnum { font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* Harness controls (not part of the product UI) */
+#harness { display:flex; flex-wrap:wrap; gap:8px 14px; padding:8px 12px; background:var(--b3); border-bottom:1px solid var(--border-strong); font-size:12px; }
+#harness label { display:flex; gap:6px; align-items:center; color:var(--bcm); }
+#harness select { background:var(--b2); color:var(--bc); border:1px solid var(--border-strong); border-radius:4px; padding:2px 4px; font:inherit; }
+#stage { padding:12px; display:flex; align-items:flex-start; gap:16px; }
+#panelwrap { flex:none; border:1px dashed var(--border-strong); }
+#legendnote { max-width:260px; font-size:11px; color:var(--bcm); }
+
+/* Panel */
+.panel { background:var(--b1); container-type:inline-size; padding:12px; display:flex; flex-direction:column; gap:12px; overflow-x:hidden; }
+[data-component="ptah-surface-section"] { background:var(--b2); border:1px solid var(--border); border-radius:8px; padding:10px; display:flex; flex-direction:column; gap:8px; }
+.sec-h { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.sec-h h2 { margin:0; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--bcm); font-weight:600; }
+.scope { font-size:11px; color:var(--bcm); }
+
+/* ptah-stat */
+.tiles { display:grid; grid-template-columns:1fr; gap:8px; }
+@container (min-width:304px) { .tiles { grid-template-columns:1fr 1fr; } }
+.stat.tile { background:var(--b3); border:1px solid var(--border); border-radius:6px; padding:8px; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.stat .l { font-size:11px; color:var(--bcm); }
+.stat .v { font-weight:600; font-size:18px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.stat .v.xs { font-size:14px; }
+.stat .v.mut { font-weight:500; color:var(--bcm); font-size:14px; }
+.stat .h { font-size:11px; color:var(--bcm); }
+.stat.plain { display:flex; flex-direction:column; min-width:0; }
+.stat.plain .l { font-size:10px; }
+.stat.plain .v { font-size:13px; font-weight:600; }
+.stat.plain .v.mut { font-size:12px; }
+.legend { font-size:11px; color:var(--bcm); }
+
+/* ptah-meter */
+.meter { display:flex; flex-direction:column; gap:3px; }
+.meter .row { display:flex; justify-content:space-between; gap:8px; font-size:11px; }
+.meter .row .n { color:var(--bcm); min-width:0; overflow-wrap:anywhere; }
+.meter .row .t { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.bar { position:relative; height:4px; background:var(--track); border-radius:2px; box-shadow:0 0 0 1px var(--track-edge) inset; }
+.bar > i { position:absolute; left:0; top:0; bottom:0; border-radius:2px; background:var(--gold); }
+.bar.warn > i { background:var(--warn); } .bar.err > i { background:var(--errfill); }
+.bar > b { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--bc); opacity:.7; }
+.bar.thin { height:3px; }
+.cue { font-size:11px; font-weight:600; }
+.cue.warn { color:var(--need); } .cue.err { color:var(--err); }
+
+/* ptah-ring */
+.ring { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; font-size:10px; font-weight:600;
+  background:conic-gradient(var(--gold) calc(var(--p)*1%), var(--track) 0); position:relative; }
+.ring::before { content:""; position:absolute; inset:4px; background:var(--b1); border-radius:50%; }
+.ring span { position:relative; }
+
+/* disclosure */
+.disc > button { display:flex; gap:6px; align-items:center; width:100%; font-size:12px; color:var(--bcm); padding:4px 2px; }
+.disc > button::before { content:"▸"; transition:transform .12s; } .disc > button[aria-expanded="true"]::before { transform:rotate(90deg); }
+.disc .body { padding:6px 4px 2px; font-size:11px; display:flex; flex-direction:column; gap:4px; }
+.disc dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:2px 10px; }
+.disc dt { color:var(--bcm); } .disc dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+
+/* agents */
+.cap { font-size:11px; color:var(--bcm); }
+.rows { display:flex; flex-direction:column; gap:4px; }
+.agent { position:relative; background:var(--b2); border:1px solid var(--border); border-radius:6px; padding:8px 8px 8px 10px; display:flex; flex-direction:column; gap:4px; width:100%; }
+.agent[aria-current="true"] { box-shadow:inset 3px 0 0 var(--gold); border-color:var(--border-strong); background-image:linear-gradient(var(--sel-fill),var(--sel-fill)); }
+.l1 { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.nm { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.st { font-size:11px; white-space:nowrap; display:inline-flex; gap:4px; align-items:center; }
+.st.run { color:var(--run); } .st.done { color:var(--done); } .st.err { color:var(--err); } .st.stop { color:var(--idle); } .st.q { color:var(--need); }
+.st.run .g { animation:pulse 1.2s infinite; } @keyframes pulse { 50% { opacity:.3; } }
+@media (prefers-reduced-motion:reduce) { .st.run .g { animation:none; } }
+.l2 { font-size:11px; color:var(--bcm); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.l3 { display:grid; grid-template-columns:auto auto auto; justify-content:space-between; gap:6px; }
+.detail { background:var(--b2); border:1px solid var(--border); border-top:0; border-radius:0 0 6px 6px; margin:-4px 0 0; padding:8px 10px; font-size:11px; display:flex; flex-direction:column; gap:6px; }
+.detail ul { margin:0; padding-left:14px; } .detail li { overflow-wrap:anywhere; }
+.actions { display:flex; gap:6px; position:relative; }
+.btn { border:1px solid var(--border-strong); border-radius:4px; padding:3px 8px; font-size:11px; background:var(--b3); }
+.menu { position:absolute; top:100%; left:0; z-index:3; background:var(--b3); border:1px solid var(--border-strong); border-radius:6px; margin-top:2px; display:flex; flex-direction:column; min-width:130px; }
+.menu button { padding:6px 10px; font-size:12px; } .menu button:hover { background:var(--b2); }
+.alert { border:1px solid var(--err); color:var(--bc); border-radius:4px; padding:6px 8px; font-size:11px; display:flex; gap:6px; }
+.alert b { color:var(--err); }
+.more { align-self:flex-start; font-size:12px; color:var(--bcm); padding:4px 2px; text-decoration:underline; }
+.skel { height:62px; border-radius:6px; background:linear-gradient(90deg,var(--b2),var(--b3),var(--b2)); background-size:200% 100%; animation:sk 1.4s infinite; }
+@keyframes sk { to { background-position:-200% 0; } }
+@media (prefers-reduced-motion:reduce) { .skel { animation:none; } }
+.box { border:1px dashed var(--border-strong); border-radius:6px; padding:10px; font-size:12px; color:var(--bcm); }
+.box.errb { border-style:solid; border-color:var(--err); color:var(--bc); }
+.sublimits { background:var(--b2); border:1px solid var(--border); border-radius:8px; padding:10px; font-size:11px; color:var(--bcm); }
+
+/* rail */
+.rail { width:56px; padding:8px 4px; gap:8px; align-items:stretch; }
+.rbtn { display:flex; flex-direction:column; align-items:center; gap:1px; padding:4px 0; border-radius:6px; position:relative; width:100%; text-align:center; }
+.rbtn .rl { font-size:10px; color:var(--bcm); } .rbtn .rv { font-size:12px; font-weight:600; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.rbtn .dot { position:absolute; bottom:8px; right:10px; width:7px; height:7px; border-radius:50%; background:var(--need); }
+.sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<div id="harness" role="group" aria-label="Prototype controls">
+  <label>Width <select id="c-w"><option>300</option><option>336</option><option>360</option><option>400</option><option>448</option><option value="rail">Rail 56</option></select></label>
+  <label>Theme <select id="c-theme"><option>dark</option><option>light</option></select></label>
+  <label>Fixture <select id="c-fx">
+    <option value="f1">F1 complete exact</option>
+    <option value="f2">F2 SDK-only partial pricing</option>
+    <option value="lanes">SDK + lanes estimated (F6-like)</option>
+    <option value="f8">F8 known zero + missing source</option>
+    <option value="f9">F9 all missing</option>
+    <option value="live">Live / running (F5)</option>
+    <option value="unknown">Resumed, unknown duration</option>
+    <option value="loading">State: loading</option>
+    <option value="empty">State: empty</option>
+    <option value="error">State: error</option>
+  </select></label>
+  <label>Details <select id="c-open"><option value="0">closed</option><option value="1">open</option></select></label>
+  <label>Agents <select id="c-more"><option value="0">collapsed</option><option value="1">all</option></select></label>
+  <label>Selected <select id="c-sel"><option value="">none</option></select></label>
+</div>
+<div id="stage"><div id="panelwrap"><div id="app"></div></div><div id="legendnote">Dashed border = panel edge. Params: ?w=400&amp;theme=dark&amp;fx=lanes&amp;open=1&amp;more=1&amp;sel=s2&amp;steer=1</div></div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const q = new URLSearchParams(location.search);
+const S = { w:q.get('w')||'400', theme:q.get('theme')||'dark', fx:q.get('fx')||'lanes', open:q.get('open')||'0', more:q.get('more')||'0', sel:q.get('sel')||'', steer:q.get('steer')==='1', menu:false };
+
+const MARKER_FULL = { '':'', '~':'Estimate', '>=':'At least', '>=~':'At least, partly estimated' };
+
+/* Fixtures. t=display, m=marker word, full=full-precision text for title/Details, hint=visible hint */
+const FX = {
+  f1: { subs:2, lanes:0, running:0, tok:{t:'1,000', full:'1,000 tokens (exact)'}, cost:{t:'$0.50', full:'$0.50 (exact)'}, dur:'12:04', turns:'8 turns', ids:['F1','R1'],
+    split:[['SDK (orchestrator + subagents)','1,000 · 100%',100,'']], budget:null,
+    agents:[ag('s1','Explore codebase','sub','done','Claude Sonnet','600','$0.30','06:10',60),ag('s2','Reviewer','sub','done','Claude Sonnet','400','$0.20','05:02',40)], ctx:6.7 },
+  f2: { subs:2, lanes:0, tok:{t:'1,000', full:'1,000 tokens (exact)'}, cost:{t:'≥ $0.30', full:'At least $0.30: pricing is missing for one model', hint:'Lower bound: partial pricing'}, dur:'12:04', turns:'8 turns',
+    split:[['SDK (orchestrator + subagents)','1,000 · 100%',100,'']], budget:null,
+    agents:[ag('s1','Explore codebase','sub','done','Claude Sonnet','600','$0.30','06:10',60),ag('s2','Reviewer','sub','done','Unpriced model','400','Unknown','05:02',40,{costUnknown:true})], ctx:6.7 },
+  lanes: { subs:7, lanes:2, running:1, tok:{t:'25,912,340', full:'25,912,340 tokens (exact)', xs:true}, cost:{t:'≥ ~$17.54', full:'At least $17.5431: one lane has an estimated cost, one lane reports none', hint:'Lower bound: 1 lane has no cost'}, dur:'42:17', turns:'24 turns',
+    split:[['SDK (orchestrator + subagents)','23.5M · 91%',91,''],['CLI lanes','2.4M · ~9%',9,'~']], budget:{n:'Token budget · SDK snapshot scope', t:'62% · Tighten', v:62, tone:'warn', note:'Weighted-token fallback; lower bound'}, ctx:6.7,
+    agents:[ag('s1','Explore codebase','sub','run','Claude Sonnet','412K','$3.21','04:12',2),ag('s2','Reviewer','sub','done','Claude Opus','1.2M','$9.80','11:03',5),ag('s3','Architect with a very long agent name that must truncate','sub','err','Claude Opus','88K','≥ $0.60','02:10','~<1',{marker:true}),
+      ag('l1','Codex','lane','done','CLI worker · gpt-5','2.4M','~$2.10','18:44','~9'),ag('l2','Gemini','lane','stop','CLI reviewer · gemini','Unknown','Unknown','00:31',null,{unk:true}),
+      ag('s4','Planner','sub','done','Claude Sonnet','2.1M','$1.20','07:30',8),ag('s5','Tester','sub','done','Claude Sonnet','3.0M','$0.90','05:55',12),ag('s6','Docs','sub','done','Claude Sonnet','1.3M','$0.22','03:10',5),ag('s7','Linter','sub','q','Claude Haiku','0','$0','--:--',0)] },
+  f8: { subs:0, lanes:1, tok:{t:'≥ 0', full:'At least 0 tokens: one lane reported no usage'}, cost:{t:'≥ $0', full:'At least $0: one lane reported no usage', hint:'Lower bound: 1 lane has no cost'}, dur:'03:20', turns:'1 turn',
+    split:[['SDK (orchestrator + subagents)','0 · —',0,''],['CLI lanes','Unknown',null,'']], budget:null, ctx:1.2,
+    agents:[ag('l1','Codex','lane','done','CLI worker · gpt-5','Unknown','Unknown','03:20',null,{unk:true})] },
+  f9: { subs:0, lanes:1, tok:{unk:true, full:'Unknown: no usage reported by the snapshot or the CLI lane'}, cost:{unk:true, full:'Unknown: no usage reported', hint:'Not priced'}, dur:'03:20', turns:'1 turn',
+    split:[], budget:null, ctx:null,
+    agents:[ag('l1','Codex','lane','done','CLI worker · gpt-5','Unknown','Unknown','03:20',null,{unk:true})] },
+  live: { subs:1, lanes:0, running:1, tok:{t:'~800', full:'About 800 tokens (estimate, live turn)', hint:'Estimate'}, cost:{t:'~$0.40', full:'About $0.40 (estimate, live turn)', hint:'Estimate'}, dur:'live', turns:'3 turns',
+    split:[['SDK (orchestrator + subagents)','~800 · ~100%',100,'~']], budget:null, ctx:86,
+    agents:[ag('s1','Explore codebase','sub','run','Claude Sonnet','~800','~$0.40','00:48','~100')] },
+  unknown: { subs:2, lanes:0, tok:{t:'1,000', full:'1,000 tokens (exact)'}, cost:{t:'$0.50', full:'$0.50 (exact)'}, dur:null, turns:'8 turns',
+    split:[['SDK (orchestrator + subagents)','1,000 · 100%',100,'']], budget:null, ctx:6.7,
+    agents:[ag('s1','Explore codebase','sub','done','Claude Sonnet','600','$0.30','--:--',60,{noDur:true}),ag('s2','Reviewer','sub','done','Claude Sonnet','400','$0.20','--:--',40,{noDur:true})] },
+};
+FX.loading = { state:'loading' }; FX.empty = { state:'empty' }; FX.error = { state:'error' };
+
+function ag(id,name,kind,st,model,tok,cost,time,share,x={}){ return { id,name,kind,st,model,tok,cost,time,share,...x }; }
+
+/* ---------- component builders (data-component names match the shared lib) ---------- */
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+const STAT = {run:['●','Running','run'],done:['✓','Done','done'],err:['✕','Error','err'],stop:['■','Stopped','stop'],q:['◌','Queued','q']};
+
+function stat(label, v, o={}) { // ptah-stat tile / plain
+  const layout = o.layout || 'plain', cls = (v.unk || o.muted) ? 'v mut' : ('v' + (o.xs ? ' xs' : ''));
+  const text = v.unk ? 'Unknown' : (o.muted ? 'Not available' : v.t);
+  const title = o.title || v.full || text;
+  return `<div class="stat ${layout}" data-component="ptah-stat" data-layout="${layout}" title="${esc(title)}"><span class="l">${esc(label)}</span><span class="${cls} tnum" aria-label="${esc(label+': '+title)}">${esc(text)}</span>${v.hint?`<span class="h">${esc(v.hint)}</span>`:''}</div>`;
+}
+function meter(name, text, pct, o={}) { // ptah-meter
+  const tone = o.tone==='gold' ? '' : (o.tone || (pct>=100?'err':pct>=80?'warn':''));
+  return `<div class="meter" data-component="ptah-meter" data-size="xs"><div class="row">${o.hideLabel?'':`<span class="n" title="${esc(name)}">${esc(name)}</span>`}<span class="t">${esc(text)}</span></div><div class="bar ${tone} ${o.thin?'thin':''}" role="meter" aria-label="${esc(name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct??0}" aria-valuetext="${esc(text)}"><i style="width:${Math.max(0,Math.min(100,pct||0))}%"></i>${o.marker?`<b style="left:${o.marker}%"></b>`:''}</div></div>`;
+}
+function disclosure(id, label, body) { // ptah-disclosure
+  const open = S.open==='1';
+  return `<div class="disc" data-component="ptah-disclosure"><button type="button" aria-expanded="${open}" aria-controls="${id}" data-disc="${id}">${esc(label)}</button>${open?`<div class="body" id="${id}">${body}</div>`:''}</div>`;
+}
+function surface(title, scope, inner) { // ptah-surface-section
+  return `<section data-component="ptah-surface-section" aria-label="${esc(title)}"><div class="sec-h"><h2>${esc(title)}</h2></div>${scope?`<div class="scope">${esc(scope)}</div>`:''}${inner}</section>`;
+}
+
+function markersVisible(f){ return [f.tok,f.cost].some(v => v.unk || /^[~≥]/.test(v.t||'') ); }
+
+function sessionSection(f) {
+  const scope = `Whole session: orchestrator + ${f.subs} subagent${f.subs===1?'':'s'} + ${f.lanes} CLI lane${f.lanes===1?'':'s'}`;
+  const tiles = `<div class="tiles">${stat('Tokens', f.tok, {layout:'tile', xs:f.tok.xs || (f.tok.t||'').length>9 })}${stat('Cost', f.cost, {layout:'tile', xs:(f.cost.t||'').length>9})}</div>`;
+  const hintRow = `<div class="legend">${markersVisible(f)?'~ estimate · ≥ at least · Unknown':''}</div>`;
+  const dur = f.dur==='live' ? `<span data-component="ptah-timer" class="tnum" title="Running since 10:41:07" aria-label="Elapsed 00:48, running">⏱ 00:48 <span class="muted">running</span></span>`
+    : f.dur ? `<span data-component="ptah-timer" class="tnum" title="Duration 42m 17s" aria-label="Duration ${f.dur}">⏱ ${f.dur}</span>`
+    : `<span class="tnum muted" data-component="ptah-timer" data-state="unknown" title="Duration not recorded" aria-label="Duration not recorded">⏱ --:--</span>`;
+  const meters = f.split.length ? `<div style="display:flex;flex-direction:column;gap:6px"><div class="cap">Where it came from</div>${f.split.map(s=>meter(s[0],s[1],s[2],{tone:'gold'})).join('')}</div>` : '';
+  const budget = f.budget ? meter(f.budget.n, f.budget.t, f.budget.v, {tone:f.budget.tone}) + `<div class="legend">${esc(f.budget.note)}</div>` : '';
+  const det = disclosure('det-sess','Details · full values & models',
+    `<dl><dt>Tokens (session)</dt><dd>${esc(f.tok.full)}</dd><dt>Cost (session)</dt><dd>${esc(f.cost.full)}</dd><dt>Models (SDK scope)</dt><dd>Claude Opus, Claude Sonnet</dd><dt>Token categories</dt><dd>in 18,402,115 · out 7,510,225</dd><dt>Coverage</dt><dd>Complete</dd></dl><div class="legend">Models and categories: SDK scope (orchestrator + subagents, no CLI lanes).</div>`);
+  return surface('Session', scope, `${tiles}${hintRow}<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">${dur}<span class="tnum" data-component="ptah-stat" data-layout="plain">${esc(f.turns)}</span></div>${meters}${budget}${det}`);
+}
+
+function agentRow(a, selected) {
+  const [g,txt,cls] = STAT[a.st];
+  const tokS = {t:a.tok, full:a.tokFull||a.tok+' tokens'}, costS = {t:a.cost, full:a.cost};
+  const unkT = a.unk ? {unk:true, full:'Unknown: no usage reported'} : tokS;
+  const unkC = (a.unk||a.costUnknown) ? {unk:true, full:'Unknown: no cost reported'} : costS;
+  const timeV = a.time==='--:--' ? {t:'--:--', full:'Duration not recorded', unk:false} : {t:a.time, full:'Duration '+a.time};
+  const share = a.share==null ? '' : meter('Share of whole session', String(a.share).replace('~<1','~<1')+'%', parseFloat(String(a.share).replace(/[^\d.]/g,''))||1, {hideLabel:true, thin:true, tone:'gold'});
+  return `<button type="button" class="agent" data-component="ptah-agent-row" data-id="${a.id}" aria-current="${selected}" aria-label="${esc(a.name+', '+txt)}">
+    <div class="l1"><span class="nm" title="${esc(a.name)}">${esc(a.name)}</span><span class="st ${cls}"><span class="g" aria-hidden="true">${g}</span>${txt}</span></div>
+    <div class="l2" title="${esc(a.model)}">${esc(a.model)}${a.kind==='lane'?' · CLI lane':''}</div>
+    <div class="l3">${stat('Tokens', unkT)}${stat('Cost', unkC)}${stat('Time', timeV, {muted:false})}</div>${share}</button>`;
+}
+function orchestratorRow(f, selected) {
+  const ctx = f.ctx;
+  const ctxPct = ctx==null?null:ctx;
+  const cue = ctx==null ? '' : ctx>=100 ? '<span class="cue err">■ Limit reached</span>' : ctx>=80 ? '<span class="cue warn">▲ Near limit</span>' : '';
+  const ctxM = ctx==null ? `<div class="stat plain" data-component="ptah-stat"><span class="l">Context (main request)</span><span class="v mut">Unknown</span></div>`
+    : meter('Context · main request', `${ctx}% · ${Math.round(ctx*10)}K / 1.0M`, ctx, {marker:80});
+  const cause = 'The session snapshot mixes the orchestrator and SDK subagents; no orchestrator-only split is recorded';
+  return `<button type="button" class="agent" data-component="ptah-agent-row" data-role="orchestrator" data-id="orch" aria-current="${selected}" aria-label="Orchestrator">
+    <div class="l1"><span class="nm">Orchestrator</span><span class="st ${f.running?'run':'done'}"><span class="g" aria-hidden="true">${f.running?'●':'✓'}</span>${f.running?'Running':'Done'}</span></div>
+    <div class="l2">Claude Opus (primary model)</div>
+    <div class="l3">${stat('Tokens',{full:cause},{muted:true,title:cause})}${stat('Cost',{full:cause},{muted:true,title:cause})}${stat('Time',{t:'--:--',full:'Duration not recorded'})}</div>
+    ${ctxM}${cue}
+    <div style="display:flex;justify-content:space-between;gap:6px;font-size:11px;flex-wrap:wrap"><span class="tnum" data-component="ptah-stat" data-layout="plain">1 compaction</span>
+      <span class="tnum" data-component="ptah-countdown" data-size="sm" title="Prompt cache expires in 03:42 (estimated)">Cache ⏳ 03:42 left (est.)</span></div>
+    ${meter('Cache TTL','74% left',74,{hideLabel:true,thin:true,tone:'gold'})}</button>`;
+}
+
+function detailBlock(a) {
+  const m = S.menu;
+  return `<div class="detail" data-component="ptah-agent-detail" aria-label="Selected: ${esc(a.name)}">
+    <div class="muted">Started 10:41:07 · in 312K / out 100K tokens</div>
+    <div>Request lines</div><ul><li>Review the stats sidebar for token and cost accuracy</li><li>Report mismatches between SDK scope and CLI lanes in a single table</li></ul>
+    <div class="actions"><button type="button" class="btn" id="actbtn" aria-haspopup="menu" aria-expanded="${m}">Actions ▾</button>
+      ${m?`<div class="menu" role="menu"><button role="menuitem" data-act="steer">Steer…</button><button role="menuitem" data-act="bg">Move to background</button><button role="menuitem" data-act="stop">Stop</button></div>`:''}</div>
+    ${S.steer?`<div class="alert" role="alert"><b aria-hidden="true">✕</b><span>Steer failed: the agent is no longer running. Your message was not sent.</span></div>`:''}</div>`;
+}
+
+function agentsSection(f) {
+  const rows = f.agents;
+  const subs = rows.filter(r=>r.kind==='sub').length, lanes = rows.filter(r=>r.kind==='lane').length, run = rows.filter(r=>r.st==='run').length + (f.running&&!rows.some(r=>r.st==='run')?1:0);
+  const cap = `Agents · ${run} running · ${subs} subagent${subs===1?'':'s'} · ${lanes} CLI lane${lanes===1?'':'s'}`;
+  const COLLAPSED = 4;
+  let list = [{o:true}, ...rows];
+  let vis = list;
+  if (S.more!=='1' && list.length>COLLAPSED) {
+    vis = list.slice(0,COLLAPSED);
+    const si = list.findIndex(r=>r.id===S.sel || (r.o && S.sel==='orch'));
+    if (si>=COLLAPSED) vis = [...list.slice(0,COLLAPSED-1), list[si]];
+  }
+  const hidden = list.length - vis.length;
+  const html = vis.map(r => {
+    const sel = r.o ? S.sel==='orch' : S.sel===r.id;
+    const row = r.o ? orchestratorRow(f, sel) : agentRow(r, sel);
+    return row + (sel && !r.o ? detailBlock(r) : sel ? detailBlock({name:'Orchestrator'}) : '');
+  }).join('');
+  const toggle = list.length>COLLAPSED ? `<button type="button" class="more" id="more" aria-expanded="${S.more==='1'}" aria-controls="agentlist">${S.more==='1'?'Show fewer':`Show ${hidden} more`}</button>` : '';
+  return `<section aria-label="Agents"><div class="cap" data-component="ptah-agents-caption" title="Counts come from the agent roster only">${esc(cap)}</div><div class="rows" id="agentlist">${html}</div>${toggle}</section>`;
+}
+
+function plan() { return `<div class="sublimits" data-component="plan-limits-unchanged">Plan limits (unchanged, loads independently)<div class="tnum" style="margin-top:4px;color:var(--bc)">5-hour 38% · Weekly 12%</div></div>`; }
+
+function railView(f) {
+  const ctx = f.ctx;
+  const tok = f.tok.unk ? '?' : (f.tok.t.length>7 ? compact(f.tok.t) : f.tok.t);
+  const cost = f.cost.unk ? '?' : f.cost.t.replace(/\s/g,'');
+  const near = ctx!=null && ctx>=80;
+  return `<div class="panel rail" data-component="ptah-rail" aria-label="Session stats rail">
+   <button class="rbtn" data-component="ptah-stat" title="Tokens, whole session: ${esc(f.tok.full)}" aria-label="Tokens, whole session: ${esc(f.tok.full)}"><span class="rl">Tokens</span><span class="rv">${esc(tok)}</span></button>
+   <button class="rbtn" data-component="ptah-stat" title="Cost, whole session: ${esc(f.cost.full)}" aria-label="Cost, whole session: ${esc(f.cost.full)}"><span class="rl">Cost</span><span class="rv">${esc(cost)}</span></button>
+   <button class="rbtn" data-component="ptah-ring" data-size="sm" title="Context, main request: ${ctx==null?'Unknown':ctx+'%'}${near?'. Near limit':''}" aria-label="Context, main request ${ctx==null?'unknown':ctx+'%'}${near?', near limit':''}"><span class="rl">Context</span>
+     ${ctx==null?'<span class="rv muted">?</span>':`<span class="ring" style="--p:${ctx}"><span>${Math.round(ctx)}%</span></span>`}${near?'<span class="rv" style="color:var(--need)" aria-hidden="true">!</span><i class="dot" aria-hidden="true"></i>':''}</button></div>`;
+}
+function compact(s){ const n=Number(s.replace(/[^\d]/g,'')); if(isNaN(n)) return s; return n>=1e6 ? (n/1e6).toFixed(1)+'M' : n>=1e3 ? Math.round(n/1e3)+'K' : String(n); }
+
+function render() {
+  document.documentElement.setAttribute('data-theme', S.theme);
+  const f = FX[S.fx] || FX.lanes, rail = S.w==='rail';
+  const w = rail ? 56 : +S.w;
+  let inner;
+  if (rail && !f.state) inner = railView(f);
+  else if (f.state==='loading') inner = `<div class="panel" style="width:${w}px"><div class="box" role="status">Loading session stats…</div><div class="cap">Loading agents…</div><div class="skel"></div><div class="skel"></div>${plan()}</div>`;
+  else if (f.state==='empty') inner = `<div class="panel" style="width:${w}px">${surface('Session','Whole session: orchestrator + 0 subagents + 0 CLI lanes',`<div class="box">No usage yet. Tokens and cost appear after the first turn.</div>`)}<div class="cap">Agents · 0 running · 0 subagents · 0 CLI lanes</div><div class="box">No agents in this session.</div>${plan()}</div>`;
+  else if (f.state==='error') inner = `<div class="panel" style="width:${w}px"><div class="box errb" role="alert">✕ Session stats could not be loaded. <button class="btn" type="button">Retry</button></div><div class="cap">Agents · loaded independently</div>${plan()}</div>`;
+  else inner = `<div class="panel" style="width:${w}px">${sessionSection(f)}${agentsSection(f)}${plan()}</div>`;
+  document.getElementById('app').innerHTML = inner;
+  const sel = $('#c-sel'); sel.innerHTML = '<option value="">none</option>' + (f.agents?[['orch','Orchestrator'],...f.agents.map(a=>[a.id,a.name])]:[]).map(a=>`<option value="${a[0]}">${esc(a[1].slice(0,24))}</option>`).join('');
+  sel.value = S.sel; $('#c-w').value = S.w; $('#c-theme').value = S.theme; $('#c-fx').value = S.fx; $('#c-open').value = S.open; $('#c-more').value = S.more;
+}
+
+/* controls */
+[['c-w','w'],['c-theme','theme'],['c-fx','fx'],['c-open','open'],['c-more','more'],['c-sel','sel']].forEach(([id,k]) => $('#'+id).addEventListener('change', e => { S[k]=e.target.value; S.menu=false; S.steer=false; render(); }));
+
+/* behavior */
+let lastFocus = null;
+document.addEventListener('click', e => {
+  const row = e.target.closest('.agent'), disc = e.target.closest('[data-disc]'), more = e.target.closest('#more'), act = e.target.closest('[data-act]'), ab = e.target.closest('#actbtn');
+  if (disc) { S.open = S.open==='1'?'0':'1'; render(); const b=$('[data-disc]'); b&&b.focus(); return; }
+  if (more) { S.more = S.more==='1'?'0':'1'; render(); $('#more').focus(); return; }
+  if (act) { if (act.dataset.act==='steer') S.steer=true; S.menu=false; render(); const r=$(`.agent[data-id="${S.sel}"]`); r&&r.focus(); return; }
+  if (ab) { S.menu=!S.menu; render(); $('#actbtn').focus(); return; }
+  if (row) { S.sel = row.dataset.id; S.menu=false; S.steer=false; render(); $(`.agent[data-id="${S.sel}"]`).focus(); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key!=='Escape') return;
+  if (S.menu) { S.menu=false; render(); const r=$(`.agent[data-id="${S.sel}"]`); r&&r.focus(); return; }
+  if (S.open==='1') { S.open='0'; render(); const b=$('[data-disc]'); b&&b.focus(); }
+});
+render();
+</script>
+</body>
+</html>

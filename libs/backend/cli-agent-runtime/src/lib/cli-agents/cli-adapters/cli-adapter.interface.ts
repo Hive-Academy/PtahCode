@@ -385,14 +385,6 @@ export interface CliAdapter {
   readonly supportsMcp?: boolean;
 
   /**
-   * Optional: whether the next run on `binaryPath` attaches the Ptah MCP
-   * server, for an adapter that picks its transport per run and has a
-   * transport without MCP (agy stream-json). `false` means the manager waits
-   * for no handshake and mints no lane token. Absent: `supportsMcp` decides.
-   */
-  attachesMcp?(binaryPath: string | undefined): Promise<boolean>;
-
-  /**
    * Run the task and return a handle to its in-process execution. Every
    * adapter runs via the SDK/streaming path; adapters that wrap a binary CLI
    * spawn it internally and adapt its output to an SdkHandle.

@@ -1,4 +1,7 @@
 import type { SessionBudgetState } from '@ptah-extension/shared';
+import type { PtahMeterTone } from '@ptah-extension/ui';
+import type { UsageTotal } from './session-usage-totals';
+import { formatUsageCost, formatUsageTokens } from './session-usage-format';
 import {
   formatCost,
   formatOptionalTokens,
@@ -105,4 +108,42 @@ export function tokensTooltip(
 ): string {
   const line = budget?.measure === 'tokens' || budget?.measure === 'weighted-tokens' ? budgetLine : null;
   return line ? `${breakdown}\n\n${line}` : breakdown;
+}
+
+/** The expanded tiles retain cents above the rail's whole-dollar threshold. */
+export function formatExpandedUsageCost(figure: Pick<UsageTotal, 'value' | 'state' | 'causes'>): string {
+  const compact = formatUsageCost(figure);
+  if (figure.value === null || figure.value < 10) return compact;
+  const fraction = String(figure.value).split('.')[1] ?? '';
+  return `${compact}.${fraction.slice(0, 2).padEnd(2, '0')}`;
+}
+
+export const SDK_BUDGET_SCOPE = 'SDK usage only, CLI lanes are not counted';
+
+export function inspectorBudgetDisplay(budget: SessionBudgetState) {
+  const { measure, used, limit, percent, lowerBound, stage } = budget;
+  const dollars = measure === 'cost' || measure === 'cost-lower-bound';
+  const label = measure === 'weighted-fallback' ? 'Weighted tokens in place of cost'
+    : measure === 'weighted-tokens' ? 'Weighted session tokens'
+    : dollars ? 'Cost budget' : 'Raw session tokens';
+  const compact = (value: number) => {
+    if (!dollars) {
+      return lowerBound ? formatUsageTokens({ value, state: 'exact', causes: [] }) : formatTokens(value);
+    }
+    if (!lowerBound) return formatBudgetUsd(value);
+    return formatExpandedUsageCost({ value, state: 'exact', causes: [] });
+  };
+  const mark = lowerBound ? '≥' : '';
+  const spoken = lowerBound ? 'at least ' : '';
+  const percentText = percent === null ? '—' : `${Math.floor(percent)}%`;
+  const numerator = used === null ? '—' : `${mark}${compact(used)}`;
+  const limitText = dollars ? formatBudgetUsd(limit) : formatTokens(limit);
+  const tone: PtahMeterTone = stage === 'limit' ? 'err' : stage === 'tighten' || stage === 'handoff' ? 'warn' : 'gold';
+  const full = (value: number) => (dollars ? '$' : '') + value.toLocaleString('en-US', { maximumSignificantDigits: 21 });
+  const amount = used === null ? 'Usage unavailable' : `${spoken}${full(used)} of ${full(limit)}`;
+  const percentDetail = percent === null ? '' : `${spoken}${percentText} used. `;
+  return {
+    label, numerator, limitText, percent, percentText, stage, tone, lowerBound,
+    detail: `${label}. ${percentDetail}${amount}. ${SDK_BUDGET_SCOPE}. Stage: ${stage}. At 50% Ptah lowers auto-compact; at 80% you can ask the agent to wrap up and hand off.`,
+  };
 }
