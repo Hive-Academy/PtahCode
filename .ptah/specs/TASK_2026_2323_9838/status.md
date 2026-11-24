@@ -12,3 +12,12 @@
   block.
 - Related tests and lint/typecheck passed for agent-sdk and vscode-lm-tools.
 - Parent approved a merge of origin/main (7e24e47d1) to correct the benchmark report.
+
+## Batch 2 — gate, review and PR (2026-11-24)
+
+- Review S1 fixed (fe1bb6860): a copy is excluded only when the kept copy loads. Re-review:
+  APPROVE 8.5/10.
+- Full gate passed: `npm run verify -- -p agent-sdk,vscode-lm-tools` and
+  `npm run verify -- -t typecheck -p ptah-electron`.
+- Report and benchmark-report correction committed (9e13544c3). PR #1497 opened against main.
+- Task status set to in_review. CI and the CodeRabbit review were pending at this batch.
