@@ -41,7 +41,7 @@ import {
   AgentMessageDispatchWithdrawnError,
   type AgentMessageDispatchJournal,
 } from './messaging/agent-message-dispatch-journal.port';
-import { classifyContinuationFailure } from './messaging/continuation-failure.classifier';
+import { classifyContinuationFailureDetail } from './messaging/continuation-failure.classifier';
 import { resolveEffectiveLaneCapabilities } from './messaging/agent-effective-capabilities';
 
 /**
@@ -159,6 +159,11 @@ export interface ContinuationDispatcher {
 export interface RouteTurnInput {
   readonly turn?: LaneTurnRequest;
   readonly rawBody?: string;
+  /**
+   * Never steer (R3-2: a raw provider `/command` must start its own turn).
+   * `now` then interrupts and resumes when confirmed; `steer` is refused.
+   */
+  readonly noSteer?: boolean;
 }
 
 /**
@@ -277,7 +282,7 @@ export class AgentMessageRouter {
       content ? live.steer?.(message, content) : live.steer?.(message);
 
     if (delivery === 'steer') {
-      if (!turnInFlight || !caps.steer || !handle?.steer)
+      if (input.noSteer || !turnInFlight || !caps.steer || !handle?.steer)
         return { mode: 'unsupported', reasonCode: 'steer-unavailable', detail: 'Explicit steer is unavailable for this active turn.' };
       try {
         await steer(handle);
@@ -293,7 +298,7 @@ export class AgentMessageRouter {
     }
 
     if (delivery === 'now') {
-      if (turnInFlight && caps.steer && handle?.steer) {
+      if (!input.noSteer && turnInFlight && caps.steer && handle?.steer) {
         try {
           await steer(handle);
           return { mode: 'steer', detail: 'Injected into the active turn.' };
@@ -454,6 +459,10 @@ export class AgentMessageRouter {
       await continueWith(dispatcher, agentId, message, undefined, input);
     } catch (error: unknown) {
       if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId, input);
+      // A settings refusal carries fixed text from the adapter, safe to show.
+      const refused = classifyContinuationFailureDetail(error);
+      if (refused.reasonCode && refused.lastError)
+        return { mode: 'unsupported', reasonCode: refused.reasonCode, detail: refused.lastError };
       return {
         mode: 'unsupported',
         reasonCode: 'start-turn-failed',
@@ -546,9 +555,10 @@ export class AgentMessageRouter {
           offerNext = !isLanePaused(tracked);
         }
       } else {
-        const reason = classifyContinuationFailure(error);
+        const detail = classifyContinuationFailureDetail(error);
+        const reason = detail.reasonCode ?? detail.reason;
         // The reconciler decides between a backoff retry and a permanent hold.
-        offerNext = reason === 'continuation_rejected';
+        offerNext = detail.reason === 'continuation_rejected';
         this.setTerminal(agentId, next.messageId, { status: 'failed', reason });
         this.logger.error('[AgentMessageRouter] Queued message could not be delivered', {
           agentId,

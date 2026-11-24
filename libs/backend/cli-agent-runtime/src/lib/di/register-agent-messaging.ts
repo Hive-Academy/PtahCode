@@ -214,6 +214,7 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         purge: c.resolve<ParentSessionPurgeService>(CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE),
         isParentFrozen: isParentFrozen(c),
         lanePolicy: c.resolve<LaneMessagePolicy>(CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY),
+        attachments: c.resolve<AgentMessageAttachmentStore>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE),
         logger,
       });
       // Purge recovery decides before the scheduler delivers anything (Component 10).

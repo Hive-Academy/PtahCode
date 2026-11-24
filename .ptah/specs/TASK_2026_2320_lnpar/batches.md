@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 19/30
+Total tasks: 49 | Batches: 30 | Complete: 20/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -924,7 +924,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 20: B3b coordinator, dispatcher, scheduler, reconciler (raw delivery, R3-1, R3-2) - PENDING (AFTER REBASE)
+## Batch 20: B3b coordinator, dispatcher, scheduler, reconciler (raw delivery, R3-1, R3-2) - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~38k (coordinator 7.5k, dispatcher 3k, scheduler 3.5k, reconciler 3.5k, specs ~15k, plan ~5k)
@@ -964,9 +964,9 @@ Edge cases:
 - Tasks: 3 | Depends on: Batches 17, 18, 19
 - Phase: P5 Messaging core
 
-### Task 20.1: Coordinator refusals, getMessage, turnOptions, catalog cache; dispatcher raw delivery and images - PENDING
-### Task 20.2: Reconciler R3-1; raw-never-steers R3-2; scheduler image failure - PENDING
-### Task 20.3: Specs incl. new dispatcher spec - PENDING
+### Task 20.1: Coordinator refusals, getMessage, turnOptions, catalog cache; dispatcher raw delivery and images - COMPLETE
+### Task 20.2: Reconciler R3-1; raw-never-steers R3-2; scheduler image failure - COMPLETE
+### Task 20.3: Specs incl. new dispatcher spec - COMPLETE
 
 ### Batch 20 verification
 

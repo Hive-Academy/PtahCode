@@ -570,3 +570,31 @@ describe('AgentMessageDeliveryScheduler', () => {
     });
   });
 });
+
+describe('AgentMessageDeliveryScheduler lost attachments (D4)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('fails a held message that expected images after a host restart, body kept, never delivered', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    now = START;
+    const storage = new FakeStateStorage();
+    const before = await open(storage);
+    const withImages = await put(before, { turn: { imageCount: 2 } });
+    const textOnly = await put(before);
+    const held = await put(before, { turn: { imageCount: 1 } });
+    await before.transition(held, { state: 'blocked-retryable', reason: 'delivery-failed', nextRetryAt: START + 5_000 });
+
+    const store = await open(storage);
+    const deliver = target();
+    const scheduler = new AgentMessageDeliveryScheduler(store, logger(), { clock });
+    await scheduler.start(deliver);
+
+    expect(await store.get(withImages)).toMatchObject({ state: 'failed', reason: 'attachments-unavailable' });
+    expect(await store.get(held)).toMatchObject({ state: 'failed', reason: 'attachments-unavailable' });
+    expect(await store.getBody(withImages)).toBe('hello');
+    expect(await store.get(textOnly)).toMatchObject({ state: 'blocked-retryable', reason: 'awaiting-resume' });
+    expect(jest.getTimerCount()).toBe(0);
+    expect(deliver.deliver).not.toHaveBeenCalled();
+    scheduler.dispose();
+  });
+});

@@ -50,7 +50,11 @@ interface QueueUpdate {
 
 /** Router reasons for an entry that was parked but never dispatched (exit race, gap 10). */
 const EXIT_RACE = new Set(['agent_stopped', 'subprocess_released', 'session_changed']);
-const KNOWN_FAILURES = new Set(['continuation_rejected', 'queue-full', 'storage-unavailable']);
+const KNOWN_FAILURES = new Set([
+  'continuation_rejected', 'queue-full', 'storage-unavailable',
+  // A refused model/effort or a blocked command at flush: permanent, body kept.
+  'turn-options-refused', 'turn-input-unsupported',
+]);
 
 /** The lane that owns an envelope's delivery: the resumed lane once there is one. */
 export function envelopeLane(envelope: AgentMessageEnvelope): AgentId {
@@ -178,7 +182,10 @@ export class AgentMessageReconciler {
     const laneId = AgentId.safeParse(info.agentId);
     await this.deps.store.transition(envelope.id, {
       state: 'started', turnSeq: info.turnSeq, maybeDelivered: true,
-      ackState: ackStateAtStart(envelope.ackState, laneMcpCapability(info)),
+      // R3-1: a raw provider `/command` asks for no ack line, so none is expected.
+      ackState: envelope.rawDelivery?.raw
+        ? ackStateAtStart(envelope.ackState, undefined)
+        : ackStateAtStart(envelope.ackState, laneMcpCapability(info)),
       ...(laneId && laneId !== envelope.targetAgentId ? { actualAgentId: laneId } : {}),
     }, ['dispatching', 'not-started']);
   }

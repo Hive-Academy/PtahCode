@@ -206,3 +206,34 @@ describe('AgentMessageReconciler', () => {
     expect(h.scheduler.schedule).not.toHaveBeenCalled();
   });
 });
+
+describe('AgentMessageReconciler raw delivery (R3-1)', () => {
+  it('starts a parked raw envelope with ackState unavailable', async () => {
+    const h = harness();
+    const { envelope } = await h.store.put({
+      targetAgentId: h.agentId, laneLineageId: h.agentId, sender: user, senderKey: 'user',
+      mode: 'queue-next-turn', delivery: 'queue', rawDelivery: { raw: true },
+    }, '/compact');
+    h.events.emit('agent:turn-started', { ...h.tracked.info, turnSeq: 2, messageId: envelope.id });
+    await settleEvents();
+    expect(await h.store.get(envelope.id)).toMatchObject({ state: 'started', ackState: 'unavailable' });
+  });
+
+  it('still expects an ack from a formatted message on an MCP lane', async () => {
+    const h = harness();
+    const id = await parked(h);
+    h.events.emit('agent:turn-started', { ...h.tracked.info, turnSeq: 2, messageId: id });
+    await settleEvents();
+    expect(await h.store.get(id)).toMatchObject({ state: 'started', ackState: 'pending' });
+  });
+
+  it('fails a flushed message whose settings the lane refused, keeping its body', async () => {
+    const h = harness();
+    const id = await parked(h);
+    await flushTakes(h, id);
+    h.events.emit('agent:queue-updated', { agentId: h.agentId, failures: [{ messageId: id, reason: 'turn-options-refused' }] });
+    await settleEvents();
+    expect(await h.store.get(id)).toMatchObject({ state: 'failed', reason: 'turn-options-refused' });
+    expect(await h.store.getBody(id)).toBe('later');
+  });
+});

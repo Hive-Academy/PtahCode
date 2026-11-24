@@ -7,7 +7,10 @@ import { AgentId, type AgentMessageSender } from '@ptah-extension/shared';
 import { AgentMessageError } from '../agent-message-router.service';
 import { AgentMessageCoordinator } from './agent-message-coordinator.service';
 import { LaneMessagePolicy, type VerifiedLaneSender } from './lane-message.policy';
-import { harness, idOf } from './__fixtures__/agent-message-harness';
+import { harness, idOf, manifest } from './__fixtures__/agent-message-harness';
+import { AgentMessageAttachmentStore } from './agent-message-attachment.store';
+import type { CliAdapterManifest } from '@ptah-extension/shared';
+import type { SdkHandle } from '../cli-adapters/cli-adapter.interface';
 
 const WS = 'ws-key-1';
 
@@ -125,6 +128,131 @@ describe('AgentMessageCoordinator — lane to lane', () => {
       const id = idOf(await coordinator.send({ agentId: h.agentId, message: 'hi' }, laneSender(), binding()));
       await expect(coordinator.getReceipt(h.agentId, id, { kind: 'lane', agentId: h.agentId, verified: false }))
         .rejects.toMatchObject({ code: 'not_found' });
+    });
+  });
+});
+
+describe('AgentMessageCoordinator — turn input refusals and options', () => {
+  const grokTurnInput: NonNullable<CliAdapterManifest['turnInput']> = {
+    model: { state: 'supported', appliesAt: 'next-turn' },
+    effort: { state: 'supported', appliesAt: 'next-turn' },
+    images: { state: 'unsupported', reason: 'Grok did not advertise image input.' },
+    files: { state: 'supported', delivery: 'reference' },
+    commands: { state: 'supported', blocked: ['always-approve'] },
+    skills: { state: 'supported' },
+  };
+  const grok: CliAdapterManifest = { ...manifest, turnInput: grokTurnInput };
+  const handleOf = (h: ReturnType<typeof harness>): SdkHandle => {
+    if (!h.tracked.sdkHandle) throw new Error('lane has no live handle');
+    return h.tracked.sdkHandle;
+  };
+  const user = { kind: 'user' } as const;
+  const image = { data: 'aGk=', mediaType: 'image/png' };
+
+  function setupTurn(attachments: AgentMessageAttachmentStore | null = new AgentMessageAttachmentStore()) {
+    const h = harness();
+    h.coordinator.dispose();
+    h.setInfo({ cli: 'grok', displayName: 'Grok', potentialCapabilities: grok });
+    h.tracked.sdkHandle = { ...handleOf(h), applyTurnSettings: jest.fn() };
+    const coordinator = new AgentMessageCoordinator({
+      manager: h.manager, detection: h.detection, store: h.store, aliases: h.aliases, resume: h.resume,
+      scheduler: h.scheduler, ack: h.ack, logger: h.logger, attachments,
+    });
+    return { h, coordinator, attachments, persisted: () => h.storage.states().size };
+  }
+
+  it('refuses an unsupported image with no envelope stored', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported', detail: 'Grok did not advertise image input.',
+    });
+    expect(outcome.messageId).toBeUndefined();
+    expect(persisted()).toBe(0);
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+  });
+
+  it('refuses a model change on a steer with turn-options-refused and stores nothing', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({
+      agentId: h.agentId, message: 'now', delivery: 'now', turn: { model: 'grok-4-fast' },
+    }, user);
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'turn-options-refused' });
+    expect(persisted()).toBe(0);
+  });
+
+  it('refuses /always-approve on a live Grok lane with no envelope stored', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({ agentId: h.agentId, message: '  /always-approve on' }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported',
+      detail: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+    });
+    expect(persisted()).toBe(0);
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+  });
+
+  it('refuses /always-approve on a restored (stopped) Grok record and never resumes', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    expect(coordinator.preview({ agentId: h.agentId }).usesResume).toBe(true);
+    const outcome = await coordinator.send({ agentId: h.agentId, message: '/always-approve on' }, user);
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'turn-input-unsupported' });
+    expect(h.resume.resume).not.toHaveBeenCalled();
+    expect(persisted()).toBe(0);
+  });
+
+  it('holds images beside the envelope and returns them with the body', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const outcome = await coordinator.send({
+      agentId: h.agentId, message: 'look', turn: { images: [image], files: ['a.ts'], model: 'grok-4' },
+    }, user);
+    expect(outcome.mode).toBe('queue-next-turn');
+    const id = idOf(outcome);
+    expect(await h.store.get(id)).toMatchObject({ turn: { imageCount: 1, files: ['a.ts'], model: 'grok-4' } });
+    expect(attachments?.take(id)).toEqual([image]);
+    await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({
+      text: 'look', turn: { model: 'grok-4', files: ['a.ts'], images: [image] },
+    });
+    await expect(coordinator.getBody(h.agentId, id, user)).resolves.toBe('look');
+  });
+
+  it('serves the live catalog without hidden commands and keeps it for a stopped lane', async () => {
+    const { h, coordinator } = setupTurn();
+    h.setInfo({ model: 'grok-4' });
+    h.tracked.sdkHandle = {
+      ...handleOf(h),
+      listTurnOptions: async () => ({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'],
+        commands: [
+          { name: 'compact', group: 'command' as const },
+          { name: 'always-approve', group: 'command' as const },
+          { name: 'code-review', group: 'skill' as const },
+        ],
+      }),
+    };
+    const live = await coordinator.turnOptions(h.agentId);
+    expect(live).toMatchObject({ currentModel: 'grok-4', efforts: ['low', 'high'] });
+    expect(live.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+    expect(live.error).toBeUndefined();
+
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stopped = await coordinator.turnOptions(h.agentId);
+    expect(stopped.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+  });
+
+  it('returns an error result, never a throw, when the lookup fails', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions: async () => { throw new Error('boom'); } };
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      models: [], commands: [], error: 'Lane options could not be read.',
     });
   });
 });
