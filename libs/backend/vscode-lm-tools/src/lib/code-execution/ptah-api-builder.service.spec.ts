@@ -216,6 +216,7 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
 }));
 
 import * as namespaceBuilders from './namespace-builders';
+import { HELP_DOCS } from './namespace-builders/system-namespace.builders';
 import { buildRouteNamespace } from './namespace-builders/route-namespace.builder';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import { WebSearchService } from './services/web-search.service';
@@ -727,6 +728,55 @@ function buildTestBuilder(
     codexPermissionReader,
   );
 }
+
+/**
+ * Guard: an agent finds a namespace only through `ptah.help()`. A namespace
+ * the overview does not name is invisible (round 7 of the nav benchmark: Code
+ * Mode never found `ptah.code.searchSymbols`).
+ */
+describe('PtahAPIBuilder.build() — help lists every namespace', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  // Topics that do not exist yet. The list only shrinks: add a topic to
+  // HELP_DOCS and remove the name here (the second test enforces it).
+  const NAMESPACES_WITHOUT_TOPIC: readonly string[] = [
+    'git',
+    'route',
+    'browser',
+    'skill',
+    'webSearch',
+    'memory',
+    'session',
+  ];
+
+  const builtNamespaces = (): string[] =>
+    Object.keys(
+      buildTestBuilder(makeRawWorkspaceProvider(), makeSessionManager()).build(),
+    ).filter((name) => name !== 'help');
+
+  it('names every built namespace in the overview', () => {
+    // As `ptah.<name>`, or in one of the two bare lists: prose never counts.
+    const bareLists = HELP_DOCS['overview']
+      .split('\n')
+      .filter((line) => /^(WORKSPACE|ANALYSIS):/.test(line))
+      .join('\n');
+    const missing = builtNamespaces().filter(
+      (name) =>
+        !new RegExp(`ptah\\.${name}\\b`).test(HELP_DOCS['overview']) &&
+        !new RegExp(`[ ,]${name}(,|$)`, 'm').test(bareLists),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('has a help topic for each namespace outside the known gap list', () => {
+    const names = builtNamespaces();
+    const noTopic = names.filter((name) => HELP_DOCS[name] === undefined);
+    expect(noTopic.sort()).toEqual([...NAMESPACES_WITHOUT_TOPIC].sort());
+    expect(HELP_DOCS['code']).toContain('ptah.code.searchSymbols');
+  });
+});
 
 describe('PtahAPIBuilder.build() — session-aware root resolution (criterion 6)', () => {
   afterEach(() => {
