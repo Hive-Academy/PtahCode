@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 0/30
+Total tasks: 49 | Batches: 30 | Complete: 15/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -739,7 +739,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass; Phase P4 review requested once 13 and 14 are committed.
 
-## Batch 15: B2 handle contract, capability resolver, command filter - PENDING (AFTER REBASE)
+## Batch 15: B2 handle contract, capability resolver, command filter - COMPLETE
 
 - Shape: contract
 - Estimated weight (tokens): ~18k (interface 4.5k, resolver + planner + specs ~5k, new files ~4k, plan ~3k)
@@ -772,18 +772,18 @@ Edge cases:
 - Tasks: 3 | Depends on: rebase onto TASK_2026_2322_4ba4, Batch 3
 - Phase: P5 Messaging core | Phase review: see Batch 22
 
-### Task 15.0: Post-rebase checks (plan :1019-1027) - PENDING
+### Task 15.0: Post-rebase checks (plan :1019-1027) - COMPLETE
 
 - Re-read every shared-table file and re-cite lines; confirm agy builds its handle through
   `createProviderSessionLaneHandle` with `antigravityAcpProfile`; confirm `redactLaneStderr` in the
   handle's `diagnostic` branch; confirm the stream-json manifest is gone. Report line numbers.
   Any failure -> stop and report; no edits.
 
-### Task 15.1: SdkHandle additions, resolver, planner refusal helpers, contract test helper - PENDING
+### Task 15.1: SdkHandle additions, resolver, planner refusal helpers, contract test helper - COMPLETE
 
 - Validation notes: steer-exposure risk (gate `supportsSteer`)
 
-### Task 15.2: lane-command-filter (`filterLaneCommands`, `blockedLaneCommand`) + spec - PENDING
+### Task 15.2: lane-command-filter (`filterLaneCommands`, `blockedLaneCommand`) + spec - COMPLETE
 
 ### Batch 15 verification
 
