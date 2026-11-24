@@ -18,7 +18,13 @@
  */
 
 import 'reflect-metadata';
-import { mkdtempSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -97,6 +103,7 @@ interface BuildInput {
   backingOff?: string[];
   authEnv?: AuthEnv;
   mcpServersOverride?: Record<string, McpHttpServerOverride>;
+  projectPath?: string;
 }
 
 interface Built {
@@ -175,7 +182,7 @@ async function build(input: BuildInput = {}): Promise<Built> {
     abortController: new AbortController(),
     sessionConfig: {
       model: 'claude-sonnet-4-5',
-      projectPath: PROJECT,
+      projectPath: input.projectPath ?? PROJECT,
       tabId: 'tab-fixture',
     } as AISessionConfig,
     authEnvOverride: input.authEnv ?? {},
@@ -556,5 +563,40 @@ describe('capability helpers', () => {
       expect.any(String),
       expect.objectContaining({ error: 'EACCES' }),
     );
+  });
+});
+
+describe('SdkQueryOptionsBuilder — repeated CLAUDE.md copies', () => {
+  let root: string;
+  beforeEach(() => {
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'ptah-claude-md-')));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('excludes an identical ancestor CLAUDE.md on the flag tier', async () => {
+    const workspace = join(root, 'checkout', 'nested-copy');
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(root, 'checkout', 'CLAUDE.md'), '# Rules\n');
+    writeFileSync(join(workspace, 'CLAUDE.md'), '# Rules\n');
+
+    const built = await build({ projectPath: workspace });
+
+    expect(built.options.cwd).toBe(workspace);
+    expect(built.settings['claudeMdExcludes']).toEqual([
+      join(root, 'checkout', 'CLAUDE.md'),
+    ]);
+  });
+
+  it('emits no excludes when the ancestor text differs', async () => {
+    const workspace = join(root, 'checkout', 'app');
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(join(root, 'checkout', 'CLAUDE.md'), '# Monorepo\n');
+    writeFileSync(join(workspace, 'CLAUDE.md'), '# App\n');
+
+    const built = await build({ projectPath: workspace });
+
+    expect(built.settings).not.toHaveProperty('claudeMdExcludes');
   });
 });

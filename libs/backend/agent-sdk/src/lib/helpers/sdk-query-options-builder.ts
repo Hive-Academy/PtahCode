@@ -27,6 +27,7 @@ import {
 } from '@ptah-extension/platform-core';
 import { createCronApprovalGate } from '../permission/cron-approval-gate';
 import { MemoryPromptInjector } from './memory-prompt-injector';
+import { findDuplicateClaudeMdExcludes } from './claude-md-dedup';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 import {
@@ -439,6 +440,7 @@ export function buildFlagSettings(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): Settings {
   assertSingleOutputStylePath(sessionConfig);
   const styleName = sessionConfig?.outputStyleName?.trim();
@@ -455,7 +457,8 @@ export function buildFlagSettings(
     !styleName &&
     Object.keys(autoCompactKeys).length === 0 &&
     Object.keys(capabilityKeys).length === 0 &&
-    subagentPromptCacheTtl === undefined
+    subagentPromptCacheTtl === undefined &&
+    !claudeMdExcludes?.length
   ) {
     return PTAH_DISABLE_SDK_AUTO_MEMORY;
   }
@@ -465,6 +468,9 @@ export function buildFlagSettings(
     ...autoCompactKeys,
     ...capabilityKeys,
     ...(subagentPromptCacheTtl !== undefined ? { subagentPromptCacheTtl } : {}),
+    ...(claudeMdExcludes?.length
+      ? { claudeMdExcludes: [...claudeMdExcludes] }
+      : {}),
   };
 }
 
@@ -771,12 +777,14 @@ export function buildFlagSettingsArg(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): string {
   const settings = buildFlagSettings(
     sessionConfig,
     autoCompact,
     capabilityFlags,
     subagentPromptCacheTtl,
+    claudeMdExcludes,
   );
   if (crossSessionInbound === undefined) {
     return JSON.stringify(settings);
@@ -1634,6 +1642,18 @@ export class SdkQueryOptionsBuilder {
         ? ['user', 'project', 'local']
         : ['project', 'local'];
 
+    // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
+    // its own checkout) would be sent on every turn. The flag tier unions
+    // with the user's own `claudeMdExcludes`; no setting source, no read.
+    const claudeMdExcludes =
+      settingSources.length > 0 ? await findDuplicateClaudeMdExcludes(cwd) : [];
+    if (claudeMdExcludes.length > 0) {
+      this.logger.info(
+        '[SdkQueryOptionsBuilder] Excluding repeated CLAUDE.md copies',
+        { cwd, claudeMdExcludes },
+      );
+    }
+
     const policy = this.sessionCapabilityPolicy(capabilityPolicy, cwd);
     // The config dir the Claude child reads (D-B2): a named run's certified
     // launch env alone (it never inherits the host env), otherwise the auth
@@ -1754,6 +1774,7 @@ export class SdkQueryOptionsBuilder {
           autoCompact,
           capabilityFlags,
           subagentTtl.sdkValue,
+          claudeMdExcludes,
         ),
         tools: sessionTools,
         // Applies on the verified and the unverified path alike, and on every

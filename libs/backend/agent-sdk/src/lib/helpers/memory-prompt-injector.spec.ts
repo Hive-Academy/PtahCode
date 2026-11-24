@@ -947,3 +947,36 @@ describe('MemoryPromptInjector.buildCorpusBlock — privacy invariant', () => {
     expect(result).not.toContain('source_message_ids');
   });
 });
+
+/**
+ * Size guard on the recalled-memory block (TASK_2026_2323). The block rides
+ * the system prompt of every turn with a query; the hit count and the chunk
+ * cap keep it bounded. The input is the worst realistic case: the store
+ * returns every hit it is asked for, each with a long subject and a chunk far
+ * over the cap. Raise the budget only with a measured reason.
+ */
+describe('MemoryPromptInjector.buildBlock size budget', () => {
+  // Measured 2,767 chars on main (TASK_2026_2323), plus five percent.
+  const BLOCK_CHAR_BUDGET = 2_905;
+
+  it('stays within the measured budget for the worst realistic hits', async () => {
+    const reader: IMemoryReader = {
+      search: jest.fn((_query: string, limit: number) =>
+        Promise.resolve({
+          hits: Array.from({ length: limit }, (_, i) =>
+            makeHit({
+              memoryId: `mem-${i}`,
+              subject: `decision: ${'s'.repeat(110)} ${i}`,
+              chunkText: 'word '.repeat(400),
+            }),
+          ),
+          bm25Only: false,
+        } satisfies MemoryHitPage),
+      ),
+    };
+
+    const block = await makeInjector(reader).buildBlock(LONG_QUERY, '/ws');
+
+    expect(block.length).toBeLessThanOrEqual(BLOCK_CHAR_BUDGET);
+  });
+});
