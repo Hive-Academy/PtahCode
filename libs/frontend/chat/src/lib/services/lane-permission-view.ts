@@ -19,6 +19,7 @@ import type {
   PermissionRequest,
   PermissionResponse,
 } from '@ptah-extension/shared';
+import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentPermissionResponder } from './agent-permission-responder';
 import { ChatStore } from './chat.store';
 
@@ -76,6 +77,20 @@ interface PromptEntry {
   readonly title: string;
 }
 
+interface PromptSource {
+  readonly agentId: string | undefined;
+  readonly prompts: readonly PromptEntry[];
+}
+
+const SENT_OUTCOMES_CAP = 32;
+
+/** A lane switch, or a prompt that was not open before. */
+function startsNewRound(previous: PromptSource, current: PromptSource): boolean {
+  if (previous.agentId !== current.agentId) return true;
+  const before = new Set(previous.prompts.map((prompt) => prompt.id));
+  return current.prompts.some((prompt) => !before.has(prompt.id));
+}
+
 /**
  * One lane's approval and question prompts, ready for main chat's
  * `ptah-permission-request-card` and `ptah-question-card` (Req 5).
@@ -98,11 +113,19 @@ export class LanePermissionView {
 
   private readonly sources = signal<LanePermissionViewSources | null>(null);
   private readonly converted = new WeakMap<AgentPermissionRequest, PermissionRequest>();
-  /** Outcomes this view sent; read when the prompt leaves the queue. Pruned there. */
+  /**
+   * Outcomes this view sent, read when the prompt leaves the queue. Bounded
+   * to the most recent {@link SENT_OUTCOMES_CAP} answers, oldest dropped on
+   * insert, so `resolvedStatus` only reads it.
+   */
   private readonly sentOutcomes = new Map<string, PromptOutcome>();
-  private readonly _notice = signal<string | null>(null);
 
   private readonly agent = computed(() => this.sources()?.agent() ?? undefined);
+  /** The lane and its open prompts; a change of either can clear a status line. */
+  private readonly promptSource = computed(() => ({
+    agentId: this.agent()?.agentId,
+    prompts: this.promptEntries(),
+  }));
 
   /** Display name the cards show in their lane badge. */
   readonly laneLabel = computed(() => {
@@ -141,29 +164,32 @@ export class LanePermissionView {
     () => this.permissions().length > 0 || this.questions().length > 0,
   );
 
-  /** Refusal text for a second answer; null when there is none. */
+  /**
+   * Refusal text for a second answer; null when there is none. Cleared by
+   * the next answer sent, a new prompt, or a lane switch.
+   */
+  private readonly _notice = linkedSignal<PromptSource, string | null>({
+    source: () => this.promptSource(),
+    computation: (current, previous) =>
+      !previous || startsNewRound(previous.source, current) ? null : previous.value,
+  });
   readonly notice = this._notice.asReadonly();
 
   /**
    * One line for the most recent prompt that stopped being answerable here:
-   * answered in this view, answered in another surface, or expired.
+   * answered in this view, answered in another surface, or expired. Cleared
+   * when a new prompt arrives or the lane changes. The computation has no
+   * side effects: it only reads the outcomes this view recorded.
    */
-  readonly resolvedStatus = linkedSignal<
-    { agentId: string | undefined; prompts: PromptEntry[] },
-    string | null
-  >({
-    source: () => ({ agentId: this.agent()?.agentId, prompts: this.promptEntries() }),
+  readonly resolvedStatus = linkedSignal<PromptSource, string | null>({
+    source: () => this.promptSource(),
     computation: (current, previous) => {
       if (!previous || previous.source.agentId !== current.agentId) return null;
       const open = new Set(current.prompts.map((prompt) => prompt.id));
       const gone = previous.source.prompts.filter((prompt) => !open.has(prompt.id));
-      if (gone.length === 0) return previous.value;
-      let status: string | null = previous.value;
-      for (const prompt of gone) {
-        status = `${prompt.title} - ${this.outcomeText(this.sentOutcomes.get(prompt.id))}`;
-      }
-      for (const id of this.sentOutcomes.keys()) if (!open.has(id)) this.sentOutcomes.delete(id);
-      return status;
+      const last = gone[gone.length - 1];
+      if (last) return `${last.title} - ${this.outcomeText(this.sentOutcomes.get(last.id))}`;
+      return startsNewRound(previous.source, current) ? null : previous.value;
     },
   });
 
@@ -189,6 +215,16 @@ export class LanePermissionView {
     if (!agentId) return false;
     const timedOut =
       response.decision === 'deny' && response.reason === CARD_TIMEOUT_REASON;
+    const prior = this.sentOutcomes.get(response.id);
+    // Recorded before the send: the prompt can leave the queue synchronously.
+    this.recordOutcome(
+      response.id,
+      timedOut
+        ? 'expired'
+        : response.decision === 'allow' || response.decision === 'always_allow'
+          ? 'allowed'
+          : 'denied',
+    );
     const sent = this.injector.get(AgentPermissionResponder).respondLane(
       agentId,
       response.id,
@@ -197,33 +233,59 @@ export class LanePermissionView {
       response.modifiedInput,
     );
     if (!sent) {
+      this.restoreOutcome(response.id, prior);
       // The card's own countdown deny is automatic; the user did not answer twice.
       if (!timedOut) this._notice.set(LANE_ANSWER_REFUSED_TEXT);
       return false;
     }
     this._notice.set(null);
-    this.sentOutcomes.set(
-      response.id,
-      timedOut
-        ? 'expired'
-        : response.decision === 'allow' || response.decision === 'always_allow'
-          ? 'allowed'
-          : 'denied',
-    );
     return true;
   }
 
   /** Answer a question card. Returns false when the question is no longer pending. */
   answer(response: AskUserQuestionResponse): boolean {
-    const pending = this.questions().some((request) => request.id === response.id);
-    if (!pending) {
+    const request = this.questions().find((item) => item.id === response.id);
+    if (!request) {
       this._notice.set(LANE_ANSWER_REFUSED_TEXT);
       return false;
     }
     this._notice.set(null);
-    this.sentOutcomes.set(response.id, 'answered');
-    this.injector.get(ChatStore).handleQuestionResponse(response);
+    this.recordOutcome(response.id, 'answered');
+    // The lane's owner tab decides, not whichever tab happens to be active.
+    this.injector
+      .get(ChatStore)
+      .handleQuestionResponse(response, this.ownerTabId(request));
     return true;
+  }
+
+  /**
+   * The tab that owns this lane's question: the tab it was routed to, else
+   * the tab of the session that spawned the lane. Null when no open tab owns it.
+   */
+  private ownerTabId(request: AskUserQuestionRequest): string | null {
+    if (request.tabId) return request.tabId;
+    const session = this.agent()?.parentSessionId ?? request.sessionId;
+    if (!session) return null;
+    const tabs = this.injector.get(TabManagerService);
+    return (
+      tabs.findTabByIdAcrossWorkspaces(session)?.tab.id ??
+      tabs.findTabBySessionIdAcrossWorkspaces(session)?.tab.id ??
+      null
+    );
+  }
+
+  private recordOutcome(id: string, outcome: PromptOutcome): void {
+    this.sentOutcomes.delete(id);
+    this.sentOutcomes.set(id, outcome);
+    for (const key of this.sentOutcomes.keys()) {
+      if (this.sentOutcomes.size <= SENT_OUTCOMES_CAP) break;
+      this.sentOutcomes.delete(key);
+    }
+  }
+
+  private restoreOutcome(id: string, prior: PromptOutcome | undefined): void {
+    if (prior === undefined) this.sentOutcomes.delete(id);
+    else this.sentOutcomes.set(id, prior);
   }
 
   private outcomeText(outcome: PromptOutcome | undefined): string {

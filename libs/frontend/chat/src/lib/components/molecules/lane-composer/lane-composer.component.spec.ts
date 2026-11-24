@@ -253,6 +253,23 @@ describe('LaneComposerComponent', () => {
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Again', 'now', false, expect.any(String), undefined);
   });
 
+  it('refuses Ctrl+Enter while an attachment is still being read (M1)', async () => {
+    sendMessage.mockResolvedValue({ mode: 'steer', receipt: { ...receipt, state: 'started', delivery: 'now' } });
+    const fixture = await mount();
+    const attachments = fixture.componentRef.injector.get(ComposerAttachmentsService);
+    type(fixture, 'With an image');
+    attachments.pendingReads.set(1);
+    key(fixture, { ctrlKey: true });
+    await settle(fixture);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(statusText(fixture)).toBe('An attachment is still loading. Send when it appears in the tray.');
+
+    attachments.pendingReads.set(0);
+    key(fixture, { ctrlKey: true });
+    await settle(fixture);
+    expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'With an image', 'now', false, expect.any(String), undefined);
+  });
+
   it('withdraws a queued message back into the composer beside the draft', async () => {
     sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt });
     cancelMessage.mockResolvedValue({ ...receipt, state: 'failed', reason: 'cancelled-by-user' });

@@ -635,7 +635,16 @@ export class AgentDeliveryStore {
    * it to a lane's composer (see `takeRecoveredMessage`).
    */
   async recoverIntoComposer(composerAgentId: string, agentId: string, messageId: string): Promise<void> {
-    const message = await this.recoverQueuedMessage(agentId, messageId);
+    this.holdForComposer(composerAgentId, await this.recoverQueuedMessage(agentId, messageId));
+  }
+
+  /**
+   * Keep a message for a lane's composer until one shows that lane (see
+   * `takeRecoveredMessage`). A composer hands over a message that came back
+   * after it switched to another lane, so the message is never lost. A
+   * message already waiting is merged with this one.
+   */
+  holdForComposer(composerAgentId: string, message: RecoveredLaneMessage): void {
     this._recovered.update((current) => {
       const next = new Map(current);
       const prior = next.get(composerAgentId);

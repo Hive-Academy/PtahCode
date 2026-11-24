@@ -153,7 +153,7 @@ const LANE_PANEL_CLASS =
         >
           @for (request of pendingQuestions(); track request.id) {
             <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
-              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event)" />
+              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
             </div>
           }
           @switch (selectedKind()) {

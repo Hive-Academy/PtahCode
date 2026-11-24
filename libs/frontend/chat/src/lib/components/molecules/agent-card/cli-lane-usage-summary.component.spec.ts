@@ -178,6 +178,23 @@ describe('CliLaneUsageSummaryComponent', () => {
       expect(el.querySelector('[data-testid="lane-usage-total"]')?.textContent?.trim()).toBe('301 tok');
     });
 
+    it('does not flash when the card is reused for another lane (M5)', () => {
+      TestBed.configureTestingModule({ imports: [CliLaneUsageSummaryComponent] });
+      const fixture = TestBed.createComponent(CliLaneUsageSummaryComponent);
+      const el = fixture.nativeElement as HTMLElement;
+      const flash = () => el.querySelector('[data-testid="lane-usage-flash"]');
+      fixture.componentRef.setInput('agent', agent({ inputTokens: 100, outputTokens: 1 }));
+      fixture.detectChanges();
+
+      fixture.componentRef.setInput('agent', { ...agent({ inputTokens: 900, outputTokens: 1 }), agentId: 'lane-2' });
+      fixture.detectChanges();
+      expect(flash()).toBeNull();
+
+      fixture.componentRef.setInput('agent', { ...agent({ inputTokens: 950, outputTokens: 1 }), agentId: 'lane-2' });
+      fixture.detectChanges();
+      expect(flash()).not.toBeNull();
+    });
+
     it('animates only opacity and turns the fade off under reduced motion', () => {
       const source = readFileSync(join(__dirname, 'cli-lane-usage-summary.component.ts'), 'utf8');
       expect(source).toMatch(/\.lane-usage-flash\s*\{[^}]*animation:\s*lane-usage-flash 900ms/);

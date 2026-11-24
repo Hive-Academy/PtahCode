@@ -89,7 +89,8 @@ import { LaneDeliveryController } from './lane-delivery.controller';
 let nextLaneComposerId = 0;
 
 const NEXT_TURN_FOOTER = 'Applies from your next message. The lane keeps running.';
-const STEER_HINT = 'Send this message into the running turn now';
+const ATTACHMENT_READING_TEXT = 'An attachment is still loading. Send when it appears in the tray.';
+const STEER_HINT ='Send this message into the running turn now';
 const INTERRUPT_HINT = 'Stop the current turn and send this message now';
 
 const APPROVAL_LABELS: Readonly<Record<LanePermissionMode, string>> = {
@@ -572,9 +573,20 @@ export class LaneComposerComponent {
   /** Ctrl/Cmd+Enter: Send now for the draft, after the loss confirmation when the turn would lose work. */
   protected requestNow(): void {
     if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked()) return;
+    if (this.waitForReads()) return;
     this.lossTarget = { kind: 'draft' };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);
+  }
+
+  /**
+   * Send now refuses while an attachment is still being read, so the read
+   * never lands in the tray after its message left. True when it refused.
+   */
+  private waitForReads(): boolean {
+    if (this.attachments.pendingReads() === 0) return false;
+    this.actionNote.set(ATTACHMENT_READING_TEXT);
+    return true;
   }
 
   /** The queued card's Send now / Interrupt & send. */
@@ -600,6 +612,8 @@ export class LaneComposerComponent {
 
   private async sendNow(allowPartialTurnLoss: boolean): Promise<void> {
     const target = this.lossTarget;
+    // An attachment can start reading while the loss dialog is open.
+    if (target.kind === 'draft' && this.waitForReads()) return;
     const interrupt = this.delivery.state().now?.mode === 'interrupt-resume';
     if (target.kind === 'draft') await this.delivery.send('now', allowPartialTurnLoss);
     else await this.delivery.sendQueuedNow(target.id, allowPartialTurnLoss);

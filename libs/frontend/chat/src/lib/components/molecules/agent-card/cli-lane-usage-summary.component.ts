@@ -177,14 +177,19 @@ export class CliLaneUsageSummaryComponent {
 
   /**
    * Number of times the total figure changed after the first render. Each change
-   * re-creates the highlight overlay, which restarts its one-shot fade.
+   * re-creates the highlight overlay, which restarts its one-shot fade. A
+   * different agent starts again from zero, so reusing the card for another
+   * lane does not flash.
    */
-  protected readonly figureChanges = linkedSignal<number | null, number>({
-    source: () => this.lane().tokens,
-    computation: (tokens, previous) =>
-      previous === undefined
+  protected readonly figureChanges = linkedSignal<
+    { agentId: string; tokens: number | null },
+    number
+  >({
+    source: () => ({ agentId: this.agent().agentId, tokens: this.lane().tokens }),
+    computation: (current, previous) =>
+      previous === undefined || previous.source.agentId !== current.agentId
         ? 0
-        : previous.source === tokens
+        : previous.source.tokens === current.tokens
           ? previous.value
           : previous.value + 1,
   });

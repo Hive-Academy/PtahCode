@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { Injector, signal, type DestroyableInjector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
@@ -54,9 +54,14 @@ describe('LaneDeliveryController', () => {
     newIdempotencyKey: () => `key-${++keys}`,
     takeRecoveredMessage: (id: string) => {
       const message = recovered().get(id) ?? null;
-      recovered.set(new Map());
+      const next = new Map(recovered());
+      next.delete(id);
+      recovered.set(next);
       return message;
     },
+    holdForComposer: jest.fn((id: string, message: RecoveredLaneMessage) => {
+      recovered.set(new Map(recovered()).set(id, message));
+    }),
   };
 
   let controller: LaneDeliveryController;
@@ -392,5 +397,196 @@ describe('LaneDeliveryController', () => {
     TestBed.tick();
     expect(controller.nowNeedsConfirmation()).toBe(true);
     expect(controller.hint()).toContain('interrupts and restarts the turn');
+  });
+
+  describe('a lane switch while a send is in flight (S3)', () => {
+    function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((done) => { resolve = done; });
+      return { promise, resolve };
+    }
+
+    function switchLane(id: string): void {
+      agentId.set(id);
+      TestBed.tick();
+    }
+
+    async function queueOne(): Promise<AgentDeliveryReceipt> {
+      const queued = receipt();
+      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: queued });
+      fillComposer('Queued body');
+      await controller.send('queue');
+      push(queued);
+      settings.clearPending(AGENT);
+      return queued;
+    }
+
+    it('Send now still sends the cancelled message for its own lane', async () => {
+      const queued = await queueOne();
+      const cancel = deferred<AgentDeliveryReceipt>();
+      store.cancelMessage.mockReturnValueOnce(cancel.promise);
+      store.sendMessage.mockResolvedValueOnce({ mode: 'steer', receipt: receipt({ state: 'started', delivery: 'now' }) });
+
+      const run = controller.sendQueuedNow(queued.id);
+      switchLane(OTHER_AGENT);
+      cancel.resolve({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      await run;
+
+      expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Queued body', 'now', false, expect.any(String), expect.anything());
+      expect(draft()).toBe('');
+      expect(controller.error()).toBeNull();
+    });
+
+    it('a refused Send now goes back to its own lane, not into the lane now shown', async () => {
+      const queued = await queueOne();
+      const cancel = deferred<AgentDeliveryReceipt>();
+      store.cancelMessage.mockReturnValueOnce(cancel.promise);
+      store.sendMessage.mockResolvedValueOnce({ mode: 'unsupported', detail: 'No steer now' });
+
+      const run = controller.sendQueuedNow(queued.id);
+      switchLane(OTHER_AGENT);
+      cancel.resolve({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      await run;
+
+      expect(draft()).toBe('');
+      expect(controller.error()).toBeNull();
+      expect(store.holdForComposer).toHaveBeenCalledWith(AGENT, expect.objectContaining({ text: 'Queued body' }));
+
+      switchLane(AGENT);
+      expect(draft()).toBe('Queued body');
+      expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+      expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
+      expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
+    });
+
+    it('Edit after a lane switch holds the message for its lane', async () => {
+      const queued = await queueOne();
+      const cancel = deferred<AgentDeliveryReceipt>();
+      store.cancelMessage.mockReturnValueOnce(cancel.promise);
+
+      const run = controller.withdraw(queued.id);
+      switchLane(OTHER_AGENT);
+      cancel.resolve({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      await run;
+
+      expect(draft()).toBe('');
+      switchLane(AGENT);
+      expect(draft()).toBe('Queued body');
+    });
+
+    it('remembers a message accepted after the switch, so a later refusal restores it on return', async () => {
+      const sent = receipt();
+      const send = deferred<unknown>();
+      store.sendMessage.mockReturnValueOnce(send.promise);
+      fillComposer('Accepted late');
+      settings.clearPending(AGENT);
+
+      const run = controller.send('queue');
+      switchLane(OTHER_AGENT);
+      send.resolve({ mode: 'queue-next-turn', receipt: sent });
+      await run;
+      expect(accepted).not.toHaveBeenCalled();
+
+      push({ ...sent, state: 'failed', reason: 'turn-input-unsupported', updatedAt: sent.updatedAt + 1 });
+      expect(draft()).toBe('');
+      switchLane(AGENT);
+      expect(draft()).toBe('Accepted late');
+      expect(attachments.files()).toEqual([FILE]);
+      expect(controller.error()).toContain('Not delivered:');
+    });
+
+    it('holds a draft the lane refused after the switch for its own lane', async () => {
+      const send = deferred<unknown>();
+      store.sendMessage.mockReturnValueOnce(send.promise);
+      fillComposer('Refused late');
+
+      const run = controller.send('queue');
+      switchLane(OTHER_AGENT);
+      send.resolve({ mode: 'unsupported', detail: 'Lane cannot take images' });
+      await run;
+
+      expect(draft()).toBe('');
+      expect(controller.error()).toBeNull();
+      switchLane(AGENT);
+      expect(draft()).toBe('Refused late');
+      expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
+    });
+  });
+
+  it('does not overwrite a model or effort picked after the message left (M2)', async () => {
+    const sent = receipt();
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+    fillComposer('Old pick');
+    await controller.send('queue');
+    settings.clearPending(AGENT);
+    settings.pickModel(AGENT, 'sonnet');
+
+    push({ ...sent, state: 'failed', reason: 'turn-options-refused', updatedAt: sent.updatedAt + 1 });
+
+    expect(draft()).toBe('Old pick');
+    expect(settings.pending(AGENT)).toEqual({ model: 'sonnet', reasoningEffort: 'high' });
+  });
+
+  describe('two composers on one lane (M3)', () => {
+    let child: DestroyableInjector;
+    let second: LaneDeliveryController;
+    let secondDraft: ReturnType<typeof signal<string>>;
+
+    beforeEach(() => {
+      child = Injector.create({
+        providers: [LaneDeliveryController, ComposerAttachmentsService],
+        parent: TestBed.inject(Injector),
+      });
+      second = child.get(LaneDeliveryController);
+      secondDraft = signal('');
+      second.connect({
+        agentId: signal(AGENT), draft: secondDraft, stopped: signal(false), cli: signal('Codex'),
+        resumePath: signal(null), accepted: jest.fn(),
+      });
+      TestBed.tick();
+    });
+
+    afterEach(() => child.destroy());
+
+    it('restores a refused message into the composer it was sent from', async () => {
+      const sent = receipt();
+      store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+      fillComposer('From the first');
+      await controller.send('queue');
+
+      push({ ...sent, state: 'failed', reason: 'turn-input-unsupported', updatedAt: sent.updatedAt + 1 });
+
+      expect(draft()).toBe('From the first');
+      expect(secondDraft()).toBe('');
+    });
+
+    it('hands a refused message to the other composer once its owner left the lane', async () => {
+      const sent = receipt();
+      store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+      fillComposer('Owner left');
+      await controller.send('queue');
+      agentId.set(OTHER_AGENT);
+      TestBed.tick();
+
+      push({ ...sent, state: 'failed', reason: 'turn-input-unsupported', updatedAt: sent.updatedAt + 1 });
+
+      expect(secondDraft()).toBe('Owner left');
+      expect(draft()).toBe('');
+    });
+
+    it('puts recovered text into the composer the user last used for the lane', () => {
+      controller.draftChanged();
+      recovered.set(new Map([[AGENT, { text: 'Recovered' }]]));
+      TestBed.tick();
+      expect(draft()).toBe('Recovered');
+      expect(secondDraft()).toBe('');
+    });
+
+    it('without a last-used composer, puts recovered text into the one mounted last', () => {
+      recovered.set(new Map([[AGENT, { text: 'Recovered' }]]));
+      TestBed.tick();
+      expect(secondDraft()).toBe('Recovered');
+      expect(draft()).toBe('');
+    });
   });
 });

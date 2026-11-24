@@ -171,6 +171,15 @@ describe('AgentDeliveryStore', () => {
     expect(store.takeRecoveredMessage(resumed)).toBeNull();
   });
 
+  it('holds a message for a lane composer without a backend read and merges it with one waiting', async () => {
+    rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'recovered' }));
+    await store.recoverIntoComposer(resumed, lane, 'message-1');
+    rpc.call.mockClear();
+    store.holdForComposer(resumed, { text: 'came back', turn: { files: ['a.ts'] } });
+    expect(rpc.call).not.toHaveBeenCalled();
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'recovered\ncame back', turn: { files: ['a.ts'] } });
+  });
+
   describe('turn snapshot', () => {
     const turn = { model: 'gpt-5.5', reasoningEffort: 'high', files: ['src/app.ts'] };
 

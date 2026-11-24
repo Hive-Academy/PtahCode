@@ -9,6 +9,7 @@ import type {
   AgentPermissionRequest,
   AskUserQuestionRequest,
 } from '@ptah-extension/shared';
+import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentPermissionResponder } from './agent-permission-responder';
 import { ChatStore } from './chat.store';
 import {
@@ -90,11 +91,15 @@ describe('LanePermissionView', () => {
   const questions = signal<AskUserQuestionRequest[]>([]);
   const respondLane = jest.fn<boolean, unknown[]>(() => true);
   const handleQuestionResponse = jest.fn();
+  const findTabByIdAcrossWorkspaces = jest.fn((): { tab: { id: string } } | null => null);
+  const findTabBySessionIdAcrossWorkspaces = jest.fn((): { tab: { id: string } } | null => null);
   let view: LanePermissionView;
 
   beforeEach(() => {
     jest.clearAllMocks();
     respondLane.mockReturnValue(true);
+    findTabByIdAcrossWorkspaces.mockReturnValue(null);
+    findTabBySessionIdAcrossWorkspaces.mockReturnValue(null);
     agent.set(lane([permission()]));
     questions.set([]);
     TestBed.configureTestingModule({
@@ -104,6 +109,7 @@ describe('LanePermissionView', () => {
         { provide: AgentMonitorStore, useValue: { permissionBelongsToAgent: () => true } },
         { provide: PermissionHandlerService, useValue: { questionRequests: questions } },
         { provide: ChatStore, useValue: { handleQuestionResponse } },
+        { provide: TabManagerService, useValue: { findTabByIdAcrossWorkspaces, findTabBySessionIdAcrossWorkspaces } },
       ],
     });
     view = TestBed.inject(LanePermissionView);
@@ -174,5 +180,72 @@ describe('LanePermissionView', () => {
 
   it('refuses a second connect', () => {
     expect(() => view.connect({ agent })).toThrow('already connected');
+  });
+
+  describe('status line and notice lifetime (M4)', () => {
+    it('clears the status line when the next prompt arrives', () => {
+      view.resolvedStatus();
+      view.respond({ id: 'perm-1', decision: 'allow' });
+      agent.set(lane([]));
+      expect(view.resolvedStatus()).toContain('Allowed by you');
+      agent.set({ ...lane([]), stdout: 'more' } as MonitoredAgent);
+      expect(view.resolvedStatus()).toContain('Allowed by you');
+
+      agent.set(lane([permission({ requestId: 'perm-2' })]));
+      expect(view.resolvedStatus()).toBeNull();
+    });
+
+    it('clears the refusal notice when the next prompt arrives, not when the refused one leaves', () => {
+      respondLane.mockReturnValue(false);
+      view.respond({ id: 'perm-1', decision: 'allow' });
+      agent.set(lane([]));
+      expect(view.notice()).toBe(LANE_ANSWER_REFUSED_TEXT);
+
+      agent.set(lane([permission({ requestId: 'perm-2' })]));
+      expect(view.notice()).toBeNull();
+    });
+
+    it('keeps the outcome for a status read late, after another prompt was answered', () => {
+      agent.set(lane([permission(), permission({ requestId: 'perm-2', toolArgs: '{"command":"ls"}' })]));
+      view.resolvedStatus();
+      view.respond({ id: 'perm-1', decision: 'deny' });
+      view.respond({ id: 'perm-2', decision: 'allow' });
+      agent.set(lane([permission({ requestId: 'perm-2', toolArgs: '{"command":"ls"}' })]));
+      expect(view.resolvedStatus()).toContain('Denied by you');
+      agent.set(lane([]));
+      expect(view.resolvedStatus()).toBe('Permission · Bash · ls - Allowed by you. No longer answerable here.');
+    });
+
+    it('does not record an outcome for an answer that was not sent', () => {
+      view.resolvedStatus();
+      respondLane.mockReturnValue(false);
+      view.respond({ id: 'perm-1', decision: 'allow' });
+      agent.set(lane([]));
+      expect(view.resolvedStatus()).toContain('in another view');
+    });
+  });
+
+  describe('question deciding tab (M6)', () => {
+    const response = { id: 'q-a', answers: { 'Which target?': 'lint' } };
+
+    it('passes the tab the question was routed to', () => {
+      questions.set([{ ...question('q-a', 'lane-a'), tabId: 'tab-routed' }]);
+      view.answer(response);
+      expect(handleQuestionResponse).toHaveBeenCalledWith(response, 'tab-routed');
+    });
+
+    it('passes the tab of the session that spawned the lane, not the active tab', () => {
+      findTabBySessionIdAcrossWorkspaces.mockReturnValue({ tab: { id: 'tab-owner' } });
+      questions.set([question('q-a', 'lane-a')]);
+      view.answer(response);
+      expect(findTabBySessionIdAcrossWorkspaces).toHaveBeenCalledWith('session-1');
+      expect(handleQuestionResponse).toHaveBeenCalledWith(response, 'tab-owner');
+    });
+
+    it('passes null when no open tab owns the lane', () => {
+      questions.set([question('q-a', 'lane-a')]);
+      view.answer(response);
+      expect(handleQuestionResponse).toHaveBeenCalledWith(response, null);
+    });
   });
 });

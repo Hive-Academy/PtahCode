@@ -1,4 +1,5 @@
 import {
+  DestroyRef,
   Injectable,
   computed,
   effect,
@@ -48,6 +49,8 @@ interface AcceptedMessage {
   readonly agentId: string;
   readonly text: string;
   readonly snapshot: LaneTurnSnapshot;
+  /** The composer (controller id) the message was sent from; it gets the message back first. */
+  readonly owner: number;
 }
 
 /** The last submission that did not reach the backend; a retry of the same content reuses its key. */
@@ -69,6 +72,26 @@ const TURN_REFUSAL_REASONS: ReadonlySet<string> = new Set(['turn-options-refused
  * {@link ACCEPTED_CAP} entries and {@link ACCEPTED_PER_LANE_CAP} per lane.
  */
 const acceptedMessages = new Map<string, AcceptedMessage>();
+
+let nextControllerId = 0;
+/** The lane each mounted composer shows, by controller id, in mount order. */
+const mountedComposers = signal<ReadonlyMap<number, string>>(new Map());
+/** The composer the user last used for each lane, by controller id. */
+const lastUsedComposer = signal<ReadonlyMap<string, number>>(new Map());
+
+/**
+ * The composer that receives a lane's restored or recovered message when
+ * more than one shows the lane (for example the inspector and the canvas):
+ * the one the user last used, else the one mounted last.
+ */
+function preferredComposer(agentId: string): number | undefined {
+  const mounted = mountedComposers();
+  const used = lastUsedComposer().get(agentId);
+  if (used !== undefined && mounted.get(used) === agentId) return used;
+  let latest: number | undefined;
+  for (const [id, lane] of mounted) if (lane === agentId) latest = id;
+  return latest;
+}
 
 function isEmptySnapshot(snapshot: LaneTurnSnapshot): boolean {
   return snapshot.files.length === 0 && snapshot.images.length === 0
@@ -133,6 +156,7 @@ export class LaneDeliveryController {
   private readonly attachments = inject(ComposerAttachmentsService);
   private readonly filePicker = inject(FilePickerService);
 
+  private readonly id = nextControllerId++;
   private readonly sources = signal<LaneDeliverySources | null>(null);
   private readonly cancelling = new Set<string>();
   private submission: Submission | null = null;
@@ -145,6 +169,11 @@ export class LaneDeliveryController {
 
   private readonly agentId = computed(() => this.sources()?.agentId() ?? '');
   private readonly draftText = computed(() => this.sources()?.draft().trim() ?? '');
+  /** This composer receives the lane's recovered messages and those of a composer that left the lane. */
+  private readonly preferred = computed(() => {
+    const agentId = this.agentId();
+    return !!agentId && preferredComposer(agentId) === this.id;
+  });
 
   readonly state = computed(() => this.store.composerState(this.agentId()));
   /** False until both previews have answered. */
@@ -195,6 +224,12 @@ export class LaneDeliveryController {
       const agentId = this.agentId();
       if (!sources || !agentId) return;
       untracked(() => {
+        mountedComposers.update((current) => {
+          const next = new Map(current);
+          // Delete first so the map keeps mount order: this lane was shown last.
+          next.delete(this.id);
+          return next.set(this.id, agentId);
+        });
         sources.draft.set('');
         this.attachments.clear();
         this._error.set(null);
@@ -215,6 +250,9 @@ export class LaneDeliveryController {
     effect(() => {
       if (!this.sources()) return;
       const receipts = this.store.receipts().get(this.agentId()) ?? [];
+      // Re-run when this composer becomes the lane's preferred one: it then
+      // takes over messages whose owner left the lane.
+      this.preferred();
       untracked(() => {
         for (const receipt of receipts) this.processReceipt(receipt);
       });
@@ -222,12 +260,25 @@ export class LaneDeliveryController {
     effect(() => {
       // A message recovered from an undelivered receipt ("Recover text")
       // lands in this draft with its files, images, model and effort.
-      if (!this.sources()) return;
+      // With two composers on one lane, only the preferred one takes it.
+      if (!this.sources() || !this.preferred()) return;
       const agentId = this.agentId();
       if (!this.store.recovered().has(agentId)) return;
       untracked(() => {
         const message = this.store.takeRecoveredMessage(agentId);
         if (message?.text) this.restore(message.text, this.snapshotFromTurn(message.turn));
+      });
+    });
+    inject(DestroyRef).onDestroy(() => {
+      mountedComposers.update((current) => {
+        const next = new Map(current);
+        next.delete(this.id);
+        return next;
+      });
+      lastUsedComposer.update((current) => {
+        const next = new Map(current);
+        for (const [lane, id] of current) if (id === this.id) next.delete(lane);
+        return next;
       });
     });
   }
@@ -239,6 +290,7 @@ export class LaneDeliveryController {
   /** The user edited the draft. */
   draftChanged(): void {
     this._error.set(null);
+    this.markUsed();
   }
 
   refreshPreviews(): void {
@@ -268,6 +320,7 @@ export class LaneDeliveryController {
     let text = draftText;
     let snapshot = draftSnapshot;
     let earlierQueuedId: string | null = null;
+    this.markUsed();
     this._sending.set(true);
     this._error.set(null);
     try {
@@ -285,29 +338,42 @@ export class LaneDeliveryController {
         agentId, text, delivery, allowPartialTurnLoss, this.submissionKey(agentId, text, delivery, turn), turn,
       );
       this.submission = null;
-      if (this.agentId() !== agentId) return;
+      // A lane switch while the send was in flight cleared the draft and the
+      // tray. The message then goes back to its own lane, never to this one.
+      const switched = this.agentId() !== agentId;
       const receipt = outcome.receipt;
       const limitHeld = receipt?.state === 'blocked-retryable' && receipt.reason === 'lane-at-limit';
       if (!limitHeld && (outcome.mode === 'unsupported' || (receipt && receipt.state !== 'accepted' && receipt.state !== 'started'))) {
         // Refused at send: the draft, its attachments and the pick stay where they are.
+        if (switched) { this.holdForLane(agentId, draftText, draftSnapshot); return; }
         this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
         this.refreshPreviews();
         return;
       }
-      if (!receipt) { this._error.set('No message receipt was returned. Try again.'); return; }
-      if (sources.draft().trim() === draftText) sources.draft.set('');
-      sent.removeSent();
+      if (!receipt) {
+        if (switched) this.holdForLane(agentId, draftText, draftSnapshot);
+        else this._error.set('No message receipt was returned. Try again.');
+        return;
+      }
+      if (!switched) {
+        if (sources.draft().trim() === draftText) sources.draft.set('');
+        sent.removeSent();
+      }
       if (receipt.state === 'accepted' || limitHeld) {
-        this.remember(receipt.id, { agentId, text, snapshot });
+        // Remembered even after a lane switch, so a later refusal restores it
+        // when a composer shows that lane again.
+        this.remember(receipt.id, { agentId, text, snapshot, owner: this.id });
         const latest = this.store.receipt(agentId, receipt.id);
-        if (latest) this.processReceipt(latest);
+        if (latest && !switched) this.processReceipt(latest);
       }
       if (earlierQueuedId) await this.withdrawCombined(agentId, earlierQueuedId);
-      sources.accepted();
+      if (!switched) sources.accepted();
     } catch {
       if (this.agentId() === agentId) {
         this._error.set('Could not send your message. Try again.');
         this.refreshPreviews();
+      } else {
+        this.holdForLane(agentId, draftText, draftSnapshot);
       }
     } finally {
       if (this.agentId() === agentId) this._sending.set(false);
@@ -318,11 +384,12 @@ export class LaneDeliveryController {
   async withdraw(messageId: string): Promise<void> {
     const agentId = this.agentId();
     if (!agentId) return;
+    this.markUsed();
     this._sending.set(true);
     this.cancelling.add(messageId);
     try {
       const message = await this.takeQueued(agentId, messageId);
-      if (message) this.restore(message.text, message.snapshot);
+      if (message) this.restoreFor(agentId, message.text, message.snapshot);
     } finally {
       this.cancelling.delete(messageId);
       if (this.agentId() === agentId) this._sending.set(false);
@@ -333,20 +400,25 @@ export class LaneDeliveryController {
    * Send a queued message now (the queued card's Send now): withdraw it, then
    * send its text and turn snapshot with delivery `now`, apart from the draft.
    * Needs `allowPartialTurnLoss` when {@link nowNeedsConfirmation} is true. A
-   * refused or failed send puts the message back into the composer.
+   * refused or failed send puts the message back into the composer; after a
+   * lane switch, it is held for its own lane instead.
+   *
+   * A lane switch after the cancel does not stop the send: the user asked
+   * for this message to go now, and the queue no longer holds it.
    */
   async sendQueuedNow(messageId: string, allowPartialTurnLoss = false): Promise<void> {
     const sources = this.sources();
     const agentId = this.agentId();
     if (!sources || !agentId || sources.stopped() || this._sending()) return;
     if (!this.state().now || this.state().nowDisabledReason) return;
+    this.markUsed();
     this._sending.set(true);
     this._error.set(null);
     this.cancelling.add(messageId);
     let message: AcceptedMessage | null = null;
     try {
       message = await this.takeQueued(agentId, messageId);
-      if (!message || this.agentId() !== agentId) return;
+      if (!message) return;
       const turn = toTurnRequest(message.snapshot);
       const outcome = await this.store.sendMessage(
         agentId, message.text, 'now', allowPartialTurnLoss,
@@ -356,20 +428,21 @@ export class LaneDeliveryController {
       const receipt = outcome.receipt;
       if (outcome.mode === 'unsupported' || !receipt || (receipt.state !== 'accepted' && receipt.state !== 'started')) {
         // The message left the queue; put it back so nothing is lost.
-        this.restore(message.text, message.snapshot);
-        this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
-        this.refreshPreviews();
+        if (this.restoreFor(agentId, message.text, message.snapshot)) {
+          this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
+          this.refreshPreviews();
+        }
         return;
       }
+      const switched = this.agentId() !== agentId;
       if (receipt.state === 'accepted') {
-        this.remember(receipt.id, message);
+        this.remember(receipt.id, { ...message, owner: this.id });
         const latest = this.store.receipt(agentId, receipt.id);
-        if (latest) this.processReceipt(latest);
+        if (latest && !switched) this.processReceipt(latest);
       }
-      sources.accepted();
+      if (!switched) sources.accepted();
     } catch {
-      if (message && this.agentId() === agentId) {
-        this.restore(message.text, message.snapshot);
+      if (message && this.restoreFor(agentId, message.text, message.snapshot)) {
         this._error.set('Could not send your message. Try again.');
         this.refreshPreviews();
       }
@@ -392,24 +465,24 @@ export class LaneDeliveryController {
       else {
         try {
           const recovered = await this.store.recoverQueuedMessage(agentId, messageId);
-          message = { agentId, text: recovered.text, snapshot: this.snapshotFromTurn(recovered.turn) };
+          message = { agentId, text: recovered.text, snapshot: this.snapshotFromTurn(recovered.turn), owner: this.id };
         } catch {
           // degradation-audit: reported - the cancel would drop the only copy of
           // the message, so Edit stops, shows the error, and the queued message
           // stays for a retry.
-          this._error.set('Could not load the queued message to edit. Try again.');
+          this.errorFor(agentId, 'Could not load the queued message to edit. Try again.');
           return null;
         }
       }
       const receipt = await this.store.cancelMessage(agentId, messageId);
       if (receipt.reason !== 'cancelled-by-user') {
-        this._error.set('Message already started and could not be cancelled.');
+        this.errorFor(agentId, 'Message already started and could not be cancelled.');
         return null;
       }
       acceptedMessages.delete(messageId);
       return message;
     } catch {
-      this._error.set('Could not cancel the queued message. Try again.');
+      this.errorFor(agentId, 'Could not cancel the queued message. Try again.');
       return null;
     }
   }
@@ -419,6 +492,7 @@ export class LaneDeliveryController {
     const pending = acceptedMessages.get(receipt.id);
     if (!pending || pending.agentId !== this.agentId() || !pending.text) return;
     if (receipt.state === 'failed' || receipt.state === 'expired' || receipt.state === 'interrupted-undelivered') {
+      if (!this.receivesMessageOf(pending.owner)) return;
       this.restore(pending.text, pending.snapshot);
       this._error.set(`${this.store.receiptStatus(receipt).label}: ${receiptRefusalText(receipt)}`);
       acceptedMessages.delete(receipt.id);
@@ -434,9 +508,9 @@ export class LaneDeliveryController {
     this.cancelling.add(earlierQueuedId);
     try {
       const cancelled = await this.store.cancelMessage(agentId, earlierQueuedId);
-      if (cancelled.reason !== 'cancelled-by-user') this._error.set('Earlier message already started; both messages may be delivered.');
+      if (cancelled.reason !== 'cancelled-by-user') this.errorFor(agentId, 'Earlier message already started; both messages may be delivered.');
     } catch {
-      this._error.set('Could not cancel the earlier message; both messages may be delivered.');
+      this.errorFor(agentId, 'Could not cancel the earlier message; both messages may be delivered.');
     } finally {
       this.cancelling.delete(earlierQueuedId);
     }
@@ -454,9 +528,57 @@ export class LaneDeliveryController {
         return [...images, ...snapshot.images.filter((image) => !ids.has(image.id))];
       });
     }
+    // A pick the user made after this message left keeps priority over the message's own.
     const agentId = this.agentId();
-    if (snapshot.settings.model !== undefined) this.settings.pickModel(agentId, snapshot.settings.model);
-    if (snapshot.settings.reasoningEffort !== undefined) this.settings.pickEffort(agentId, snapshot.settings.reasoningEffort);
+    const current = this.settings.pending(agentId);
+    if (snapshot.settings.model !== undefined && current.model === undefined) {
+      this.settings.pickModel(agentId, snapshot.settings.model);
+    }
+    if (snapshot.settings.reasoningEffort !== undefined && current.reasoningEffort === undefined) {
+      this.settings.pickEffort(agentId, snapshot.settings.reasoningEffort);
+    }
+  }
+
+  /**
+   * Restore into this composer when it shows `agentId`; otherwise hold the
+   * message for that lane's composer. True when it was restored here.
+   */
+  private restoreFor(agentId: string, text: string, snapshot: LaneTurnSnapshot): boolean {
+    if (this.agentId() === agentId) {
+      this.restore(text, snapshot);
+      return true;
+    }
+    this.holdForLane(agentId, text, snapshot);
+    return false;
+  }
+
+  /** Hold a message for its lane: the lane's composer restores it when it shows the lane. */
+  private holdForLane(agentId: string, text: string, snapshot: LaneTurnSnapshot): void {
+    if (!text) return;
+    const turn = toTurnRequest(snapshot);
+    this.store.holdForComposer(agentId, turn ? { text, turn } : { text });
+  }
+
+  /**
+   * The message's owner gets it back. Another composer of the lane takes it
+   * only when the owner no longer shows the lane, and then only if it is the
+   * lane's preferred composer, so the user sees where it went.
+   */
+  private receivesMessageOf(owner: number): boolean {
+    if (owner === this.id) return true;
+    if (mountedComposers().get(owner) === this.agentId()) return false;
+    return this.preferred();
+  }
+
+  private markUsed(): void {
+    const agentId = this.agentId();
+    if (!agentId || lastUsedComposer().get(agentId) === this.id) return;
+    lastUsedComposer.update((current) => new Map(current).set(agentId, this.id));
+  }
+
+  /** Show an error only while this composer still shows the lane it concerns. */
+  private errorFor(agentId: string, text: string): void {
+    if (this.agentId() === agentId) this._error.set(text);
   }
 
   private remember(messageId: string, message: AcceptedMessage): void {
