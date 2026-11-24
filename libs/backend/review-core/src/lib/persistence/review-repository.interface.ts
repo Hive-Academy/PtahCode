@@ -2,6 +2,7 @@ import type { IReviewQueueRepository } from '../review-queue.service';
 import type { RepoIdentity } from '@ptah-extension/review-contracts';
 import type { ReviewFailure } from '../review-failure';
 import type { ReviewLaneUse } from '../lanes/review-lane.runner';
+import type { ReviewLaneRunUsage } from '../lanes/review-lane-usage';
 
 export interface ReviewStageRecord {
   attemptId: string;
@@ -56,10 +57,21 @@ export interface IReviewRepository extends IReviewQueueRepository {
   saveCheckpoint(attemptId: string, stage: string, ordinal: number, data: unknown): Promise<void>;
   getCheckpoint(attemptId: string, stage: string, ordinal: number): Promise<unknown | null>;
   /**
-   * Records the lane a role used on its stage row: the family into `review_stages.family`, and lane,
-   * model, family and skipped entries into the `checkpoint:lane:<stage>` row (no migration, plan A2).
+   * Appends one pending lane run to the `checkpoint:lane:<stage>` row before a lane starts, so a run the
+   * process never ends still counts as unknown and partial. Does not touch `review_stages.family`.
    */
-  saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse): Promise<void>;
+  beginStageLaneRun(attemptId: string, stage: string, ordinal: number): Promise<void>;
+  /**
+   * Ends the pending lane run on the `checkpoint:lane:<stage>` row and appends `run` when given (no migration,
+   * plan A2). A non-null `use` replaces lane, model, family and skipped entries and writes the family, null
+   * included, into `review_stages.family`; a null `use` keeps the stored lane.
+   */
+  saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse | null, run?: ReviewLaneRunUsage): Promise<void>;
+  /**
+   * Closes the caller's own `running` row as `interrupted`. The `startedAt` match leaves a row that a new
+   * lease owner has restarted untouched.
+   */
+  closeRunningStage(attemptId: string, stage: string, ordinal: number, startedAt: string, endedAt: string): Promise<void>;
   getStatusSync(attemptId: string): Promise<ReviewStatusSyncRecord | null>;
   saveStatusSync(record: ReviewStatusSyncRecord): Promise<void>;
   getPendingStatusSync(now: string): Promise<ReviewStatusSyncRecord[]>;
