@@ -177,6 +177,27 @@ export type {
   McpCallerToolProfile,
 } from './interfaces/mcp-caller-credentials.interface';
 export type {
+  IMcpGateway,
+  McpGatewayCallResult,
+  McpGatewayScope,
+  McpGatewayServerState,
+  McpGatewayServerStatus,
+  McpGatewayTool,
+} from './interfaces/mcp-gateway.interface';
+export type { McpGatewayCaller } from './interfaces/mcp-gateway-caller-policy';
+export {
+  gatewayScopeFromBinding,
+  internalQueryGatewayScope,
+  isGatewayCallerPermitted,
+  sessionGatewayScope,
+} from './interfaces/mcp-gateway-caller-policy';
+export {
+  PTAH_MCP_TOOL_PREFIX,
+  hasPtahMcpToolPrefix,
+  stripPtahMcpToolPrefix,
+  withPtahMcpToolPrefix,
+} from './interfaces/ptah-mcp-tool-name';
+export type {
   IMcpSubagentRootRegistrar,
   McpSubagentRootRetention,
 } from './interfaces/mcp-subagent-root-registrar.interface';
@@ -376,6 +397,7 @@ export { formatSourceHash } from './utils/source-hash';
 export {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
+  preloadProcessTreeKill,
 } from './utils/process-tree-reaper';
 export {
   runProcessToCompletion,

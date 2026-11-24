@@ -79,6 +79,7 @@ import type { SdkHandle } from './cli-adapter.interface';
 import { blockedLaneCommand } from './lane-command-filter';
 import { resolveEffectiveLaneCapabilities } from '../messaging/agent-effective-capabilities';
 import { turnInputRefusal } from '../messaging/agent-delivery-planner';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 
 /** `grok models` as grok 1.0.46 printed it (`grok-probe.md` §6). */
 const PROBED_MODELS_OUTPUT = [
@@ -162,6 +163,12 @@ describe('GrokCliAdapter', () => {
       expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
       expect(adapter.capabilities().messaging.steer.state).toBe('unsupported');
       expect(adapter.capabilities().permissionModes.plan?.state).toBe('unsupported');
+    });
+
+    it('defaults a lane with no explicit mode to its only verified mode, yolo with network', () => {
+      expect(resolveCliLanePolicy({ cli: 'grok', manifest: adapter.capabilities(), saved: {}, request: {} }))
+        .toMatchObject({ permission: 'yolo', network: 'allow',
+          permissionSource: 'built-in', networkSource: 'built-in' });
     });
 
     it('strips ANSI codes from raw output', () => {

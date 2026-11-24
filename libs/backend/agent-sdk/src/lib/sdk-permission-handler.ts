@@ -61,6 +61,10 @@ import type {
   UnattendedSessionPolicyRegistry,
 } from './permission/unattended-session-policy.registry';
 import { SDK_TOKENS } from './di/tokens';
+import {
+  PLATFORM_TOKENS,
+  type IMcpGateway,
+} from '@ptah-extension/platform-core';
 import type { SessionToolDispositionPort } from './helpers/session-tool-disposition.port';
 import type { SubagentBudgetMonitor } from './helpers/compaction/subagent-budget-monitor';
 import { buildBudgetResumeRefusal } from './helpers/compaction/subagent-resume-advice';
@@ -341,6 +345,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     },
     @inject(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, { isOptional: true })
     private readonly toolDisposition?: SessionToolDispositionPort,
+    // Bound only when the host serves the user's own MCP servers through the
+    // `ptah` server; without it every `mcp__ptah__*` tool is a host tool.
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: Pick<IMcpGateway, 'isGatewayTool'>,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
@@ -1106,6 +1114,26 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   }
 
   /**
+   * Whether a `mcp__ptah__*` name is a third-party tool the gateway serves.
+   * Such a tool gets the decision any third-party MCP tool gets, never the
+   * Ptah MCP allow. Fail-closed: a predicate that throws counts as gateway.
+   */
+  private isGatewayTool(toolName: string): boolean {
+    if (!this.mcpGateway) return false;
+    try {
+      return this.mcpGateway.isGatewayTool(toolName);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the tool is treated
+      // as a gateway tool, so it takes the out-of-policy branch.
+      this.logger.warn(
+        `[SdkPermissionHandler] Gateway tool check failed for ${toolName}; treating it as a gateway tool`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return true;
+    }
+  }
+
+  /**
    * The decision table for an unattended session (TASK_2026_584). Nobody is
    * watching, so no call may wait without bound: a call outside the policy
    * gets a prompt in the child's own tab that is denied after
@@ -1150,7 +1178,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       toolName === 'ExitPlanMode' ||
       SAFE_TOOLS.includes(toolName) ||
       SUBAGENT_TOOLS.includes(toolName) ||
-      toolName.startsWith(PTAH_MCP_TOOL_PREFIX)
+      (toolName.startsWith(PTAH_MCP_TOOL_PREFIX) &&
+        !this.isGatewayTool(toolName))
     ) {
       this.logger.debug(
         `[SdkPermissionHandler] Unattended policy allowed: ${toolName}`,

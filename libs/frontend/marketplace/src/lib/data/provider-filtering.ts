@@ -49,11 +49,12 @@ export interface ProviderFilterOptions {
 
 /** Origins in list order: config files first, account connectors last. */
 const ORIGIN_RANK: Readonly<Record<McpServerOrigin, number>> = {
-  'harness-config': 0,
-  'claude-user': 1,
-  smithery: 2,
-  oauth: 3,
-  'claude-connector': 4,
+  'ptah-intent': 0,
+  'harness-config': 1,
+  'claude-user': 2,
+  smithery: 3,
+  oauth: 4,
+  'claude-connector': 5,
 };
 
 /**

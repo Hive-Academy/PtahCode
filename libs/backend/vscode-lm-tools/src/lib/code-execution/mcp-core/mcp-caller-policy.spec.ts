@@ -117,4 +117,22 @@ describe('mcp caller policy', () => {
       }
     });
   });
+
+  it('puts every gateway name in class gateway, privileged only', () => {
+    expect(toolClass('zernio__create_post', 'gateway')).toBe('gateway');
+    // A host-origin name keeps its own class even when the shape matches.
+    expect(toolClass('ptah_workspace_analyze', 'host')).toBe('read');
+    expect(
+      isToolPermitted('zernio__create_post', 'privileged', 'gateway'),
+    ).toBe(true);
+    for (const capability of ['read-only', 'lane-report'] as const) {
+      expect(
+        isToolPermitted('zernio__create_post', capability, 'gateway'),
+      ).toBe(false);
+      // A read-class name served by the gateway is still a gateway tool.
+      expect(
+        isToolPermitted('ptah_workspace_analyze', capability, 'gateway'),
+      ).toBe(false);
+    }
+  });
 });

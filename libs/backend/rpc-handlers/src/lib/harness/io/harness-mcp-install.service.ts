@@ -13,15 +13,23 @@
  * hand rather than silently implying they were wired up.
  *
  * Applying a harness configures the workspace it was applied to, so every
- * server is recorded as a WORKSPACE intent (TASK_2026_853, D-4): no other
- * workspace's reconcile writes it. A home-folder target (Codex, Copilot,
+ * server is recorded as a WORKSPACE intent (TASK_2026_853, D-4): the gateway
+ * serves it in that workspace only.
+ *
+ * Recording is all an install does (TASK_2026_979 B18): no config file is
+ * written. Ptah serves every enabled server to each session and CLI lane
+ * through its own `ptah` MCP server, so the outcome names the servers that
+ * were recorded, not config paths. A home-folder target (Codex, Copilot,
  * Antigravity) would leak the server into every workspace, so it is left out
  * with a warning; the user can make the server global from the MCP directory.
  */
 
 import { inject, injectable } from 'tsyringe';
 import type { DependencyContainer } from 'tsyringe';
-import { McpInstallService } from '@ptah-extension/cli-agent-runtime';
+import {
+  McpInstallService,
+  refreshBoundMcpGateway,
+} from '@ptah-extension/cli-agent-runtime';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import {
   HARNESS_SYNC_TOKENS,
@@ -36,9 +44,10 @@ import {
   type McpServerEntry,
 } from '@ptah-extension/shared';
 
-/** Paths written and problems encountered while installing harness MCP servers. */
+/** Servers recorded and problems encountered while installing harness MCP servers. */
 export interface HarnessMcpInstallOutcome {
-  installedPaths: string[];
+  /** Server keys whose intent was recorded for this workspace. No paths: nothing is written. */
+  recordedServers: string[];
   warnings: string[];
 }
 
@@ -52,15 +61,17 @@ export class HarnessMcpInstallService {
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(PLATFORM_TOKENS.DI_CONTAINER) container: DependencyContainer,
   ) {
-    // Same service the marketplace uses: it records the install intent and
-    // asks the harness reconciler to write it into each target's config file
-    // (TASK_2026_278 Batch 2).
+    // Same service the marketplace uses: it records the install intent, which
+    // the MCP gateway serves (TASK_2026_979 B18). The reconciler argument is
+    // the constructor's retained positional slot; the service never calls it.
     this.installService = new McpInstallService(
       container.isRegistered(HARNESS_SYNC_TOKENS.RECONCILER)
         ? container.resolve<HarnessReconcilerService>(
             HARNESS_SYNC_TOKENS.RECONCILER,
           )
         : null,
+      undefined,
+      { onIntentsChanged: () => refreshBoundMcpGateway(container) },
     );
   }
 
@@ -69,7 +80,7 @@ export class HarnessMcpInstallService {
     workspaceRoot: string | undefined,
   ): Promise<HarnessMcpInstallOutcome> {
     const outcome: HarnessMcpInstallOutcome = {
-      installedPaths: [],
+      recordedServers: [],
       warnings: [],
     };
 
@@ -119,9 +130,10 @@ export class HarnessMcpInstallService {
           workspaceRoot,
           'workspace',
         );
+        let recorded = false;
         for (const result of results) {
           if (result.success) {
-            outcome.installedPaths.push(result.configPath);
+            recorded = true;
           } else {
             outcome.warnings.push(
               `Failed to install MCP server "${entry.name}" to ${result.target}: ${
@@ -130,6 +142,7 @@ export class HarnessMcpInstallService {
             );
           }
         }
+        if (recorded) outcome.recordedServers.push(serverKey);
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         outcome.warnings.push(
@@ -142,10 +155,9 @@ export class HarnessMcpInstallService {
       }
     }
 
-    // Several servers usually land in the same two config files; report each
-    // written path once.
+    // Two entries may share a server key; report each recorded key once.
     return {
-      installedPaths: Array.from(new Set(outcome.installedPaths)),
+      recordedServers: Array.from(new Set(outcome.recordedServers)),
       warnings: outcome.warnings,
     };
   }

@@ -9,17 +9,16 @@
  *      `McpInstallService` surface `mcp:install` uses — never a second writer.
  *   2. Uninstalling FORGETS those intents in the scope each was recorded in,
  *      so a plugin's servers cannot outlive the plugin.
- *   3. A key an unowned server already occupies is REPORTED and is still routed
- *      through the one path that refuses to overwrite it. The refusal itself is
- *      the reconciler's rule (pinned in `harness-sync`'s
- *      `harness-reconciler.verify-agreement.spec.ts`); what is pinned here is
- *      that the user is finally TOLD.
+ *   3. A key an unowned server already occupies is REPORTED, and the intent
+ *      is still recorded. Ptah writes no config file (TASK_2026_979 B18), so
+ *      the user's entry stays as it is; what is pinned here is that the user
+ *      is TOLD.
  *
  * Most cases use a structural fake installer: `McpInstallService`'s default
  * `McpIntentStore` points at the developer's real `~/.ptah/mcp-installed.json`.
  * The scope suite at the end uses the real `McpInstallService` over an intent
  * store in a temp directory, so workspace isolation is proven on the store the
- * reconciler actually reads.
+ * MCP gateway actually reads.
  *
  * Source-under-test:
  *   `libs/backend/rpc-handlers/src/lib/handlers/external-plugin-mcp.service.ts`
@@ -217,9 +216,9 @@ describe('ExternalPluginMcpService.install', () => {
       'global',
     );
 
-    // `claude` and `vscode` are unconditional because the reconciler never
-    // gates them either; codex and cursor are here only because they were
-    // detected, and copilot/antigravity are absent for the same reason.
+    // `claude` and `vscode` are unconditional; codex and cursor are here only
+    // because they were detected, and copilot/antigravity are absent for the
+    // same reason.
     expect(installer.installs[0]?.targets).toEqual([
       'claude',
       'vscode',
@@ -314,10 +313,8 @@ describe('ExternalPluginMcpService.install', () => {
     expect(outcome.warnings[0]).toContain('C:\\ws\\.vscode\\mcp.json');
     expect(outcome.warnings[0]).toContain('does not own');
 
-    // The intent is STILL recorded. Skipping it here would be a second copy of
-    // an ownership rule that must have exactly one owner: the reconciler
-    // classifies the key `foreign`/`blocked` and leaves the user's entry
-    // untouched, which is the same answer a directory install gets.
+    // The intent is STILL recorded, the same answer a directory install gets:
+    // recording writes no config file, so the user's entry stays untouched.
     expect(installer.installs).toHaveLength(1);
     expect(installer.installs[0]?.serverKey).toBe('binlog');
   });
@@ -370,7 +367,7 @@ describe('ExternalPluginMcpService.install', () => {
 
     expect(outcome.serverKeys).toEqual(['binlog']);
     expect(outcome.warnings).toEqual([
-      expect.stringContaining('could not be written to vscode: EPERM'),
+      expect.stringContaining('could not be recorded for vscode: EPERM'),
     ]);
   });
 
@@ -443,7 +440,7 @@ describe('ExternalPluginMcpService.install', () => {
 
     expect(outcome.serverKeys).toEqual([]);
     expect(outcome.warnings).toEqual([
-      expect.stringContaining('could not be written to claude'),
+      expect.stringContaining('could not be recorded for claude'),
     ]);
   });
 
@@ -568,7 +565,12 @@ describe('ExternalPluginMcpService.uninstall', () => {
     const installer = createFakeInstaller();
     installer.recorded.set('binlog', ['global', 'workspace']);
     const forget = installer.uninstall.bind(installer);
-    installer.uninstall = async (serverKey, targets, workspaceRoot, options) => {
+    installer.uninstall = async (
+      serverKey,
+      targets,
+      workspaceRoot,
+      options,
+    ) => {
       await forget(serverKey, targets, workspaceRoot, options);
       // The global pass still sees the workspace record's entry and reports a
       // refusal; the workspace pass removes it.
@@ -676,7 +678,7 @@ describe('ExternalPluginMcpService.uninstall', () => {
 
     expect(outcome.serverKeys).toEqual([]);
     expect(outcome.warnings).toEqual([
-      expect.stringContaining('could not be written to claude'),
+      expect.stringContaining('could not be recorded for claude'),
     ]);
   });
 
@@ -711,10 +713,10 @@ describe('ExternalPluginMcpService.uninstall', () => {
 });
 
 /**
- * The real `McpInstallService` over a temp intent store: the store the
- * reconciler's desired state is built from (`listFor(workspaceRoot)`). No
- * reconciler, so nothing is written to any config file — only the intent file
- * under the temp root.
+ * The real `McpInstallService` over a temp intent store: the store the MCP
+ * gateway serves from (`listFor(workspaceRoot)`). Install records intent only,
+ * so nothing is written to any config file — only the intent file under the
+ * temp root.
  */
 describe('ExternalPluginMcpService scope (real intent store)', () => {
   let root: string;

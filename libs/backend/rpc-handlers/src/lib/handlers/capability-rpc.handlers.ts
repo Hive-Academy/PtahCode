@@ -29,6 +29,13 @@
  * reason (AC-1.4); the UI reverts its optimistic value on it. The resolver's
  * own error text (paths, errno detail) is logged here and never sent across.
  *
+ * ## Running sessions hear a toggle at once
+ *
+ * A saved toggle asks the bound MCP gateway (`PLATFORM_TOKENS.MCP_GATEWAY`)
+ * to re-read its sources, so `tools/list_changed` reaches a running session
+ * now instead of at the gateway's next 30 s poll (TASK_2026_979 B23). A host
+ * with no gateway bound skips it.
+ *
  * ## Schema size
  *
  * No row carries `schemaTokens` until PR 2 adds the measurement. The UI
@@ -40,7 +47,10 @@ import { z } from 'zod';
 import { RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import type {
+  IMcpGateway,
+  IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import { isCapabilityPolicyUnknownError } from '@ptah-extension/shared';
 import type {
@@ -163,6 +173,8 @@ export class CapabilityRpcHandlers {
     private readonly workspaceProvider: IWorkspaceProvider,
     @inject(SDK_TOKENS.SDK_CAPABILITY_RESOLVER)
     private readonly resolver: ICapabilityResolver,
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly gateway?: IMcpGateway,
   ) {}
 
   register(): void {
@@ -266,6 +278,8 @@ export class CapabilityRpcHandlers {
               id: input.id,
               enabled: input.enabled,
             });
+      // `refresh()` never rejects; it logs its own failure.
+      void this.gateway?.refresh();
       return { entry };
     } catch (error: unknown) {
       this.logFailure('capabilities:setEnabled', error, detail);

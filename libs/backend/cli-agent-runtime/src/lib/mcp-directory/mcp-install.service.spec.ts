@@ -24,8 +24,11 @@ describe('McpInstallService', () => {
   let intents: McpIntentStore;
   let reconcileCalls: number;
 
-  /** A reconciler that reports every requested target clean. */
-  const cleanReconciler = (): HarnessReconcilerService =>
+  /**
+   * A reconciler that counts calls. Install records intent only (TASK_2026_979
+   * B18), so every case below expects this count to stay at zero.
+   */
+  const countingReconciler = (): HarnessReconcilerService =>
     ({
       reconcile: (_root: string, opts: { targets?: string[] }) => {
         reconcileCalls += 1;
@@ -47,7 +50,7 @@ describe('McpInstallService', () => {
       oauth?: { filePath: string; list(): McpOAuthConnectedRecord[] };
     } = {},
   ): McpInstallService =>
-    new McpInstallService(cleanReconciler(), intents, {
+    new McpInstallService(countingReconciler(), intents, {
       homeDir: tmp,
       ...options,
     });
@@ -63,6 +66,26 @@ describe('McpInstallService', () => {
   const readMcpJson = (): Record<string, unknown> =>
     JSON.parse(fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8'))
       .mcpServers;
+
+  /**
+   * Every file under the temp home/workspace except the intent store: the
+   * proof that an install, uninstall or make-global wrote no config file.
+   */
+  const filesBesideIntentStore = (): string[] => {
+    const intentFile = path.join(tmp, '.ptah', 'mcp-installed.json');
+    const found: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (full !== intentFile && !full.startsWith(`${intentFile}.`)) {
+          found.push(path.relative(tmp, full));
+        }
+      }
+    };
+    walk(tmp);
+    return found.sort();
+  };
 
   /** `~/.claude.json` with a top-level (user) map and this workspace's map. */
   const writeClaudeJson = (maps: {
@@ -96,7 +119,7 @@ describe('McpInstallService', () => {
   });
 
   describe('listInstalled', () => {
-    it('marks a harness-config key Ptah never recorded as removable only by force', () => {
+    it('gives a harness-config key Ptah never recorded no removal path, with the hand-removal reason (D2)', () => {
       writeMcpJson({ handwritten: { command: 'node', args: ['s.js'] } });
 
       return service()
@@ -107,7 +130,12 @@ describe('McpInstallService', () => {
           expect(row?.origin).toBe('harness-config');
           expect(row?.target).toBe('claude');
           expect(row?.managedByPtah).toBe(false);
-          expect(row?.removal).toBe('direct');
+          expect(row?.removal).toBe('none');
+          expect(row?.removalBlockedReason).toContain('handwritten');
+          expect(row?.removalBlockedReason).toContain(
+            path.join(tmp, '.mcp.json'),
+          );
+          expect(row?.removalFixCommand).toBeUndefined();
         });
     });
 
@@ -128,6 +156,7 @@ describe('McpInstallService', () => {
       );
       expect(row?.managedByPtah).toBe(true);
       expect(row?.removal).toBe('ptah-managed');
+      expect(row?.removalBlockedReason).toBeUndefined();
     });
 
     it('includes read-only ~/.claude.json rows with a reason naming the CLI command', async () => {
@@ -423,73 +452,281 @@ describe('McpInstallService', () => {
     });
   });
 
+  describe('install records intent only (TASK_2026_979 B18)', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+
+    it('records the intent, writes no config file and never reconciles', async () => {
+      const results = await service().install(
+        'io.github.x/k',
+        'k',
+        stdio,
+        ['claude', 'vscode', 'cursor'],
+        tmp,
+      );
+
+      expect(results).toEqual(
+        ['claude', 'vscode', 'cursor'].map((target) => ({
+          target,
+          configPath: '',
+          success: true,
+        })),
+      );
+      expect(intents.listFor(tmp)).toEqual([
+        {
+          serverKey: 'k',
+          registryName: 'io.github.x/k',
+          config: stdio,
+          targets: ['claude', 'vscode', 'cursor'],
+        },
+      ]);
+      expect(reconcileCalls).toBe(0);
+      expect(filesBesideIntentStore()).toEqual([]);
+    });
+
+    it('a global install with no folder open succeeds: the gateway serves global intents everywhere', async () => {
+      const results = await service().install(
+        'r/k',
+        'k',
+        stdio,
+        ['claude', 'codex'],
+        undefined,
+        'global',
+      );
+
+      expect(results).toEqual([
+        { target: 'claude', configPath: '', success: true },
+        { target: 'codex', configPath: '', success: true },
+      ]);
+      expect(JSON.stringify(results)).not.toContain('deferred');
+      // An empty root yields the global entries: what the gateway reads.
+      expect(intents.listFor('').map((i) => i.serverKey)).toEqual(['k']);
+      expect(reconcileCalls).toBe(0);
+      expect(filesBesideIntentStore()).toEqual([]);
+    });
+
+    it('a host with no reconciler records the same intent and reports the same success', async () => {
+      const svc = new McpInstallService(null, intents, { homeDir: tmp });
+
+      const results = await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+
+      expect(results).toEqual([
+        { target: 'claude', configPath: '', success: true },
+      ]);
+      expect(JSON.stringify(results)).not.toContain('reconciler-unavailable');
+      expect(intents.has('k')).toBe(true);
+    });
+
+    it('leaves an existing config file byte-for-byte alone', async () => {
+      writeMcpJson({ k: { command: 'old' }, mine: { command: 'other' } });
+      const before = fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8');
+
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+      await service().uninstall('k', ['claude'], tmp);
+
+      expect(fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8')).toBe(
+        before,
+      );
+      expect(filesBesideIntentStore()).toEqual(['.mcp.json']);
+    });
+  });
+
+  describe('Installed rows from the intent store (TASK_2026_979 B23)', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+    const intentFile = (): string =>
+      path.join(tmp, '.ptah', 'mcp-installed.json');
+
+    it('lists a workspace install, which no config file carries, as a removable Ptah row', async () => {
+      await service().install('r/k', 'k', stdio, ['claude', 'cursor'], tmp);
+
+      const rows = await service().listInstalled(tmp);
+
+      expect(rows).toEqual(
+        ['claude', 'cursor'].map((target) => ({
+          serverKey: 'k',
+          target,
+          configPath: intentFile(),
+          config: stdio,
+          managedByPtah: true,
+          origin: 'ptah-intent',
+          originLabel: 'Ptah',
+          removal: 'ptah-managed',
+          scope: 'workspace',
+        })),
+      );
+    });
+
+    it('lists a global install in any workspace and with no folder open', async () => {
+      await service().install(
+        'r/g',
+        'g',
+        stdio,
+        ['codex'],
+        undefined,
+        'global',
+      );
+
+      for (const root of [tmp, undefined]) {
+        const rows = await service().listInstalled(root);
+        expect(rows).toEqual([
+          expect.objectContaining({
+            serverKey: 'g',
+            target: 'codex',
+            origin: 'ptah-intent',
+            scope: 'global',
+          }),
+        ]);
+      }
+    });
+
+    it('gives a key recorded in both scopes one row per scope, each with its own config', async () => {
+      const wsConfig = { type: 'stdio' as const, command: 'ws' };
+      await service().install(
+        'r/k',
+        'k',
+        stdio,
+        ['codex'],
+        undefined,
+        'global',
+      );
+      await service().install('r/k', 'k', wsConfig, ['claude'], tmp);
+
+      const rows = await service().listInstalled(tmp);
+
+      expect(rows.map((row) => [row.target, row.scope, row.config])).toEqual([
+        ['codex', 'global', stdio],
+        ['claude', 'workspace', wsConfig],
+      ]);
+    });
+
+    it('drops the row once the install is uninstalled', async () => {
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+      await service().uninstall('k', ['claude'], tmp);
+
+      expect(await service().listInstalled(tmp)).toEqual([]);
+    });
+
+    it('feeds the same rows to the capability inventory', async () => {
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+
+      const { declarations } = await service().listDeclarations(tmp);
+
+      expect(declarations).toEqual([
+        expect.objectContaining({ serverKey: 'k', origin: 'ptah-intent' }),
+      ]);
+    });
+
+    it('lists no Ptah rows, and logs why, when the intent file is unreadable', async () => {
+      fs.writeFileSync(intentFile(), '{ not json', 'utf-8');
+      const warn = jest.fn();
+      const svc = new McpInstallService(null, intents, { homeDir: tmp, warn });
+
+      const rows = await svc.listInstalled(tmp);
+
+      expect(rows).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        '[mcp-install] The MCP intent store could not be read',
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('onIntentsChanged (TASK_2026_979 B23)', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+
+    it('fires after a saved install, make-global and uninstall', async () => {
+      const onIntentsChanged = jest.fn();
+      const svc = new McpInstallService(null, intents, {
+        homeDir: tmp,
+        onIntentsChanged,
+      });
+
+      await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(1);
+      await svc.makeGlobal('k', tmp, []);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(2);
+      await svc.uninstall('k', undefined, tmp);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not fire when the intent change was not saved', async () => {
+      fs.writeFileSync(
+        path.join(tmp, '.ptah', 'mcp-installed.json'),
+        '{ not json',
+        'utf-8',
+      );
+      const onIntentsChanged = jest.fn();
+      const svc = new McpInstallService(null, intents, {
+        homeDir: tmp,
+        onIntentsChanged,
+      });
+
+      const results = await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+
+      expect(results[0]).toMatchObject({ success: false });
+      expect(onIntentsChanged).not.toHaveBeenCalled();
+    });
+  });
+
   describe('uninstall', () => {
-    it('reports a refusal, not a success, when the reconciler left a user key alone', async () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+
+    it('forgets a recorded intent and writes no config file', async () => {
+      await service().install('r/k', 'k', stdio, ['claude', 'cursor'], tmp);
+
+      const results = await service().uninstall('k', ['claude'], tmp);
+
+      expect(results).toEqual([
+        { target: 'claude', configPath: '', success: true },
+      ]);
+      expect(intents.targetsIn('k', 'workspace', tmp)).toEqual(['cursor']);
+      expect(reconcileCalls).toBe(0);
+      expect(filesBesideIntentStore()).toEqual([]);
+    });
+
+    it('reports a key Ptah never recorded as not installed, and leaves the file alone', async () => {
       writeMcpJson({ handwritten: { command: 'node' } });
 
       const results = await service().uninstall('handwritten', ['claude'], tmp);
 
       expect(results).toHaveLength(1);
-      expect(results[0].success).toBe(false);
+      expect(results[0]).toMatchObject({
+        target: 'claude',
+        configPath: '',
+        success: false,
+      });
       expect(results[0].error).toContain('handwritten');
-      expect(results[0].error).toContain('user-owned');
-      // The reconciler is correct to leave it: the entry is still there.
+      expect(results[0].error).toContain('was not installed by Ptah');
       expect(readMcpJson()).toHaveProperty('handwritten');
     });
 
-    it('force removes an unowned key through the facet, without a reconcile', async () => {
+    it('fails only the requested targets the key was never recorded for', async () => {
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+
+      const results = await service().uninstall('k', ['claude', 'cursor'], tmp);
+
+      expect(results[0]).toEqual({
+        target: 'claude',
+        configPath: '',
+        success: true,
+      });
+      expect(results[1]).toMatchObject({ target: 'cursor', success: false });
+      expect(intents.has('k')).toBe(false);
+    });
+
+    it('has no force path: an unrecorded key is never removed from a config file (D2)', async () => {
       writeMcpJson({
         handwritten: { command: 'node' },
         untouched: { command: 'other' },
       });
+      const before = fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8');
 
-      const results = await service().uninstall(
-        'handwritten',
-        ['claude'],
-        tmp,
-        {
-          force: true,
-        },
+      const results = await service().uninstall('handwritten', undefined, tmp);
+
+      expect(results.every((result) => !result.success)).toBe(true);
+      expect(fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8')).toBe(
+        before,
       );
-
-      expect(results[0]).toMatchObject({ target: 'claude', success: true });
-      expect(reconcileCalls).toBe(0);
-      const after = readMcpJson();
-      expect(after).not.toHaveProperty('handwritten');
-      // The facet edits one key and leaves every other byte alone.
-      expect(after).toHaveProperty('untouched');
-    });
-
-    it('force on a key Ptah DOES own still goes through the reconciler', async () => {
-      writeMcpJson({ other: { command: 'x' } });
-      intents.record({
-        serverKey: 'owned',
-        registryName: 'io.github.x/owned',
-        targets: ['claude'],
-        config: { type: 'stdio', command: 'node' },
-        scope: 'workspace',
-        workspaceRoot: tmp,
-      });
-
-      const results = await service().uninstall('owned', ['claude'], tmp, {
-        force: true,
-      });
-
-      expect(reconcileCalls).toBe(1);
-      expect(results[0].success).toBe(true);
-      expect(intents.has('owned')).toBe(false);
-    });
-
-    it('reports a target whose config path cannot be resolved on the force path', async () => {
-      // No workspace root, so every workspace-scoped facet resolves nothing.
-      const results = await service().uninstall('handwritten', ['claude'], '', {
-        force: true,
-      });
-      expect(results[0]).toMatchObject({
-        success: false,
-        code: 'config-unresolved',
-        error: MCP_INSTALL_RESULT_COPY['config-unresolved'],
-      });
+      expect(fs.existsSync(path.join(tmp, '.mcp.json.bak'))).toBe(false);
     });
   });
 
@@ -517,7 +754,7 @@ describe('McpInstallService', () => {
       expect(service().intentScopeOf('k', otherWs)).toBeUndefined();
     });
 
-    it('refuses a workspace install with no root before writing or reconciling', async () => {
+    it('refuses a workspace install with no root before saving anything', async () => {
       await expect(
         service().install('r/k', 'k', stdio, ['claude'], undefined),
       ).rejects.toMatchObject({ code: 'workspace-root-required' });
@@ -546,14 +783,17 @@ describe('McpInstallService', () => {
       expect(intents.listFor(tmp)[0].targets).toEqual(['claude', 'cursor']);
     });
 
-    it('makeGlobal promotes the record, adds opt-in home targets and reconciles them', async () => {
+    it('makeGlobal promotes the record and adds opt-in home targets, writing no config file', async () => {
       await service().install('r/k', 'k', stdio, ['claude'], tmp);
-      reconcileCalls = 0;
 
       const results = await service().makeGlobal('k', tmp, ['codex']);
 
-      expect(results.map((r) => r.target)).toEqual(['claude', 'codex']);
-      expect(reconcileCalls).toBe(1);
+      expect(results).toEqual([
+        { target: 'claude', configPath: '', success: true },
+        { target: 'codex', configPath: '', success: true },
+      ]);
+      expect(reconcileCalls).toBe(0);
+      expect(filesBesideIntentStore()).toEqual([]);
       expect(intents.scopeOf('k', otherWs)).toBe('global');
       expect(intents.listFor(otherWs)[0].targets).toEqual(['claude', 'codex']);
     });
@@ -596,17 +836,6 @@ describe('McpInstallService', () => {
   });
   describe('failure results carry fixed copy (Phase D review L2, L5, L6)', () => {
     const stdio = { type: 'stdio' as const, command: 'node' };
-    const SECRET = 'SECRET-SENTINEL-sk-live-1234';
-
-    const withReconciler = (
-      reconcile: HarnessReconcilerService['reconcile'],
-      warn?: (message: string, detail?: unknown) => void,
-    ): McpInstallService =>
-      new McpInstallService(
-        { reconcile } as unknown as HarnessReconcilerService,
-        intents,
-        { homeDir: tmp, ...(warn === undefined ? {} : { warn }) },
-      );
 
     /** A store whose path is a directory: every read fails with EISDIR. */
     const brokenStore = (): McpIntentStore => {
@@ -615,9 +844,9 @@ describe('McpInstallService', () => {
       return new McpIntentStore(dir);
     };
 
-    it('fails every target before reconciling when the intent cannot be saved', async () => {
+    it('fails every target when the intent cannot be saved, and logs the cause', async () => {
       const warnings: unknown[] = [];
-      const svc = new McpInstallService(cleanReconciler(), brokenStore(), {
+      const svc = new McpInstallService(countingReconciler(), brokenStore(), {
         homeDir: tmp,
         warn: (_message, detail) => warnings.push(detail),
       });
@@ -633,19 +862,20 @@ describe('McpInstallService', () => {
 
       expect(reconcileCalls).toBe(0);
       expect(results).toEqual([
-        expect.objectContaining({
+        {
           target: 'claude',
+          configPath: '',
           success: false,
           code: 'intent-not-saved',
           error: MCP_INSTALL_RESULT_COPY['intent-not-saved'],
-        }),
+        },
         expect.objectContaining({ target: 'codex', code: 'intent-not-saved' }),
       ]);
       expect(warnings).toHaveLength(1);
     });
 
-    it('makeGlobal rejects with the persistence error and does not reconcile', async () => {
-      const svc = new McpInstallService(cleanReconciler(), brokenStore(), {
+    it('makeGlobal rejects with the persistence error', async () => {
+      const svc = new McpInstallService(countingReconciler(), brokenStore(), {
         homeDir: tmp,
       });
       await expect(svc.makeGlobal('k', tmp, ['codex'])).rejects.toMatchObject({
@@ -654,97 +884,142 @@ describe('McpInstallService', () => {
       });
       expect(reconcileCalls).toBe(0);
     });
+  });
 
-    it('defers every target of a global install with no folder open, saving the intent', async () => {
-      const results = await service().install(
-        'r/k',
-        'k',
-        stdio,
-        ['claude', 'codex'],
-        undefined,
-        'global',
+  describe('linked git worktree (#1469)', () => {
+    /** git's linked-worktree layout: `.git` is a FILE with a gitdir pointer. */
+    const makeLinkedWorktree = (): void => {
+      fs.writeFileSync(
+        path.join(tmp, '.git'),
+        'gitdir: /repo/.git/worktrees/wt\n',
+        'utf-8',
       );
+    };
+
+    it('needs no special case: install and uninstall change the intent and write nothing', async () => {
+      makeLinkedWorktree();
+      const warnings: unknown[] = [];
+      const svc = new McpInstallService(countingReconciler(), intents, {
+        homeDir: tmp,
+        warn: (message) => warnings.push(message),
+      });
+
+      const installed = await svc.install(
+        'io.github.x/zernio',
+        'zernio',
+        { type: 'stdio', command: 'node' },
+        ['claude'],
+        tmp,
+      );
+      expect(installed).toEqual([
+        { target: 'claude', configPath: '', success: true },
+      ]);
+      expect(intents.has('zernio')).toBe(true);
+
+      const removed = await svc.uninstall('zernio', ['claude'], tmp);
+      expect(removed).toEqual([
+        { target: 'claude', configPath: '', success: true },
+      ]);
+      expect(intents.has('zernio')).toBe(false);
 
       expect(reconcileCalls).toBe(0);
-      expect(results).toEqual(
-        ['claude', 'codex'].map((target) =>
-          expect.objectContaining({
-            target,
-            success: false,
-            deferred: true,
-            code: 'deferred-no-workspace',
-            error: MCP_INSTALL_RESULT_COPY['deferred-no-workspace'],
-          }),
-        ),
-      );
-      expect(intents.targetsIn('k', 'global')).toEqual(['claude', 'codex']);
+      expect(warnings).toEqual([]);
+      expect(filesBesideIntentStore()).toEqual(['.git']);
     });
 
-    it('defers every target with no folder open even when the host has no reconciler', async () => {
-      const svc = new McpInstallService(null, intents, { homeDir: tmp });
+    // B24 (decision row 39): the gateway serves a worktree's intents with its
+    // main checkout's (`GatewayServerSources.resolve`), so the Installed tab
+    // lists them too, resolved through the same `mainCheckoutRoot` seam.
+    describe("lists the main checkout's workspace intents the gateway serves", () => {
+      const stdio = { type: 'stdio' as const, command: 'node' };
+      let worktree: string;
+      let mainRoot: string;
+      const linked = (): McpInstallService =>
+        new McpInstallService(null, intents, {
+          homeDir: tmp,
+          mainCheckoutRoot: (root) => (root === worktree ? mainRoot : null),
+        });
 
-      const results = await svc.install(
-        'r/k',
-        'k',
-        stdio,
-        ['claude', 'codex'],
-        undefined,
-        'global',
-      );
+      /**
+       * A root with its own workspace marker, so the intent store keys it as
+       * its own workspace rather than walking up to `tmp` (which holds the
+       * `.ptah` of the intent store).
+       */
+      const repoRoot = (name: string): string => {
+        const root = path.join(tmp, name);
+        fs.mkdirSync(path.join(root, '.ptah'), { recursive: true });
+        return root;
+      };
 
-      expect(results).toEqual(
-        ['claude', 'codex'].map((target) =>
-          expect.objectContaining({
-            target,
-            success: false,
-            deferred: true,
-            code: 'deferred-no-workspace',
-          }),
-        ),
-      );
-      expect(JSON.stringify(results)).not.toContain('reconciler-unavailable');
-      expect(intents.targetsIn('k', 'global')).toEqual(['claude', 'codex']);
-    });
-
-    it('never puts a reconcile exception message in a result, and logs it', async () => {
-      const warnings: unknown[] = [];
-      const svc = withReconciler(
-        () => Promise.reject(new Error(`EACCES /home/u/.codex ${SECRET}`)),
-        (_message, detail) => warnings.push(detail),
-      );
-
-      const results = await svc.install('r/k', 'k', stdio, ['claude'], tmp);
-
-      expect(results[0]).toMatchObject({
-        success: false,
-        code: 'reconcile-failed',
-        error: MCP_INSTALL_RESULT_COPY['reconcile-failed'],
+      beforeEach(() => {
+        worktree = repoRoot('wt');
+        mainRoot = repoRoot('main');
       });
-      expect(JSON.stringify(results)).not.toContain(SECRET);
-      expect(JSON.stringify(warnings)).toContain(SECRET);
-    });
 
-    it('never puts a write-failure reason in a result, and logs it', async () => {
-      const warnings: unknown[] = [];
-      const svc = withReconciler(
-        (_root, opts) =>
-          Promise.resolve({
-            targets: (opts.targets ?? []).map((target) => ({
-              target,
-              writeFailed: [{ relPath: '.mcp.json#k', reason: SECRET }],
-            })),
-          }) as unknown as ReturnType<HarnessReconcilerService['reconcile']>,
-        (_message, detail) => warnings.push(detail),
-      );
+      it('adds the main checkout rows after the worktree own rows, removable only there', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+        await linked().install('r/w', 'own', stdio, ['cursor'], worktree);
 
-      const results = await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+        const rows = await linked().listInstalled(worktree);
 
-      expect(results[0]).toMatchObject({
-        success: false,
-        code: 'write-failed',
+        expect(
+          rows.map((row) => [row.serverKey, row.target, row.scope, row.removal]),
+        ).toEqual([
+          ['own', 'cursor', 'workspace', 'ptah-managed'],
+          ['from-main', 'claude', 'workspace', 'none'],
+        ]);
+        const fromMain = rows.find((row) => row.serverKey === 'from-main');
+        expect(fromMain).toMatchObject({
+          origin: 'ptah-intent',
+          managedByPtah: true,
+          configPath: path.join(tmp, '.ptah', 'mcp-installed.json'),
+          config: stdio,
+        });
+        expect(fromMain?.removalBlockedReason).toContain(mainRoot);
+        expect(fromMain?.removalBlockedReason).toContain('Open that folder');
       });
-      expect(JSON.stringify(results)).not.toContain(SECRET);
-      expect(JSON.stringify(warnings)).toContain(SECRET);
+
+      it('feeds the main checkout rows to the capability inventory too', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+
+        const { declarations } = await linked().listDeclarations(worktree);
+
+        expect(declarations).toEqual([
+          expect.objectContaining({
+            serverKey: 'from-main',
+            origin: 'ptah-intent',
+            scope: 'workspace',
+          }),
+        ]);
+      });
+
+      it('lists nothing extra outside a linked worktree', async () => {
+        await linked().install('r/m', 'from-main', stdio, ['claude'], mainRoot);
+        const other = repoRoot('other');
+
+        expect(await linked().listInstalled(other)).toEqual([]);
+        // The main checkout itself lists its own record once, as removable.
+        expect(
+          (await linked().listInstalled(mainRoot)).map((row) => row.removal),
+        ).toEqual(['ptah-managed']);
+      });
+
+      it('lists a global install once, not again through the main checkout', async () => {
+        await linked().install(
+          'r/g',
+          'g',
+          stdio,
+          ['codex'],
+          undefined,
+          'global',
+        );
+
+        const rows = await linked().listInstalled(worktree);
+
+        expect(rows.map((row) => [row.serverKey, row.scope])).toEqual([
+          ['g', 'global'],
+        ]);
+      });
     });
   });
 });

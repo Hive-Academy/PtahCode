@@ -257,17 +257,24 @@ import {
   isToolPermitted,
   MCP_CRON_WRITE_DENIED_MESSAGE,
 } from './mcp-caller-policy';
-import {
-  composeEffectiveToolList,
-  buildToolDefinitions,
-} from './effective-tool-list';
+import { composeEffectiveToolList } from './effective-tool-list';
 import { childPhasePolicyRefusal } from './child-phase-policy';
 import {
   MCP_CALLER_FORBIDDEN_CODE,
   MCP_TOOL_DENIED_MESSAGE,
 } from './mcp-caller-auth.types';
-import type { McpCallerCapability } from '@ptah-extension/platform-core';
+import type {
+  IMcpGateway,
+  McpCallerCapability,
+} from '@ptah-extension/platform-core';
 import { isPhaseToolDenied } from './mcp-caller-phase-filter';
+import {
+  hostToolNames,
+  listGatewayToolsForList,
+  routeGatewayCall,
+  type GatewayBridgeContext,
+  type GatewayCallContext,
+} from './gateway-tool-bridge';
 import {
   applyToolResultBudget,
   getToolResultBudget,
@@ -423,6 +430,11 @@ export interface ProtocolHandlerDependencies {
    * suite (see `mcpSlowToolWarnMs`). Absent → no breadcrumbs.
    */
   hangBreadcrumbs?: Pick<HangBreadcrumbs, 'begin' | 'end'>;
+  /**
+   * The user's own MCP servers served through `ptah`. Absent (a host without
+   * auth secrets): `tools/list` and `tools/call` serve Ptah's tools only.
+   */
+  gateway?: IMcpGateway;
 }
 
 /**
@@ -451,7 +463,7 @@ export async function handleMCPRequest(
         return handleInitialize(request, logger);
 
       case 'tools/list':
-        return handleToolsList(request, deps);
+        return await handleToolsList(request, deps);
 
       case 'tools/call': {
         const caller = resolveMcpCaller(request);
@@ -571,10 +583,10 @@ function handleInitialize(request: MCPRequest, logger: Logger): MCPResponse {
  * - ptah_get_diagnostics: Uses IDiagnosticsProvider abstraction (works on both platforms)
  */
 
-function handleToolsList(
+async function handleToolsList(
   request: MCPRequest,
   deps: ProtocolHandlerDependencies,
-): MCPResponse {
+): Promise<MCPResponse> {
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
   const tools = composeEffectiveToolList(
@@ -587,33 +599,60 @@ function handleToolsList(
 
   markEagerTools(tools, deps, profile);
   declareResultBudgets(tools);
+  // Appended after the eager and budget passes: gateway tools stay deferred
+  // and pass through unchanged, after Ptah's byte-stable list.
+  const gatewayTools = await listGatewayToolsForList(
+    request,
+    gatewayBridgeContext(request, deps),
+  );
 
   return {
     jsonrpc: '2.0',
     id: request.id,
-    result: { tools },
+    result: { tools: [...tools, ...gatewayTools] },
+  };
+}
+
+/** What `gateway-tool-bridge` needs from this request and these deps. */
+function gatewayBridgeContext(
+  request: MCPRequest,
+  deps: ProtocolHandlerDependencies,
+): GatewayBridgeContext {
+  return {
+    gateway: deps.gateway,
+    capability: requestCapability(request),
+    warn: (message, meta) => runObserver(() => deps.logger.warn(message, meta)),
+    debug: (message, meta) =>
+      runObserver(() => deps.logger.debug(message, 'CodeExecutionMCP', meta)),
   };
 }
 
 /**
- * Every tool name the dispatcher serves (all namespaces and capabilities on).
- * Built on first use; the telemetry line logs only these names.
+ * {@link gatewayBridgeContext} plus the tool-result budget, applied under the
+ * gateway tool's name (the default budget), the same as host tool results.
  */
-let registeredToolNames: ReadonlySet<string> | undefined;
+function gatewayCallContext(
+  request: MCPRequest,
+  deps: ProtocolHandlerDependencies,
+): GatewayCallContext {
+  return {
+    ...gatewayBridgeContext(request, deps),
+    budgetText: async (text) =>
+      (await budgetToolText(request, text, deps)).text,
+  };
+}
 
 /** Label the telemetry uses for a requested name that is not a registered tool. */
 const UNKNOWN_TOOL_LABEL = '<unknown>';
 
 /**
- * The tool identity the telemetry may log: a registered tool name, else
+ * The tool identity the telemetry may log: a registered tool name (every
+ * name the dispatcher serves, see `hostToolNames`), else
  * {@link UNKNOWN_TOOL_LABEL}. A requested name is caller input — it can carry
  * a path or a secret — so an unregistered one is never logged verbatim.
  */
 function telemetryToolName(requestedName: string): string {
-  registeredToolNames ??= new Set(
-    buildToolDefinitions({ hasIDECapabilities: true }).map((tool) => tool.name),
-  );
-  return registeredToolNames.has(requestedName)
+  return hostToolNames().has(requestedName)
     ? requestedName
     : UNKNOWN_TOOL_LABEL;
 }
@@ -1017,6 +1056,15 @@ async function dispatchToolsCall(
   if (APPS_ONLY_TOOL_NAMES.has(name) && getCallerToolProfile() !== 'apps') {
     return toolErrorResponse(request, appsOnlyToolMessage(name));
   }
+  // Gateway first: a name its reverse map holds is never a host tool name.
+  const gatewayResult = await routeGatewayCall(
+    request,
+    gatewayCallContext(request, deps),
+    name,
+    args,
+    false,
+  );
+  if (gatewayResult) return gatewayResult;
   const individualResult = await handleIndividualTool(
     name,
     args || {},
@@ -1071,6 +1119,14 @@ async function dispatchToolsCall(
     );
   }
 
+  const relisted = await routeGatewayCall(
+    request,
+    gatewayCallContext(request, deps),
+    name,
+    args,
+    true,
+  );
+  if (relisted) return relisted;
   return createErrorResponse(request.id, -32602, `Unknown tool: ${name}`);
 }
 

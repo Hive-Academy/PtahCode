@@ -155,6 +155,7 @@ import type {
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { buildTaskPrompt, renderRoleBlock } from './cli-adapter.utils';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 
 /** Drain a handle's raw output + structured segments into arrays. */
 function collect(handle: SdkHandle): {
@@ -514,6 +515,16 @@ describe('OpencodeCliAdapter', () => {
 
       const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
       expect(argsArg).not.toContain('--auto');
+    });
+
+    it('spawns the built-in default (yolo with network) with --auto', async () => {
+      const resolved = resolveCliLanePolicy({ cli: 'opencode', manifest: adapter.capabilities(), saved: {}, request: {} });
+      expect(resolved).toMatchObject({ permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      const handle = await adapter.runSdk({ ...baseOptions, ...resolved });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
     });
 
     it('uses --auto and merges permission allow with the existing MCP config for yolo', async () => {

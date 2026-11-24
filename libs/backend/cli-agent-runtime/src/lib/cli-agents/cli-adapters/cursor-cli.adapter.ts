@@ -61,10 +61,17 @@ interface CursorMcpServerConfig {
   headers?: Record<string, string>;
 }
 
+/** `SettingSource` from `@cursor/sdk` (`dist/esm/agent/options.d.ts`). */
+type CursorSettingSource = 'project' | 'user' | 'team' | 'mdm' | 'plugins' | 'all';
+
 interface CursorAgentOptions {
   apiKey?: string;
   model?: CursorModelSelection;
-  local?: { cwd?: string; sandboxOptions?: { enabled: boolean } };
+  local?: {
+    cwd?: string;
+    settingSources?: CursorSettingSource[];
+    sandboxOptions?: { enabled: boolean };
+  };
   mode?: 'agent' | 'plan';
   mcpServers?: Record<string, CursorMcpServerConfig>;
 }
@@ -452,6 +459,13 @@ export class CursorCliAdapter implements CliAdapter {
             apiKey,
             model: { id: options.model ?? DEFAULT_CURSOR_MODEL },
             local: { cwd: options.workingDirectory,
+              // No ambient Cursor settings layers: the SDK then loads no
+              // project or user `.cursor/mcp.json` and no plugin MCP, so the
+              // lane sees only the inline `ptah` server, whose gateway serves
+              // the user's enabled servers (TASK_2026_979 A5). `[]` is the SDK
+              // default today; it is explicit so a default change cannot
+              // bring duplicate servers back.
+              settingSources: [],
               ...(options.permission === 'yolo' ? { sandboxOptions: { enabled: false } } : {}) },
             ...(options.permission === 'yolo' ? { mode: 'agent' as const } : {}),
           };

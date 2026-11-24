@@ -67,6 +67,7 @@ function assemblyFor(
   enabledTools: string[] = [],
   enabledSkills: string[] = [],
   syncedSkillIds: string[] = [],
+  servedByGateway = false,
 ): PtahSpawnAssembly {
   const builtinPolicy = resolveClaudeBuiltinPolicy({
     enabledTools,
@@ -85,7 +86,7 @@ function assemblyFor(
       policy,
       builtinPolicy,
     ),
-    capabilityIsolation: capabilityIsolationOptions(policy),
+    capabilityIsolation: capabilityIsolationOptions(policy, servedByGateway),
     builtinPolicy,
   };
 }
@@ -152,6 +153,23 @@ function certifiedLaunch(): ClaudeCertifiedLaunchContext {
     identityReference: 'b'.repeat(64),
   };
 }
+
+describe('buildClaudeSdkLaneOptions — strict MCP from the gateway (C11)', () => {
+  it('runs strict when the assembly says the gateway serves the lane', () => {
+    const options = buildClaudeSdkLaneOptions(
+      laneInput(assemblyFor(verifiedPolicy(), [], [], [], true)),
+    );
+    expect(options.strictMcpConfig).toBe(true);
+    expect(options.skills).toBeUndefined();
+  });
+
+  it('keeps the lane MCP sources when the gateway does not serve it', () => {
+    const options = buildClaudeSdkLaneOptions(
+      laneInput(assemblyFor(verifiedPolicy())),
+    );
+    expect(options.strictMcpConfig).toBeUndefined();
+  });
+});
 
 describe('buildClaudeSdkLaneOptions — phase tool profile', () => {
   it('appends phase denials after the preset and drops duplicates and blanks', () => {

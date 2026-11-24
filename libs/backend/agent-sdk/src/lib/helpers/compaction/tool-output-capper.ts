@@ -5,7 +5,11 @@
  *
  * Scope: `Bash`, `PowerShell`, `Grep`, `Read` and every MCP tool except
  * Ptah's own (`mcp__ptah__*`), whose server already budgets each answer with
- * the same engine. Any other tool passes through untouched.
+ * the same engine. A `mcp__ptah__*` tool that the MCP gateway serves for a
+ * third-party server is capped like any MCP tool: when the optional
+ * `isGatewayTool` predicate is bound it decides, fail-closed (a throw caps);
+ * unbound, every `mcp__ptah__*` tool is exempt as before. Any other tool
+ * passes through untouched.
  *
  * The rewrite is shape-preserving (AS9): only the text fields the model reads
  * change — Bash/PowerShell `stdout`/`stderr`, Grep `content`, Read
@@ -93,6 +97,9 @@ export class ToolOutputCapper {
     // Optional: `registerSdkServices` passes it only when a host bound
     // `SDK_TOKENS.SDK_CODE_OUTLINER`.
     private readonly outliner?: CodeOutliner,
+    // Optional: `IMcpGateway.isGatewayTool`, passed only when a host bound
+    // the gateway; it marks the `mcp__ptah__*` tools that are third-party.
+    private readonly isGatewayTool?: (toolName: string) => boolean,
   ) {
     this.reducerOutput = {
       name: 'ToolOutputCapper',
@@ -104,8 +111,15 @@ export class ToolOutputCapper {
     };
   }
 
-  /** Whether `toolName` is one this capper rewrites. */
-  static appliesTo(toolName: string): boolean {
+  /**
+   * Whether `toolName` is one this capper rewrites. A `mcp__ptah__*` tool is
+   * rewritten only when `isGatewayTool` is given and says it is a gateway
+   * tool, or throws (fail-closed).
+   */
+  static appliesTo(
+    toolName: string,
+    isGatewayTool?: (toolName: string) => boolean,
+  ): boolean {
     if (
       SHELL_TOOLS.has(toolName) ||
       toolName === 'Grep' ||
@@ -113,9 +127,17 @@ export class ToolOutputCapper {
     ) {
       return true;
     }
-    return (
-      toolName.startsWith(MCP_PREFIX) && !toolName.startsWith(PTAH_MCP_PREFIX)
-    );
+    if (!toolName.startsWith(MCP_PREFIX)) return false;
+    if (!toolName.startsWith(PTAH_MCP_PREFIX)) return true;
+    if (!isGatewayTool) return false;
+    try {
+      return isGatewayTool(toolName);
+    } catch {
+      // degradation-audit: optional-capability - the gateway predicate is
+      // optional; when it throws the tool is capped like any third-party MCP
+      // tool (fail-closed), and capping is shape-preserving.
+      return true;
+    }
   }
 
   /**
@@ -129,7 +151,7 @@ export class ToolOutputCapper {
     toolResponse: unknown,
     cwd: string,
   ): Promise<unknown> {
-    if (!ToolOutputCapper.appliesTo(toolName)) {
+    if (!ToolOutputCapper.appliesTo(toolName, this.isGatewayTool)) {
       return toolResponse;
     }
     try {

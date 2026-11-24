@@ -115,7 +115,6 @@ describe('rival targets — agent model reconciliation', () => {
         getWorkspacePluginConfig: () => ({}),
       }),
       undefined,
-      undefined,
       withModels
         ? () => ({
             layersForPath: (root: string) => {

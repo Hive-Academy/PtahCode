@@ -12,7 +12,6 @@
 
 import type { AgentModelLayers, HarnessTargetId } from '@ptah-extension/shared';
 import type { HarnessRetiredSources } from '../targets/harness-target.port';
-import type { HarnessMcpIntent } from './mcp-intent-store';
 
 /** Absolute roots of the user layer (`~/.ptah/user/` by default). */
 export interface HarnessSourceLayout {
@@ -56,22 +55,8 @@ export interface HarnessSourceLayout {
 export interface HarnessSourceState {
   layout: HarnessSourceLayout;
   /**
-   * MCP servers that apply to the reconciled workspace, from
-   * `~/.ptah/mcp-installed.json` (see `mcp-intent-store.ts`): the global
-   * records merged with this workspace's own, never another workspace's
-   * (TASK_2026_853, D-1). Empty is the normal state and means "no
-   * Ptah-managed MCP servers" — never "remove the user's own", which are not
-   * in the manifest and so are never touched.
-   *
-   * Optional, and absent means empty, so a resolver that predates the MCP facet
-   * (or a spec that only cares about skills) is a valid source state rather
-   * than a compile error.
-   */
-  mcpIntents?: HarnessMcpIntent[];
-  /**
    * Sources retired for good (D-2): skills.sh roots listed in
-   * `~/.ptah/plugins/.ptah-skillssh-retired.json`, and the MCP keys the intent
-   * store carried over from its v1 file. The reconciler removes a copy of one
+   * `~/.ptah/plugins/.ptah-skillssh-retired.json`. The reconciler removes a copy of one
    * only on proof, never as an ordinary stale entry.
    *
    * Retirement is permanent and independent of the plugin policy, so
@@ -125,9 +110,9 @@ export interface HarnessSourceState {
    * consent story; `state.json`'s `agentSyncEnabled` is the workspace-level
    * half, and either one dropping an agent reaps it from every target.
    *
-   * Optional, and absent means "none disabled", for the same reason
-   * {@link mcpIntents} is optional: a resolver built by hand and every spec that
-   * predates this field stays a valid source state rather than a compile error.
+   * Optional, and absent means "none disabled": a resolver built by hand and
+   * every spec that predates this field stays a valid source state rather
+   * than a compile error.
    */
   disabledAgentIds?: string[];
   /**

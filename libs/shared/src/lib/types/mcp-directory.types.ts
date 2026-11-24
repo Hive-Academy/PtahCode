@@ -379,9 +379,18 @@ export const MCP_INSTALL_RESULT_COPY: Readonly<
  * `claude-connector` is produced by the FRONTEND only: a claude.ai account
  * connector (Gmail, Calendar, Drive, Canva) exists nowhere on disk, so the
  * backend cannot and does not emit it.
+ *
+ * `ptah-intent` is a server installed through Ptah and recorded in
+ * `~/.ptah/mcp-installed.json` (TASK_2026_979). No config file carries it any
+ * more: the MCP gateway serves it through Ptah's own `ptah` server.
  */
 export type McpServerOrigin =
-  'harness-config' | 'claude-user' | 'smithery' | 'oauth' | 'claude-connector';
+  | 'harness-config'
+  | 'ptah-intent'
+  | 'claude-user'
+  | 'smithery'
+  | 'oauth'
+  | 'claude-connector';
 
 /**
  * How — and whether — a row can be removed locally.

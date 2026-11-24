@@ -16,8 +16,11 @@ import {
   type SessionToolDispositionRegistry,
 } from '@ptah-extension/agent-sdk';
 import {
+  NON_AUTH_PROVIDER_KEY_SLOT_IDS,
   PLATFORM_TOKENS,
+  type IMcpGateway,
   type IOutputChannel,
+  type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
   CLAUDE_LANE_ACCOUNT_PERSISTENCE,
@@ -79,6 +82,14 @@ import {
   createSmitheryConfigSecretStore,
 } from '../mcp-directory/smithery-installed-manifest';
 import { McpOAuthInstalledManifestStore } from '../mcp-directory/oauth/mcp-oauth-installed-manifest';
+import { McpOAuthService } from '../mcp-directory/oauth/mcp-oauth.service';
+import { createMcpOAuthTokenStore } from '../mcp-directory/oauth/mcp-oauth-token-store';
+import { SmitheryRegistrySource } from '../mcp-directory/smithery-registry.source';
+import { SmitheryConnectionResolver } from '../mcp-directory/smithery-connection-resolver';
+import { SmitheryOverrideResolver } from '../mcp-directory/smithery-override-resolver';
+import { GatewayServerSources } from '../mcp-directory/gateway/server-sources';
+import { McpGateway } from '../mcp-directory/gateway/mcp-gateway.service';
+import { McpIntentStore } from '@ptah-extension/harness-sync';
 import {
   AUTH_PROVIDERS_TOKENS,
   type ProviderAccountAdmissionPort,
@@ -466,6 +477,7 @@ export function registerCliAgentRuntimeServices(
     { lifecycle: Lifecycle.Singleton },
   );
   registerCapabilityServices(container);
+  registerMcpGateway(container);
   logger.info('[CliAgentRuntime] CLI agent runtime services registered', {
     services: Object.keys(CLI_AGENT_RUNTIME_TOKENS),
   });
@@ -544,5 +556,88 @@ function createDeclarationInventory(c: DependencyContainer): McpInstallService {
   return new McpInstallService(null, undefined, {
     oauth: new McpOAuthInstalledManifestStore(),
     ...(smithery === undefined ? {} : { smithery }),
+  });
+}
+
+/**
+ * The MCP gateway (`PLATFORM_TOKENS.MCP_GATEWAY`, TASK_2026_979 Hub 1), bound
+ * only where the auth secrets service exists: OAuth tokens and the Smithery
+ * key live there. A host without it (the benchmark without auth) binds no
+ * gateway, and every consumer injects the token as optional.
+ *
+ * Bound here, in phase 2 of Electron and before the CLI engine resolves
+ * anything, so the optional injections of the SDK permission handler, the
+ * query builder and runner, the stream transformer, the cron runner and the
+ * HTTP MCP server (all resolved later) find it. A cached factory: nothing is
+ * built until the first consumer resolves it, and the capability resolver is
+ * looked up on each use, so building the gateway never builds the resolver.
+ *
+ * Pre-warm (M5): the gateway warms the host's active workspace root when its
+ * first listener subscribes (the HTTP MCP server's start). The workspace
+ * provider is read then, not here, and a host without one pre-warms nothing.
+ */
+function registerMcpGateway(container: DependencyContainer): void {
+  if (!container.isRegistered(TOKENS.AUTH_SECRETS_SERVICE, true)) return;
+  container.register<IMcpGateway>(PLATFORM_TOKENS.MCP_GATEWAY, {
+    useFactory: instanceCachingFactory((c) => {
+      const logger = c.resolve<Logger>(TOKENS.LOGGER);
+      const secrets = c.resolve<IAuthSecretsService>(
+        TOKENS.AUTH_SECRETS_SERVICE,
+      );
+      const slots = {
+        getProviderKey: (id: string) => secrets.getProviderKey(id),
+        setProviderKey: (id: string, value: string) =>
+          secrets.setProviderKey(id, value),
+        deleteProviderKey: (id: string) => secrets.deleteProviderKey(id),
+      };
+      const oauthManifest = new McpOAuthInstalledManifestStore();
+      const getSmitheryKey = async (): Promise<string | null> =>
+        (await secrets.getProviderKey(
+          NON_AUTH_PROVIDER_KEY_SLOT_IDS.smitheryApiKey,
+        )) ?? null;
+      // Resolved per call, not here: the gateway is built when the SDK
+      // permission handler is constructed, and the resolver pulls in the
+      // plugin loader, which that point of the graph must not require.
+      const capabilities: Pick<ICapabilityResolver, 'resolve'> = {
+        resolve: (cwd, context) =>
+          c
+            .resolve<ICapabilityResolver>(SDK_TOKENS.SDK_CAPABILITY_RESOLVER)
+            .resolve(cwd, context),
+      };
+      const sources = new GatewayServerSources({
+        oauth: {
+          manifest: oauthManifest,
+          // Token paths only: no loopback or browser opener is needed.
+          service: new McpOAuthService({
+            tokenStore: createMcpOAuthTokenStore(slots),
+            manifest: oauthManifest,
+            logger,
+          }),
+        },
+        smithery: new SmitheryOverrideResolver({
+          manifest: new SmitheryInstalledManifestStore(
+            createSmitheryConfigSecretStore(slots),
+          ),
+          resolver: new SmitheryConnectionResolver(
+            getSmitheryKey,
+            new SmitheryRegistrySource({ getApiKey: getSmitheryKey, logger }),
+          ),
+          logger,
+        }),
+        intents: new McpIntentStore(),
+        capabilities,
+        logger,
+      });
+      const prewarmRoots = (): readonly string[] => {
+        if (!c.isRegistered(PLATFORM_TOKENS.WORKSPACE_PROVIDER, true)) {
+          return [];
+        }
+        const root = c
+          .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+          .getWorkspaceRoot();
+        return root === undefined || root === '' ? [] : [root];
+      };
+      return new McpGateway({ sources, capabilities, logger, prewarmRoots });
+    }),
   });
 }

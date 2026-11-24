@@ -2,14 +2,16 @@
  * MCP caller token registry.
  *
  * Lane and session tokens live in memory and die on `revokeSubject` or
- * `revokeEphemeral` (`stop`). Persistent slot tokens are remembered as a
- * sha256 digest plus the binding in host `IStateStorage`, so a restart can
- * recognise the token already written in a config file and leave that file
- * byte-identical (M1). The raw token is never stored and never logged.
+ * `revokeEphemeral` (`stop`). The raw token is never stored and never logged.
  *
- * The registry decides keep-versus-issue and replaces an unknown file token
- * rather than treating it as one of ours (M2: a persistent slot is read-only
- * unless the setting is `full`, and a home slot is always read-only).
+ * Persistent slot tokens were remembered as a sha256 digest plus the binding
+ * in host `IStateStorage`, for the `ptah` entry Ptah used to write into
+ * provider MCP config files. Ptah writes no such file any more (TASK_2026_979,
+ * decision row 10), so the registry mints no persistent token. Records already
+ * in state still load and authorize until their slot is retired
+ * (`revokePersistent`), and the external-caller setting still applies to them
+ * (M2: read-only unless the setting is `full`; a home slot is always
+ * read-only).
  */
 
 import * as crypto from 'node:crypto';
@@ -56,26 +58,6 @@ export interface McpLegacyNotice {
     message: string,
     ...actions: string[]
   ): Promise<string | undefined>;
-}
-
-export interface PersistentSlotInput {
-  readonly configPath: string;
-  readonly kind: 'workspace' | 'home';
-  readonly workspaceRoot?: string;
-  readonly setting: McpExternalAccess;
-  readonly fileToken?: string;
-}
-
-export interface PersistentReconcileResult {
-  /** Existing credential was verified against host-local state. */
-  readonly preserveFile: boolean;
-  /** Credential to keep or write. Never persist or log this value. */
-  readonly token: string;
-}
-
-export interface PreparedPersistentCredential extends PersistentReconcileResult {
-  /** Commit only after the config writer accepts the credential. */
-  readonly commit: () => Promise<void>;
 }
 
 interface LaneRecord {
@@ -192,144 +174,6 @@ export class McpCallerTokenRegistry {
   }
 
   /**
-   * Mint a persistent slot token and store its hash. Returns the raw token
-   * once. Throws when this config path already has a record, so a restart
-   * cannot rotate it. Does not write a config file.
-   */
-  async issuePersistent(
-    input: Omit<PersistentSlotInput, 'fileToken'>,
-  ): Promise<string> {
-    if (this.findPersistent(input.configPath) !== undefined) {
-      throw new Error(
-        `Persistent MCP credential already exists for ${input.configPath}`,
-      );
-    }
-    const token = mintToken();
-    const next = [
-      ...this.persistent,
-      this.toPersistent(input, digestToken(token)),
-    ];
-    await this.persist(next);
-    this.persistent = next.map((record) => this.clampRecord(record));
-    return token;
-  }
-
-  /**
-   * Prepare a persistent credential without replacing the live record.
-   * `commit` runs only after the config file write succeeds.
-   */
-  async preparePersistent(
-    input: PersistentSlotInput,
-  ): Promise<PreparedPersistentCredential> {
-    const capability = this.allowedCapability(input.kind, input.setting);
-    const records = this.persistent.filter(
-      (record) => record.configPath === input.configPath,
-    );
-    const fileToken = input.fileToken;
-    const fileDigest =
-      fileToken === undefined ? undefined : digestToken(fileToken);
-    const existing =
-      fileDigest === undefined
-        ? undefined
-        : records.find((record) => digestsEqual(fileDigest, record.tokenHash));
-
-    if (existing !== undefined && fileToken !== undefined) {
-      await this.writeCapability(existing, capability);
-      const current = this.persistent.filter(
-        (record) => record.configPath === input.configPath,
-      );
-      const retained =
-        current.find((record) =>
-          digestsEqual(record.tokenHash, existing.tokenHash),
-        ) ?? existing;
-      return {
-        preserveFile: true,
-        token: fileToken,
-        commit:
-          current.length <= 1
-            ? () => Promise.resolve()
-            : async () => {
-                // A failed replacement can leave the old and file hashes live.
-                // Retry keeps the file hash and removes the stale hash.
-                const latest =
-                  this.persistent.find(
-                    (record) =>
-                      record.configPath === input.configPath &&
-                      digestsEqual(record.tokenHash, retained.tokenHash),
-                  ) ?? retained;
-                const next = [
-                  ...this.persistent.filter(
-                    (record) => record.configPath !== input.configPath,
-                  ),
-                  latest,
-                ];
-                await this.persist(
-                  next.map((record) => this.clampRecord(record)),
-                );
-                this.persistent = next.map((record) =>
-                  this.clampRecord(record),
-                );
-              },
-      };
-    }
-
-    // A replacement must not leave an old privileged token live after the
-    // setting becomes read-only. Clamp in memory before any config or state
-    // write. A restart also derives capability from the current setting.
-    if (capability === 'read-only') {
-      this.persistent = this.persistent.map((record) =>
-        record.configPath === input.configPath &&
-        record.capability !== 'read-only'
-          ? { ...record, capability: 'read-only' }
-          : record,
-      );
-    }
-
-    // Missing or unknown file credentials cannot be recovered from a hash.
-    // Do not expose the candidate until the caller commits it after the config
-    // write. If durable state then fails, keep both hashes live and clamped so
-    // the published file token works and a retry can finish the transition.
-    const token = mintToken();
-    const candidate = this.toPersistent(input, digestToken(token));
-    // Durably stage the hash before the token can be published to a config file.
-    const pending = [...this.persistent, candidate];
-    await this.persist(pending.map((record) => this.clampRecord(record)));
-    this.persistent = pending.map((record) => this.clampRecord(record));
-    return {
-      preserveFile: false,
-      token,
-      commit: async () => {
-        const next = [
-          ...this.persistent.filter(
-            (record) => record.configPath !== input.configPath,
-          ),
-          this.clampRecord(candidate),
-        ];
-        try {
-          await this.persist(next);
-        } catch (error: unknown) {
-          const current = this.persistent.filter(
-            (record) => record.configPath === input.configPath,
-          );
-          const retained = current.some((record) =>
-            digestsEqual(record.tokenHash, candidate.tokenHash),
-          )
-            ? current
-            : [...current, candidate];
-          this.persistent = [
-            ...this.persistent.filter(
-              (record) => record.configPath !== input.configPath,
-            ),
-            ...retained,
-          ];
-          throw error;
-        }
-        this.persistent = next.map((record) => this.clampRecord(record));
-      },
-    };
-  }
-
-  /**
    * Apply the setting to every live persistent binding without rotating tokens.
    * A downgrade clamps memory before the state write. An upgrade changes memory
    * only after the state write succeeds.
@@ -344,7 +188,7 @@ export class McpCallerTokenRegistry {
     this.persistent = next.map((record) => this.clampRecord(record));
   }
 
-  /** Clamp synchronously even when registration is awaiting a config write. */
+  /** Clamp synchronously, before any awaited state write lands. */
   clampExternalCallerAccess(access: McpExternalAccess): void {
     this.currentAccess = access;
     if (access === 'read-only') {
@@ -371,15 +215,6 @@ export class McpCallerTokenRegistry {
       record.capability !== 'read-only'
       ? { ...record, capability: 'read-only' }
       : record;
-  }
-
-  /** Direct registry users prepare and commit in one operation. */
-  async reconcilePersistent(
-    input: PersistentSlotInput,
-  ): Promise<PersistentReconcileResult> {
-    const prepared = await this.preparePersistent(input);
-    await prepared.commit();
-    return { preserveFile: prepared.preserveFile, token: prepared.token };
   }
 
   /** Headers and URL only. Does not read a body. */
@@ -466,44 +301,6 @@ export class McpCallerTokenRegistry {
 
   private findPersistent(configPath: string): PersistentRecord | undefined {
     return this.persistent.find((record) => record.configPath === configPath);
-  }
-
-  private toPersistent(
-    input: Omit<PersistentSlotInput, 'fileToken'>,
-    tokenHash: Buffer,
-  ): PersistentRecord {
-    const capability = this.allowedCapability(input.kind, input.setting);
-    const workspaceRoot =
-      input.kind === 'workspace' ? input.workspaceRoot : undefined;
-    return {
-      configPath: input.configPath,
-      tokenHash,
-      kind: input.kind,
-      capability,
-      ...(workspaceRoot === undefined || workspaceRoot === ''
-        ? {}
-        : { workspaceRoot }),
-    };
-  }
-
-  private async writeCapability(
-    existing: PersistentRecord,
-    capability: McpCallerCapability,
-  ): Promise<void> {
-    const nextCapability = this.allowedCapability(
-      existing.kind,
-      capability === 'privileged' ? 'full' : 'read-only',
-    );
-    if (existing.capability === nextCapability) return;
-    const next = this.persistent.map((record) =>
-      record.configPath === existing.configPath
-        ? { ...record, capability: nextCapability }
-        : record,
-    );
-    // A downgrade must fail closed in memory even when durable storage fails.
-    if (nextCapability === 'read-only') this.persistent = next;
-    await this.persist(next);
-    this.persistent = next.map((record) => this.clampRecord(record));
   }
 
   private readPersistent(): PersistentRecord[] {

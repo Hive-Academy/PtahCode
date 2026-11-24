@@ -207,19 +207,16 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     mailboxSpy.mockRestore();
   });
 
-  it('uses the built-in plan mode when no lane choice is saved (D24)', async () => {
-    // D24: a lane with no spawn argument and no saved row runs in plan,
-    // the most restrictive mode. It never falls back to manifest yolo.
+  it('uses the built-in yolo mode when no lane choice is saved', async () => {
+    // A lane with no spawn argument and no saved row runs with the built-in
+    // default: the most capable mode the manifest supports (yolo for Ptah CLI).
     const { registry, queryFn } = buildHarness();
     await registry.spawnAgent(BASE_CONFIG.id, 'do work');
     expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
-        permissionMode: 'plan',
-        allowDangerouslySkipPermissions: false,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
       }),
-    }));
-    expect(queryFn).not.toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ permissionMode: 'bypassPermissions' }),
     }));
   });
 

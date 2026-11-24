@@ -243,16 +243,24 @@ describe('HarnessManifestBuilder', () => {
 
   it('rejects an unreadable origin store with the default throwing logger when sync is enabled', async () => {
     writeAgent(root, 'custom-developer');
-    const originFile = join(root, '.ptah', 'setup-wizard', 'agent-origins.json');
+    const originFile = join(
+      root,
+      '.ptah',
+      'setup-wizard',
+      'agent-origins.json',
+    );
     mkdirSync(originFile, { recursive: true });
-    await expect(builder.build(emptyState(root), { workspaceRoot: root }))
-      .rejects.toThrow();
+    await expect(
+      builder.build(emptyState(root), { workspaceRoot: root }),
+    ).rejects.toThrow();
   });
 
   it('[286] an absent agentSyncEnabled option means enabled, so a caller with no opinion never triggers a reap', async () => {
     writeAgent(root, 'custom-developer');
 
-    const desired = await builder.build(emptyState(root), { workspaceRoot: root });
+    const desired = await builder.build(emptyState(root), {
+      workspaceRoot: root,
+    });
 
     expect(desired.agents.map((a) => a.slug)).toEqual(['custom-developer']);
   });
@@ -309,10 +317,13 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
   });
 
   async function buildAgent(agentModels?: AgentModelLayers) {
-    const desired = await builder.build({
-      ...emptyState(root),
-      ...(agentModels === undefined ? {} : { agentModels }),
-    }, { workspaceRoot: root });
+    const desired = await builder.build(
+      {
+        ...emptyState(root),
+        ...(agentModels === undefined ? {} : { agentModels }),
+      },
+      { workspaceRoot: root },
+    );
     expect(desired.agents).toHaveLength(1);
     return desired.agents[0];
   }
@@ -443,10 +454,13 @@ describe('HarnessManifestBuilder agent models (C6)', () => {
       detector: { isInstalled: () => Promise.resolve(true) },
       agentTransformer: transformer,
     });
-    const desired = await builder.build({
-      ...emptyState(workspace),
-      agentModels: { workspace: { '*': { codex: 'gpt-5-codex' } } },
-    }, { workspaceRoot: workspace });
+    const desired = await builder.build(
+      {
+        ...emptyState(workspace),
+        agentModels: { workspace: { '*': { codex: 'gpt-5-codex' } } },
+      },
+      { workspaceRoot: workspace },
+    );
 
     const plan = await target.plan(
       desired,
@@ -524,7 +538,7 @@ describe('HarnessManifestBuilder retirement and workspace skills.sh roots (TASK_
     writeSkill(join(root, 'skills'), 'hand-authored');
     const state: HarnessSourceState = {
       ...emptyState(root),
-      retired: { skillSourceRoots: [retiredRoot], mcpServerKeys: [] },
+      retired: { skillSourceRoots: [retiredRoot] },
     };
     const kept = ['bundled', 'hand-authored', 'live-skillssh', 'no-ref'];
 
@@ -557,7 +571,7 @@ describe('HarnessManifestBuilder retirement and workspace skills.sh roots (TASK_
     const state: HarnessSourceState = {
       ...emptyState(root),
       disabledSkillIds: ['disabled-skill'],
-      retired: { skillSourceRoots: [retiredRoot], mcpServerKeys: [] },
+      retired: { skillSourceRoots: [retiredRoot] },
     };
 
     const desired = await builder.build(state, {
@@ -585,7 +599,7 @@ describe('HarnessManifestBuilder retirement and workspace skills.sh roots (TASK_
         (
           await builder.build({
             ...emptyState(root),
-            retired: { skillSourceRoots: [], mcpServerKeys: [] },
+            retired: { skillSourceRoots: [] },
           })
         ).skills,
       ),
@@ -599,7 +613,6 @@ describe('HarnessManifestBuilder retirement and workspace skills.sh roots (TASK_
             ...emptyState(root),
             retired: {
               skillSourceRoots: [join(root, 'plugins', 'ptah-skillssh-other')],
-              mcpServerKeys: [],
             },
           })
         ).skills,
@@ -622,7 +635,7 @@ describe('HarnessManifestBuilder retirement and workspace skills.sh roots (TASK_
       ...emptyState(root),
       overlayPluginPaths: [retiredRoot, liveRoot],
       // A trailing separator must not defeat the directory match.
-      retired: { skillSourceRoots: [`${retiredRoot}/`], mcpServerKeys: [] },
+      retired: { skillSourceRoots: [`${retiredRoot}/`] },
     });
 
     expect(desired.skills.map((s) => [s.slug, s.sourceDir])).toEqual([

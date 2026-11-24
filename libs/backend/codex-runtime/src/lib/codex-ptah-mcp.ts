@@ -2,15 +2,12 @@
  * Codex facts for attaching Ptah's own MCP server: the per-call tool timeout
  * and the main-chat session URL.
  *
- * The session URL's grammar is closed and shared with two twins. The
- * agent-segment twin is `ptahMcpServerUrl` in
- * `cli-agent-runtime/.../cli-adapters/ptah-mcp-url.ts`. The file-writer twin
- * — persistent entries in `.mcp.json` and the rival CLIs' config files — is
- * `ptahMcpUrl` in `vscode-lm-tools/.../mcp-http/ptah-mcp-slots.ts`. All three
- * keep the workspace segment terminal and encode it with `encodeURIComponent`
- * (never hand-rolled escaping), and each names the others so a change to the
- * grammar finds all three. The parser is `vscode-lm-tools`'
- * `http-server.handler.ts`.
+ * The session URL's grammar is closed and shared with one twin, the
+ * agent-segment builder `ptahMcpServerUrl` in
+ * `cli-agent-runtime/.../cli-adapters/ptah-mcp-url.ts`. Both keep the
+ * workspace segment terminal and encode it with `encodeURIComponent` (never
+ * hand-rolled escaping), and each names the other so a change to the grammar
+ * finds both. The parser is `vscode-lm-tools`' `http-server.handler.ts`.
  */
 
 /**
@@ -27,8 +24,7 @@ export const CODEX_PTAH_TOOL_TIMEOUT_SEC = 960;
  * The session segment LEADS and the workspace segment stays TERMINAL — the
  * closed grammar `vscode-lm-tools`' `http-server.handler.ts` parses (see
  * `ptahMcpServerUrl` in `cli-agent-runtime/.../cli-adapters/ptah-mcp-url.ts`
- * for the agent-segment twin, and `ptahMcpUrl` in
- * `vscode-lm-tools/.../mcp-http/ptah-mcp-slots.ts` for the file-writer twin).
+ * for the agent-segment twin).
  * The routing id is the chat tab id when one exists, else the session id —
  * the same preference Claude main chat applies in
  * `sdk-query-options-builder.ts`.

@@ -131,6 +131,7 @@ export class InternalQueryService {
         auth: config.auth,
         toolAccess: config.toolAccess,
         dispatch: config.dispatch,
+        includeConnectors: config.includeConnectors,
       });
     } catch (error: unknown) {
       release();

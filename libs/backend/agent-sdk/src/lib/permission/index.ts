@@ -5,3 +5,4 @@ export * from './cron-tool-policy';
 export * from './pending-response-registry';
 export * from './ask-user-question.service';
 export * from './exit-plan-mode.service';
+export * from './gateway-approval-gate';

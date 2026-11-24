@@ -176,4 +176,52 @@ describe('HarnessReconcilerService — preflight fast path', () => {
     const copiedFile = join(ws, '.claude', 'skills', 'foo', 'SKILL.md');
     expect(readFileSync(copiedFile, 'utf-8')).toContain('version 2');
   });
+
+  it('[D1] a manifest still holding a pre-P2 `kind: mcp` row preflights as a no-op and writes nothing back (TASK_2026_979)', async () => {
+    writeSkill(skillsRoot, 'foo');
+    const store = new ManagedManifestStore();
+    const target = new ClaudeTarget(store);
+    const reconciler = new HarnessReconcilerService(
+      makeFakeLogger() as unknown as Logger,
+      new HarnessManifestBuilder(),
+      store,
+      createStaticSourceResolver(sourceState()),
+      [target],
+    );
+    await reconciler.reconcile(ws, { mode: 'full', reason: 'seed' });
+
+    // What a pre-P2 pass left behind: an owned `.mcp.json` key beside the
+    // skill, and the user's config file holding it.
+    const manifestPath = store.manifestPath(ws, 'claude');
+    const seeded = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+      entries: Record<string, unknown>;
+    };
+    seeded.entries['.mcp.json#github'] = {
+      hash: 'hash-github',
+      source: 'io.github.example/github',
+      kind: 'mcp',
+    };
+    const manifestBytes = JSON.stringify(seeded, null, 2);
+    writeFileSync(manifestPath, manifestBytes, 'utf-8');
+    const mcpJson = '{"mcpServers":{"github":{"command":"npx"}}}\n';
+    writeFileSync(join(ws, '.mcp.json'), mcpJson, 'utf-8');
+
+    const skillFile = join(ws, '.claude', 'skills', 'foo', 'SKILL.md');
+    const mtimeBefore = statSync(skillFile).mtimeMs;
+    const apply = jest.spyOn(target, 'apply');
+
+    const health = await reconciler.reconcile(ws, {
+      mode: 'preflight',
+      reason: 'old mcp row',
+    });
+
+    // Counted, the row made `entries.length` exceed the expected keys and every
+    // preflight a full pass. Dropped on load, the drift check passes.
+    expect(apply).not.toHaveBeenCalled();
+    expect(health.targets[0]?.found).toBe(health.targets[0]?.expected);
+    expect(health.targets[0]?.removed).toEqual([]);
+    expect(statSync(skillFile).mtimeMs).toBe(mtimeBefore);
+    expect(readFileSync(manifestPath, 'utf-8')).toBe(manifestBytes);
+    expect(readFileSync(join(ws, '.mcp.json'), 'utf-8')).toBe(mcpJson);
+  });
 });

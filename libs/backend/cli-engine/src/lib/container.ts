@@ -835,7 +835,6 @@ export class CliDIContainer {
               )
             : null,
         undefined,
-        undefined,
         () =>
           container.isRegistered(SETTINGS_TOKENS.AGENT_MODEL_SETTINGS)
             ? container.resolve<AgentModelSettings>(

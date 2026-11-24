@@ -5,6 +5,11 @@
  * class `agent-control`, so a new tool stays denied to read-only callers
  * until it is added here. `privileged` permits every class.
  *
+ * A name that is not a host tool name is class `gateway`: one of the user's
+ * own MCP servers served through `ptah` (`IMcpGateway`). Only `privileged`
+ * callers may list or call it, and `isGatewayCallerPermitted`
+ * (`@ptah-extension/platform-core`) narrows that further by credential kind.
+ *
  * `MCP_LEGACY_UNTOKENED_READ_ONLY` is the grace-period switch. The release
  * after this one sets it to false; missing tokens then fail closed.
  */
@@ -26,7 +31,14 @@ export type McpToolClass =
   | 'harness-mutation'
   | 'approval'
   | 'execute-code'
-  | 'network';
+  | 'network'
+  | 'gateway';
+
+/**
+ * Where a tool name comes from: Ptah's own definitions (`host`) or the
+ * gateway (`gateway`, any name that is not a host tool name).
+ */
+export type McpToolOrigin = 'host' | 'gateway';
 
 /**
  * Read tools. `ptah_task_check` is included because its handler only lists
@@ -111,7 +123,7 @@ const TASK_GIT_TOOLS: ReadonlySet<string> = new Set([
 
 const HARNESS_TOOLS: ReadonlySet<string> = new Set([
   'ptah_harness_create_skill',
-  'ptah_harness_install_mcp',
+  'ptah_harness_install_mcp_server',
   'ptah_harness_propose_config',
   'ptah_code_reindex',
   'ptah_artifact_publish',
@@ -149,8 +161,15 @@ export function isCronWriteDenied(
   return CRON_WRITE_TOOLS.has(name) && binding?.cronWriteApproval !== true;
 }
 
-/** Class of one tool name. Unknown names are `agent-control`. */
-export function toolClass(name: string): McpToolClass {
+/**
+ * Class of one tool name. Unknown host names are `agent-control`; every
+ * gateway name is `gateway`.
+ */
+export function toolClass(
+  name: string,
+  origin: McpToolOrigin = 'host',
+): McpToolClass {
+  if (origin === 'gateway') return 'gateway';
   if (name.startsWith('ptah_browser_')) return 'browser-control';
   if (name === 'execute_code') return 'execute-code';
   if (name === 'approval_prompt') return 'approval';
@@ -176,13 +195,17 @@ const LANE_REPORT_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * Read-only permits class `read`. Lane-report also permits
- * `LANE_REPORT_TOOLS`. Privileged permits every class.
+ * `LANE_REPORT_TOOLS`. Privileged permits every class. Class `gateway` is
+ * privileged only.
  */
 export function isToolPermitted(
   name: string,
   capability: McpCallerCapability,
+  origin: McpToolOrigin = 'host',
 ): boolean {
   if (capability === 'privileged') return true;
-  if (toolClass(name) === 'read') return true;
+  const cls = toolClass(name, origin);
+  if (cls === 'gateway') return false;
+  if (cls === 'read') return true;
   return capability === 'lane-report' && LANE_REPORT_TOOLS.has(name);
 }

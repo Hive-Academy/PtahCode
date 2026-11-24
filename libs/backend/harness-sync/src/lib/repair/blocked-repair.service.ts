@@ -88,7 +88,6 @@ import {
 import type { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { HarnessPropagationService } from '../propagation/harness-propagation.service';
 import type { HarnessReconcilerService } from '../reconciler/harness-reconciler.service';
-import { isMcpFragmentKey } from '../targets/mcp/mcp-facet.port';
 import { resolveHarnessWorkspaceRoot } from '../workspace/workspace-root';
 
 /** The reason string the repair pass carries into logs and health reports. */
@@ -517,19 +516,15 @@ function passDisproves(
  * a report from before the last reconcile can legitimately offer a path that is
  * no longer blocked. A kept local edit without an approval digest is refused
  * as `not-blocked`: it is not in the blocked set, and the user's own edit is
- * replaceable only against the content they approved (A21).
+ * replaceable only against the content they approved (A21). An MCP server key
+ * a stale report names (`.mcp.json#github`) is never in the blocked set, since
+ * no target writes MCP config (TASK_2026_979), so it is refused as
+ * `not-blocked` like any other path outside that set.
  */
 function refuse(
   request: HarnessRepairBlockedPath,
   repairable: ReadonlyMap<HarnessTargetId, RepairablePaths>,
 ): Pick<HarnessRepairPathResult, 'outcome' | 'reason'> | null {
-  if (isMcpFragmentKey(request.relPath)) {
-    return {
-      outcome: 'not-a-path',
-      reason:
-        'this is a server key inside a config file you also write, not a file — there is nothing to move aside',
-    };
-  }
   const paths = repairable.get(request.target);
   const isBlocked = paths?.blocked.has(request.relPath) === true;
   const isApprovedKeptEdit =

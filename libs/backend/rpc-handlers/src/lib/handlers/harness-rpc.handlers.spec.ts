@@ -188,7 +188,9 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
       disabledSkillIds: [],
     }),
     getEffectivePluginConfig: jest.fn(),
-    getWorkspacePluginConfigForWrite: jest.fn(async () => pluginLoader.getWorkspacePluginConfig()),
+    getWorkspacePluginConfigForWrite: jest.fn(async () =>
+      pluginLoader.getWorkspacePluginConfig(),
+    ),
     discoverSkillsForPlugins: jest.fn(),
     resolvePluginPaths: jest.fn().mockReturnValue([]),
     saveWorkspacePluginConfig: jest.fn().mockResolvedValue(undefined),
@@ -300,7 +302,7 @@ function buildSuite(folders: string[] = ['/ws']): Suite {
   const mcpInstall = {
     installServers: jest
       .fn()
-      .mockResolvedValue({ installedPaths: [], warnings: [] }),
+      .mockResolvedValue({ recordedServers: [], warnings: [] }),
   } as unknown as Mocked<HarnessMcpInstallService>;
 
   const skillInstall = {
@@ -746,7 +748,9 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       expect(
         suite.workspaceContext.resolveWorkspaceContext,
       ).toHaveBeenCalledWith(pinnedRoot);
-      expect(suite.workspaceContext.isWorkspaceEffectivelyEmpty).toHaveBeenCalledWith(pinnedRoot);
+      expect(
+        suite.workspaceContext.isWorkspaceEffectivelyEmpty,
+      ).toHaveBeenCalledWith(pinnedRoot);
       expect(result).toMatchObject({
         workspaceRoot: pinnedRoot,
         workspaceContext: pinnedContext,
@@ -876,11 +880,19 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       );
       suite.handlers.register();
 
-      const result = await getHandler(suite.rpc, 'harness:start-new-project')({
+      const result = await getHandler(
+        suite.rpc,
+        'harness:start-new-project',
+      )({
         intake: VALID_INTAKE,
       });
-      const payload = result as Extract<HarnessStartNewProjectResult, { success: true }>;
-      expect(suite.pluginLoader.saveWorkspacePluginConfig).not.toHaveBeenCalled();
+      const payload = result as Extract<
+        HarnessStartNewProjectResult,
+        { success: true }
+      >;
+      expect(
+        suite.pluginLoader.saveWorkspacePluginConfig,
+      ).not.toHaveBeenCalled();
       expect(payload.plugins.enabledBundled).toEqual([]);
       expect(payload.plugins.availableSkillIds).toEqual([]);
       expect(payload.seedPrompt).not.toContain('saas-workspace-initializer');
@@ -901,13 +913,23 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       );
       suite.handlers.register();
 
-      const result = await getHandler(suite.rpc, 'harness:start-new-project')({
+      const result = await getHandler(
+        suite.rpc,
+        'harness:start-new-project',
+      )({
         intake: VALID_INTAKE,
       });
-      const payload = result as Extract<HarnessStartNewProjectResult, { success: true }>;
-      expect(payload.plugins.availableSkillIds).not.toContain('saas-workspace-initializer');
+      const payload = result as Extract<
+        HarnessStartNewProjectResult,
+        { success: true }
+      >;
+      expect(payload.plugins.availableSkillIds).not.toContain(
+        'saas-workspace-initializer',
+      );
       expect(payload.seedPrompt).not.toContain('`saas-workspace-initializer`');
-      expect(payload.plugins.availableSkillIds).toContain('nx-workspace-architect');
+      expect(payload.plugins.availableSkillIds).toContain(
+        'nx-workspace-architect',
+      );
     });
 
     it('resolves the skill gate at the normalized workspace root', async () => {
@@ -921,7 +943,10 @@ describe('HarnessRpcHandlers (thin facade)', () => {
           installedSkills(...NODE_TS_SKILLS),
         );
         suite.handlers.register();
-        await getHandler(suite.rpc, 'harness:start-new-project')({ intake: VALID_INTAKE });
+        await getHandler(
+          suite.rpc,
+          'harness:start-new-project',
+        )({ intake: VALID_INTAKE });
         expect(suite.skillSyncGate.resolve).toHaveBeenCalledWith(root);
       } finally {
         rmSync(root, { recursive: true, force: true });
@@ -1073,7 +1098,10 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       )({ intake: DOTNET_INTAKE });
 
       expect(suite.pluginLoader.saveWorkspacePluginConfig).toHaveBeenCalledWith(
-        { enabledPluginIds: ['ptah-dotnet', 'ptah-core'], disabledSkillIds: [] },
+        {
+          enabledPluginIds: ['ptah-dotnet', 'ptah-core'],
+          disabledSkillIds: [],
+        },
       );
     });
 
@@ -1818,7 +1846,7 @@ describe('HarnessRpcHandlers (thin facade)', () => {
       expect(result.warnings).toContain('Failed to sync harness skills: EBUSY');
     });
 
-    it('installs recorded MCP servers and reports the written config paths', async () => {
+    it('records MCP servers and reports no config path, because none is written', async () => {
       const suite = buildSuite();
       const servers = [
         {
@@ -1829,7 +1857,7 @@ describe('HarnessRpcHandlers (thin facade)', () => {
         },
       ];
       suite.mcpInstall.installServers.mockResolvedValue({
-        installedPaths: ['/ws/.mcp.json', '/ws/.vscode/mcp.json'],
+        recordedServers: ['github'],
         warnings: [],
       });
       const config = normalizedConfig({
@@ -1845,16 +1873,16 @@ describe('HarnessRpcHandlers (thin facade)', () => {
         servers,
         '/ws',
       );
-      expect(result.appliedPaths).toEqual(
-        expect.arrayContaining(['/ws/.mcp.json', '/ws/.vscode/mcp.json']),
-      );
+      expect(result.appliedPaths).not.toContain('/ws/.mcp.json');
+      expect(result.appliedPaths).not.toContain('/ws/.vscode/mcp.json');
+      expect(result.appliedPaths).not.toContain('github');
       expect(result.warnings).toEqual([]);
     });
 
     it('propagates MCP install warnings into the apply response', async () => {
       const suite = buildSuite();
       suite.mcpInstall.installServers.mockResolvedValue({
-        installedPaths: [],
+        recordedServers: [],
         warnings: [
           'MCP server "legacy" has no transport config and was not installed. Add it to the workspace manually.',
         ],

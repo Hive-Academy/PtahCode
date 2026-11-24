@@ -344,42 +344,45 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.textContent).toContain(
       'auto-edit unavailable: Scoped edit has no binding.',
     );
-    expect(fixture.nativeElement.textContent).toContain('Unavailable');
-    expect(fixture.nativeElement.textContent).toContain(
+    // Its only verified mode is the built-in default, so the cell shows yolo, not "Select mode".
+    expect(fixture.nativeElement.textContent).not.toContain(
       'Unsupported combination',
     );
-    expect(
-      fixture.nativeElement.querySelectorAll('[tabindex="0"]').length,
-    ).toBe(4);
-    expect(combobox(fixture, 'cursor permission default').placeholder()).toBe(
-      'Select mode',
+    expect(combobox(fixture, 'cursor permission default').value()).toBe(
+      'yolo',
     );
-    expect(combobox(fixture, 'cursor permission default').value()).toBeNull();
   });
 
-  it('confirms Cursor full access before saving its first permission choice', () => {
+  it('saves Cursor yolo without a full-access dialog when yolo is already the built-in default', () => {
     const fixture = setup('cursor');
     fixture.componentRef.setInput('layout', 'wide');
     fixture.componentRef.setInput('manifest', cursorManifest);
     fixture.detectChanges();
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
-    const select = combobox(fixture, 'cursor permission default');
-    expect(select.value()).toBeNull();
-    select.value.set('yolo');
+    expect(combobox(fixture, 'cursor permission default').value()).toBe(
+      'yolo',
+    );
+    (
+      fixture.componentInstance as unknown as {
+        choosePermission(value: unknown): void;
+      }
+    ).choosePermission('yolo');
     fixture.detectChanges();
-    expect(selected).not.toHaveBeenCalled();
-    expect(fixture.nativeElement.querySelector('dialog[open]')).not.toBeNull();
-    const confirm = Array.from(
-      fixture.nativeElement.querySelectorAll(
-        'button',
-      ) as NodeListOf<HTMLButtonElement>,
-    ).find((button) => button.textContent?.trim() === 'Confirm');
-    confirm?.click();
+    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
     expect(selected).toHaveBeenCalledWith({
       permission: 'yolo',
       network: 'allow',
     });
+  });
+
+  it('shows the built-in yolo default with network allowed when nothing is saved', () => {
+    const fixture = setup('codex');
+    expect(combobox(fixture, 'codex permission default').value()).toBe(
+      'yolo',
+    );
+    expect(combobox(fixture, 'codex network default').value()).toBe('allow');
+    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
   });
 
   it('requires confirmation for full auto and cancel preserves the saved choice', () => {
@@ -406,15 +409,31 @@ describe('CliLaneDefaultCellComponent', () => {
       'button[aria-label^="Reset to default"]',
     );
 
-  it('resets to the built-in plan default without confirmation', () => {
+  it('confirms a reset that raises a saved plan to the built-in full-access default', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    const reset = jest.fn();
+    fixture.componentInstance.resetRequested.subscribe(reset);
+    resetControl(fixture)?.click();
+    fixture.detectChanges();
+    expect(reset).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.querySelector('dialog[open]')).not.toBeNull();
+    Array.from(
+      fixture.nativeElement.querySelectorAll(
+        'button',
+      ) as NodeListOf<HTMLButtonElement>,
+    ).find((button) => button.textContent?.trim() === 'Confirm')?.click();
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets a saved yolo default to the built-in yolo default without confirmation', () => {
+    const fixture = setup('codex', { permission: 'yolo', network: 'allow' });
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
     expect(fixture.nativeElement.textContent).toContain('Saved default');
     const resetButton = resetControl(fixture);
     // Icon-only: the value is in the accessible name and the tooltip, not in visible text.
     expect(resetButton?.getAttribute('aria-label')).toBe(
-      'Reset to default (plan)',
+      'Reset to default (Auto \u2014 full access)',
     );
     expect(resetButton?.textContent?.trim()).toBe('');
     expect(resetButton?.querySelector('lucide-angular')).not.toBeNull();
@@ -444,7 +463,7 @@ describe('CliLaneDefaultCellComponent', () => {
   });
 
   it('resetVisibility "always" shows the compact reset without a caption and it emits', () => {
-    const fixture = setup('ptah-cli', { permission: 'plan' });
+    const fixture = setup('ptah-cli', { permission: 'yolo' });
     fixture.componentRef.setInput('showCaption', false);
     fixture.componentRef.setInput('resetVisibility', 'always');
     fixture.detectChanges();
@@ -453,7 +472,7 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Saved default');
     const resetButton = resetControl(fixture);
     expect(resetButton?.getAttribute('aria-label')).toBe(
-      'Reset to default (plan)',
+      'Reset to default (Auto \u2014 full access)',
     );
     resetButton?.click();
     expect(reset).toHaveBeenCalledTimes(1);
@@ -471,7 +490,7 @@ describe('CliLaneDefaultCellComponent', () => {
   });
 
   it('the reset layout shows the icon-only reset when the caller projects no control', () => {
-    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    const fixture = setup('codex', { permission: 'yolo', network: 'allow' });
     fixture.componentRef.setInput('layout', 'reset');
     fixture.detectChanges();
     const reset = jest.fn();

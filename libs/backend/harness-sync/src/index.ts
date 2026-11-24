@@ -79,7 +79,6 @@ export {
 export type {
   HarnessDesiredAgent,
   HarnessDesiredCommand,
-  HarnessDesiredMcpServer,
   HarnessDesiredSkill,
   HarnessDesiredState,
 } from './lib/manifest/desired-state.types';
@@ -99,6 +98,10 @@ export {
   resolveHarnessWorkspaceRoot,
   WORKSPACE_ROOT_MARKERS,
 } from './lib/workspace/workspace-root';
+
+// Linked git worktree detection (#1469): harness sync keeps tracked copies in a
+// linked worktree, and the retired `ptah` sweep leaves its config files alone.
+export { isLinkedWorktreeRoot } from './lib/workspace/linked-worktree';
 
 // Manifest store.
 export {
@@ -154,7 +157,6 @@ export {
   createCursorTarget,
   createOpencodeTarget,
   createRivalTargets,
-  createVscodeMcpTarget,
   type RivalTargetDeps,
 } from './lib/targets/rival-targets';
 
@@ -184,7 +186,8 @@ export {
   transformSkillMarkdown,
 } from './lib/targets/skill-transform';
 
-// MCP facets — the per-target config-file adapters.
+// MCP facets — per-target config-file readers. No harness target writes them
+// (TASK_2026_979); the read API stays for the install listing and lane readers.
 export {
   isMcpFragmentKey,
   mcpEntryKey,
@@ -366,7 +369,6 @@ export {
   cursorTargetFactory,
   antigravityTargetFactory,
   opencodeTargetFactory,
-  vscodeMcpTargetFactory,
   ALL_HARNESS_TARGET_FACTORIES,
   type HarnessSyncRegistrationOptions,
   type HarnessTargetFactory,
