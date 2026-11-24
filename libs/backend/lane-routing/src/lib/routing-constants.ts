@@ -20,6 +20,34 @@ export const SCORE_MAX = 100;
 /** Midpoint. A missing profile neither attracts nor repels. */
 export const NEUTRAL_SCORE = 50;
 
+/** Maximum magnitude of the learned adjustment before exploration. */
+export const LEARNED_DELTA_CAP = 15;
+
+/** Extra points for a cell with too few local runs. */
+export const EXPLORATION_BONUS = 5;
+
+/** Local run count at which the exploration bonus ends. */
+export const EXPLORATION_MIN_SAMPLES = 3;
+
+/** Points for preference ranks 1, 2, 3, and 4 or later. */
+export const PREFERENCE_BOOST = [12, 8, 4, 2] as const;
+
+/** Score adjustments for eligible limit states. */
+export const LIMIT_ADJUST = {
+  'confirmed-room': 0,
+  unknown: -5,
+  'near-limit': -10,
+} as const;
+
+/** End-to-end routing budget in milliseconds for each stage. */
+export const ROUTE_DEADLINE_MS = { 'gate-0.1': 8000, 'pre-flight': 4000 } as const;
+
+/** Milliseconds reserved for assembling and returning the routing result. */
+export const ROUTE_RETURN_RESERVE_MS = 250;
+
+/** Maximum number of questions sent in a single decision-model call. */
+export const DECISION_QUESTIONS_PER_CALL = 2;
+
 /** Seed label map. Gaps are 15 and 30, both larger than `CLOSENESS_BAND`. */
 export const SEED_LABEL_SCORE = {
   strong: 80,

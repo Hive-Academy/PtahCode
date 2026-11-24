@@ -3,11 +3,12 @@ import {
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
 import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
-import { FAMILY_PROFILE_MODEL, type MatrixCell } from '../matrix/matrix.types';
+import { FAMILY_PROFILE_MODEL, type MatrixCell, type ValueMatrixCell } from '../matrix/matrix.types';
 import { CLOSENESS_BAND, NEUTRAL_SCORE } from '../routing-constants';
 import { toSubagentCandidate, type LaneCandidate } from './candidate.types';
 import {
   score,
+  scoreResolvedCell,
   type ListedModel,
   type ScoreCell,
   type ScoreInput,
@@ -95,6 +96,91 @@ function codexMatrix(
   }
   return matrixOf(rows);
 }
+
+function valueCell(
+  source: ValueMatrixCell['source'],
+  score: number,
+  sampleCount?: number,
+): ValueMatrixCell {
+  return {
+    kind: 'value',
+    score,
+    source,
+    asOf: '2026-02-19',
+    stale: false,
+    ...(sampleCount === undefined ? {} : { sampleCount }),
+  };
+}
+
+describe('additive score', () => {
+  it.each([[0, 5], [2, 5], [3, 0]])(
+    'applies exploration to %i local runs with bonus %i',
+    (sampleCount, exploration) => {
+      const local = valueCell('local', 90, sampleCount);
+      const result = scoreResolvedCell(lane('codex'), {
+        score: 90,
+        cell: local,
+        layers: { local, seed: valueCell('seed', 70) },
+        noProfile: false,
+        profileModel: FAMILY_PROFILE_MODEL,
+      });
+      expect(result.parts).toMatchObject({
+        prior: 70, priorSource: 'seed', learned: 15 + exploration, exploration, sampleCount,
+      });
+      expect(result.total).toBe(85 + exploration);
+      expect(result.score).toBe(90);
+    },
+  );
+
+  it('suppresses learning and exploration for a user cell', () => {
+    const user = valueCell('user', 12);
+    const result = scoreResolvedCell(lane('codex'), {
+      score: 12,
+      cell: user,
+      layers: { user, local: valueCell('local', 90, 2), seed: valueCell('seed', 70) },
+      noProfile: false,
+      profileModel: FAMILY_PROFILE_MODEL,
+    });
+    expect(result.parts).toMatchObject({ prior: 12, priorSource: 'user', learned: 0, exploration: 0 });
+    expect(result.total).toBe(12);
+  });
+
+  it('caps negative legacy local learning and adds preference, limit and override points', () => {
+    const local = valueCell('local', 0, 3);
+    const result = scoreResolvedCell({ ...lane('codex'), limitState: 'near-limit' }, {
+      score: 0,
+      cell: local,
+      noProfile: false,
+      profileModel: FAMILY_PROFILE_MODEL,
+    }, 4, 10);
+    expect(result.parts).toEqual({
+      prior: 50, priorSource: 'neutral', learned: -15, exploration: 0, sampleCount: 3,
+      preference: 2, limit: -10, override: 10,
+    });
+    expect(result.total).toBe(37);
+  });
+
+  it('promotes by additive total even when the effective cell scores order models differently', () => {
+    const matrix: ScoreMatrix = {
+      resolve(_family, model) {
+        const cell = model === 'learned'
+          ? valueCell('local', 90, 3)
+          : valueCell('seed', model === 'seeded' ? 72 : 50);
+        return {
+          score: cell.score,
+          cell,
+          profileModel: model === LANE_DEFAULT_MODEL ? FAMILY_PROFILE_MODEL : model,
+          noProfile: false,
+        };
+      },
+    };
+    const result = score({
+      candidate: { ...lane('codex'), cli: 'ptah-cli' },
+      models: [listed('learned'), listed('seeded')],
+    }, 'implement', matrix);
+    expect(result).toMatchObject({ model: 'seeded', total: 77, score: 72 });
+  });
+});
 
 describe('score', () => {
   it('pins the closeness band used to promote a listed model', () => {
@@ -262,6 +348,8 @@ describe('score', () => {
     expect(result.model).toBe(LANE_DEFAULT_MODEL);
     expect(result.provenance).toBe('lane-default');
     expect(result.score).toBe(NEUTRAL_SCORE);
+    expect(result.total).toBe(NEUTRAL_SCORE + 5);
+    expect(result.parts).toMatchObject({ priorSource: 'neutral', learned: 5, sampleCount: 0 });
     expect(result.noProfile).toBe(true);
     expect(result.cell).toEqual({ kind: 'unknown' });
   });

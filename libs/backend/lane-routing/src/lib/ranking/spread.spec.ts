@@ -134,15 +134,15 @@ describe('spread requirement 7.2', () => {
     expect(ids(roomWins)).toEqual(['room', 'missing']);
   });
 
-  it('does not rotate a worse limit class into the pick', () => {
+  it('rotates across limit classes when adjusted totals are within the band', () => {
     const key = rotationKey('build', 'implement');
-    const rotation = withPick(emptyRotationState(), key, 'missing');
+    const rotation = withPick(emptyRotationState(), key, 'room');
     const result = decide(
       [ranked('missing', 80, 'unknown'), ranked('room', 80, 'confirmed-room')],
       rotation,
     );
 
-    expect(pickId(result)).toBe('room');
+    expect(pickId(result)).toBe('missing');
   });
 });
 
@@ -222,7 +222,7 @@ describe('spread requirement 7.4', () => {
 });
 
 describe('spread requirement 7.6', () => {
-  it('drops an at-limit lane and keeps the others in rotation order', () => {
+  it('drops an at-limit lane and advances the stored cursor by id', () => {
     const candidates = [ranked('a', 50), ranked('b', 50), ranked('c', 50)];
     let rotation = emptyRotationState();
     expect(pickId(decide(candidates, rotation))).toBe('a');
@@ -244,7 +244,7 @@ describe('spread requirement 7.6', () => {
     expect(pickId(reentered)).toBe('b');
   });
 
-  it('keeps tie-break order when the last lane becomes at-limit', () => {
+  it('keeps the pick in the boosted band when the last lane becomes at-limit', () => {
     const key = rotationKey('build', 'implement');
     const rotation = withPick(emptyRotationState(), key, 'c');
     const result = decide(
@@ -256,7 +256,7 @@ describe('spread requirement 7.6', () => {
       rotation,
     );
 
-    expect(pickId(result)).toBe('b');
+    expect(pickId(result)).toBe('a');
   });
 
   it('ignores an at-limit lane even when its score is higher', () => {
@@ -268,20 +268,22 @@ describe('spread requirement 7.6', () => {
 });
 
 describe('spread tie-break', () => {
-  it('ranks the pick, the rest of the band, then others by score', () => {
+  it('offers the rotated band first and exposes the separate total order', () => {
     const key = rotationKey('build', 'implement');
     const rotation = withPick(emptyRotationState(), key, 'a');
     const result = decide(
       [
         ranked('a', 80),
         ranked('b', 80),
-        ranked('c', 78, 'unknown'),
+        ranked('c', 83, 'unknown'),
         ranked('d', 70),
       ],
       rotation,
     );
 
-    expect(ids(result)).toEqual(['b', 'a', 'c', 'd']);
+    expect(pickId(result)).toBe('b');
+    expect(ids(result)).toEqual(['b', 'c', 'a', 'd']);
+    expect(result.rankingByTotal.map(({ candidate }) => candidate.id)).toEqual(['a', 'b', 'c', 'd']);
     expect(result.rotationChangedChoice).toBe(true);
   });
 
@@ -297,26 +299,26 @@ describe('spread tie-break', () => {
     expect(result.rotationChangedChoice).toBe(false);
   });
 
-  it('does not let a preference lift a lane across the band', () => {
+  it('lets a preference boost change which lane leads the band', () => {
     const result = decide(
       [ranked('a', 80), ranked('b', 70)],
       emptyRotationState(),
       { prefer: ['b'] },
     );
 
-    expect(pickId(result)).toBe('a');
-    expect(result.preferenceChangedChoice).toBe(false);
+    expect(pickId(result)).toBe('b');
+    expect(result.preferenceChangedChoice).toBe(true);
   });
 
-  it('does not let a preference lift a near-limit lane over confirmed-room', () => {
+  it('lets a preference boost outweigh the near-limit adjustment', () => {
     const result = decide(
       [ranked('room', 50), ranked('near', 50, 'near-limit')],
       emptyRotationState(),
       { prefer: ['near'] },
     );
 
-    expect(pickId(result)).toBe('room');
-    expect(result.preferenceChangedChoice).toBe(false);
+    expect(pickId(result)).toBe('near');
+    expect(result.preferenceChangedChoice).toBe(true);
   });
 
   it('orders preferredRank ascending, and ranked before unranked', () => {
@@ -332,12 +334,12 @@ describe('spread tie-break', () => {
   });
 
   it('orders a lane ahead of a subagent in the same limit class', () => {
-    const result = decide([subagent('alpha', 50), ranked('z', 50)]);
+    const result = decide([subagent('alpha', 50), ranked('z', 50, 'unknown')]);
 
     expect(pickId(result)).toBe('z');
   });
 
-  it('keeps a subagent with the best lane class and leaves a worse class out', () => {
+  it('applies the unknown limit adjustment to a subagent', () => {
     const result = decide([
       ranked('near', 50, 'near-limit'),
       ranked('room', 50),
@@ -383,7 +385,7 @@ describe('spread tie-break', () => {
     const result = decide(
       [
         ranked('a', 50, 'confirmed-room', 1),
-        ranked('z', 50, 'confirmed-room', 3),
+        ranked('z', 54, 'confirmed-room', 3),
       ],
       rotation,
     );
@@ -417,5 +419,95 @@ describe('spread tie-break', () => {
 
   it('rejects a score off the routing scale', () => {
     expect(() => decide([ranked('a', 101)])).toThrow(/integer/);
+  });
+});
+
+describe('additive spread', () => {
+  it('rotates negative totals within five points of the actual maximum', () => {
+    const result = decide([
+      { ...ranked('leader', 5), total: -3 },
+      { ...ranked('edge', 5), total: -8 },
+      { ...ranked('outside', 5), total: -9 },
+    ], withPick(emptyRotationState(), rotationKey('build', 'implement'), 'leader'));
+    expect(result.pick).toMatchObject({ candidate: { id: 'edge' }, total: -8 });
+    expect(ids(result)).toEqual(['edge', 'leader', 'outside']);
+  });
+
+  it('breaks equal totals by preference rank, limit class, executor kind and ordinal id', () => {
+    const result = decide([
+      { ...ranked('z', 50), total: 70 },
+      { ...ranked('a', 50), total: 70 },
+      { ...ranked('unknown', 50, 'unknown'), total: 70 },
+      { ...subagent('a', 50), total: 70 },
+      { ...ranked('near', 50, 'near-limit'), total: 70 },
+      { ...ranked('pref-first', 50, 'near-limit'), total: 58 },
+      { ...ranked('pref-second', 50), total: 62 },
+    ], emptyRotationState(), { prefer: ['pref-first', 'pref-second'] });
+    expect(result.ranking.map(({ total }) => total)).toEqual(Array(7).fill(70));
+    expect(ids(result)).toEqual([
+      'pref-first', 'pref-second', 'a', 'z', 'unknown', 'subagent:a', 'near',
+    ]);
+  });
+
+  it('compares the unboosted result from the original rotation cursor', () => {
+    const key = rotationKey('build', 'implement');
+    const incoming = withPick(emptyRotationState(), key, 'a');
+    const candidates = [ranked('a', 60), ranked('b', 59), ranked('c', 54)];
+    const result = decide(candidates, incoming, { prefer: ['b'] });
+    expect(pickId(result)).toBe('b');
+    expect(result.preferenceChangedChoice).toBe(false);
+    expect(pickId(decide(candidates, result.rotation))).toBe('a');
+    expect(lastCandidateId(incoming, key)).toBe('a');
+    expect(lastCandidateId(result.rotation, key)).toBe('b');
+  });
+
+  it('reports the rule list and both overridden sources without stacking boosts', () => {
+    const result = spread({
+      phaseId: 'build',
+      taskKind: 'implement',
+      candidates: [ranked('a', 50, 'confirmed-room', 1), ranked('b', 50), ranked('c', 50)],
+      rotation: emptyRotationState(),
+      preferences: { prefer: ['b'] },
+      rulePrefer: ['c'],
+    });
+    expect(result).toMatchObject({
+      preferenceSource: 'rule',
+      overriddenPreferenceSources: ['call', 'configured'],
+      preferenceMatches: [{ entry: 'c', status: 'matched' }],
+    });
+    expect(result.ranking.map(({ candidate, total }) => [candidate.id, total]))
+      .toEqual([['c', 62], ['a', 50], ['b', 50]]);
+  });
+
+  it('uses the full inventory to report ineligible preferences without falling through to configuration', () => {
+    const room = ranked('room', 50, 'confirmed-room', 1);
+    const result = spread({
+      phaseId: 'build',
+      taskKind: 'implement',
+      candidates: [room],
+      inventory: [room.candidate, lane('hot', 'at-limit')],
+      rotation: emptyRotationState(),
+      preferences: { prefer: ['hot'] },
+    });
+    expect(result).toMatchObject({
+      preferenceSource: 'call',
+      overriddenPreferenceSources: ['configured'],
+      preferenceMatches: [{ entry: 'hot', status: 'ineligible' }],
+      pick: { total: 50 },
+      preferenceChangedChoice: false,
+    });
+  });
+
+  it('replaces a carried preference part while retaining the override and legacy score', () => {
+    const result = decide([{
+      ...ranked('a', 50),
+      total: 108,
+      parts: { prior: 50, learned: 5, limit: 0, preference: 8, override: 45 },
+    }], emptyRotationState(), { prefer: ['a'] });
+    expect(result.pick).toMatchObject({
+      total: 112,
+      score: 50,
+      parts: { preference: 12, override: 45 },
+    });
   });
 });
