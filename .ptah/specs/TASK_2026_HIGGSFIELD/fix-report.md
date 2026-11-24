@@ -85,7 +85,7 @@ array change) and the live probe (`PTAH_LIVE_PROBES=1`).
 
 ## Decisions
 
-- **The challenge scope is used only when the 401 was read.** Discovery still reads the 401
+- **Superseded (see "Review follow-up" below):** the challenge scope was used only when the 401 was read. Discovery still reads the 401
   only after the PRM path and root documents fail. Probing it every time would add an
   unauthenticated request per connect and reorder discovery, which pinned specs fix in place.
   For Higgsfield, the challenge and the PRM name the same scope. This is reversible: move
@@ -97,3 +97,45 @@ array change) and the live probe (`PTAH_LIVE_PROBES=1`).
 - **`discoverAuthorizationServer` returns an object instead of a string.** Its callers are the
   service, the live spec and the barrel export, and no consumer outside the lib exists. The
   callers were updated in place, with no wrapper.
+
+## Review follow-up: PR #1502, challenge scope skipped (Major)
+
+Finding: at `mcp-oauth-metadata.ts:385`, an early return on a guessed PRM document skipped the
+401 challenge. As a result, `challengeScope` never won, although `selectAuthorizationScope` ranks
+it first.
+
+Change (`discoverAuthorizationServer`):
+- The challenge is now always read. The chosen order is **after a guessed PRM document succeeds**:
+  PRM path form, then the PRM root, then the 401 challenge. This keeps the deadline spec
+  (first request = PRM path form) and the Smithery order spec unchanged. It costs one extra
+  unauthenticated request per discovery when a guessed document exists.
+- The challenge is optional. `readResourceChallenge` already returns `undefined` on any failure,
+  so a throwing, non-401 or header-less challenge leaves `challengeScope` unset, and discovery
+  succeeds on the PRM document's scopes. A deadline that has already passed skips the challenge
+  instead of failing discovery; the AS-metadata phase then reports the timeout.
+- When no guessed document exists, the behaviour is unchanged: the challenge's
+  `resource_metadata` is followed, and then the origin is used as a fallback.
+
+Specs:
+- Request order updated in `mcp-oauth-metadata.spec.ts`. HubSpot root:
+  `[PRM root, https://mcp.hubspot.com]`. Higgsfield: `[PRM path, MCP URL]`, which now also
+  yields `challengeScope`.
+- `mcp-oauth.service.spec.ts` "live bounded signal": 4 requests became 5, because the 401
+  challenge was added.
+- New: the PRM lists `files:read files:write admin` and the challenge names `files:read`, so
+  `files:read` wins. This is covered in discovery plus `selectAuthorizationScope`, and end to end
+  in the `connect()` authorize URL and the stored token scope.
+- New: when the challenge request throws, or the server answers 200 with no challenge, the PRM
+  scopes `a b` are used.
+
+Checks (under `scripts/verify.mjs --exec --task hf2`):
+
+| Command | Result |
+| --- | --- |
+| `npx tsc --noEmit --project libs/backend/cli-agent-runtime/tsconfig.lib.json` | exit 0 |
+| `npx tsc --noEmit --project libs/backend/cli-agent-runtime/tsconfig.spec.json` | exit 0 |
+| jest: metadata, service, override-resolver, live (skipped) specs | 4 suites, 87 passed, 1 skipped |
+| `npx eslint` on `mcp-oauth-metadata.ts`, `mcp-oauth-metadata.spec.ts`, `mcp-oauth.service.spec.ts` | 0 problems |
+
+The first jest run failed in the request-count spec: it expected 4 signals and received 5. This
+is the intended extra challenge request. After the expectation was updated, the run passed.

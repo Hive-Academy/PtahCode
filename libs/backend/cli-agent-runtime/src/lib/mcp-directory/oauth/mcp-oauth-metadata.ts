@@ -354,9 +354,12 @@ async function readResourceChallenge(
  *   4. Fall back to the MCP server's origin. Many servers co-locate their OAuth
  *      endpoints, and RFC 8414 discovery below will confirm or reject it.
  *
- * The 401 is read only when steps 1-2 found nothing, so `challengeScope` is set
- * only on that route; on the others the document's `resourceScopes` is the
- * scope source (see {@link selectAuthorizationScope}).
+ * The 401 challenge is ALWAYS read, after the documents: its `scope` is the
+ * first-choice request scope (see {@link selectAuthorizationScope}) and is
+ * often narrower than the document's `scopes_supported`. When steps 1-2 found
+ * a document, the challenge costs one extra unauthenticated request and
+ * contributes only its scope; a failed or absent challenge leaves
+ * `challengeScope` unset and discovery succeeds on the document alone.
  *
  * `signal` is the phase deadline: once it aborts, no further candidate is
  * tried and the call rejects with {@link OAuthTimeoutError}.
@@ -383,8 +386,14 @@ export async function discoverAuthorizationServer(
       signal,
     );
     if (found) {
+      // A passed deadline skips the optional challenge instead of failing a
+      // discovery that already has its answer; the next phase reports it.
+      const challenge = signal?.aborted
+        ? undefined
+        : await readResourceChallenge(serverUrl, fetchImpl, signal);
       return {
         authorizationServer: found.authorizationServer,
+        challengeScope: challenge?.scope,
         resourceScopes: found.scopesSupported,
       };
     }

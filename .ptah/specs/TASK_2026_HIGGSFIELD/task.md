@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_HIGGSFIELD
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Custom connector OAuth requests unsupported scopes; add Higgsfield connector
 description: >-

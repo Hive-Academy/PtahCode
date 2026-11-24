@@ -747,8 +747,9 @@ describe('McpOAuthService time bounds', () => {
     ).resolves.toEqual({
       serverKey: deriveMcpOAuthServerKey('https://mcp.example.com/mcp'),
     });
-    // Protected-resource doc, AS metadata, registration, token exchange.
-    expect(signals).toHaveLength(4);
+    // Protected-resource doc, 401 challenge, AS metadata, registration, token
+    // exchange.
+    expect(signals).toHaveLength(5);
     for (const signal of signals) {
       expect(signal).toBeInstanceOf(AbortSignal);
       expect(signal?.aborted).toBe(false);
@@ -810,6 +811,38 @@ describe('McpOAuthService scope selection (TASK_2026_HIGGSFIELD)', () => {
     expect(authorizeUrl.searchParams.get('scope')).toBe(
       HIGGSFIELD_RESOURCE_SCOPE,
     );
+  });
+
+  it('requests the narrower challenge scope over broad PRM scopes', async () => {
+    const narrow: FetchLike = async (url, init) => {
+      if (url.includes('.well-known/oauth-protected-resource')) {
+        return jsonResp({
+          authorization_servers: ['https://auth.example.com'],
+          scopes_supported: ['files:read', 'files:write', 'admin'],
+        });
+      }
+      if (url === 'https://mcp.example.com/mcp') {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({}),
+          text: async () => '',
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'www-authenticate'
+                ? 'Bearer scope="files:read"'
+                : null,
+          },
+        };
+      }
+      return fetchImpl(url, init);
+    };
+    const { authorizeUrl, token } = await connectAndCapture(
+      'https://mcp.example.com/mcp',
+      narrow,
+    );
+    expect(authorizeUrl.searchParams.get('scope')).toBe('files:read');
+    expect(token?.scope).toBe('files:read');
   });
 
   it('lets an explicit scope win', async () => {

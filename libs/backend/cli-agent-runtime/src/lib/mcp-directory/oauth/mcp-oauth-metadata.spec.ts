@@ -162,8 +162,10 @@ describe('discoverAuthorizationServer', () => {
       fetchImpl,
     );
     expect(result.authorizationServer).toBe('https://mcp.hubspot.com');
+    // The document first, then the server's own 401 for its challenge scope.
     expect(seen).toEqual([
       'https://mcp.hubspot.com/.well-known/oauth-protected-resource',
+      'https://mcp.hubspot.com',
     ]);
   });
 
@@ -600,7 +602,7 @@ describe('selectAuthorizationScope (MCP scope selection)', () => {
 });
 
 describe('Higgsfield (Clerk) discovery shape', () => {
-  it('reads the auth server and resource scopes from the PRM path form', async () => {
+  it('reads the PRM path form, then the 401 challenge for its scope', async () => {
     const seen: string[] = [];
     const result = await discoverAuthorizationServer(
       HIGGSFIELD_MCP_URL,
@@ -608,9 +610,77 @@ describe('Higgsfield (Clerk) discovery shape', () => {
     );
     expect(result).toEqual({
       authorizationServer: HIGGSFIELD_AS,
+      challengeScope: HIGGSFIELD_RESOURCE_SCOPE,
       resourceScopes: ['openid', 'email', 'offline_access'],
     });
-    expect(seen).toEqual([HIGGSFIELD_PRM_URL]);
+    expect(seen).toEqual([HIGGSFIELD_PRM_URL, HIGGSFIELD_MCP_URL]);
+  });
+
+  it('lets a narrower challenge scope win over broad PRM scopes', async () => {
+    const fetchImpl: FetchLike = async (url) => {
+      if (
+        url ===
+        'https://mcp.example.com/.well-known/oauth-protected-resource/mcp'
+      ) {
+        return jsonResp({
+          authorization_servers: ['https://auth.example.com'],
+          scopes_supported: ['files:read', 'files:write', 'admin'],
+        });
+      }
+      if (url === 'https://mcp.example.com/mcp') {
+        return challenge401(
+          'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", scope="files:read"',
+        );
+      }
+      return notFound();
+    };
+    const result = await discoverAuthorizationServer(
+      'https://mcp.example.com/mcp',
+      fetchImpl,
+    );
+    expect(result.challengeScope).toBe('files:read');
+    expect(result.resourceScopes).toEqual([
+      'files:read',
+      'files:write',
+      'admin',
+    ]);
+    expect(selectAuthorizationScope(undefined, result)).toBe('files:read');
+  });
+
+  it.each<[string, FetchLike]>([
+    [
+      'the challenge request throws',
+      async (url) => {
+        if (url.includes('oauth-protected-resource')) {
+          return jsonResp({
+            authorization_servers: ['https://auth.example.com'],
+            scopes_supported: ['a', 'b'],
+          });
+        }
+        throw new TypeError('fetch failed');
+      },
+    ],
+    [
+      'the server answers without a challenge',
+      async (url) =>
+        url.includes('oauth-protected-resource')
+          ? jsonResp({
+              authorization_servers: ['https://auth.example.com'],
+              scopes_supported: ['a', 'b'],
+            })
+          : jsonResp({}),
+    ],
+  ])('falls back to PRM scopes when %s', async (_case, fetchImpl) => {
+    const result = await discoverAuthorizationServer(
+      'https://mcp.example.com/mcp',
+      fetchImpl,
+    );
+    expect(result).toEqual({
+      authorizationServer: 'https://auth.example.com',
+      challengeScope: undefined,
+      resourceScopes: ['a', 'b'],
+    });
+    expect(selectAuthorizationScope(undefined, result)).toBe('a b');
   });
 
   it('carries the 401 challenge scope when the challenge led to the PRM', async () => {
