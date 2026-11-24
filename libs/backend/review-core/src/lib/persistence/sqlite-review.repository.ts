@@ -8,9 +8,8 @@ import type { ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueHead } from '../r
 import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord, ReviewStatusSyncRecord } from './review-repository.interface';
 import { NON_RETRYABLE_REVIEW_FAILURE_CODES } from '../review-failure-retry';
 import type { ReviewLaneUse } from '../lanes/review-lane.runner';
+import { REVIEW_STAGE_LANE_RECORD_VERSION } from './review-stage-lane-record';
 
-/** Version of the `checkpoint:lane:<stage>` JSON document; `ReviewQueryRepository` reads it. */
-export const REVIEW_STAGE_LANE_RECORD_VERSION = 1;
 const UPSERT_CHECKPOINT = `INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES (?, ?, ?, 'completed', ?)
       ON CONFLICT(attempt_id, stage, ordinal) DO UPDATE SET state = 'completed', outcome = excluded.outcome`;
 

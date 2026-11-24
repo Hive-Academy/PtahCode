@@ -4,10 +4,9 @@ import { z } from 'zod';
 import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
 import { publishedFindingTitle, redactSecrets } from '../publication/publication-text';
 import {
-  REVIEW_LANE_POOL_MAX, RepoIdentitySchema, ReviewFindingSchema, ReviewLaneFallbackSchema, ReviewLaneIdSchema, ReviewModelIdSchema,
-  ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewLaneFallback, type ReviewRun,
+  RepoIdentitySchema, ReviewFindingSchema, ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewLaneFallback, type ReviewRun,
 } from '@ptah-extension/review-contracts';
-import { REVIEW_STAGE_LANE_RECORD_VERSION } from './sqlite-review.repository';
+import { LANE_RECORD_PREFIX, ReviewStageLaneRecordSchema as laneRecordSchema } from './review-stage-lane-record';
 
 export interface IReviewQueryRepository {
   listRuns(input: z.input<typeof ReviewRpcSchemas['review:listRuns']['params']>): Promise<z.output<typeof ReviewRpcSchemas['review:listRuns']['result']>>;
@@ -31,17 +30,7 @@ const stageSchema = z.object({ stage: z.string(), ordinal: z.number(), state: z.
   started_at: z.number().nullable(), ended_at: z.number().nullable(), error_summary: z.string().nullable(), artifact_path: z.string().nullable() });
 const coverageSchema = z.object({ coverage: z.array(z.string().min(1).max(256)).max(100) });
 const checkpointSchema = z.object({ outcome: z.string().nullable() });
-const LANE_RECORD_PREFIX = 'checkpoint:lane:';
 const laneRowSchema = z.object({ stage: z.string(), ordinal: z.number(), outcome: z.string().nullable() });
-/** Lenient: unknown keys pass, an invalid document is ignored for display (plan component 7). */
-const laneRecordSchema = z.string().transform((text, ctx): unknown => {
-  try { return JSON.parse(text) as unknown; }
-  catch {
-    ctx.addIssue({ code: 'custom', message: 'Lane record is not JSON' });
-    return z.NEVER;
-  }
-}).pipe(z.object({ version: z.literal(REVIEW_STAGE_LANE_RECORD_VERSION), lane: ReviewLaneIdSchema.nullable(),
-  model: ReviewModelIdSchema.nullable(), fallback: z.array(ReviewLaneFallbackSchema).max(REVIEW_LANE_POOL_MAX + 1) }));
 type StageLane = { lane: string | null; model: string | null; fallback: ReviewLaneFallback[] };
 const pollRowSchema = z.object({ poll_status: z.enum(['succeeded', 'failed']).nullable(), poll_error: z.string().nullable(),
   last_success_at: z.number().nullable(), last_error_at: z.number().nullable() });

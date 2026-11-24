@@ -1,5 +1,4 @@
 import { realpath } from 'node:fs/promises';
-import { relative } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
@@ -13,6 +12,7 @@ import {
 import {
   REVIEW_CORE_TOKENS,
   ReviewPollDisabledError,
+  findRepositoryWorkspaceFolder,
   type IReviewLaneSettingsStore,
   type ReviewLaneListingService,
   type IReviewArtifactReader,
@@ -127,21 +127,8 @@ export class ReviewRpcHandlers {
 
   /** The registered workspace folder that is the checkout of the repository, or null when that checkout is not open. */
   private async repositoryRoot(repo: RepoIdentity): Promise<string | null> {
-    let checkout: string;
-    try {
-      // An old run stays readable after its repository is disabled: checkoutRoot does not examine the settings.
-      checkout = this.environment.checkoutRoot
-        ? await this.environment.checkoutRoot(repo)
-        : (await this.environment.resolve(repo)).repoRoot;
-    } catch (_error: unknown) {
-      // degradation-audit: reported — a null root makes the renderer tell the operator that the repository is not open.
-      return null;
-    }
-    const folders = this.workspace.getWorkspaceFolders();
-    const real = await Promise.allSettled(folders.map((folder) => realpath(folder)));
-    // path.relative compares without case on Windows, as the file system does.
-    const index = real.findIndex((item) => item.status === 'fulfilled' && relative(item.value, checkout) === '');
-    return index === -1 ? null : folders[index];
+    return findRepositoryWorkspaceFolder({ environment: this.environment, repo,
+      folders: this.workspace.getWorkspaceFolders(), realpath });
   }
 
   private async safe<T>(run: () => Promise<T>): Promise<T> {
