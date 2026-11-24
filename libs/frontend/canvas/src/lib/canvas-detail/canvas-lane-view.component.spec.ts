@@ -532,6 +532,7 @@ describe('CanvasLaneViewComponent', () => {
       'allow',
       undefined,
       undefined,
+      expect.any(Function),
     );
   });
 
@@ -577,6 +578,7 @@ describe('CanvasLaneViewComponent', () => {
       'deny',
       undefined,
       undefined,
+      expect.any(Function),
     );
   });
 
