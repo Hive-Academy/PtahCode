@@ -10,6 +10,7 @@ import {
 import type { LaneModelEntry } from '../lane-model-listing.port';
 import {
   MAX_DECISION_REQUESTS,
+  ROUTING_RULE_ID_PATTERN,
   SCORE_MAX,
   SCORE_MIN,
 } from '../routing-constants';
@@ -69,9 +70,13 @@ const ModelProposalSchema = z
   })
   .strict()
   .nullable();
+const USER_RULE_PREFIX = 'user-rule:';
 const ExclusionRuleSchema = z.union([
   z.enum(EXCLUSION_RULES),
-  z.templateLiteral(['user-rule:', z.string().min(1)]),
+  z.templateLiteral([USER_RULE_PREFIX, z.string()]).refine(
+    (rule) => ROUTING_RULE_ID_PATTERN.test(rule.slice(USER_RULE_PREFIX.length)),
+    'Invalid routing rule id',
+  ),
 ]);
 const PrunedCauseSchema = z.enum(['below-band', 'option-cap', 'payload-fit']);
 const PreferenceSourceSchema = z.enum(['rule', 'call', 'configured']);
@@ -103,6 +108,7 @@ const ScorePartsSchema = z.object({
   priorSource: z.enum(['user', 'seed', 'neutral']).optional(),
   sampleCount: z.number().int().nonnegative().optional(),
   override: z.number().optional(),
+  overrideLabel: z.string().max(120).optional(),
 }).strict();
 
 const CandidateTraceSchema = z.object({

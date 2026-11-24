@@ -5,7 +5,7 @@ import {
   toPhaseSubagentCandidate,
   toSubagentCandidate,
 } from './candidate.types';
-import { resolvePreferences } from './preference-match';
+import { resolvePreferences, selectPreferences } from './preference-match';
 
 function lane(row: Pick<CliDetectionResult, 'cli' | 'ptahCliId' | 'ptahCliName' | 'family'>) {
   return toLaneCandidate({ installed: true, messagingMode: 'none', ...row }, null);
@@ -60,5 +60,51 @@ describe('resolvePreferences', () => {
     expect(resolvePreferences(['DESIGNER'], [codex, designer, design])).toMatchObject([
       { ids: ['subagent:designer'], via: 'displayName', status: 'matched' },
     ]);
+  });
+
+  it('ignores blank selectors and trims or replaces directly supplied display names', () => {
+    const padded = { ...kimi, displayName: '  Kimi Code  ' };
+    const blank = { ...ollama, displayName: ' \t ', family: '' };
+    expect([padded, blank].map(candidateDisplayName)).toEqual(['Kimi Code', ollama.id]);
+    expect(resolvePreferences([' \t ', ' kimi CODE ', ollama.id], [padded, blank])).toEqual([
+      { entry: ' \t ', rank: 1, ids: [], status: 'unknown', detail: 'blank selector, ignored' },
+      { entry: ' kimi CODE ', rank: 2, ids: [kimi.id], via: 'displayName', status: 'matched' },
+      { entry: ollama.id, rank: 3, ids: [ollama.id], via: 'id', status: 'matched' },
+    ]);
+  });
+});
+
+describe('selectPreferences', () => {
+  const configured = [{ ...kimi, preferredRank: 1 }, { ...ollama, preferredRank: 1 }];
+  const eligible = new Set([kimi.id, ollama.id]);
+
+  it('reports an empty rule and uses the call list ahead of configured ranks', () => {
+    expect(selectPreferences([], [ollama.id], configured, eligible)).toMatchObject({
+      source: 'call',
+      overridden: ['configured'],
+      matches: [
+        { source: 'rule', status: 'empty, ignored' },
+        { entry: ollama.id, status: 'matched' },
+      ],
+      ranks: new Map([[ollama.id, 1]]),
+    });
+  });
+
+  it('reports empty explicit lists and orders tied configured ranks by ordinal id', () => {
+    const inventory = [{ ...kimi, preferredRank: 2 }, configured[1], { ...ollama, id: 'Z', preferredRank: 1 }];
+    const expected = {
+      source: 'configured',
+      overridden: [],
+      matches: [
+        { source: 'rule', status: 'empty, ignored' },
+        { source: 'call', status: 'empty, ignored' },
+        { entry: 'Z', rank: 1 },
+        { entry: ollama.id, rank: 1 },
+        { entry: kimi.id, rank: 2 },
+      ],
+    };
+    const eligibleIds = new Set(inventory.map(({ id }) => id));
+    expect(selectPreferences([], [], inventory, eligibleIds)).toMatchObject(expected);
+    expect(selectPreferences([], [], [...inventory].reverse(), eligibleIds)).toMatchObject(expected);
   });
 });

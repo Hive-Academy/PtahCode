@@ -32,6 +32,9 @@ export const EXPLORATION_MIN_SAMPLES = 3;
 /** Points for preference ranks 1, 2, 3, and 4 or later. */
 export const PREFERENCE_BOOST = [12, 8, 4, 2] as const;
 
+/** Accepted identifier syntax for routing rules and their exclusion tokens. */
+export const ROUTING_RULE_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
 /** Score adjustments for eligible limit states. */
 export const LIMIT_ADJUST = {
   'confirmed-room': 0,
@@ -79,14 +82,14 @@ export type InsideBandLimitState = (typeof INSIDE_BAND_LIMIT_ORDER)[number];
 export const EXCLUDED_LIMIT_STATE = 'at-limit' satisfies LaneLimitState;
 
 /**
- * T. Total tie-break after the band. Earlier steps win.
- * `preferredRank >= PREFERRED_RANK_MIN_RANKED` ranks before
- * `PREFERRED_RANK_UNRANKED` and before an absent rank.
- * Executor kind follows `TIE_BREAK_EXECUTOR_KIND_ORDER`.
+ * T. Ranking order before band rotation, starting with descending additive total.
+ * Equal totals use ascending selected preference rank (unranked last), limit class,
+ * executor kind, and ordinal candidate id.
  */
 export const TIE_BREAK_STEPS = [
-  'prefer',
-  'preferredRank',
+  'total',
+  'preferenceRank',
+  'limitClass',
   'executorKind',
   'candidateId',
 ] as const;

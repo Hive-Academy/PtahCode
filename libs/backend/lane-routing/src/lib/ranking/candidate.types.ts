@@ -55,9 +55,9 @@ export type RoutingCandidate = LaneCandidate | SubagentCandidate | ChildSessionC
 export function candidateDisplayName(candidate: RoutingCandidate): string {
   switch (candidate.kind) {
     case 'lane':
-      return candidate.displayName ?? candidate.id;
+      return candidate.displayName?.trim() || candidate.id;
     case 'subagent':
-      return candidate.role ?? candidate.phaseKind ?? candidate.id;
+      return candidate.role?.trim() || candidate.phaseKind || candidate.id;
     case 'child-session':
       return candidate.kind;
   }

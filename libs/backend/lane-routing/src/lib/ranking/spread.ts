@@ -10,7 +10,7 @@ import {
 } from '../routing-constants';
 import type { RoutingCandidate } from './candidate.types';
 import { insideClosenessBand } from './closeness-band';
-import { selectPreferences, type PreferenceMatch } from './preference-match';
+import { selectPreferences, type PreferenceDiagnostic } from './preference-match';
 import {
   lastCandidateId,
   rotationKey,
@@ -62,7 +62,7 @@ export interface SpreadResult {
   readonly preferenceChangedChoice: boolean;
   readonly preferenceSource?: PreferenceSource;
   readonly overriddenPreferenceSources: readonly PreferenceSource[];
-  readonly preferenceMatches: readonly PreferenceMatch[];
+  readonly preferenceMatches: readonly PreferenceDiagnostic[];
 }
 
 /** Rank by additive total and rotate only within the band of the maximum. */
@@ -125,6 +125,9 @@ function rankCandidates(
         ? entry.score + legacyLimitAdjustment(entry.candidate)
         : parts.prior + parts.learned + parts.limit + (parts.override ?? 0)
       : entry.total - (parts?.preference ?? 0);
+    if (!Number.isFinite(base)) {
+      throw new Error(`base total must be finite for candidate ${entry.candidate.id}`);
+    }
     return {
       ...entry,
       total: base + preference,
@@ -152,7 +155,8 @@ function select(ranking: readonly RankedTotal[], lastId: string | null): RankedT
   // An eligible candidate below the band follows every band member in score order.
   if (ranking.some((entry) => entry.candidate.id === lastId)) return first;
   // The rotation store retains only the id once a candidate is ineligible or absent.
-  return band.find((entry) => entry.candidate.id > lastId) ?? first;
+  const byId = band.sort((left, right) => compareOrdinal(left.candidate.id, right.candidate.id));
+  return byId.find((entry) => entry.candidate.id > lastId) ?? first;
 }
 
 function compare(left: RankedTotal, right: RankedTotal): number {
@@ -178,7 +182,8 @@ function compareOrdinal(left: string, right: string): number {
 function assertCandidates(candidates: readonly RankedCandidate[]): void {
   const seen = new Set<string>();
   for (const entry of candidates) {
-    const id = entry.candidate.id;
+    const { candidate } = entry;
+    const id = candidate.id;
     if (seen.has(id)) throw new Error(`candidate id must be unique: ${id}`);
     seen.add(id);
     if (!Number.isInteger(entry.score) || entry.score < SCORE_MIN || entry.score > SCORE_MAX) {
@@ -186,6 +191,10 @@ function assertCandidates(candidates: readonly RankedCandidate[]): void {
     }
     if (entry.total !== undefined && !Number.isFinite(entry.total)) {
       throw new Error('total must be finite');
+    }
+    if (candidate.kind === 'lane' && candidate.limitState !== EXCLUDED_LIMIT_STATE
+        && !Object.hasOwn(LIMIT_ADJUST, candidate.limitState)) {
+      throw new Error(`invalid limit state for candidate ${id}`);
     }
   }
 }

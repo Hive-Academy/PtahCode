@@ -1,5 +1,5 @@
 import type { LaneLimitState, OutcomeTaskKind } from '@ptah-extension/shared';
-import { CLOSENESS_BAND } from '../routing-constants';
+import { CLOSENESS_BAND, TIE_BREAK_STEPS } from '../routing-constants';
 import { toSubagentCandidate, type LaneCandidate } from './candidate.types';
 import {
   emptyRotationState,
@@ -393,6 +393,20 @@ describe('spread tie-break', () => {
     expect(pickId(result)).toBe('z');
   });
 
+  it.each([
+    ['absent', []],
+    ['hard-excluded', [ranked('b', 90, 'at-limit')]],
+  ])('selects the ordinal successor in a mixed-score band when the cursor is %s', (_label, extra) => {
+    const rotation = withPick(emptyRotationState(), rotationKey('build', 'implement'), 'b');
+    const result = decide(
+      [ranked('a', 80), ranked('z', 78), ranked('m', 77), ranked('c', 74), ...extra],
+      rotation,
+    );
+    expect(pickId(result)).toBe('m');
+    expect(ids(result)).toEqual(['m', 'a', 'z', 'c']);
+    expect(result.rankingByTotal.map(({ candidate }) => candidate.id)).toEqual(['a', 'z', 'm', 'c']);
+  });
+
   it('leaves another phase key untouched', () => {
     const other = rotationKey('plan-phase', 'plan');
     const rotation = withPick(emptyRotationState(), other, 'kept');
@@ -420,6 +434,19 @@ describe('spread tie-break', () => {
   it('rejects a score off the routing scale', () => {
     expect(() => decide([ranked('a', 101)])).toThrow(/integer/);
   });
+
+  it('rejects an unknown runtime limit state even with a supplied total', () => {
+    expect(() => decide([{ ...ranked('a', 50, 'constructor' as LaneLimitState), total: 50 }]))
+      .toThrow(/invalid limit state/);
+  });
+
+  it('rejects non-finite base totals from unchecked score parts', () => {
+    const parts = { prior: 50, learned: 0, preference: 0, limit: 0 };
+    expect(() => decide([{ ...ranked('a', 50), parts: { ...parts, override: NaN } }]))
+      .toThrow(/base total must be finite/);
+    expect(() => decide([{ ...ranked('a', 50), total: 50, parts: { ...parts, preference: Infinity } }]))
+      .toThrow(/base total must be finite/);
+  });
 });
 
 describe('additive spread', () => {
@@ -434,6 +461,7 @@ describe('additive spread', () => {
   });
 
   it('breaks equal totals by preference rank, limit class, executor kind and ordinal id', () => {
+    expect(TIE_BREAK_STEPS).toEqual(['total', 'preferenceRank', 'limitClass', 'executorKind', 'candidateId']);
     const result = decide([
       { ...ranked('z', 50), total: 70 },
       { ...ranked('a', 50), total: 70 },
@@ -477,6 +505,29 @@ describe('additive spread', () => {
     });
     expect(result.ranking.map(({ candidate, total }) => [candidate.id, total]))
       .toEqual([['c', 62], ['a', 50], ['b', 50]]);
+  });
+
+  it.each([
+    { description: 'empty rule', prefer: ['b'], source: 'call', ignored: ['rule'], pick: 'b', overridden: ['configured'] },
+    { description: 'empty rule and call', prefer: [], source: 'configured', ignored: ['rule', 'call'], pick: 'a', overridden: [] },
+  ])('preserves the lower-precedence boost with $description', ({ prefer, source, ignored, pick, overridden }) => {
+    const result = spread({
+      phaseId: 'build',
+      taskKind: 'implement',
+      candidates: [ranked('a', 50, 'confirmed-room', 1), ranked('b', 50)],
+      rotation: emptyRotationState(),
+      preferences: { prefer },
+      rulePrefer: [],
+    });
+    expect(result).toMatchObject({
+      preferenceSource: source,
+      overriddenPreferenceSources: overridden,
+      preferenceMatches: [
+        ...ignored.map((source) => ({ source, status: 'empty, ignored' })),
+        { entry: pick, status: 'matched' },
+      ],
+      pick: { candidate: { id: pick }, total: 62 },
+    });
   });
 
   it('uses the full inventory to report ineligible preferences without falling through to configuration', () => {

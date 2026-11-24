@@ -10,12 +10,18 @@ export interface PreferenceMatch {
   readonly ids: readonly string[];
   readonly via?: MatchTier;
   readonly status: 'matched' | 'unknown' | 'ambiguous' | 'duplicate' | 'ineligible';
+  readonly detail?: 'blank selector, ignored';
 }
+
+export type PreferenceDiagnostic = PreferenceMatch | {
+  readonly source: 'rule' | 'call';
+  readonly status: 'empty, ignored';
+};
 
 interface PreferenceSelection {
   readonly source?: PreferenceSource;
   readonly overridden: readonly PreferenceSource[];
-  readonly matches: readonly PreferenceMatch[];
+  readonly matches: readonly PreferenceDiagnostic[];
   readonly ranks: ReadonlyMap<string, number>;
 }
 
@@ -35,6 +41,9 @@ export function resolvePreferences(
   return entries.map((entry, index) => {
     const selector = entry.trim();
     const rank = index + 1;
+    if (selector === '') {
+      return { entry, rank, ids: [], status: 'unknown', detail: 'blank selector, ignored' };
+    }
     for (const [via, alias] of tiers) {
       const key = via === 'id' ? selector : selector.toLowerCase();
       const ids = candidates
@@ -53,7 +62,7 @@ export function resolvePreferences(
   });
 }
 
-/** Use the highest-precedence list that is present, even if its entries give no boost. */
+/** Use the highest-precedence nonempty list, even if its entries give no boost. */
 export function selectPreferences(
   rulePrefer: readonly string[] | undefined,
   callPrefer: readonly string[] | undefined,
@@ -73,14 +82,18 @@ export function selectPreferences(
       status: eligibleIds.has(candidate.id) ? 'matched' : 'ineligible',
     });
   }
-  configured.sort((left, right) => left.rank - right.rank);
+  configured.sort((left, right) => left.rank - right.rank
+    || (left.entry < right.entry ? -1 : left.entry > right.entry ? 1 : 0));
   const sources: PreferenceSource[] = [];
-  if (rulePrefer !== undefined) sources.push('rule');
-  if (callPrefer !== undefined) sources.push('call');
+  const ignored: PreferenceDiagnostic[] = [];
+  if (rulePrefer?.length === 0) ignored.push({ source: 'rule', status: 'empty, ignored' });
+  if (callPrefer?.length === 0) ignored.push({ source: 'call', status: 'empty, ignored' });
+  if (rulePrefer?.length) sources.push('rule');
+  if (callPrefer?.length) sources.push('call');
   if (configured.length > 0) sources.push('configured');
 
   const [source, ...overridden] = sources;
-  const explicit = rulePrefer ?? callPrefer;
+  const explicit = source === 'rule' ? rulePrefer : source === 'call' ? callPrefer : undefined;
   const matches = explicit === undefined
     ? configured
     : resolvePreferences(explicit, inventory, eligibleIds);
@@ -88,5 +101,10 @@ export function selectPreferences(
   for (const match of matches) {
     if (match.status === 'matched') ranks.set(match.ids[0], match.rank);
   }
-  return { ...(source === undefined ? {} : { source }), overridden, matches, ranks };
+  return {
+    ...(source === undefined ? {} : { source }),
+    overridden,
+    matches: [...ignored, ...matches],
+    ranks,
+  };
 }

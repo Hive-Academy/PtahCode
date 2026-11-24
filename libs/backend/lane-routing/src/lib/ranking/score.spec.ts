@@ -1,5 +1,6 @@
 import {
   LANE_DEFAULT_MODEL,
+  type LaneLimitState,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
 import { AUTOMATIC_MATRIX_MODEL } from '../matrix/local-derivation';
@@ -158,6 +159,15 @@ describe('additive score', () => {
       preference: 2, limit: -10, override: 10,
     });
     expect(result.total).toBe(37);
+  });
+
+  it('rejects unchecked limit states and non-finite overrides before scoring', () => {
+    const candidate = lane('codex');
+    const cell = codexMatrix({}, 65).resolve('codex', LANE_DEFAULT_MODEL, 'implement');
+    expect(() => scoreResolvedCell({ ...candidate, limitState: 'constructor' as LaneLimitState }, cell))
+      .toThrow(/invalid limit state/);
+    expect(() => scoreResolvedCell(candidate, cell, undefined, Infinity))
+      .toThrow(/score override must be finite/);
   });
 
   it('promotes by additive total even when the effective cell scores order models differently', () => {

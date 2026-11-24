@@ -189,7 +189,10 @@ describe('route-decide results', () => {
             candidate: 'claude',
             displayName: 'claude',
             total: 124,
-            parts: { prior: 80, learned: 15, preference: 12, limit: 0, override: 17 },
+            parts: {
+              prior: 80, learned: 15, preference: 12, limit: 0, override: 17,
+              overrideLabel: 'builtin design/visual-review subagent',
+            },
             disposition: 'chosen',
             preferenceSource: 'rule',
             overriddenPreferenceSources: ['call', 'configured'],
@@ -227,6 +230,40 @@ describe('route-decide results', () => {
       ],
     };
     expect(RouteDecideResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('accepts an override label of at most 120 characters', () => {
+    const withLabel = (overrideLabel: string) => gateOf([{
+      ...chosen,
+      candidates: [{
+        candidate: 'claude',
+        displayName: 'claude',
+        total: 100,
+        parts: { prior: 90, learned: 0, preference: 0, limit: -5, override: 15, overrideLabel },
+        disposition: 'chosen',
+      }],
+    }]);
+    expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(120))).success).toBe(true);
+    expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(121))).success).toBe(false);
+  });
+
+  it('allows dots, underscores and hyphens in a routing rule id up to 64 characters', () => {
+    const rule = `user-rule:A1._-${'x'.repeat(59)}`;
+    const result = {
+      ...gateOf([chosen]),
+      excluded: [{ phaseId: 'implement', candidate: 'codex', rule }],
+    };
+    expect(RouteDecideResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('rejects empty, unsafe and oversized routing rule ids in exclusions', () => {
+    for (const id of ['', ' ', 'a;b', 'a\nb', 'a\n', 'x'.repeat(65)]) {
+      const result = {
+        ...gateOf([chosen]),
+        excluded: [{ phaseId: 'implement', candidate: 'codex', rule: `user-rule:${id}` }],
+      };
+      expect(RouteDecideResultSchema.safeParse(result).success).toBe(false);
+    }
   });
 
   it.each(['deadline', 'model-cold', 'model-busy', 'question-cap'])(

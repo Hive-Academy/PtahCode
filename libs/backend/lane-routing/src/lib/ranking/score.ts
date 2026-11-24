@@ -215,6 +215,12 @@ export function scoreResolvedCell(
   const learned = Math.max(-LEARNED_DELTA_CAP, Math.min(LEARNED_DELTA_CAP, delta)) + exploration;
   const limitState = candidate.kind === 'lane' ? candidate.limitState : 'unknown';
   if (limitState === 'at-limit') throw new Error('at-limit candidates must be excluded before scoring');
+  if (!Object.hasOwn(LIMIT_ADJUST, limitState)) {
+    throw new Error(`invalid limit state for candidate ${candidate.id}`);
+  }
+  if (override !== undefined && !Number.isFinite(override)) {
+    throw new Error('score override must be finite');
+  }
   const parts: ScoreParts = {
     prior,
     priorSource: user !== undefined ? 'user' : seed !== undefined ? 'seed' : 'neutral',
