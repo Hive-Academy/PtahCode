@@ -397,6 +397,51 @@ describe('handleGrep (node engine)', () => {
     expect(reply.text).not.toContain('drop.tmp');
   });
 
+  it('applies a nested .gitignore relative to its folder, and lets it override', async () => {
+    await mkdir(path.join(root, 'src', 'deep'), { recursive: true });
+    await writeFile(path.join(root, '.gitignore'), '*.log\n');
+    await writeFile(
+      path.join(root, 'src', '.gitignore'),
+      'secret.ts\n/deep/hidden.ts\n!keep.log\n',
+    );
+    await writeFile(path.join(root, 'src', 'secret.ts'), 'LIMIT secret\n');
+    await writeFile(path.join(root, 'src', 'deep', 'hidden.ts'), 'LIMIT h\n');
+    await writeFile(path.join(root, 'src', 'deep', 'shown.ts'), 'LIMIT s\n');
+    await writeFile(path.join(root, 'src', 'keep.log'), 'LIMIT kept\n');
+    await writeFile(path.join(root, 'src', 'other.log'), 'LIMIT other\n');
+    // The nested rules do not reach a sibling folder of `src`.
+    await mkdir(path.join(root, 'lib'));
+    await writeFile(path.join(root, 'lib', 'secret.ts'), 'LIMIT sibling\n');
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(reply.text).not.toContain('src/secret.ts');
+    expect(reply.text).not.toContain('hidden.ts');
+    expect(reply.text).not.toContain('other.log');
+    expect(reply.text).toContain('src/deep/shown.ts');
+    expect(reply.text).toContain('src/keep.log');
+    expect(reply.text).toContain('lib/secret.ts');
+    const included = await handleGrep(
+      { pattern: 'LIMIT', includeIgnored: true, path: 'src' },
+      deps,
+    );
+    expect(included.text).toContain('src/secret.ts');
+  });
+
+  it('applies the .gitignore files above a scoped target folder', async () => {
+    await mkdir(path.join(root, 'src', 'deep'), { recursive: true });
+    await writeFile(path.join(root, '.gitignore'), '*.log\n');
+    await writeFile(path.join(root, 'src', '.gitignore'), 'secret.ts\n');
+    await writeFile(path.join(root, 'src', 'deep', 'secret.ts'), 'LIMIT s\n');
+    await writeFile(path.join(root, 'src', 'deep', 'run.log'), 'LIMIT l\n');
+    await writeFile(path.join(root, 'src', 'deep', 'ok.ts'), 'LIMIT ok\n');
+    const reply = await handleGrep(
+      { pattern: 'LIMIT', path: 'src/deep' },
+      deps,
+    );
+    expect(reply.text).toContain('src/deep/ok.ts');
+    expect(reply.text).not.toContain('secret.ts');
+    expect(reply.text).not.toContain('run.log');
+  });
+
   (process.platform === 'win32' ? it.skip : it)(
     'skips a .gitignore that is a FIFO instead of blocking on the read',
     async () => {
@@ -709,6 +754,31 @@ describe('handleGrep (git engine)', () => {
           '1 match in 1 file (engine: node)',
         );
         expect(reply.text).toContain('src/a.ts');
+      } finally {
+        await rm(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  itGit(
+    'honours a nested .gitignore when a parent repository ignores the root',
+    async () => {
+      const parent = await mkdtemp(path.join(os.tmpdir(), 'grep-parent-'));
+      try {
+        const parentReal = await realpath(parent);
+        execFileSync('git', ['init', '-q'], { cwd: parentReal });
+        await writeFile(path.join(parentReal, '.gitignore'), 'ignored/\n');
+        const ws = path.join(parentReal, 'ignored', 'ws');
+        await mkdir(path.join(ws, 'src'), { recursive: true });
+        await writeFile(path.join(ws, 'src', '.gitignore'), 'gen.ts\n');
+        await writeFile(path.join(ws, 'src', 'a.ts'), 'LIMIT kept\n');
+        await writeFile(path.join(ws, 'src', 'gen.ts'), 'LIMIT generated\n');
+        const reply = await handleGrep(
+          { pattern: 'LIMIT' },
+          { ...deps, defaultWorkspaceRoot: async () => ws },
+        );
+        expect(reply.text).toContain('src/a.ts');
+        expect(reply.text).not.toContain('gen.ts');
       } finally {
         await rm(parent, { recursive: true, force: true });
       }

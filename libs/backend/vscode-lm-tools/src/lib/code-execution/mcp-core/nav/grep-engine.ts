@@ -277,18 +277,16 @@ interface IgnoreRule {
 }
 
 /**
- * Text of the root `.gitignore`, or `undefined` when it is absent, not a
+ * Text of the `.gitignore` in `dir`, or `undefined` when it is absent, not a
  * regular file (a FIFO or device would block the read) or over the file
  * size cap. The open is non-blocking and the type is checked on the open
  * handle, so a swap after a path check cannot make the read hang.
  */
-async function readRootIgnoreText(
-  rootReal: string,
-): Promise<string | undefined> {
+async function readIgnoreText(dir: string): Promise<string | undefined> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(
-      path.join(rootReal, '.gitignore'),
+      path.join(dir, '.gitignore'),
       fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0),
     );
     const info = await handle.stat();
@@ -306,18 +304,28 @@ async function readRootIgnoreText(
 }
 
 /**
- * Root `.gitignore` rules for the Node walk, as a test of one entry. Only
- * the root file is read; nested ignore files are not, so the walk may search
- * a little more than rg. The last matching rule wins, as in git, so a `!`
- * rule re-includes an entry. The walk never enters an ignored directory, so
- * a file under one stays out, as in git.
+ * Rules of one `.gitignore` as a test of one entry, with the path relative
+ * to the directory of that file. The last matching rule wins, as in git, so
+ * a `!` rule re-includes an entry. The result is `undefined` when no rule
+ * matches, so a deeper file can override a shallower one.
  */
-async function loadRootIgnore(
-  rootReal: string,
-): Promise<(relative: string, name: string, isDir: boolean) => boolean> {
-  const text = await readRootIgnoreText(rootReal);
+type IgnoreTest = (
+  relative: string,
+  name: string,
+  isDir: boolean,
+) => boolean | undefined;
+
+/** One `.gitignore` of the walk and the root-relative folder that holds it. */
+interface IgnoreLayer {
+  /** `''` for the root, else the posix path of the folder. */
+  readonly base: string;
+  readonly test: IgnoreTest;
+}
+
+async function loadIgnoreTest(dir: string): Promise<IgnoreTest | undefined> {
+  const text = await readIgnoreText(dir);
   if (text === undefined) {
-    return () => false;
+    return undefined;
   }
   const rules: IgnoreRule[] = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -341,7 +349,7 @@ async function loadRootIgnore(
     });
   }
   return (relative, name, isDir) => {
-    let ignored = false;
+    let ignored: boolean | undefined;
     for (const rule of rules) {
       if (
         (!rule.dirOnly || isDir) &&
@@ -352,6 +360,26 @@ async function loadRootIgnore(
     }
     return ignored;
   };
+}
+
+/**
+ * Whether the `.gitignore` files in `layers` (root first) ignore an entry.
+ * A deeper file overrides a shallower one, as in git. The walk never enters
+ * an ignored directory, so a file under one stays out.
+ */
+function isIgnoredByLayers(
+  layers: readonly IgnoreLayer[],
+  relative: string,
+  name: string,
+  isDir: boolean,
+): boolean {
+  let ignored = false;
+  for (const layer of layers) {
+    const local =
+      layer.base === '' ? relative : relative.slice(layer.base.length + 1);
+    ignored = layer.test(local, name, isDir) ?? ignored;
+  }
+  return ignored;
 }
 
 /** First executable named one of `names` on PATH, or `undefined`. */
@@ -908,9 +936,25 @@ export async function runNodeSearch(
   let skippedLargeFiles = 0;
   let skippedLongLines = 0;
   let unreadable = 0;
-  const isIgnored = request.includeIgnored
-    ? () => false
-    : await loadRootIgnore(request.rootReal);
+  // `.gitignore` files from the root down to the folder being walked. A
+  // scoped target also takes the files of the folders between the root and
+  // the target, as rg does.
+  const baseLayers: IgnoreLayer[] = [];
+  if (!request.includeIgnored && request.targetIsDirectory) {
+    const targetRelative = toPosixRelative(
+      request.rootReal,
+      request.targetAbsolute,
+    );
+    const chain = targetRelative === '.' ? [] : targetRelative.split('/');
+    // The folders above the target. The walk loads the target folder itself.
+    for (let depth = 0; depth < chain.length; depth++) {
+      const base = chain.slice(0, depth).join('/');
+      const test = await loadIgnoreTest(path.join(request.rootReal, base));
+      if (test) {
+        baseLayers.push({ base, test });
+      }
+    }
+  }
   // A target the caller scoped into an excluded folder (`dist/pkg`) is
   // searched, as before: the shared exclude list prunes only below a
   // target that is not itself excluded.
@@ -968,7 +1012,20 @@ export async function runNodeSearch(
     }
   };
 
-  const walk = async (dir: string): Promise<void> => {
+  const walk = async (
+    dir: string,
+    inherited: readonly IgnoreLayer[],
+  ): Promise<void> => {
+    let layers = inherited;
+    if (!request.includeIgnored) {
+      const test = await loadIgnoreTest(dir);
+      if (test) {
+        const base = toPosixRelative(request.rootReal, dir);
+        layers = [...inherited, { base: base === '.' ? '' : base, test }];
+      }
+    }
+    const isIgnored = (relative: string, name: string, isDir: boolean) =>
+      isIgnoredByLayers(layers, relative, name, isDir);
     let entries: Dirent[];
     try {
       // The entry was a directory when it was listed; confirm that its real
@@ -1008,7 +1065,7 @@ export async function runNodeSearch(
             excluded ||
             isIgnored(relative, entry.name, true);
         if (!skipped) {
-          await walk(absolute);
+          await walk(absolute, layers);
         }
       } else if (entry.isFile()) {
         if (
@@ -1032,7 +1089,7 @@ export async function runNodeSearch(
 
   try {
     if (request.targetIsDirectory) {
-      await walk(request.targetAbsolute);
+      await walk(request.targetAbsolute, baseLayers);
     } else {
       await searchFile(request.targetAbsolute);
     }
