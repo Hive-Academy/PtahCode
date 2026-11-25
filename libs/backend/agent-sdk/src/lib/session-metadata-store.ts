@@ -965,6 +965,25 @@ const lanePermissionCapabilitySchema = laneCapabilitySupportSchema.extend({
   nativeMode: z.string().optional(),
   networkModes: z.array(z.enum(['allow', 'deny'])),
 }).strict();
+/** `LaneTurnInputCapabilities` and its item types (shared `agent-process.types.ts`). */
+const laneTurnSettingSchema = laneCapabilitySupportSchema.extend({
+  appliesAt: z.enum(['next-turn', 'next-spawn']).optional(),
+}).strict();
+const laneTurnInputSchema = z.object({
+  model: laneTurnSettingSchema,
+  effort: laneTurnSettingSchema,
+  images: laneCapabilitySupportSchema.extend({
+    onSteer: z.boolean().optional(),
+    onResume: z.boolean().optional(),
+  }).strict(),
+  files: laneCapabilitySupportSchema.extend({
+    delivery: z.enum(['reference', 'path-text']).optional(),
+  }).strict(),
+  commands: laneCapabilitySupportSchema.extend({
+    blocked: z.array(z.string().max(200)).max(200).optional(),
+  }).strict(),
+  skills: laneCapabilitySupportSchema,
+}).strict();
 const cliAdapterManifestSchema = z.object({
   messaging: z.object({
     steer: laneCapabilitySupportSchema,
@@ -994,6 +1013,17 @@ const cliAdapterManifestSchema = z.object({
     reason: z.string().optional(),
   }).strict(),
   mcp: laneCapabilitySupportSchema,
+  // Optional sections (`CliAdapterManifest` in shared): absent in manifests
+  // persisted before they existed, exact and strict when present.
+  turnInput: laneTurnInputSchema.optional(),
+  usage: z.object({
+    timing: z.enum(['live', 'turn-end']),
+    reason: z.string().optional(),
+  }).strict().optional(),
+  prompts: z.object({
+    approvals: laneCapabilitySupportSchema,
+    questions: laneCapabilitySupportSchema,
+  }).strict().optional(),
 }).strict();
 const restoredWorkspaceKeySchema = z.string().min(1).max(2_048);
 /** A persisted Ptah CLI agent name: a non-blank, bounded label (TASK_2026_905). */
@@ -1025,7 +1055,13 @@ function failClosedLanePolicy(
  * unchanged, as the restore path returned it before this seam existed: the `in`
  * checks below would throw on it, and restore must never throw.
  */
-function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
+/** Told when a persisted manifest fails validation and is dropped from the restored reference. */
+type DroppedManifestReport = (agentId: unknown, issuePaths: readonly string[]) => void;
+
+function restoreQuotaOwner(
+  ref: CliSessionReference,
+  onDroppedManifest?: DroppedManifestReport,
+): CliSessionReference {
   if (typeof ref !== 'object' || ref === null) return ref;
   const stored = ref as CliSessionReference & { quotaOwnerKey?: unknown };
   if (
@@ -1055,6 +1091,11 @@ function restoreQuotaOwner(ref: CliSessionReference): CliSessionReference {
   const scope =
     modelScope === null || typeof modelScope === 'string' ? { modelScope } : {};
   const capabilities = cliAdapterManifestSchema.safeParse(potentialCapabilities);
+  if (!capabilities.success && potentialCapabilities !== undefined)
+    onDroppedManifest?.(
+      rest.agentId,
+      capabilities.error.issues.slice(0, 8).map((issue) => issue.path.join('.') || '(root)'),
+    );
   const workspace = restoredWorkspaceKeySchema.safeParse(workspaceKey);
   const agentName = restoredPtahCliNameSchema.safeParse(ptahCliName);
   const effective = EFFECTIVE_LANE_POLICY_SCHEMA.safeParse(effectivePolicy);
@@ -1126,8 +1167,11 @@ function stampHostRun(ref: CliSessionReference): CliSessionReference {
 }
 
 /** Restore projection: validated owner, no internal host-run stamp. */
-function projectForRestore(ref: CliSessionReference): CliSessionReference {
-  return withoutHostRunId(restoreQuotaOwner(ref));
+function projectForRestore(
+  ref: CliSessionReference,
+  onDroppedManifest?: DroppedManifestReport,
+): CliSessionReference {
+  return withoutHostRunId(restoreQuotaOwner(ref, onDroppedManifest));
 }
 
 /** Normalize a process left running by an earlier host run exactly once. */
@@ -2747,17 +2791,29 @@ export class SessionMetadataStore {
    * The single restore seam for both resume paths, so each run's persisted
    * `quotaOwner` is validated here (TASK_2026_596 G3).
    */
+  /**
+   * The restore projection with a warning for a dropped manifest: the lane id
+   * and the failing schema paths only, never the persisted values.
+   */
+  private readonly projectRestored = (ref: CliSessionReference): CliSessionReference =>
+    projectForRestore(ref, (agentId, issuePaths) => {
+      this.logger.warn('[SessionMetadataStore] Dropped an invalid persisted lane manifest', {
+        agentId: typeof agentId === 'string' ? agentId.slice(0, 128) : null,
+        issuePaths,
+      });
+    });
+
   async getCliSessionsForRestore(
     sessionId: string,
   ): Promise<CliSessionReference[]> {
     const metadata = await this.get(sessionId);
     const stored = metadata?.cliSessions ?? [];
     if (!stored.some(isForeignRunningReference)) {
-      return stored.map(projectForRestore);
+      return stored.map(this.projectRestored);
     }
     const liveness = await this.readHostRunLiveness(stored, Date.now());
     if (!stored.some((ref) => isStaleRunningReference(ref, liveness))) {
-      return stored.map(projectForRestore);
+      return stored.map(this.projectRestored);
     }
 
     // A running reference whose host run is gone (no stamp, or no fresh
@@ -2783,7 +2839,7 @@ export class SessionMetadataStore {
         this.emitChange('updated', sessionId, current.workspaceId);
       }
     });
-    return refs.map(projectForRestore);
+    return refs.map(this.projectRestored);
   }
 
   /**

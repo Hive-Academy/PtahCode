@@ -69,6 +69,23 @@ function report(
   return { kind, report: held };
 }
 
+const NULL_CHOICE_KEYS = {
+  modelSource: null,
+  resolvedModel: null,
+  resolvedModelProvenance: null,
+  requestedEffort: null,
+  effort: null,
+  effortSource: null,
+  effortProvenance: null,
+  effortDisposition: null,
+  resolvedEffort: null,
+  resolvedEffortProvenance: null,
+  routedModel: null,
+  routedEffort: null,
+  decisionModel: null,
+  proposalConfidence: null,
+} as const;
+
 const pipelines: OutcomeWritePipeline[] = [];
 
 function trackedPipeline(
@@ -208,7 +225,7 @@ describe('OutcomeWritePipeline', () => {
     pipeline.enqueue({ kind: 'lane-completion', row });
     await pipeline.flush();
     expect(inserted).toHaveBeenCalledTimes(1);
-    expect(inserted).toHaveBeenCalledWith(row);
+    expect(inserted).toHaveBeenCalledWith({ ...row, ...NULL_CHOICE_KEYS });
     await pipeline.dispose();
   });
 
@@ -571,7 +588,7 @@ describe('OutcomeWritePipeline', () => {
     pipeline.enqueue({ kind: 'subagent-stop', row });
     await pipeline.flush();
     expect(inserted).toHaveBeenCalledTimes(1);
-    expect(inserted).toHaveBeenCalledWith(row);
+    expect(inserted).toHaveBeenCalledWith({ ...row, ...NULL_CHOICE_KEYS });
   });
 
   it('keeps one row for two stop producers and fills its missing join fields', async () => {

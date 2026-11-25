@@ -2,12 +2,18 @@
  * Gate result assembly. Joins candidate inventory, hard/user exclusions,
  * additive rankings, model-offer dispositions, traces, and compiled reasons.
  */
-import { type LaneLimitState } from '@ptah-extension/shared';
+import {
+  CLAUDE_REASONING_EFFORT_VALUES,
+  PI_REASONING_EFFORT_VALUES,
+  type EffortDisposition,
+  type LaneLimitState,
+} from '@ptah-extension/shared';
 
 import type {
   CandidateTrace,
   ChosenEntry,
   GateResult,
+  ModelEffort,
   ModelTier,
   PrunedCause,
   UnavailableEntry,
@@ -15,13 +21,14 @@ import type {
 import { ModelTierSchema } from '../contracts/route-decide-result.schema';
 import {
   candidateDisplayName,
+  type LaneCandidate,
   type RoutingCandidate,
 } from '../ranking/candidate.types';
 import type {
   PhaseConstraintResult,
   UnavailablePhase,
 } from '../ranking/hard-constraints';
-import { preferenceBoost } from '../ranking/score';
+import { preferenceBoost, type CandidateScore } from '../ranking/score';
 import type { SpreadResult } from '../ranking/spread';
 import {
   compileChosenExplanation,
@@ -57,6 +64,9 @@ interface ChosenDraft {
   readonly kind: 'chosen';
   readonly phaseId: string;
   readonly resolution: ChosenResolution;
+  readonly selected: CandidateScore;
+  readonly effort: ModelEffort;
+  readonly effortCheck?: ChosenEntry['effortCheck'];
   readonly plan: PhasePlan;
   readonly dispositions: ReadonlyMap<string, LaneOfferDisposition>;
 }
@@ -80,6 +90,7 @@ export function assembleGateResult(
   inputRowIds: readonly string[],
   tally: UsageTally,
   outcomes: readonly (ModelRequestOutcome | null)[],
+  routeId?: string,
 ): GateResult {
   const chosenFacts: ChosenReasonFacts[] = [];
   const unavailableFacts: UnavailableReasonFacts[] = [];
@@ -110,14 +121,30 @@ export function assembleGateResult(
       });
       continue;
     }
-    chosenFacts.push(chosenFactsOf(plan, resolution, args.preferenceSource));
-    drafts.push({
+    const selected = resolution.selectedScore ?? plan.ranked.find(
+      (entry) => entry.candidate.id === resolution.candidate.id,
+    )?.scored;
+    if (selected === undefined) {
+      throw new Error(
+        `phase ${plan.phaseId} is missing a score for ${resolution.candidate.id}`,
+      );
+    }
+    const effort = gathered.matrix.evidence === undefined
+      ? plan.policy.effort
+      : selected.effort ?? plan.policy.effort;
+    const effortCheck = effortCheckOf(resolution.candidate, selected.model, effort, gathered);
+    const draft: ChosenDraft = {
       kind: 'chosen',
       phaseId: phase.id,
       resolution,
+      selected,
+      effort,
+      effortCheck,
       plan,
       dispositions,
-    });
+    };
+    chosenFacts.push(chosenFactsOf(draft, args.preferenceSource));
+    drafts.push(draft);
   }
 
   const compiled = compileGateReasons({
@@ -143,33 +170,26 @@ export function assembleGateResult(
     excluded,
     reasons: [...compiled.reasons],
     usage: usageOf(tally),
+    ...(routeId !== undefined ? { routeId } : {}),
   };
 }
 
 function chosenFactsOf(
-  plan: PhasePlan,
-  resolution: ChosenResolution,
+  { plan, resolution, selected, effortCheck }: ChosenDraft,
   preferenceSource: string | undefined,
 ): ChosenReasonFacts {
-  const row = plan.ranked.find(
-    (entry) => entry.candidate.id === resolution.candidate.id,
-  );
-  if (row === undefined) {
-    throw new Error(
-      `phase ${plan.phaseId} is missing a score for ${resolution.candidate.id}`,
-    );
-  }
   const flags = choiceFlags(
     resolution.source,
     resolution.candidate.id,
     plan.spread,
   );
-  const selected = resolution.selectedScore ?? row.scored;
   return {
     phaseId: plan.phaseId,
     executor: executorOf(resolution.candidate),
     model: selected.model,
     score: selected.score,
+    ...(selected.parts !== undefined ? { parts: selected.parts } : {}),
+    ...(effortCheck !== undefined ? { effortCheck } : {}),
     source: resolution.source,
     cell: selected.cell,
     limitState: limitOf(resolution.candidate),
@@ -397,8 +417,7 @@ function buildCandidateTrace(
   // 1. Chosen candidate first.
   if (draft.kind === 'chosen') {
     const cand = draft.resolution.candidate;
-    const row = rankedById.get(cand.id);
-    const selected = draft.resolution.selectedScore ?? row?.scored;
+    const selected = draft.resolution.selectedScore ?? rankedById.get(cand.id)?.scored;
     const prefSource = plan.spread?.preferenceSource;
     const overridden = plan.spread?.overriddenPreferenceSources ?? [];
     seen.add(cand.id);
@@ -597,6 +616,57 @@ function unavailableEntry(
   };
 }
 
+function effortCheckOf(
+  candidate: RoutingCandidate,
+  model: string,
+  requested: ModelEffort,
+  gathered: GatheredCall,
+): ChosenEntry['effortCheck'] {
+  if (candidate.kind !== 'lane') return undefined;
+  const efforts = gathered.models.get(candidate.id)?.models.find((listed) => listed.id === model)?.efforts;
+  if (efforts === undefined) return undefined;
+  const supported = efforts.provenance === 'unknown' ? null : [...efforts.supported];
+  const inList = supported?.includes(requested) ?? null;
+  let expected: EffortDisposition;
+  if (efforts.provenance === 'native') {
+    expected = efforts.supported.length === 0
+      ? 'lane-takes-no-effort'
+      : inList ? 'native-match' : 'not-in-native-list';
+  } else if (
+    efforts.provenance === 'ptah-fallback' && efforts.supported.length === 0 &&
+    (candidate.cli === 'cursor' || candidate.cli === 'opencode')
+  ) {
+    expected = 'lane-takes-no-effort';
+  } else {
+    expected = fallbackEffortDisposition(candidate.cli, requested);
+  }
+  return { requested, provenance: efforts.provenance, supported, inList, expected };
+}
+
+/** Mirrors the first offer in spawn policy for the route's ModelEffort values. */
+function fallbackEffortDisposition(
+  cli: LaneCandidate['cli'],
+  effort: ModelEffort,
+): EffortDisposition {
+  switch (cli) {
+    case 'codex':
+    case 'copilot':
+    case 'grok':
+      return effort === 'max' ? 'fallback-mapped' : 'fallback-allowlist';
+    case 'antigravity':
+    case 'ptah-cli':
+      return 'fallback-allowlist';
+    case 'claude':
+      return CLAUDE_REASONING_EFFORT_VALUES.some((value) => value === effort)
+        ? 'fallback-allowlist' : 'fallback-refused';
+    case 'pi':
+      return PI_REASONING_EFFORT_VALUES.some((value) => value === effort)
+        ? 'fallback-allowlist' : 'fallback-refused';
+    default:
+      return 'fallback-refused';
+  }
+}
+
 function chosenEntry(
   draft: ChosenDraft,
   gathered: GatheredCall,
@@ -604,19 +674,14 @@ function chosenEntry(
   reason: string,
   seenPreferenceDiagnostics: Set<string>,
 ): ChosenEntry {
-  const plan = draft.plan;
-  const row = plan.ranked.find((entry) => entry.candidate.id === draft.resolution.candidate.id);
-  if (row === undefined) {
-    throw new Error(`phase ${draft.phaseId} is missing a score for ${draft.resolution.candidate.id}`);
-  }
-  const selected = draft.resolution.selectedScore ?? row.scored;
+  const { plan, selected, effort, effortCheck } = draft;
   const confidence = rosterEntryConfidence({
     status: 'chosen',
     source: draft.resolution.source,
     reportedConfidence: draft.resolution.reported,
   });
-  const pinnedTier = draft.resolution.candidate.kind === 'subagent' && row.scored.provenance === 'tier'
-    ? ModelTierSchema.safeParse(row.scored.model)
+  const pinnedTier = draft.resolution.candidate.kind === 'subagent' && selected.provenance === 'tier'
+    ? ModelTierSchema.safeParse(selected.model)
     : null;
   const tier = pinnedTier?.success ? pinnedTier.data : plan.policy.tier;
   const selectedTotal = effectiveTotal(selected);
@@ -646,7 +711,7 @@ function chosenEntry(
     ...(callerPreferenceNote !== undefined ? { callerPreferenceNote } : {}),
     policyCondition: plan.policy.condition ?? plan.policy.ruleId,
     tier,
-    effort: plan.policy.effort,
+    effort,
     ...(plan.matchedRule !== undefined ? { matchedRuleId: plan.matchedRule.id } : {}),
     policyRuleNote: plan.policyRuleNote,
     limitState: limitOf(draft.resolution.candidate),
@@ -661,7 +726,8 @@ function chosenEntry(
     executor: executorOf(draft.resolution.candidate),
     model: selected.model,
     tier,
-    effort: plan.policy.effort,
+    effort,
+    ...(effortCheck !== undefined ? { effortCheck } : {}),
     provenance: selected.provenance,
     score: selected.score,
     source: draft.resolution.source,

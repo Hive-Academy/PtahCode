@@ -14,7 +14,15 @@
  */
 
 import type { AgentStatus, LaneCompletionVerdict } from './agent-process.types';
+import type { EffortDisposition, ValueProvenance } from './lane-native-values.types';
 import type { PhaseKind } from './phase-contract.types';
+
+/**
+ * The verdict an outcome row stores. A caller stop (`stopped` completion
+ * verdict) is recorded as `failed` with status `stopped`, as rows always
+ * were, so the routing statistics keep their meaning.
+ */
+export type LaneOutcomeVerdict = Exclude<LaneCompletionVerdict, 'stopped'>;
 
 export const OUTCOME_TASK_KINDS = [
   'plan',
@@ -32,6 +40,7 @@ export const OUTCOME_TASK_KIND_SOURCES = [
   'unclassified',
 ] as const;
 export type OutcomeTaskKindSource = (typeof OUTCOME_TASK_KIND_SOURCES)[number];
+/** Provider failure classes: the choices a failure classifier may answer. */
 export const LANE_FAILURE_CLASSES = [
   'usage-limit',
   'auth',
@@ -39,7 +48,16 @@ export const LANE_FAILURE_CLASSES = [
   'timeout',
   'bad-output',
 ] as const;
-export type LaneFailureClass = (typeof LANE_FAILURE_CLASSES)[number];
+/**
+ * A caller stop (the user's Stop or `ptah_agent_stop`). Not a provider
+ * failure: the row is kept (verdict `failed`, as rows always were), never
+ * offered to a classifier, and left out of every delivery rate and failure
+ * tally.
+ */
+export const LANE_USER_STOP_CLASS = 'user-stop';
+/** Every class an outcome row may store. */
+export const STORED_LANE_FAILURE_CLASSES = [...LANE_FAILURE_CLASSES, LANE_USER_STOP_CLASS] as const;
+export type LaneFailureClass = (typeof STORED_LANE_FAILURE_CLASSES)[number];
 export const OUTCOME_ROUTING_SOURCES = [
   'model',
   'ranking',
@@ -66,6 +84,15 @@ export const SUBAGENT_LANE_ID = 'subagent';
  * as its own model key.
  */
 export const LANE_DEFAULT_MODEL = 'lane-default';
+
+/** How the requested model was chosen (cli-agent-runtime `LaneModelSource`, cli-adapter.interface.ts:142-143). */
+export const OUTCOME_MODEL_SOURCES = ['request', 'setting', 'ptah-default', 'cli-default'] as const;
+export type OutcomeModelSource = (typeof OUTCOME_MODEL_SOURCES)[number];
+/** Which R2.3 step produced the sent effort (lane-spawn-policy.ts:310-311). */
+export const OUTCOME_EFFORT_SOURCES = ['request', 'setting', 'chat', 'role-default', 'chat-fallback', 'none'] as const;
+export type OutcomeEffortSource = (typeof OUTCOME_EFFORT_SOURCES)[number];
+/** Same value as vscode-lm-tools MAX_EFFORT_LENGTH (agent-spawn-args.schema.ts:75). */
+export const MAX_OUTCOME_EFFORT_LENGTH = 32;
 
 /** One completed lane run, as the outcome pipeline persists it. */
 export interface LaneOutcomeRecord {
@@ -96,7 +123,7 @@ export interface LaneOutcomeRecord {
    */
   readonly phaseKind?: PhaseKind | null;
   readonly taskId: string | null;
-  readonly verdict: LaneCompletionVerdict;
+  readonly verdict: LaneOutcomeVerdict;
   readonly failureClass: LaneFailureClass | null;
   readonly startedAt: number | null;
   /** Epoch ms. */
@@ -117,6 +144,27 @@ export interface LaneOutcomeRecord {
   readonly skillsLoaded: readonly string[] | null;
   /** `skill_session_verdicts.evidence_class` for the run's session, if a row exists. */
   readonly sessionEvidenceClass: string | null;
+  readonly modelSource?: OutcomeModelSource | null;
+  /** Model the lane reported it ran (2.12.3). Null: not reported, or old row. */
+  readonly resolvedModel?: string | null;
+  /** `native` when resolvedModel is set, `unknown` when the lane reported none. Null: old row. */
+  readonly resolvedModelProvenance?: Extract<ValueProvenance, 'native' | 'unknown'> | null;
+  /** First effort value offered by the R2.3 precedence (FA8.4 "requested value"). */
+  readonly requestedEffort?: string | null;
+  /** Effort sent to the CLI. Null: none sent, or old row. */
+  readonly effort?: string | null;
+  readonly effortSource?: OutcomeEffortSource | null;
+  /** Provenance of the list that checked or mapped the effort. */
+  readonly effortProvenance?: ValueProvenance | null;
+  readonly effortDisposition?: EffortDisposition | null;
+  /** Effort the lane reported for its session (2.12.3). Null: not reported, or old row. */
+  readonly resolvedEffort?: string | null;
+  readonly resolvedEffortProvenance?: Extract<ValueProvenance, 'native' | 'unknown'> | null;
+  readonly routedModel?: string | null;
+  readonly routedEffort?: string | null;
+  /** `<kind>:<model>` of the System One model that proposed; null: no proposal. */
+  readonly decisionModel?: string | null;
+  readonly proposalConfidence?: number | null;
 }
 
 /** What routing reads. Holds no text. */
@@ -137,6 +185,20 @@ export type LaneOutcomeSummary = Pick<
   | 'inputTokens'
   | 'outputTokens'
   | 'costUsd'
+  | 'modelSource'
+  | 'resolvedModel'
+  | 'resolvedModelProvenance'
+  | 'requestedEffort'
+  | 'effort'
+  | 'effortSource'
+  | 'effortProvenance'
+  | 'effortDisposition'
+  | 'resolvedEffort'
+  | 'resolvedEffortProvenance'
+  | 'routedModel'
+  | 'routedEffort'
+  | 'decisionModel'
+  | 'proposalConfidence'
 >;
 
 export interface OutcomeRatio {

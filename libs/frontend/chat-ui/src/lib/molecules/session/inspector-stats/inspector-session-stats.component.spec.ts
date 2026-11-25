@@ -5,7 +5,7 @@ import type { SessionBudgetState, SessionStatsEntry } from '@ptah-extension/shar
 import { PTAH_CLOCK, type PtahClock } from '@ptah-extension/ui';
 import type { SessionStatsInputs } from '../session-stats-view';
 import { cliContribution, sdkContribution, sessionTotal } from '../session-usage-totals';
-import { InspectorSessionStatsComponent } from './inspector-session-stats.component';
+import { InspectorSessionStatsComponent, sameModel } from './inspector-session-stats.component';
 
 const snapshot: SessionStatsEntry = {
   sessionId: 'first', model: 'opus', totalCost: 17.54, knownCost: 17.54,
@@ -46,7 +46,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     const tile = (key: string) => required(root.querySelector<HTMLElement>(`[data-testid="session-${key}"]`));
-    const models = required(root.querySelector<HTMLButtonElement>('ptah-disclosure button'));
+    const models = required(root.querySelector<HTMLButtonElement>('[data-testid="session-models"] button'));
     return { fixture, root, tile, models };
   }
 
@@ -185,30 +185,108 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(tooltip?.textContent).toContain('Started');
   });
 
-  it('preserves the single-model name and SDK scope, and restores each session disclosure independently', () => {
+  it('opens the model breakdown as a popover, closes it on a session switch and on Escape', () => {
     const { fixture, models, root } = render();
     expect(root.querySelector('h3')?.textContent).toBe('Session');
     expect(models.textContent).toMatch(/Models\s*1\s*Opus 4.7/);
     expect(models.tabIndex).toBe(0);
-    const panel = () => root.querySelector<HTMLElement>(`#${models.getAttribute('aria-controls')}`);
-    expect(panel()?.hidden).toBe(true);
+    expect(models.getAttribute('aria-haspopup')).toBe('dialog');
+    const panel = () => root.querySelector<HTMLElement>('[role="dialog"] ptah-session-model-breakdown');
+    expect(models.getAttribute('aria-controls')).toBeNull();
+    expect(panel()).toBeNull();
+    models.focus();
     models.click();
     fixture.detectChanges();
     expect(models.getAttribute('aria-expanded')).toBe('true');
-    expect(panel()?.hidden).toBe(false);
+    expect(root.querySelector(`#${models.getAttribute('aria-controls')}`)).toBeTruthy();
     expect(panel()?.textContent).toContain('SDK scope — orchestrator and SDK subagents, no CLI lanes');
     expect(panel()?.textContent).not.toMatch(/Lanes with tokens/);
     fixture.componentRef.setInput('stats', { ...stats, sessionId: 'second' });
     fixture.detectChanges();
-    expect(panel()?.hidden).toBe(true);
+    expect(panel()).toBeNull();
     fixture.componentRef.setInput('stats', stats);
     fixture.detectChanges();
-    expect(panel()?.hidden).toBe(false);
+    // Never reopens on its own after a session switch.
+    expect(panel()).toBeNull();
+    models.click();
+    fixture.detectChanges();
+    expect(panel()).toBeTruthy();
     models.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     fixture.detectChanges();
     expect(models.getAttribute('aria-expanded')).toBe('false');
-    expect(panel()?.hidden).toBe(true);
-    expect(document.activeElement).toBe(models);
+    expect(panel()).toBeNull();
+  });
+
+  it("leads the models summary with the session's current model, not its first one (F9)", () => {
+    const { models } = render({
+      snapshot: {
+        ...snapshot, model: 'fable', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'opus', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'opus', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+    });
+    expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1 earlier/);
+    expect(models.textContent).not.toContain('claude-fable-5-2 +1');
+    const summary = models.querySelector('[data-testid="session-models-summary"]') as HTMLElement;
+    expect(summary.getAttribute('title')).toBe('Current model: Opus 4.7. Earlier in this session: Fable 5.2.');
+  });
+
+  it('takes the model pill as current, over a cost-ranked live pick of an older model (round 6)', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'claude-fable-5-2', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 5 },
+          { model: 'opus-20261001', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 1 },
+        ],
+      },
+      liveModelStats: { model: 'claude-fable-5-2', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+      currentModel: 'opus',
+    });
+    // The dated row is the pill's model: named once, by its display name.
+    expect(models.textContent).toMatch(/Models\s*2\s*/);
+    const title = root.querySelector('[data-testid="session-models-summary"]')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/^Current model: (Opus 4\.7|opus(-20261001)?)\./);
+    expect(title).toContain('Earlier in this session: Fable 5.2.');
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current']);
+  });
+
+  it('picks the row the latest turn ran when a tier alias matches several rows (PR 1512 review)', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'claude-haiku-4-5', modelUsageList: [
+          { model: 'claude-haiku-3-5', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'claude-haiku-4-5', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'claude-haiku-5-0', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'claude-haiku-4-5', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+      currentModel: 'haiku',
+    });
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current', 'earlier in this session']);
+  });
+
+  it('labels each breakdown row current or earlier in this session', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'opus', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'opus', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'opus', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+    });
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current']);
   });
 
   it('keeps the model count and real model category rows when multiple models are present', () => {
@@ -262,8 +340,17 @@ describe(InspectorSessionStatsComponent.name, () => {
   it('omits the budget tile and leaves cache and context to Orchestrator detail', () => {
     const { root } = render({ compactionCount: 3, cache: { ttl: '5m', lastRequestAt: 0, expiresAt: 300_000 } });
     expect(root.querySelector('[data-testid="session-budget"]')).toBeNull();
-    expect(root.querySelector('ptah-disclosure')?.classList.contains('models-wide')).toBe(true);
+    expect(root.querySelector('[data-testid="session-models"]')?.classList.contains('models-wide')).toBe(true);
     expect(root.querySelector('ptah-inspector-cache-tile')).toBeNull();
     expect(root.textContent).not.toContain('compactions');
+  });
+});
+
+describe('sameModel', () => {
+  it('matches equal, dated and tier-alias ids, never a vendor word', () => {
+    expect(sameModel('claude-haiku-4-5', 'claude-haiku-4-5-20251001')).toBe(true);
+    expect(sameModel('haiku', 'claude-haiku-4-5')).toBe(true);
+    expect(sameModel('claude', 'claude-haiku-4-5')).toBe(false);
+    expect(sameModel('gpt-5.5', 'gpt-5.5-mini')).toBe(false);
   });
 });

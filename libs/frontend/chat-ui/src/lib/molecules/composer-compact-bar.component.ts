@@ -13,7 +13,9 @@ import {
 /**
  * One-row stand-in for the chat composer while the agent streams: a status
  * line, the model name and Stop, on the composer card's surface so the bar
- * reads as the same object, folded.
+ * reads as the same object, folded. The expand chevron leads the row and Stop
+ * is a labelled pill behind a rule at the far end, so the two never share a
+ * spot (a live test hit Stop when it sat where the chevron was).
  *
  * The status + model region is one button (`aria-expanded="false"`,
  * `aria-controls` = the full composer) that asks the owner to expand. Only the
@@ -43,6 +45,13 @@ import {
           (click)="expandRequested.emit()"
         >
           <span class="sr-only">Expand composer.</span>
+          <!-- The expand affordance sits at the start of the row, away from
+               Stop, so a click meant for expand can never land on Stop. -->
+          <lucide-angular
+            [img]="ChevronUpIcon"
+            class="w-4 h-4 flex-shrink-0 text-base-content-muted group-hover:text-base-content"
+            aria-hidden="true"
+          />
           <span
             class="ptah-compact-pulse h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary"
             aria-hidden="true"
@@ -57,18 +66,20 @@ import {
               >{{ modelLabel() }}</span
             >
           }
-          <lucide-angular
-            [img]="ChevronUpIcon"
-            class="ml-auto w-4 h-4 flex-shrink-0 text-base-content-muted group-hover:text-base-content"
-            aria-hidden="true"
-          />
         </button>
 
         @if (showStop()) {
+          <!-- A rule and a gap separate Stop from the expand button; the
+               labelled pill reads as its own action, not part of the row. -->
+          <span
+            class="ml-1 h-5 w-px flex-shrink-0 bg-surface-border"
+            aria-hidden="true"
+            data-testid="composer-compact-stop-divider"
+          ></span>
           <button
             type="button"
-            class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
-            title="Stop generating"
+            class="ml-1 inline-flex items-center gap-1 h-7 flex-shrink-0 rounded-full px-2.5 text-xs font-medium bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
+            title="Stop generating: ends the current turn"
             aria-label="Stop generating"
             data-testid="chat-stop-btn"
             (click)="stopRequested.emit()"
@@ -78,6 +89,7 @@ import {
               class="w-3.5 h-3.5"
               aria-hidden="true"
             />
+            <span aria-hidden="true">Stop</span>
           </button>
         }
       </div>

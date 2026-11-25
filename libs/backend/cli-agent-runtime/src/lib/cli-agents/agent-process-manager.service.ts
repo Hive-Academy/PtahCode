@@ -34,6 +34,7 @@ import {
   SpawnAgentResult,
   AgentOutput,
   CliType,
+  OUTCOME_EFFORT_SOURCES,
   normalizeWorkspaceRoot,
   isAgentBudgetStopReason,
   formatBudgetAskReadOnly,
@@ -44,6 +45,7 @@ import {
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
+  AgentOutputDelta,
   CliAdapterManifest,
   EffectiveLanePolicy,
   AgentRoleChannel,
@@ -95,6 +97,7 @@ import { TURN_INPUT_NOT_REPORTED } from './messaging/agent-delivery-planner';
 import {
   blockedLaneCommand,
   blockedLaneCommandReason,
+  isRawCommandDelivery,
 } from './cli-adapters/lane-command-filter';
 import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
@@ -288,7 +291,7 @@ interface SdkSpawnOptions {
   readonly roleChannel: AgentRoleChannel;
   readonly binaryPath?: string;
   readonly mcpPort?: number;
-  /** Detected CLI version, for the `Lane policy` log line only (never passed to the adapter, F2). */
+  /** Detected CLI version, used for diagnostics and transport capability probes. */
   readonly cliVersion?: string;
   /** The resume gate's outcome, for a spawn that asked to resume. */
   readonly resumeDecision?: AgentResumeOutcome;
@@ -1405,7 +1408,20 @@ export class AgentProcessManager {
       effort: request.effort,
       roleName: roleDefinition?.name,
       phaseKind,
+      nativeEfforts: this.cliDetection.nativeEfforts(cli, resolvedModel),
     });
+    const spawnSettings = {
+      model: resolvedModel,
+      modelSource: laneModel.source,
+      spawnEffort: {
+        requested: laneEffort.requested ?? null,
+        sent: laneEffort.effort ?? null,
+        source: OUTCOME_EFFORT_SOURCES[laneEffort.step - 1] ?? 'none',
+        provenance: laneEffort.provenance,
+        disposition: laneEffort.disposition,
+      },
+      ...(request.routeFacts ? { routeFacts: request.routeFacts } : {}),
+    };
     const laneBudgets =
       cli === 'codex' ? this.spawnEnvironment.resolveLaneBudgets() : undefined;
     const roleStamp: AgentRoleStamp | undefined = roleDefinition
@@ -1428,9 +1444,9 @@ export class AgentProcessManager {
         cli,
         agentId,
       ),
-      ...(previous ? { resumedFromAgentId: previous.agentId } : {}),
+      ...this.resumedFromField(request.resumedFromAgentId, cli, previous),
       displayName,
-      model: resolvedModel,
+      ...spawnSettings,
       ...(request.resumeSessionId
         ? { cliSessionId: request.resumeSessionId }
         : {}),
@@ -1499,8 +1515,19 @@ export class AgentProcessManager {
     let sdkHandle: SdkHandle;
     let issuedMcpToken: string | undefined;
     try {
-      if (ticket && this.agents.get(agentId)?.info.status !== 'starting') {
-        throw new Error(`Spawn stopped before launch: ${agentId}`);
+      if (ticket) {
+        const admitted = this.agents.get(agentId);
+        if (!admitted || admitted.info.status !== 'starting') {
+          throw new Error(`Spawn stopped before launch: ${agentId}`);
+        }
+        // An acknowledged spawn can write an outcome even if runSdk throws.
+        admitted.info = {
+          ...admitted.info,
+          ...spawnSettings,
+          cli,
+          taskKind: info.taskKind,
+          routingSource: info.routingSource,
+        };
       }
       const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
@@ -1555,6 +1582,7 @@ export class AgentProcessManager {
         model: resolvedModel,
         modelSource: laneModel.source,
         binaryPath,
+        cliVersion,
         mcpPort,
         mcpToken,
         onMcpConfigRestored:
@@ -1565,6 +1593,7 @@ export class AgentProcessManager {
         resumeSessionId: request.resumeSessionId,
         projectGuidance: request.projectGuidance,
         reasoningEffort: laneEffort.effort,
+        reasoningEffortResolved: true,
         phaseKind,
         autoApprove: this.spawnEnvironment.resolveAutoApprove(cli),
         permission: request.permission,
@@ -1729,6 +1758,8 @@ export class AgentProcessManager {
        */
       model?: string;
       reasoningEffort?: string;
+      spawnEffort?: AgentProcessInfo['spawnEffort'];
+      routeFacts?: AgentProcessInfo['routeFacts'];
     },
   ): Promise<SpawnAgentResult> {
     if (!meta.admission) await this.reserveSpawnSlot();
@@ -1777,6 +1808,8 @@ export class AgentProcessManager {
         ptahCliId: meta.ptahCliId,
         ...(meta.model ? { model: meta.model } : {}),
         ...(meta.reasoningEffort ? { reasoningEffort: meta.reasoningEffort } : {}),
+        ...(meta.spawnEffort ? { spawnEffort: meta.spawnEffort } : {}),
+        ...(meta.routeFacts ? { routeFacts: meta.routeFacts } : {}),
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
@@ -1880,6 +1913,12 @@ export class AgentProcessManager {
     }
     const reference = handleReference ?? requestedReference;
     info = { ...info, ...reference };
+    if (info.spawnEffort && sdkHandle.effortDelivery) {
+      info = {
+        ...info,
+        spawnEffort: { ...info.spawnEffort, ...sdkHandle.effortDelivery },
+      };
+    }
     const potential =
       info.potentialCapabilities ??
       this.cliDetection
@@ -3132,8 +3171,11 @@ export class AgentProcessManager {
       );
     }
 
-    const warning = tracked.heldBudgetWarning;
-    const routedMessage = takeHeldBudgetWarning(tracked, message);
+    // A raw provider `/command` (`noSteer`, set only for one) must reach the
+    // CLI as typed: text before it would turn it into plain prose (D6). A held
+    // warning waits for the next ordinary message instead.
+    const warning = input.noSteer ? undefined : tracked.heldBudgetWarning;
+    const routedMessage = input.noSteer ? message : takeHeldBudgetWarning(tracked, message);
     try {
       const outcome = await this.messageRouter.route(
         agentId,
@@ -3444,6 +3486,7 @@ export class AgentProcessManager {
 
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
+    tracked.rawCommandTurn = isRawCommandDelivery(message, rawBody);
 
     // The continuation is the reason the subprocess was kept alive — stand the
     // idle countdown down before doing anything that can await.
@@ -3624,6 +3667,7 @@ export class AgentProcessManager {
     this.clearInactivityTimers(tracked);
     const droppedIds = tracked.pendingMessages.map((entry) => entry.messageId);
     this.messageRouter.discardPending(agentId, tracked);
+    this.captureReportedSession(tracked);
     this.events.emit('agent:turn-settled', {
       ...tracked.info,
       turnSeq: tracked.info.turnSeq,
@@ -3796,6 +3840,23 @@ export class AgentProcessManager {
    * Guarded shape because `unref` exists on Node's `Timeout` but not on the
    * DOM's numeric handle, and not on every fake-timer implementation.
    */
+  /**
+   * The card link of a resumed lane (F2). The resumer names the record it
+   * resumes; that link holds even when the resume gate started a fresh
+   * handoff (no session id, so no `previous` by session). Only a tracked
+   * record of the same CLI is linked, so a caller cannot point a new lane at
+   * an unrelated card. Without one, the record that held the session links.
+   */
+  private resumedFromField(
+    requested: string | undefined,
+    cli: CliType,
+    previous: AgentProcessInfo | undefined,
+  ): Pick<AgentProcessInfo, 'resumedFromAgentId'> {
+    const named = requested ? this.agents.get(requested)?.info : undefined;
+    const source = named && named.cli === cli ? named : previous;
+    return source ? { resumedFromAgentId: source.agentId } : {};
+  }
+
   private unrefTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
     if (typeof (timer as { unref?: () => void }).unref === 'function') {
       (timer as { unref: () => void }).unref();
@@ -3819,7 +3880,23 @@ export class AgentProcessManager {
       };
     }
 
-    this.events.emit('agent:output', delta);
+    this.events.emit('agent:output', this.withSteerChange(tracked, delta));
+  }
+
+  /**
+   * Stamps `steerAvailable` on the delta when it changed since the last one
+   * (D1). A Claude lane's steer opens when a tool starts and closes when it
+   * ends; both produce output, so the throttled flush carries the change and
+   * the composer refetches its preview. Handles without steer never stamp.
+   */
+  private withSteerChange(tracked: TrackedAgent, delta: AgentOutputDelta): AgentOutputDelta {
+    const handle = tracked.sdkHandle;
+    if (typeof handle?.steer !== 'function') return delta;
+    const available =
+      tracked.info.status === 'running' && handle.supportsSteer?.() !== false;
+    if (available === tracked.publishedSteerAvailable) return delta;
+    tracked.publishedSteerAvailable = available;
+    return { ...delta, steerAvailable: available };
   }
 
   /**
@@ -4212,12 +4289,16 @@ export class AgentProcessManager {
         code === 0 && !structuredLimitTexts.length ? null : limit,
         observedAt,
       );
-    } else if (!tracked.info.completedAt) {
-      const completedAt = new Date().toISOString();
+      this.captureReportedSession(tracked);
+    } else {
+      // Already terminal (a stop or a timeout stamped it): the process has now
+      // really exited. Its exit code rides the `agent:exited` below, so the
+      // card can end "Stopping…" here and not at the stop request.
+      const completedAt = tracked.info.completedAt ?? new Date().toISOString();
       tracked.info = {
         ...tracked.info,
-        completedAt,
-        lastActivityAt: completedAt,
+        ...(code !== null ? { exitCode: code } : {}),
+        ...(tracked.info.completedAt ? {} : { completedAt, lastActivityAt: completedAt }),
       };
     }
     this.events.emit('agent:turn-settled', {
@@ -4510,6 +4591,19 @@ export class AgentProcessManager {
     );
   }
 
+  private captureReportedSession(tracked: TrackedAgent): void {
+    const reported = tracked.sdkHandle?.reportedSession?.();
+    if (!reported) return;
+    tracked.info.reportedSession = reported;
+    if (reported.model && reported.efforts.provenance === 'native') {
+      this.cliDetection.recordNativeSession(
+        tracked.info.ptahCliId ?? tracked.info.cli,
+        reported.model,
+        reported.efforts,
+      );
+    }
+  }
+
   /**
    * Push this lane's completion signal to the session that spawned it
    * (TASK_2026_515).
@@ -4577,6 +4671,15 @@ export class AgentProcessManager {
         : {}),
       ...(tracked.repeatedCalls ? { repeatedCalls: tracked.repeatedCalls } : {}),
     };
+    // A completed raw user `/command` turn (`/context`, `/compact`) is not
+    // work the parent assigned: no completion envelope, no outcome row. Its
+    // usage was recorded above. A failed or stopped one still reports.
+    if (tracked.rawCommandTurn && info.status === 'completed') {
+      this.logger.debug('[AgentProcessManager] Command turn settled without a parent completion', {
+        agentId: info.agentId,
+      });
+      return;
+    }
     const externalOwner = tracked.externalOwner;
     const deliver = (parentSessionId?: string) => {
       const completion = { ...info, parentSessionId };

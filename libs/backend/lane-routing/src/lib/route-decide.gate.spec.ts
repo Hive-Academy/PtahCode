@@ -1816,3 +1816,405 @@ describe('route decide gate: selection and target come from one snapshot (R1-3)'
     );
   });
 });
+
+describe('performance-backed gate routing', () => {
+  type CatalogDep = NonNullable<
+    ConstructorParameters<typeof RouteDecideService>[0]['catalog']
+  >;
+  type CatalogEntry = NonNullable<ReturnType<CatalogDep['get']>>;
+  type MatrixLoadInput = Parameters<RouteMatrix['load']>[0];
+
+  function catalogEntry(
+    laneId: string,
+    models: CatalogEntry['models'],
+  ): CatalogEntry {
+    return {
+      laneId,
+      models,
+      status: 'ok',
+      fetchedAt: 1_000,
+      lastOkAt: 1_000,
+    };
+  }
+
+  function mockCatalog(entries: ReadonlyMap<string, CatalogEntry> = new Map()) {
+    const get = jest.fn<
+      ReturnType<CatalogDep['get']>,
+      Parameters<CatalogDep['get']>
+    >((laneId) => entries.get(laneId));
+    const refresh = jest.fn<
+      ReturnType<CatalogDep['refresh']>,
+      Parameters<CatalogDep['refresh']>
+    >(async (row) => ({
+      laneId: row.ptahCliId ?? row.cli,
+      models: [],
+      status: 'empty',
+      fetchedAt: 1_000,
+      lastOkAt: null,
+    }));
+    const refreshIfDue = jest.fn<
+      ReturnType<CatalogDep['refreshIfDue']>,
+      Parameters<CatalogDep['refreshIfDue']>
+    >();
+    return { get, refresh, refreshIfDue };
+  }
+
+  function pairEvidenceMatrix(
+    onLoad: (input: MatrixLoadInput) => void,
+  ): RouteMatrix {
+    const base = neutralMatrix();
+    return {
+      load: async (input) => {
+        onLoad(input);
+        const snapshot = await base.load(input);
+        if (input.choice !== true) return snapshot;
+        const pairCell = {
+          key: {
+            family: 'openai',
+            model: 'gpt-5.4',
+            effort: 'high' as const,
+            taskKind: 'implement' as const,
+          },
+          funnel: {
+            spawned: 6,
+            completed: 6,
+            delivered: 6,
+            reviewed: 6,
+            approved: 6,
+            capacityDropped: 0,
+            unverified: 0,
+            noDeliverable: 0,
+            failed: 0,
+            rejected: 0,
+            unresolvedRevise: 0,
+            reviseRounds: 0,
+          },
+          aggregates: {
+            durationMs: { total: 6_000, count: 6 },
+            inputTokens: { total: 6_000, count: 6 },
+            outputTokens: { total: 1_200, count: 6 },
+            costUsd: { total: 0.6, count: 6 },
+          },
+          local: {
+            kind: 'value' as const,
+            score: 90,
+            source: 'local' as const,
+            sourceRef: 'outcomes',
+            asOf: '2026-11-25',
+            stale: false,
+            sampleCount: 6,
+          },
+          effortNotSent: 0,
+        };
+        return {
+          ...snapshot,
+          evidence: {
+            cell: (key) =>
+              key.family === 'openai' &&
+              key.model === 'gpt-5.4' &&
+              key.effort === 'high' &&
+              key.taskKind === 'implement'
+                ? pairCell
+                : undefined,
+            cells: () => [pairCell],
+            routedRuns: () => 0,
+            decisionModels: () => [],
+          },
+        };
+      },
+    };
+  }
+
+  function routeService(options: {
+    readonly performanceRouting?: { isEnabled(): boolean };
+    readonly catalog?: CatalogDep;
+    readonly newRouteId?: () => string;
+    readonly matrix?: RouteMatrix;
+    readonly listing?: LaneModelListing;
+    readonly selection?: unknown;
+    readonly replyConfidence?: number;
+  }): RouteDecideService {
+    return new RouteDecideService({
+      rotationSetting: { isEnabled: () => false },
+      ...(options.performanceRouting !== undefined
+        ? { performanceRouting: options.performanceRouting }
+        : {}),
+      ...(options.catalog !== undefined ? { catalog: options.catalog } : {}),
+      ...(options.newRouteId !== undefined
+        ? { newRouteId: options.newRouteId }
+        : {}),
+      config: configFor(
+        options.selection === undefined ? { kind: 'unset' } : options.selection,
+        async (url) => {
+          throw new Error(`unexpected probe ${url}`);
+        },
+      ),
+      matrix: options.matrix ?? neutralMatrix(),
+      rotation: memoryRotation(),
+      logger: testLogger(),
+      listing:
+        options.listing ??
+        listingOf(async () => [{ id: 'listed', provenance: 'reported' }]),
+      seams: {
+        now: () => 1_000,
+        residencyFetch: warmResidency,
+        ...(options.replyConfidence !== undefined
+          ? {
+              systemOne: () => ({
+                decide: async (payload) =>
+                  answersFor(payload, () => ({
+                    choice: 'o1',
+                    confidence: options.replyConfidence,
+                  })),
+              }),
+            }
+          : {}),
+      },
+    });
+  }
+
+  it('uses the injected newRouteId factory once before scoring to set routeId', async () => {
+    const newRouteId = jest.fn(() => 'route-fixed-1');
+    const matrixLoad = jest.fn<void, [MatrixLoadInput]>();
+    const service = routeService({
+      newRouteId,
+      matrix: pairEvidenceMatrix(matrixLoad),
+    });
+
+    const result = await service.decide(
+      {
+        ...implement('build'),
+        phases: [
+          { id: 'build', kind: 'implement' },
+          { id: 'check', kind: 'review', reviews: ['build'] },
+        ],
+      },
+      candidateSource([...THREE]),
+    );
+
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.routeId).toBe('route-fixed-1');
+    expect(newRouteId).toHaveBeenCalledTimes(1);
+    expect(newRouteId.mock.invocationCallOrder[0]).toBeLessThan(
+      matrixLoad.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('treats an absent performanceRouting setting as off without reading the catalog', async () => {
+    const catalog = mockCatalog(
+      new Map([
+        [
+          'codex',
+          catalogEntry('codex', [
+            {
+              id: 'gpt-5.4',
+              provenance: 'reported',
+              efforts: {
+                provenance: 'native',
+                supported: ['medium', 'high'],
+                default: 'medium',
+              },
+            },
+          ]),
+        ],
+      ]),
+    );
+    const list = jest.fn<
+      ReturnType<LaneModelListing['list']>,
+      Parameters<LaneModelListing['list']>
+    >(async () => [{ id: 'listed-model', provenance: 'reported' }]);
+    const matrixLoad = jest.fn<void, [MatrixLoadInput]>();
+    const service = routeService({
+      catalog,
+      listing: listingOf(list),
+      matrix: pairEvidenceMatrix(matrixLoad),
+    });
+
+    const result = await service.decide(
+      implement(),
+      candidateSource([{ ...lane('codex'), family: 'openai' }]),
+    );
+
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(catalog.get).not.toHaveBeenCalled();
+    expect(catalog.refresh).not.toHaveBeenCalled();
+    expect(catalog.refreshIfDue).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(matrixLoad).toHaveBeenCalledTimes(1);
+    expect(matrixLoad.mock.calls[0][0].choice).toBeUndefined();
+  });
+
+  it('reads the catalog and chooses model-effort pairs when performanceRouting is enabled', async () => {
+    const catalog = mockCatalog(
+      new Map([
+        [
+          'codex',
+          catalogEntry('codex', [
+            {
+              id: 'gpt-5.4',
+              provenance: 'reported',
+              efforts: {
+                provenance: 'native',
+                supported: ['medium', 'high'],
+                default: 'medium',
+              },
+            },
+          ]),
+        ],
+      ]),
+    );
+    const list = jest.fn<
+      ReturnType<LaneModelListing['list']>,
+      Parameters<LaneModelListing['list']>
+    >(async () => [{ id: 'listed-model', provenance: 'reported' }]);
+    const matrixLoad = jest.fn<void, [MatrixLoadInput]>();
+    const service = routeService({
+      performanceRouting: { isEnabled: () => true },
+      catalog,
+      listing: listingOf(list),
+      matrix: pairEvidenceMatrix(matrixLoad),
+    });
+
+    const result = await service.decide(
+      implement(),
+      candidateSource([{ ...lane('codex'), family: 'openai' }]),
+    );
+
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(catalog.get).toHaveBeenCalledWith('codex');
+    expect(catalog.refreshIfDue).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
+    expect(matrixLoad).toHaveBeenCalledWith(
+      expect.objectContaining({ choice: true }),
+    );
+    expect(result.roster[0]).toMatchObject({
+      status: 'chosen',
+      executor: { kind: 'lane', id: 'codex' },
+      model: 'gpt-5.4',
+      effort: 'high',
+      provenance: 'reported',
+      score: 90,
+      effortCheck: {
+        requested: 'high',
+        provenance: 'native',
+        supported: ['medium', 'high'],
+        inList: true,
+        expected: 'native-match',
+      },
+    });
+    expect(result.roster[0].candidates?.[0]?.parts).toMatchObject({
+      effort: 'high',
+      evidence: 'pair',
+    });
+  });
+
+  it('stores spawn facts for each chosen entry and exposes them via spawnFacts', async () => {
+    const service = routeService({
+      newRouteId: () => 'route-facts-1',
+      selection: OLLAMA,
+      replyConfidence: 0.2,
+    });
+
+    const result = await service.decide(
+      {
+        ...implement('build'),
+        phases: [
+          { id: 'build', kind: 'implement' },
+          { id: 'pinned', kind: 'implement' },
+          { id: 'missing', kind: 'implement' },
+        ],
+        pins: [
+          { phaseId: 'pinned', executor: 'codex' },
+          { phaseId: 'missing', executor: 'nonexistent' },
+        ],
+      },
+      candidateSource([...THREE]),
+    );
+
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.routeId).toBe('route-facts-1');
+
+    const build = result.roster.find((row) => row.phaseId === 'build');
+    const pinned = result.roster.find((row) => row.phaseId === 'pinned');
+    const missing = result.roster.find((row) => row.phaseId === 'missing');
+    if (build?.status !== 'chosen' || pinned?.status !== 'chosen') {
+      throw new Error('expected build and pinned phases to be chosen');
+    }
+    expect(missing?.status).toBe('unavailable');
+
+    expect(service.spawnFacts('route-facts-1', 'build')).toEqual({
+      routeId: 'route-facts-1',
+      phaseId: 'build',
+      laneId: build.executor.id,
+      model: build.model,
+      effort: build.effort,
+      source: 'ranking',
+      decisionModel: 'ollama:nimble',
+      proposalConfidence: 0.2,
+    });
+    expect(service.spawnFacts('route-facts-1', 'pinned')).toEqual({
+      routeId: 'route-facts-1',
+      phaseId: 'pinned',
+      laneId: 'codex',
+      model: pinned.model,
+      effort: pinned.effort,
+      source: 'pin',
+      decisionModel: null,
+      proposalConfidence: null,
+    });
+    expect(service.spawnFacts('route-facts-1', 'missing')).toBeNull();
+    expect(service.spawnFacts('route-unknown', 'build')).toBeNull();
+  });
+
+  it('reads performanceRouting.isEnabled once per decide call', async () => {
+    const isEnabled = jest
+      .fn<boolean, []>()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    const catalog = mockCatalog(
+      new Map(
+        THREE.map((row) => [
+          row.cli,
+          catalogEntry(row.cli, [
+            {
+              id: 'listed',
+              provenance: 'reported',
+              efforts: {
+                provenance: 'native',
+                supported: ['medium', 'high'],
+                default: 'medium',
+              },
+            },
+          ]),
+        ]),
+      ),
+    );
+    const list = jest.fn<
+      ReturnType<LaneModelListing['list']>,
+      Parameters<LaneModelListing['list']>
+    >(async () => [{ id: 'listed', provenance: 'reported' }]);
+    const service = routeService({
+      performanceRouting: { isEnabled },
+      catalog,
+      listing: listingOf(list),
+    });
+    const args = {
+      ...implement('build'),
+      phases: [
+        { id: 'build', kind: 'implement' as const },
+        { id: 'check', kind: 'review' as const, reviews: ['build'] },
+      ],
+    };
+
+    await service.decide(args, candidateSource([...THREE]));
+    expect(isEnabled).toHaveBeenCalledTimes(1);
+    const catalogReadsAfterOn = catalog.get.mock.calls.length;
+    expect(catalogReadsAfterOn).toBe(THREE.length);
+    expect(list).not.toHaveBeenCalled();
+
+    await service.decide(args, candidateSource([...THREE]));
+    expect(isEnabled).toHaveBeenCalledTimes(2);
+    expect(catalog.get).toHaveBeenCalledTimes(catalogReadsAfterOn);
+    expect(list).toHaveBeenCalledTimes(THREE.length);
+  });
+});

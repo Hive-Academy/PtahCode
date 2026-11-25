@@ -447,6 +447,34 @@ describe('unified CLI agent output', () => {
     ]);
   });
 
+  it('places a host notice among the event nodes by its send time and hides other info lines (round 7)', () => {
+    const turn = (id: string, at: number, text: string): FlatStreamEventUnion[] => [
+      { id: `${id}-start`, eventType: 'message_start', messageId: id, role: 'assistant', timestamp: at },
+      { id: `${id}-delta`, eventType: 'text_delta', messageId: id, blockIndex: 0, delta: text, timestamp: at + 1 },
+    ];
+    const fixture = TestBed.createComponent(CliAgentOutputComponent);
+    fixture.componentRef.setInput('agentId', 'notice-order-agent');
+    fixture.componentRef.setInput('segments', [
+      { type: 'info', content: 'Grok ran /context and returned no output.', hostNotice: true, sentAt: 200 },
+      { type: 'info', content: 'Turn usage: 10 in, 2 out' },
+    ]);
+    fixture.componentRef.setInput('streamEvents', [...turn('m1', 100, 'reply one'), ...turn('m2', 300, 'reply two')]);
+    expect(fixture.componentInstance.executionNodes().map((node) => node.content)).toEqual([
+      'reply one',
+      'Grok ran /context and returned no output.',
+      'reply two',
+    ]);
+  });
+
+  it('keeps the stdout fallback when the only node is a host notice (round 7)', () => {
+    const fixture = TestBed.createComponent(CliAgentOutputComponent);
+    fixture.componentRef.setInput('agentId', 'stdout-notice-agent');
+    fixture.componentRef.setInput('segments', [{ type: 'info', content: 'Ptah note', hostNotice: true, sentAt: 5 }]);
+    fixture.componentRef.setInput('stdoutSegments', [{ type: 'text', content: 'Raw provider output' }]);
+    const view = fixture.componentInstance as unknown as { showStdoutFallback(): boolean };
+    expect(view.showStdoutFallback()).toBe(true);
+  });
+
   it('keeps the stdout fallback when the only node is a user echo (PR 1509)', () => {
     const fixture = TestBed.createComponent(CliAgentOutputComponent);
     fixture.componentRef.setInput('agentId', 'stdout-echo-agent');
@@ -496,7 +524,7 @@ describe('unified CLI agent output', () => {
     );
     fixture.componentRef.setInput('isStreaming', false);
     fixture.detectChanges();
-    expect(fixture.componentInstance.executionNodes()[0].status).toBe('error');
+    expect(fixture.componentInstance.executionNodes()[0].status).toBe('interrupted');
   });
 
   it('shows reported zero values and total-only usage without invented token counts', () => {

@@ -24,6 +24,7 @@ import {
   isSystemCliLane,
   type RoutingCandidate,
 } from '../ranking/candidate.types';
+import type { ChoiceInput } from '../ranking/choice.types';
 import { insideClosenessBand } from '../ranking/closeness-band';
 import {
   constrainPhase,
@@ -40,6 +41,7 @@ import {
   scoreResolvedCell,
   type AdditiveCandidateScore,
   type CandidateScore,
+  type ListedModel,
 } from '../ranking/score';
 import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
@@ -212,13 +214,21 @@ export function planRoutePhases(
       userExclusions.size > 0 ? userExclusions : undefined,
     ));
     const taskKind = taskKindFor(phase.kind);
+    const evidence = gathered.matrix.evidence;
+    // The scorer checks the lane's limit, default-pair samples and routed-run slot.
+    const choice: ChoiceInput | undefined = evidence === undefined ? undefined : {
+      evidence,
+      policyEffort: policy.effort,
+      effortFixed: pin !== undefined || matchedRule?.set.effort !== undefined,
+      exploreTurn: taskKind !== 'review' && pin === undefined && matchedRule === undefined,
+    };
     const excludedIds = new Set(constraint.excluded.map((entry) => entry.candidate));
     const scorePool = inventory.filter((candidate) => !excludedIds.has(candidate.id));
 
     if (constraint.status === 'unavailable') {
       const scored = scorePool.map((candidate) => ({
         candidate,
-        scored: scoreCandidate(candidate, policy.tier, taskKind, undefined, gathered),
+        scored: scoreCandidate(candidate, policy.tier, taskKind, undefined, gathered, choice),
       }));
       const spreadResult = scored.length === 0 ? null : spread({
         phaseId: phase.id,
@@ -262,7 +272,7 @@ export function planRoutePhases(
       (phase.kind === 'visual-review' || phase.kind === 'design');
     const scored = scorePool.map((candidate) => ({
       candidate,
-      scored: scoreCandidate(candidate, policy.tier, taskKind, candidate.id === pinnedId ? pinModel : undefined, gathered),
+      scored: scoreCandidate(candidate, policy.tier, taskKind, candidate.id === pinnedId ? pinModel : undefined, gathered, choice),
     }));
     const spreadCandidates = scored.map((row) => ({
       candidate: row.candidate,
@@ -301,6 +311,7 @@ export function planRoutePhases(
       cursor,
       rotate,
       gathered,
+      choice,
     );
     const rankedByTotal = orderScored(scored, spreadResult.rankingByTotal);
     let ranked: ScoredCandidate[];
@@ -324,7 +335,7 @@ export function planRoutePhases(
       constraint,
       ranked,
       rankedByTotal,
-      alternates: constraint.pinAccepted ? [] : alternateOptions(ranked, taskKind, gathered),
+      alternates: constraint.pinAccepted ? [] : alternateOptions(ranked, taskKind, gathered, choice?.policyEffort),
       spread: spreadResult,
       inventory,
       ...(matchedRule !== undefined ? { matchedRule, ruleExclusionChangedChoice } : {}),
@@ -451,6 +462,7 @@ function alternateOptions(
   ranked: readonly ScoredCandidate[],
   taskKind: OutcomeTaskKind,
   gathered: GatheredCall,
+  effort: CandidateScore['effort'],
 ): AlternateOption[] {
   const options: AlternateOption[] = [];
   const top = ranked.length === 0 ? 0 : Math.max(...ranked.map((row) => effectiveTotal(row.scored)));
@@ -470,9 +482,10 @@ function alternateOptions(
       const recomputed = scoreResolvedCell(candidate, resolved, row.preferenceRank);
       if (!insideClosenessBand(top, recomputed.total)) continue;
       const scored: CandidateScore = {
-        ...row.scored,
+        candidate,
         model: listed.id,
         provenance: 'reported',
+        ...(effort === undefined ? {} : { effort }),
         score: recomputed.score,
         total: recomputed.total,
         parts: recomputed.parts,
@@ -555,6 +568,7 @@ function computeRuleExclusionChangedChoice(
   incomingCursor: GatheredCall['rotation'],
   rotate: boolean,
   gathered: GatheredCall,
+  choice?: ChoiceInput,
 ): boolean {
   if (matchedRule === undefined || constraint.pinAccepted) return false;
   const ruleTag: UserRuleExclusion = `user-rule:${matchedRule.id}`;
@@ -565,7 +579,7 @@ function computeRuleExclusionChangedChoice(
   const restored = inventory
     .filter((candidate) => excludedByRule.has(candidate.id))
     .map((candidate) => {
-      const scored = scoreCandidate(candidate, tier, taskKind, undefined, gathered);
+      const scored = scoreCandidate(candidate, tier, taskKind, undefined, gathered, choice);
       return { candidate, score: scored.score, total: scored.total, parts: scored.parts };
     });
   if (restored.length === 0) return false;
@@ -612,6 +626,7 @@ function scoreCandidate(
   taskKind: OutcomeTaskKind,
   pinModel: string | undefined,
   gathered: GatheredCall,
+  choice?: ChoiceInput,
 ): AdditiveCandidateScore {
   const facts = candidate.kind === 'lane' ? gathered.models.get(candidate.id) : undefined;
   const configuredModel = candidate.kind !== 'lane'
@@ -622,31 +637,45 @@ function scoreCandidate(
       candidate,
       ...(facts?.models !== undefined ? { models: facts.models } : {}),
       ...(configuredModel !== undefined ? { configuredModel } : {}),
+      ...(candidate.kind === 'lane' && choice !== undefined ? { choice } : {}),
     },
     taskKind,
     gathered.matrix,
   );
   return pinModel === undefined
     ? scored
-    : applyPinModel(scored, candidate, pinModel, facts?.models ?? [], taskKind, gathered);
+    : applyPinModel(scored, candidate, pinModel, facts?.models ?? [], taskKind, gathered, choice);
 }
 
 function applyPinModel(
   scored: AdditiveCandidateScore,
   candidate: RoutingCandidate,
   pinModel: string,
-  models: readonly {
-    readonly id: string;
-    readonly provenance: CandidateScore['provenance'];
-  }[],
+  models: readonly ListedModel[],
   taskKind: OutcomeTaskKind,
   gathered: GatheredCall,
+  choice?: ChoiceInput,
 ): AdditiveCandidateScore {
   const listed = models.find((model) => model.id === pinModel);
   const laneDefault = pinModel === LANE_DEFAULT_MODEL;
   const tierPin =
     candidate.kind === 'subagent' && ModelTierSchema.safeParse(pinModel).success;
   if (listed === undefined && !laneDefault && !tierPin) return scored;
+  if (candidate.kind === 'lane' && choice !== undefined) {
+    // Score the pinned pair without offering other models or efforts.
+    if (laneDefault) return score({ candidate, choice }, taskKind, gathered.matrix);
+    if (listed !== undefined && pinModel !== '' && pinModel !== AUTOMATIC_MATRIX_MODEL) {
+      return {
+        ...score({
+          candidate,
+          models: [listed],
+          configuredModel: { id: pinModel, provenance: 'configured' },
+          choice,
+        }, taskKind, gathered.matrix),
+        provenance: listed.provenance,
+      };
+    }
+  }
   const modelId = laneDefault ? LANE_DEFAULT_MODEL : pinModel;
   const resolved = gathered.matrix.resolve(candidate.family, modelId, taskKind);
   const recomputed = scoreResolvedCell(candidate, resolved);
@@ -726,6 +755,7 @@ function toOption(row: ScoredCandidate): DecisionOption {
     laneId: row.candidate.id,
     family: row.candidate.family,
     model: row.scored.model,
+    ...(row.scored.effort === undefined ? {} : { effort: row.scored.effort }),
     limitState: limitOf(row.candidate),
     score: effectiveTotal(row.scored),
   };

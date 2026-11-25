@@ -8,7 +8,7 @@
  *   - buildTreeFromSegments: text merging, thinking merging, tool-call +
  *     tool-result pairing, error/info segments, orphan results
  *   - buildTreeFromSegments normalizes `path` → `file_path` for read/write tools
- *   - finalizeOrphanedTools marks streaming tools as error and recurses
+ *   - finalizeOrphanedTools marks unfinished tools interrupted and recurses
  *   - clearAgentCache / clearCache drop memoization entries
  *   - Memoization: same-length input returns the same reference
  */
@@ -633,6 +633,19 @@ describe('AgentMonitorTreeBuilderService', () => {
     });
   });
 
+  describe('host notices (round 7)', () => {
+    it('builds a timed notice node for a hostNotice info segment and keeps other info as before', () => {
+      const nodes = service.buildTreeFromSegments('notice-agent', [
+        { type: 'info', content: 'Grok ran /context and returned no output.', hostNotice: true, sentAt: 42 },
+        { type: 'info', content: 'Plain info' },
+      ]);
+      expect(nodes[0]).toMatchObject({
+        id: 'seg-notice-0', type: 'text', content: 'Grok ran /context and returned no output.', startTime: 42,
+      });
+      expect(nodes[1].id).toBe('seg-info-1');
+    });
+  });
+
   describe('finalizeOrphanedTools', () => {
     it('returns the same reference when no streaming tools exist', () => {
       const nodes: ExecutionNode[] = [
@@ -647,20 +660,25 @@ describe('AgentMonitorTreeBuilderService', () => {
       expect(result).toBe(nodes);
     });
 
-    it('marks streaming tools as error with a descriptive message', () => {
+    it('marks an unfinished tool of a lane that no longer runs as interrupted, not running or failed', () => {
       const nodes: ExecutionNode[] = [
-        createExecutionNode({
-          id: 'n1',
-          type: 'tool',
-          status: 'streaming',
-          toolName: 'Bash',
-          content: null,
-        }),
+        createExecutionNode({ id: 'n1', type: 'tool', status: 'streaming', toolName: 'PowerShell', content: null, startTime: 1_000 }),
+        createExecutionNode({ id: 'n2', type: 'tool', status: 'pending', toolName: 'Read', content: null }),
       ];
-      const result = service.finalizeOrphanedTools(nodes);
+      const result = service.finalizeOrphanedTools(nodes, 31_000);
       expect(result).not.toBe(nodes);
-      expect(result[0].status).toBe('error');
-      expect(result[0].error).toContain('interrupted');
+      expect(result.map((node) => node.status)).toEqual(['interrupted', 'interrupted']);
+      // The final elapsed time stops at the lane's end, so nothing keeps counting.
+      expect(result[0].duration).toBe(30_000);
+      expect(result[1].duration).toBeUndefined();
+    });
+
+    it('keeps a tool duration of its own and ends streaming text so the turn is not live', () => {
+      const tool = createExecutionNode({ id: 't', type: 'tool', status: 'streaming', toolName: 'Bash', content: null, startTime: 0, duration: 5 });
+      const message = createExecutionNode({ id: 'm', type: 'message', status: 'streaming', content: null, children: [tool] });
+      const [finalMessage] = service.finalizeOrphanedTools([message], 9_000);
+      expect(finalMessage.status).toBe('complete');
+      expect(finalMessage.children[0]).toMatchObject({ status: 'interrupted', duration: 5 });
     });
 
     it('recurses into nested children', () => {
@@ -680,7 +698,7 @@ describe('AgentMonitorTreeBuilderService', () => {
       });
       const result = service.finalizeOrphanedTools([parent]);
       const finalizedChild = result[0].children[0];
-      expect(finalizedChild.status).toBe('error');
+      expect(finalizedChild.status).toBe('interrupted');
     });
   });
 

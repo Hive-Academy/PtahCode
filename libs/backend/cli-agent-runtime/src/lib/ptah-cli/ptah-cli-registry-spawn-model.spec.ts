@@ -444,16 +444,13 @@ describe('PtahCliRegistry.spawnAgent — resume prompt passes the caller task (T
 });
 
 describe('PtahCliRegistry.spawnAgent — steer manifest wiring (M6 d)', () => {
-  it("hands the runner the manifest's steer, which stays unsupported until the flip", async () => {
+  it("hands the runner the manifest's steer (supported since live L4)", async () => {
     const run = jest.spyOn(ClaudeSdkLaneRunner.prototype, 'run');
     try {
       const harness = buildHarness(BASE_CONFIG);
       await harness.registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'yolo' });
       expect(run).toHaveBeenCalledTimes(1);
-      expect(run.mock.calls[0][0].manifestSteer).toEqual({
-        state: 'unsupported',
-        reason: 'The SDK prompt mailbox starts a new turn.',
-      });
+      expect(run.mock.calls[0][0].manifestSteer).toEqual({ state: 'supported' });
     } finally {
       run.mockRestore();
     }

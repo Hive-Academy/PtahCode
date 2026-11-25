@@ -125,6 +125,9 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
       effort: 'low',
       step: 2,
       ignored: [],
+      requested: 'low',
+      provenance: 'ptah-fallback',
+      disposition: 'fallback-allowlist',
     });
   });
 
@@ -138,6 +141,9 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
       effort: 'high',
       step: 3,
       ignored: [],
+      requested: 'high',
+      provenance: 'ptah-fallback',
+      disposition: 'fallback-allowlist',
     });
   });
 
@@ -176,11 +182,21 @@ describe('AgentSpawnEnvironment — agentOrchestration settings routing (D8)', (
       effort: 'high',
       step: 3,
       ignored: [],
+      requested: 'high',
+      provenance: 'ptah-fallback',
+      disposition: 'fallback-allowlist',
     });
     expect(withoutChat.resolveReasoningEffort('pi').effort).toBeUndefined();
     expect(
       withoutChat.resolveReasoningEffort('pi', { roleName: 'senior-tester' }),
-    ).toEqual({ effort: 'medium', step: 4, ignored: [] });
+    ).toEqual({
+      effort: 'medium',
+      step: 4,
+      ignored: [],
+      requested: 'medium',
+      provenance: 'ptah-fallback',
+      disposition: 'fallback-allowlist',
+    });
   });
 
   it('reads the Codex lane budgets from the file store', () => {

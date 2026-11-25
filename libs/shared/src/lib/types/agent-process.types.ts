@@ -14,9 +14,16 @@ import type {
   ProviderAccountSelection,
 } from './provider-account.types';
 import type {
+  OutcomeEffortSource,
+  OutcomeModelSource,
   OutcomeRoutingSource,
   OutcomeTaskKind,
 } from './lane-outcome.types';
+import type {
+  EffortDisposition,
+  LaneReportedSession,
+  ValueProvenance,
+} from './lane-native-values.types';
 import type { AgentMessagingCapability } from './agent-messaging.types';
 
 /**
@@ -332,6 +339,17 @@ export interface AgentProcessInfo {
   reasoningEffort?: string;
   /** Model the provider reported it actually used on the latest turn. */
   observedModel?: string;
+  readonly modelSource?: OutcomeModelSource;
+  readonly spawnEffort?: {
+    readonly requested: string | null;
+    readonly sent: string | null;
+    readonly source: OutcomeEffortSource;
+    readonly provenance: ValueProvenance;
+    readonly disposition: EffortDisposition;
+  };
+  /** Latest native session values (2.12.3). Absent: the handle reports none. */
+  reportedSession?: LaneReportedSession;
+  readonly routeFacts?: RouteSpawnFacts;
   /** Display name of the Ptah CLI agent (only set when cli === 'ptah-cli') */
   readonly ptahCliName?: string;
   /** Ptah CLI agent registry ID (only set when cli === 'ptah-cli'). Needed for resume. */
@@ -482,7 +500,22 @@ export interface LaneRequestContext {
   readonly source: LaneRequestContextSource;
 }
 
+export interface RouteSpawnFacts {
+  readonly routeId: string;
+  readonly phaseId: string;
+  readonly laneId: string;
+  readonly model: string;
+  readonly effort: string;
+  readonly source: Exclude<OutcomeRoutingSource, 'not-routed'>;
+  readonly decisionModel: string | null;
+  readonly proposalConfidence: number | null;
+}
+
 export interface SpawnAgentRequest {
+  /** Route the coordinator spawns from. Caller-set. Unknown ids are ignored. */
+  readonly route?: { readonly routeId: string; readonly phaseId: string };
+  /** Resolved by the MCP entry from `route`. NOT set by callers. */
+  readonly routeFacts?: RouteSpawnFacts;
   /** Validated phase handoff for lane delivery. */
   readonly phase?: import('./phase-contract.types').PhaseDispatchV1;
   /** Host-resolved skills, including standalone skills without a phase. */
@@ -758,6 +791,19 @@ export interface CliOutputSegment {
   readonly messageId?: string;
   /** Host send time in epoch ms (for `user` segments), to order the echo among stream events. */
   readonly sentAt?: number;
+  /**
+   * Images the user sent with the message (for `user` segments), for the
+   * echo thumbnail. Live deltas only: the persisted output drops them, so a
+   * reloaded transcript shows the echo text without its images.
+   */
+  readonly images?: readonly import('./rpc/rpc-chat.types').InlineImageAttachment[];
+  /**
+   * A host notice for the lane transcript (on an `info` segment), not
+   * provider output: e.g. "Grok ran /context and returned no output." Stream
+   * lanes build their transcript from stream events, which carry no notice,
+   * so the transcript shows these segments as a status row at `sentAt`.
+   */
+  readonly hostNotice?: true;
 }
 
 export interface AgentOutputDelta {
@@ -769,6 +815,13 @@ export interface AgentOutputDelta {
   readonly segments?: readonly CliOutputSegment[];
   /** Rich streaming events from Ptah CLI adapter (optional — only ptah-cli uses this) */
   readonly streamEvents?: readonly FlatStreamEventUnion[];
+  /**
+   * Whether a steer can join the running turn now. Present only on the delta
+   * where it changed for a lane whose handle exposes steer (a Claude lane
+   * offers steer only while one of its tools runs). The composer refetches
+   * `agent:previewMessage` when it sees this field.
+   */
+  readonly steerAvailable?: boolean;
 }
 
 /**
@@ -898,10 +951,13 @@ export interface LaneDeliverableCheck {
  * - `unverified` — terminal status `completed` (or a host stop) and nothing
  *   was declared, so there is nothing to check. Read the output before you
  *   trust it.
- * - `failed` — any other ending: a crash, a timeout or a caller stop.
+ * - `stopped` — the caller (the user's Stop or `ptah_agent_stop`) stopped the
+ *   lane: status `stopped` with no host `stopReason`. Not a failure; the work
+ *   is unfinished and can be resumed.
+ * - `failed` — any other ending: a crash or a timeout.
  */
 export type LaneCompletionVerdict =
-  'delivered' | 'no-deliverable' | 'unverified' | 'failed';
+  'delivered' | 'no-deliverable' | 'unverified' | 'failed' | 'stopped';
 
 /** The payload pushed to the session that spawned the lane. */
 export interface LaneCompletionSignal {

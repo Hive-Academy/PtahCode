@@ -80,7 +80,7 @@ export function effectiveCanvasLaneKind(
  * region and the composer sits below it, as the main chat view does.
  */
 const LANE_CLI_PANEL_CLASS =
-  'relative flex h-full min-h-0 min-w-0 flex-col pt-2 [container-type:inline-size]';
+  'relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pt-2 [container-type:inline-size]';
 
 @Component({
   selector: 'ptah-canvas-lane-view',
@@ -101,9 +101,10 @@ const LANE_CLI_PANEL_CLASS =
   providers: [LanePermissionView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    class: 'block h-full min-h-0',
-    '[class.overflow-hidden]': "selectedKind() === 'orchestrator'",
-    '[class.overflow-auto]': "selectedKind() !== 'orchestrator'",
+    // One scroll container per lane: the transcript region scrolls inside the
+    // panel height and the composer stays pinned below it. The host never
+    // scrolls, so no second (outer) scrollbar can appear.
+    class: 'block h-full min-h-0 overflow-hidden',
     '(keydown.escape)': 'onEscape($event)',
   },
   styles: [
@@ -131,9 +132,7 @@ const LANE_CLI_PANEL_CLASS =
       role="tabpanel"
       tabindex="-1"
       [attr.aria-labelledby]="panelId() + '-tab-' + laneKey()"
-      class="h-full min-h-0"
-      [class.flex]="selectedKind() === 'orchestrator'"
-      [class.flex-col]="selectedKind() === 'orchestrator'"
+      class="flex h-full min-h-0 flex-col"
     >
       <div
         [class.hidden]="selectedKind() !== 'orchestrator'"
@@ -149,13 +148,19 @@ const LANE_CLI_PANEL_CLASS =
       @for (block of laneBlocks(); track block.key) {
         <!-- Hidden for the orchestrator: an empty full-height block would take the transcript's height. -->
         <div
-          class="rail-lane-enter h-full min-h-0 flex-col"
+          class="rail-lane-enter min-h-0 flex-1 flex-col"
           [class.flex]="selectedKind() !== 'orchestrator'"
           [class.hidden]="selectedKind() === 'orchestrator'"
         >
-          @for (request of pendingQuestions(); track request.id) {
-            <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
-              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
+          @if (pendingQuestions().length) {
+            <!-- Questions scroll in their own capped area, so a tall one keeps its
+                 answer controls reachable; the transcript stays the main scroller. -->
+            <div class="max-h-[45%] shrink-0 overflow-y-auto" data-testid="lane-pending-questions">
+              @for (request of pendingQuestions(); track request.id) {
+                <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
+                  <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
+                </div>
+              }
             </div>
           }
           @switch (selectedKind()) {
@@ -256,6 +261,7 @@ const LANE_CLI_PANEL_CLASS =
                         [resumePending]="laneCard.isResuming()"
                         (stopRequested)="laneCard.stopAgent($event)"
                         (resumeRequested)="laneCard.resumeAgent($event)"
+                        (messageAccepted)="followAfterSend(agent.agentId)"
                       />
                     </div>
                   </ptah-chat-session-layout>
@@ -269,7 +275,9 @@ const LANE_CLI_PANEL_CLASS =
               @if (selectedSubagent(); as sub) {
                 <ng-container [ngTemplateOutlet]="subagentLane" />
               } @else if (selectedBackground(); as agent) {
+                <!-- Not a panel: the strip scrolls in the lane's own height. -->
                 <ptah-background-agent-strip
+                  class="block min-h-0 overflow-y-auto"
                   [entries]="[
                     {
                       id: agent.toolCallId,
@@ -446,6 +454,11 @@ export class CanvasLaneViewComponent {
       if (agent && !agent.expanded)
         this.monitor.toggleAgentExpanded(agent.agentId);
     });
+  }
+
+  /** A message sent from this lane view may resume the lane under a new id: follow it once (F2). */
+  followAfterSend(agentId: string): void {
+    this.detail.followAfterSend(this.tabId(), agentId);
   }
 
   back(): void {

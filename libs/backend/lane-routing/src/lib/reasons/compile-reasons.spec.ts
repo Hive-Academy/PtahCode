@@ -98,6 +98,8 @@ function chosen(
     executor: overrides.executor ?? lane('grok'),
     model: overrides.model ?? 'grok-4',
     score,
+    ...(overrides.parts !== undefined ? { parts: overrides.parts } : {}),
+    ...(overrides.effortCheck !== undefined ? { effortCheck: overrides.effortCheck } : {}),
     source: overrides.source ?? 'ranking',
     cell,
     limitState: overrides.limitState ?? 'confirmed-room',
@@ -318,6 +320,58 @@ describe('requirement 13.2 chosen facts', () => {
     expect(reason).toContain('provenance seed, asOf 2026-02-19, stale false');
     expect(reason).not.toContain('stale true');
     expect(reason).not.toContain(SEED_URL);
+  });
+
+  const scoreParts = { prior: 80, learned: 0, preference: 0, limit: 0 };
+
+  it('states the chosen model and effort with evidence and samples', () => {
+    const reason = compileChosenReason(chosen({
+      parts: { ...scoreParts, effort: 'high', evidence: 'pair', sampleCount: 7 },
+    }));
+    expect(reason).toContain('; model grok-4 effort high (pair, 7 samples); score ');
+    expect(reason).not.toContain('; explore ');
+  });
+
+  it('reports the explored pair and the configured exploration cadence', () => {
+    const reason = compileChosenReason(chosen({
+      parts: { ...scoreParts, effort: 'low', evidence: 'prior', sampleCount: 0, explore: true },
+    }));
+    expect(reason).toContain('; model grok-4 effort low (prior, 0 samples);');
+    expect(reason).toContain('; explore grok-4/low: 0/3 samples, 1 of every 5 routed runs');
+  });
+
+  it.each([undefined, { ...scoreParts, effort: 'high', evidence: 'pair' } as const])(
+    'discloses unsupported native effort with score parts %p',
+    (parts) => {
+      const reason = compileChosenReason(chosen({
+        ...(parts === undefined ? {} : { parts }),
+        effortCheck: {
+          requested: 'high',
+          provenance: 'native',
+          supported: ['low'],
+          inList: false,
+          expected: 'not-in-native-list',
+        },
+      }));
+      expect(reason).toContain(
+        '; effort high not in grok native list; spawn sends no effort at this step',
+      );
+    },
+  );
+
+  it.each([true, null])('omits the native-list clause when inList is %p', (inList) => {
+    const baseline = chosen();
+    expect(compileChosenReason({
+      ...baseline,
+      parts: { ...scoreParts, sampleCount: 7 },
+      effortCheck: {
+        requested: 'high',
+        provenance: inList ? 'native' : 'unknown',
+        supported: inList ? ['high'] : null,
+        inList,
+        expected: inList ? 'native-match' : 'fallback-refused',
+      },
+    })).toBe(compileChosenReason(baseline));
   });
 
   it('states user provenance and omits the dataset URL and asOf', () => {

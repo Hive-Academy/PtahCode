@@ -32,6 +32,8 @@ import {
 } from '@ptah-extension/ui';
 import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
+import { PerformanceRoutingSettingComponent } from './performance-routing-setting.component';
+import { RoutingEvidenceComponent } from './routing-evidence.component';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
 
@@ -52,6 +54,8 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
     PtahFormSectionComponent,
     HostRoutingSettingComponent,
     LaneRotationSettingComponent,
+    PerformanceRoutingSettingComponent,
+    RoutingEvidenceComponent,
   ],
   template: `
     <div
@@ -90,6 +94,8 @@ import { RoutingDisplayNamesStore } from './routing-display-names.store';
       (modelConfiguredChange)="routingModelConfigured.set($event)"
     />
     <ptah-lane-rotation-setting />
+    <ptah-performance-routing-setting />
+    <ptah-routing-evidence />
     <ptah-form-section
       wide
       level="2"

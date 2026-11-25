@@ -146,6 +146,9 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   // Lane rotation inside the closeness band. Default true keeps today's
   // cyclic pick. A flip joins ROUTING_KEYS so a cached routing notice refreshes.
   'agentOrchestration.laneRotation',
+  // Performance-backed routing. `false` runs today's routing path. A flip joins
+  // ROUTING_KEYS so a cached routing notice refreshes.
+  'agentOrchestration.performanceRouting',
   // Ordered user routing rules (default []). Kept whole in
   // FILE_BASED_OBJECT_SETTINGS_KEYS so malformed object-shaped values reach the
   // router intact for diagnosis. Joins ROUTING_KEYS.
@@ -397,6 +400,8 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   'agentOrchestration.hostRouting': true,
   // Missing or non-boolean reads stay "on" in the routing reader (R1).
   'agentOrchestration.laneRotation': true,
+  // Missing or non-boolean reads stay "on" in the performance routing reader.
+  'agentOrchestration.performanceRouting': true,
   'agentOrchestration.routingRules': [],
   // Compaction budgets: see ADVANCED_SETTINGS_DEFAULTS.
   // Preserve old reader defaults until every host has run agentBudgetV1.

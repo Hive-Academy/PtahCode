@@ -101,12 +101,13 @@ function signalOf(delivery: LaneCompletionDelivery) {
 
 describe('lane terminal outcomes integration', () => {
   it.each([
-    ['exit', {}, 'delivered', null],
-    ['failed exit', { status: 'failed', exitCode: 1 }, 'failed', 'crash'],
-    ['quota', { status: 'failed', failureKind: 'quota', exitCode: 1 }, 'failed', 'usage-limit'],
-    ['timeout', { status: 'timeout', exitCode: undefined }, 'failed', 'timeout'],
-    ['caller stop', { status: 'stopped', exitCode: undefined }, 'failed', null],
-  ] as const)('%s persists the terminal verdict', async (_name, changes, verdict, failureClass) => {
+    ['exit', {}, 'delivered', 'delivered', null],
+    ['failed exit', { status: 'failed', exitCode: 1 }, 'failed', 'failed', 'crash'],
+    ['quota', { status: 'failed', failureKind: 'quota', exitCode: 1 }, 'failed', 'failed', 'usage-limit'],
+    ['timeout', { status: 'timeout', exitCode: undefined }, 'failed', 'failed', 'timeout'],
+    // The parent hears `stopped`; the row stays `failed`, classed `user-stop` so no rate counts it.
+    ['caller stop', { status: 'stopped', exitCode: undefined }, 'stopped', 'failed', 'user-stop'],
+  ] as const)('%s persists the terminal verdict', async (_name, changes, verdict, rowVerdict, failureClass) => {
     const run = await fixture();
     try {
       await run.write('fresh result');
@@ -114,7 +115,7 @@ describe('lane terminal outcomes integration', () => {
       await run.flush();
       expect(signal.verdict).toBe(verdict);
       expect(await run.store.get(`${AGENT}:${ENDED}`)).toMatchObject({
-        verdict, failureClass,
+        verdict: rowVerdict, failureClass,
       });
       if (verdict === 'failed') expect(signal.verdict).not.toBe('delivered');
     } finally { await run.close(); }

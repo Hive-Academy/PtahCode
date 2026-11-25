@@ -78,6 +78,7 @@ import {
 interface ProcessManagerMock {
   spawn: jest.Mock;
   beginSpawn: jest.Mock;
+  executeSpawn: jest.Mock;
   spawnFromSdkHandle: jest.Mock;
   prepareSdkHandleSpawn: jest.Mock;
   reserveAgentId: jest.Mock;
@@ -105,6 +106,7 @@ function createProcessManager(): ProcessManagerMock {
   return {
     spawn: jest.fn(),
     beginSpawn: jest.fn(),
+    executeSpawn: jest.fn(),
     spawnFromSdkHandle: jest.fn(),
     // Pass-through by default: no resume id, nothing to gate or refuse.
     prepareSdkHandleSpawn: jest.fn(
@@ -817,6 +819,98 @@ function mockPtahCliSpawn(mocks: { registry: RegistryMock | undefined }): void {
     setAgentId: jest.fn(),
   });
 }
+
+describe('buildAgentNamespace — spawn (route facts)', () => {
+  const route = { routeId: 'route-1', phaseId: 'B28' };
+  const facts = {
+    ...route,
+    laneId: 'codex',
+    model: 'gpt-5',
+    effort: 'high',
+    source: 'ranking',
+    decisionModel: 'decision-model',
+    proposalConfidence: 0.85,
+  } satisfies NonNullable<SpawnAgentRequest['routeFacts']>;
+
+  it('reads route facts at execution and stamps them on a matching system lane', async () => {
+    const { deps, mocks } = makeDeps();
+    const spawnFacts = jest.fn().mockReturnValue(facts);
+    deps.getRouteRecordReader = () => ({ spawnFacts });
+    mocks.processManager.executeSpawn.mockResolvedValue({ agentId: 'a' });
+    const admission = { agentId: 'a' };
+    mocks.processManager.beginSpawn.mockReturnValue(admission);
+    const namespace = buildAgentNamespace(deps);
+    const request = { task: 't', cli: 'codex', route } satisfies SpawnAgentRequest;
+
+    const ticket = namespace.beginSpawn(request);
+    expect(spawnFacts).not.toHaveBeenCalled();
+    await namespace.executeSpawn(ticket, request);
+
+    expect(spawnFacts).toHaveBeenCalledWith(route.routeId, route.phaseId);
+    expect(mocks.processManager.executeSpawn).toHaveBeenCalledWith(
+      admission,
+      expect.objectContaining({ routeFacts: facts }),
+    );
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['unknown route or phase', null],
+    ['other lane', { ...facts, laneId: 'claude' }],
+  ])('spawns without facts for %s and logs only IDs', async (_name, lookup) => {
+    const { deps, mocks } = makeDeps();
+    deps.getRouteRecordReader = () => ({ spawnFacts: () => lookup });
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a' });
+
+    await buildAgentNamespace(deps).spawn({ task: 't', cli: 'codex', route });
+
+    expect(mocks.processManager.spawn.mock.calls[0][0]).not.toHaveProperty('routeFacts');
+    expect(mocks.warn).toHaveBeenCalledTimes(1);
+    expect(mocks.warn).toHaveBeenCalledWith(
+      expect.stringContaining('No route facts'),
+      { ...route, laneId: 'codex' },
+    );
+  });
+
+  it('drops caller-supplied facts in both admission and spawn', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a' });
+    const namespace = buildAgentNamespace(deps);
+    const request = { task: 't', cli: 'codex', routeFacts: facts } satisfies SpawnAgentRequest;
+
+    namespace.beginSpawn(request);
+    await namespace.spawn(request);
+
+    expect(mocks.processManager.beginSpawn.mock.calls[0][0]).not.toHaveProperty('routeFacts');
+    expect(mocks.processManager.spawn.mock.calls[0][0]).not.toHaveProperty('routeFacts');
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it('uses the configured Ptah CLI ID to match route facts', async () => {
+    const { deps, mocks } = makeDeps();
+    const ptahCliFacts = { ...facts, laneId: 'agent-a' };
+    deps.getRouteRecordReader = () => ({ spawnFacts: () => ptahCliFacts });
+    mockPtahCliSpawn(mocks);
+    mocks.processManager.spawnFromSdkHandle.mockResolvedValue({ agentId: 'a' });
+
+    await buildAgentNamespace(deps).spawn({ task: 't', ptahCliId: 'agent-a', route });
+
+    expect(mocks.processManager.spawnFromSdkHandle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        routeFacts: ptahCliFacts,
+        spawnEffort: {
+          requested: null,
+          sent: null,
+          source: 'none',
+          provenance: 'unknown',
+          disposition: 'none-requested',
+        },
+      }),
+    );
+    expect(mocks.warn).not.toHaveBeenCalled();
+  });
+});
 
 describe('buildAgentNamespace — spawn (role)', () => {
   it('resolves the role before the ptah-cli branch reserves an id or spawns', async () => {
@@ -1865,6 +1959,13 @@ describe('buildAgentNamespace — spawn boundary', () => {
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const options = mocks.registry!.spawnAgent.mock.calls[0][2];
     expect(options).not.toHaveProperty('effort');
+    expect(mocks.processManager.spawnFromSdkHandle.mock.calls[0][1].spawnEffort).toEqual({
+      requested: 'high',
+      sent: null,
+      source: 'request',
+      provenance: 'unknown',
+      disposition: 'fallback-allowlist',
+    });
   });
 });
 

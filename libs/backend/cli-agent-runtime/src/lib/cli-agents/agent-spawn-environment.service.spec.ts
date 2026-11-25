@@ -236,6 +236,16 @@ describe('AgentSpawnEnvironment', () => {
   });
 
   describe('resolveReasoningEffort()', () => {
+    it('checks configured effort against the native list before applying fallback precedence', () => {
+      const { environment } = makeEnvironment({
+        config: { codexReasoningEffort: 'max' },
+        effort: 'high',
+      });
+      expect(environment.resolveReasoningEffort('codex', {
+        nativeEfforts: { provenance: 'native', supported: ['max'], default: null },
+      })).toMatchObject({ effort: 'max', step: 2, disposition: 'native-match' });
+    });
+
     it('lets the UI effort selection drive codex and copilot when no setting is set', () => {
       const { environment } = makeEnvironment({ effort: 'high' });
       expect(environment.resolveReasoningEffort('codex').effort).toBe('high');
@@ -251,6 +261,9 @@ describe('AgentSpawnEnvironment', () => {
         effort: 'low',
         step: 2,
         ignored: [],
+        requested: 'low',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-allowlist',
       });
     });
 
@@ -267,7 +280,14 @@ describe('AgentSpawnEnvironment', () => {
           'codex',
           { roleName: 'code-logic-reviewer' },
         ),
-      ).toEqual({ effort: 'medium', step: 4, ignored: [] });
+      ).toEqual({
+        effort: 'medium',
+        step: 4,
+        ignored: [],
+        requested: 'medium',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-allowlist',
+      });
     });
 
     it("maps UI 'max' to 'xhigh' for codex", () => {
@@ -288,7 +308,10 @@ describe('AgentSpawnEnvironment', () => {
       ).toEqual({
         effort: undefined,
         step: 6,
-        ignored: [{ step: 2, value: 'turbo' }],
+        ignored: [{ step: 2, value: 'turbo', reason: 'fallback-refused' }],
+        requested: 'turbo',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-refused',
       });
     });
 
@@ -319,6 +342,9 @@ describe('AgentSpawnEnvironment', () => {
         effort: 'low',
         step: 5,
         ignored: [],
+        requested: 'low',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-allowlist',
       });
     });
 
@@ -328,6 +354,9 @@ describe('AgentSpawnEnvironment', () => {
         effort: undefined,
         step: 6,
         ignored: [],
+        requested: undefined,
+        provenance: 'unknown',
+        disposition: 'none-requested',
       });
     });
   });

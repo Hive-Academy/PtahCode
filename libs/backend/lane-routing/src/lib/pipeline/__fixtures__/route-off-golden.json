@@ -1,0 +1,676 @@
+{
+  "implement-gate": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "impl-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "lane",
+          "id": "codex",
+          "cli": "codex",
+          "family": "codex"
+        },
+        "model": "lane-default",
+        "tier": "sonnet",
+        "effort": "medium",
+        "provenance": "lane-default",
+        "score": 50,
+        "source": "model",
+        "taskKind": "implement",
+        "confidence": 0.9,
+        "fallbackCause": null,
+        "modelProposal": null,
+        "reason": "phase impl-1; executor lane codex; model lane-default; score 50; no profile; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability 0.9; fallback cause none; policy R5; tier sonnet, effort medium, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "chosen",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "subagent:implement",
+            "displayName": "implement",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked"
+          }
+        ],
+        "explanation": "Selected codex (model lane-default) with total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] over runner-up grok at total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] (gap +0), decided by tie-break, no preferences active, policy R5 shape=unset weight omitted, sonnet/medium, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "model",
+    "overallConfidence": 0.9,
+    "excluded": [],
+    "reasons": [],
+    "usage": {
+      "requests": 1,
+      "inputTokens": 10,
+      "outputTokens": 4,
+      "costUsd": null
+    }
+  },
+  "review-gate": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "rev-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "lane",
+          "id": "codex",
+          "cli": "codex",
+          "family": "codex"
+        },
+        "model": "lane-default",
+        "tier": "opus",
+        "effort": "high",
+        "provenance": "lane-default",
+        "score": 50,
+        "source": "model",
+        "taskKind": "review",
+        "confidence": 0.9,
+        "fallbackCause": null,
+        "modelProposal": null,
+        "reason": "phase rev-1; executor lane codex; model lane-default; score 50; no profile; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability 0.9; fallback cause none; policy R2; tier opus, effort high, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "chosen",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "subagent:review",
+            "displayName": "review",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked"
+          }
+        ],
+        "explanation": "Selected codex (model lane-default) with total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] over runner-up grok at total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] (gap +0), decided by tie-break, no preferences active, policy R2 kind=review weight omitted, opus/high, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "model",
+    "overallConfidence": 0.9,
+    "excluded": [],
+    "reasons": [],
+    "usage": {
+      "requests": 1,
+      "inputTokens": 10,
+      "outputTokens": 4,
+      "costUsd": null
+    }
+  },
+  "grok-at-limit": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "impl-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "lane",
+          "id": "codex",
+          "cli": "codex",
+          "family": "codex"
+        },
+        "model": "lane-default",
+        "tier": "sonnet",
+        "effort": "medium",
+        "provenance": "lane-default",
+        "score": 50,
+        "source": "model",
+        "taskKind": "implement",
+        "confidence": 0.9,
+        "fallbackCause": null,
+        "modelProposal": null,
+        "reason": "phase impl-1; executor lane codex; model lane-default; score 50; no profile; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability 0.9; fallback cause none; policy R5; tier sonnet, effort medium, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "chosen",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": null,
+            "disposition": "excluded",
+            "rule": "at-limit",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "subagent:implement",
+            "displayName": "implement",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "ranked"
+          }
+        ],
+        "explanation": "Selected codex (model lane-default) with total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] over runner-up OpenRouter Main (openrouter-main) at total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] (gap +0), decided by tie-break, no preferences active, policy R5 shape=unset weight omitted, sonnet/medium, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "model",
+    "overallConfidence": 0.9,
+    "excluded": [
+      {
+        "candidate": "grok",
+        "rule": "at-limit",
+        "phaseId": "impl-1"
+      }
+    ],
+    "reasons": [
+      "phase impl-1 candidate grok excluded by at-limit"
+    ],
+    "usage": {
+      "requests": 1,
+      "inputTokens": 10,
+      "outputTokens": 4,
+      "costUsd": null
+    }
+  },
+  "ranking-implement": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "impl-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "lane",
+          "id": "openrouter-main",
+          "cli": "ptah-cli",
+          "ptahCliId": "openrouter-main",
+          "family": "openrouter"
+        },
+        "model": "glm-4.7-max",
+        "tier": "sonnet",
+        "effort": "medium",
+        "provenance": "reported",
+        "score": 67,
+        "source": "ranking",
+        "taskKind": "implement",
+        "confidence": null,
+        "fallbackCause": "timeout",
+        "modelProposal": null,
+        "reason": "phase impl-1; executor lane openrouter-main; model glm-4.7-max; score 67; provenance local, sample count 5; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability not applicable; fallback cause timeout; policy R5; tier sonnet, effort medium, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 60,
+            "parts": {
+              "prior": 50,
+              "learned": 15,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 0,
+              "priorSource": "neutral",
+              "sampleCount": 5
+            },
+            "disposition": "chosen",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "subagent:implement",
+            "displayName": "implement",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": 57,
+            "parts": {
+              "prior": 50,
+              "learned": 12,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 0,
+              "priorSource": "neutral",
+              "sampleCount": 3
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          }
+        ],
+        "explanation": "Selected OpenRouter Main (openrouter-main) (model glm-4.7-max) with total 60 [prior 50 (neutral), learned +15 (exploration +0, n=5), preference +0, limit -5] over runner-up grok at total 57 [prior 50 (neutral), learned +12 (exploration +0, n=3), preference +0, limit -5] (gap +3), decided by score, no preferences active, policy R5 shape=unset weight omitted, sonnet/medium, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "ranking",
+    "overallConfidence": null,
+    "excluded": [
+      {
+        "candidate": "codex",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      },
+      {
+        "candidate": "subagent:implement",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      }
+    ],
+    "reasons": [
+      "phase impl-1 candidate codex excluded by pruned",
+      "phase impl-1 candidate subagent:implement excluded by pruned"
+    ],
+    "usage": {
+      "requests": 1,
+      "inputTokens": null,
+      "outputTokens": null,
+      "costUsd": null
+    }
+  },
+  "ranking-configured": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "impl-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "lane",
+          "id": "openrouter-main",
+          "cli": "ptah-cli",
+          "ptahCliId": "openrouter-main",
+          "family": "openrouter"
+        },
+        "model": "glm-4.7-air",
+        "tier": "sonnet",
+        "effort": "medium",
+        "provenance": "configured",
+        "score": 64,
+        "source": "ranking",
+        "taskKind": "implement",
+        "confidence": null,
+        "fallbackCause": "timeout",
+        "modelProposal": null,
+        "reason": "phase impl-1; executor lane openrouter-main; model glm-4.7-air; score 64; provenance local, sample count 4; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability not applicable; fallback cause timeout; policy R5; tier sonnet, effort medium, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 59,
+            "parts": {
+              "prior": 50,
+              "learned": 14,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 0,
+              "priorSource": "neutral",
+              "sampleCount": 4
+            },
+            "disposition": "chosen",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "subagent:implement",
+            "displayName": "implement",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": 57,
+            "parts": {
+              "prior": 50,
+              "learned": 12,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 0,
+              "priorSource": "neutral",
+              "sampleCount": 3
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          }
+        ],
+        "explanation": "Selected OpenRouter Main (openrouter-main) (model glm-4.7-air) with total 59 [prior 50 (neutral), learned +14 (exploration +0, n=4), preference +0, limit -5] over runner-up grok at total 57 [prior 50 (neutral), learned +12 (exploration +0, n=3), preference +0, limit -5] (gap +2), decided by score, no preferences active, policy R5 shape=unset weight omitted, sonnet/medium, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "ranking",
+    "overallConfidence": null,
+    "excluded": [
+      {
+        "candidate": "codex",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      },
+      {
+        "candidate": "subagent:implement",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      }
+    ],
+    "reasons": [
+      "phase impl-1 candidate codex excluded by pruned",
+      "phase impl-1 candidate subagent:implement excluded by pruned"
+    ],
+    "usage": {
+      "requests": 1,
+      "inputTokens": null,
+      "outputTokens": null,
+      "costUsd": null
+    }
+  },
+  "ranking-learned": {
+    "stage": "gate-0.1",
+    "roster": [
+      {
+        "phaseId": "impl-1",
+        "status": "chosen",
+        "executor": {
+          "kind": "subagent",
+          "id": "subagent:implement",
+          "phaseKind": "implement",
+          "family": "claude"
+        },
+        "model": "sonnet",
+        "tier": "sonnet",
+        "effort": "medium",
+        "provenance": "tier",
+        "score": 58,
+        "source": "ranking",
+        "taskKind": "implement",
+        "confidence": null,
+        "fallbackCause": "timeout",
+        "modelProposal": null,
+        "reason": "phase impl-1; executor subagent subagent:implement; model sonnet; score 58; provenance local, sample count 2; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability not applicable; fallback cause timeout; policy R5; tier sonnet, effort medium, shape unset, weight unset",
+        "candidates": [
+          {
+            "candidate": "subagent:implement",
+            "displayName": "implement",
+            "total": 58,
+            "parts": {
+              "prior": 50,
+              "learned": 13,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 2
+            },
+            "disposition": "chosen"
+          },
+          {
+            "candidate": "codex",
+            "displayName": "codex",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "openrouter-main",
+            "displayName": "OpenRouter Main",
+            "total": 50,
+            "parts": {
+              "prior": 50,
+              "learned": 5,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 5,
+              "priorSource": "neutral",
+              "sampleCount": 0
+            },
+            "disposition": "excluded",
+            "rule": "pruned",
+            "cause": "below-band",
+            "modelListStatus": "ok"
+          },
+          {
+            "candidate": "grok",
+            "displayName": "grok",
+            "total": 57,
+            "parts": {
+              "prior": 50,
+              "learned": 12,
+              "preference": 0,
+              "limit": -5,
+              "exploration": 0,
+              "priorSource": "neutral",
+              "sampleCount": 3
+            },
+            "disposition": "ranked",
+            "modelListStatus": "ok"
+          }
+        ],
+        "explanation": "Selected implement (subagent:implement) (model sonnet) with total 58 [prior 50 (neutral), learned +13 (exploration +5, n=2), preference +0, limit -5] over runner-up grok at total 57 [prior 50 (neutral), learned +12 (exploration +0, n=3), preference +0, limit -5] (gap +1), decided by score, no preferences active, policy R5 shape=unset weight omitted, sonnet/medium, limit unknown (age unknown)."
+      }
+    ],
+    "overallSource": "ranking",
+    "overallConfidence": null,
+    "excluded": [
+      {
+        "candidate": "codex",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      },
+      {
+        "candidate": "openrouter-main",
+        "rule": "pruned",
+        "cause": "below-band",
+        "phaseId": "impl-1"
+      }
+    ],
+    "reasons": [
+      "phase impl-1 candidate codex excluded by pruned",
+      "phase impl-1 candidate openrouter-main excluded by pruned"
+    ],
+    "usage": {
+      "requests": 1,
+      "inputTokens": null,
+      "outputTokens": null,
+      "costUsd": null
+    }
+  }
+}

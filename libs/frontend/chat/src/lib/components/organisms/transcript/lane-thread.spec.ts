@@ -52,6 +52,25 @@ describe('laneThreadEntries', () => {
       { status: 'completed', timestamp: 20 });
     expect(entries[0].verdict).toBe(label);
   });
+  it('reads a user stop as stopped, never failed, even with a failed verdict or status (D13)', () => {
+    const pending = [{ agentId: 'lane' as AgentId, kind: 'completion' as const, state: 'pending' as const, verdict: 'failed' as const }];
+    const user = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', pending,
+      { status: 'failed', timestamp: 20, stoppedByUser: true });
+    expect(user[0]).toMatchObject({ verdict: 'Stopped by you', stopped: true });
+    const plain = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', pending, { status: 'stopped', timestamp: 20 });
+    expect(plain[0]).toMatchObject({ verdict: 'Stopped', stopped: true });
+    const budget = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', [],
+      { status: 'stopped', timestamp: 20, stopReason: 'budget' });
+    expect(budget[0].verdict).toBe('Stopped by Ptah budget monitor');
+    // The host's own `stopped` verdict on a run the user did not stop here (ptah_agent_stop).
+    const hostStop = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex',
+      [{ agentId: 'lane' as AgentId, kind: 'completion', state: 'pending', verdict: 'stopped' }], { status: 'completed', timestamp: 20 });
+    expect(hostStop[0]).toMatchObject({ verdict: 'Stopped', stopped: true });
+    // A run that finished before the stop landed is not relabelled.
+    const finished = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', [],
+      { status: 'completed', timestamp: 20, stoppedByUser: true });
+    expect(finished[0].stopped).toBeUndefined();
+  });
   it('does not infer deliverables from a completed status', () => {
     const entries = laneThreadEntries([], [], 'Claude', 'Docs', 'Codex', [],
       { status: 'completed', timestamp: 20 });

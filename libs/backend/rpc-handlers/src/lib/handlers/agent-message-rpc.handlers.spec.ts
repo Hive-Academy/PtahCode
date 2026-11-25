@@ -119,6 +119,21 @@ describe('AgentMessageRpcHandlers', () => {
     expect(coordinator.send).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts an image-only message and rejects one with neither text nor images', async () => {
+    const { coordinator, call } = setup();
+    const images = [{ data: 'aGk=', mediaType: 'image/png' }];
+    const imageOnly = await call('agent:sendMessage', { agentId: AGENT_ID, message: '', turn: { images } });
+    expect(imageOnly.success).toBe(true);
+    expect(coordinator.send).toHaveBeenCalledWith({ agentId: AGENT_ID, message: '', turn: { images } }, USER);
+    const results = await Promise.all([
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '' }),
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '   ', turn: { images: [] } }),
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '', turn: { files: ['a.ts'] } }),
+    ]);
+    for (const result of results) expect(result).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+    expect(coordinator.send).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves message whitespace', async () => {
     const { coordinator, call } = setup();
     await call('agent:sendMessage', { agentId: AGENT_ID, message: '  hello  ' });
@@ -296,6 +311,30 @@ describe('AgentMessageRpcHandlers', () => {
         models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'], currentModel: 'grok-4',
         commands: [{ name: 'compact', group: 'command', description: 'Compact' }, { name: 'code-review', group: 'skill' }],
       });
+    });
+
+    it('serves unsendable efforts alongside the native effort list in catalog order', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [], efforts: ['low', 'future-effort', 'high'], unsendableEfforts: ['future-effort'], commands: [],
+      });
+
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+
+      expect(result.data).toEqual({
+        models: [], efforts: ['low', 'future-effort', 'high'], unsendableEfforts: ['future-effort'], commands: [],
+      });
+    });
+
+    it('omits an empty unsendable effort list', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [], efforts: ['low', 'high'], unsendableEfforts: [], commands: [],
+      });
+
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+
+      expect(result.data).toStrictEqual({ models: [], efforts: ['low', 'high'], commands: [] });
     });
 
     it('passes the cached lists beside an error, and the stopped-lane reason (M5, S2)', async () => {

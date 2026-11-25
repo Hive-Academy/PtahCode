@@ -1,11 +1,6 @@
 /**
  * `LaneModelListing` for every host that calls `registerSharedRpcHandlers`.
  *
- * The Batch 5 port type is not on the `@ptah-extension/lane-routing` barrel
- * (that index export belongs to a later batch). This class matches
- * `list(row, signal)` on `lane-model-listing.port.ts` and is registered under
- * `LANE_ROUTING_TOKENS.LANE_MODEL_LISTING`.
- *
  * System CLI rows come from `CliModelListService`. Ptah CLI rows come from
  * the saved config (no network) plus one shared provider discovery per
  * provider, raced against the row's signal.
@@ -18,6 +13,10 @@ import {
   PTAH_CLI_KEY_PREFIX,
 } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
+import type {
+  LaneModelEntry,
+  LaneModelListing,
+} from '@ptah-extension/lane-routing';
 import {
   TOKENS,
   type IAuthSecretsService,
@@ -27,18 +26,12 @@ import {
   type AgentModelEntry,
   type AgentModelProvider,
   type CliDetectionResult,
+  type EffortSupport,
   type PtahCliConfig,
   type ProviderModelListSource,
   type SystemCliType,
 } from '@ptah-extension/shared';
 import { CliModelListService } from './cli-model-list.service';
-
-/** Matches `LaneModelEntry` on the Batch 5 port. */
-interface ListedModel {
-  readonly id: string;
-  readonly provenance: 'reported' | 'fallback' | 'configured' | 'tier';
-  readonly auto?: boolean;
-}
 
 interface DiscoveryModels {
   readonly kind: 'models';
@@ -89,7 +82,7 @@ function failureReason(error: unknown): 'threw' | 'threw-unknown' {
  * `LANE_ROUTING_TOKENS.LANE_MODEL_LISTING`.
  */
 @injectable()
-export class LaneModelListingAdapter {
+export class LaneModelListingAdapter implements LaneModelListing {
   /** In-flight discovery for one burst. Dropped when that promise settles. */
   private readonly discoveryInFlight = new Map<
     string,
@@ -101,7 +94,7 @@ export class LaneModelListingAdapter {
     @inject(CliModelListService)
     private readonly cliModels: Pick<
       CliModelListService,
-      'listAll' | 'listForClassification'
+      'listAll' | 'listForClassification' | 'effortSupport'
     >,
     @inject(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_CONFIG_PERSISTENCE)
     private readonly ptahCliConfigs: {
@@ -119,27 +112,32 @@ export class LaneModelListingAdapter {
   async list(
     row: CliDetectionResult,
     signal: AbortSignal,
-  ): Promise<readonly ListedModel[]> {
+  ): Promise<readonly LaneModelEntry[]> {
     if (row.cli === 'ptah-cli') {
       return this.listPtahCli(row, signal);
     }
     return this.listSystemCli(row.cli);
   }
 
-  private async listSystemCli(cli: SystemCliType): Promise<ListedModel[]> {
+  private async listSystemCli(cli: SystemCliType): Promise<LaneModelEntry[]> {
     const [listed, classified] = await Promise.all([
       this.cliModels.listAll(),
       this.cliModels.listForClassification(),
     ]);
     const seen = new Set<string>();
-    const entries: ListedModel[] = [];
-    const push = (id: string, isFallback: boolean | undefined): void => {
+    const entries: LaneModelEntry[] = [];
+    const push = (
+      id: string,
+      isFallback: boolean | undefined,
+      efforts?: EffortSupport,
+    ): void => {
       const trimmed = id.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) return;
       seen.add(trimmed);
       entries.push({
         id: trimmed,
         provenance: isFallback === true ? 'fallback' : 'reported',
+        efforts: efforts ?? this.cliModels.effortSupport(cli, trimmed),
       });
     };
 
@@ -152,6 +150,7 @@ export class LaneModelListingAdapter {
       push(
         option.id,
         fromClassification ? fromClassification.isFallback : option.isFallback,
+        option.efforts,
       );
     }
     if (isClassifiedCli(cli)) {
@@ -175,7 +174,7 @@ export class LaneModelListingAdapter {
   private async listPtahCli(
     row: CliDetectionResult,
     signal: AbortSignal,
-  ): Promise<readonly ListedModel[]> {
+  ): Promise<readonly LaneModelEntry[]> {
     const configs = this.ptahCliConfigs.loadConfigs();
     const config = row.ptahCliId
       ? configs.find((item) => item.id === row.ptahCliId)
@@ -210,19 +209,23 @@ export class LaneModelListingAdapter {
     }
   }
 
-  private entriesFromConfig(config: PtahCliConfig | undefined): ListedModel[] {
+  private entriesFromConfig(config: PtahCliConfig | undefined): LaneModelEntry[] {
     if (!config) return [];
-    const entries: ListedModel[] = [];
+    const entries: LaneModelEntry[] = [];
     const seen = new Set<string>();
     const push = (
       id: string | undefined,
-      provenance: ListedModel['provenance'],
+      provenance: LaneModelEntry['provenance'],
     ): void => {
       if (typeof id !== 'string') return;
       const trimmed = id.trim();
       if (trimmed.length === 0 || seen.has(trimmed)) return;
       seen.add(trimmed);
-      entries.push({ id: trimmed, provenance });
+      entries.push({
+        id: trimmed,
+        provenance,
+        efforts: { provenance: 'unknown' },
+      });
     };
     push(config.selectedModel, 'configured');
     const tiers = config.tierMappings;
@@ -235,17 +238,17 @@ export class LaneModelListingAdapter {
   }
 
   private mergeDiscovery(
-    base: readonly ListedModel[],
+    base: readonly LaneModelEntry[],
     models: readonly { readonly id: string }[],
     provenance: DiscoveryModels['provenance'],
-  ): ListedModel[] {
+  ): LaneModelEntry[] {
     const entries = base.map((entry) => ({ ...entry }));
     const seen = new Set(entries.map((entry) => entry.id));
     for (const model of models) {
       const id = model.id.trim();
       if (id.length === 0 || seen.has(id)) continue;
       seen.add(id);
-      entries.push({ id, provenance });
+      entries.push({ id, provenance, efforts: { provenance: 'unknown' } });
     }
     return entries;
   }

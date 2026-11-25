@@ -84,6 +84,8 @@ export interface LaneComposerCommandOption {
 export interface AgentGetLaneComposerOptionsResult {
   readonly models: readonly CliModelOption[];
   readonly efforts: readonly string[];
+  /** Native values the lane cannot send; shown with a label. */
+  readonly unsendableEfforts?: readonly string[];
   readonly currentModel?: string;
   readonly currentEffort?: string;
   readonly commands: readonly LaneComposerCommandOption[];

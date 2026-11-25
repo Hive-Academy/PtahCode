@@ -28,6 +28,7 @@ export * from './lib/types/model-autopilot.types';
 export * from './lib/types/agent-process.types';
 export * from './lib/types/cli-lane-defaults.types';
 export * from './lib/types/lane-outcome.types';
+export * from './lib/types/lane-native-values.types';
 export * from './lib/types/plan-limit.types';
 export * from './lib/types/cli-skill-sync.types';
 export * from './lib/types/auth-env.types';

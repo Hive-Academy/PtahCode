@@ -231,6 +231,7 @@ export { AgentAvatarComponent } from './lib/atoms/agent-avatar/agent-avatar.comp
 export {
   AGENT_KIND_LABEL,
   agentAccessibleLabel,
+  agentStatusText,
   type AgentAvatarSize,
   type AgentKind,
   type AgentLabelParts,

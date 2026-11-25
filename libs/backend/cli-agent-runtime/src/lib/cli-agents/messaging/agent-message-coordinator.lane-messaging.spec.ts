@@ -203,6 +203,67 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     expect(persisted()).toBe(0);
   });
 
+  it('accepts an image for a stopped lane whose cold resume carries images (D4)', async () => {
+    const resumable: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported', onSteer: false, onResume: true } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'claude', displayName: 'Claude', status: 'stopped', potentialCapabilities: resumable });
+    expect(coordinator.preview({ agentId: h.agentId }).usesResume).toBe(true);
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'what colour?', turn: { images: [image] } }, user);
+    expect(outcome.mode).not.toBe('unsupported');
+    const id = idOf(outcome);
+    expect(await h.store.get(id)).toMatchObject({ turn: { imageCount: 1 } });
+    expect(attachments?.take(id)).toEqual([image]);
+  });
+
+  it('refuses an image for a stopped named-account lane with the named reason (D4)', async () => {
+    const resumable: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported', onSteer: false, onResume: true } },
+    };
+    const { h, coordinator, persisted } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'claude', displayName: 'Claude', status: 'stopped', potentialCapabilities: resumable });
+    // The record carries the run's account fields (`laneAccountFields`).
+    Object.assign(h.tracked.info, { accountBindingId: 'run-1' });
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'what colour?', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported',
+      detail: 'Images need a running lane on a named-account Claude lane.',
+    });
+    expect(persisted()).toBe(0);
+    expect(h.resume.resume).not.toHaveBeenCalled();
+  });
+
+  it('sends an image-only message end to end: empty body kept, header-only text, images on the turn', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const outcome = await coordinator.send({ agentId: h.agentId, message: '', turn: { images: [image] } }, user);
+    expect(outcome.mode).toBe('queue-next-turn');
+    const id = idOf(outcome);
+    // The store keeps the empty text as a real body, so the message is still deliverable.
+    expect(await h.store.get(id)).toMatchObject({ bodyBytes: 0, bodyStored: true, turn: { imageCount: 1 } });
+    await expect(h.store.getBody(id)).resolves.toBe('');
+    const [, text, , , , input] = h.sendToAgent.mock.calls[0] as unknown as
+      [string, string, string, string, boolean, { turn?: { images?: unknown[] }; echo?: string }];
+    expect(text.startsWith(`[Ptah message ${id} from the user]`)).toBe(true);
+    expect(text).not.toContain('\n\n\n');
+    expect(input).toMatchObject({ echo: '', turn: { images: [image] } });
+    expect(attachments?.take(id)).toEqual([image]);
+    await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({ text: '', turn: { images: [image] } });
+  });
+
+  it('still refuses a message with neither text nor images', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    await expect(coordinator.send({ agentId: h.agentId, message: '  ' }, user)).rejects.toThrow('Message must not be empty.');
+    expect(persisted()).toBe(0);
+  });
+
   it('holds images beside the envelope and returns them with the body', async () => {
     const withImages: CliAdapterManifest = {
       ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },

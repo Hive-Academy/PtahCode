@@ -15,6 +15,8 @@ import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { DecisionMatrixPageComponent } from './decision-matrix-page.component';
 import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
+import { PerformanceRoutingSettingComponent } from './performance-routing-setting.component';
+import { RoutingEvidenceComponent } from './routing-evidence.component';
 @Component({
   selector: 'ptah-host-routing-setting',
   standalone: true,
@@ -32,13 +34,41 @@ class HostRoutingStubComponent {
 })
 class LaneRotationStubComponent {}
 
+@Component({
+  selector: 'ptah-performance-routing-setting',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class PerformanceRoutingStubComponent {}
+
+@Component({
+  selector: 'ptah-routing-evidence',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class RoutingEvidenceStubComponent {}
+
 describe('DecisionMatrixPageComponent', () => {
   beforeEach(() =>
     TestBed.overrideComponent(DecisionMatrixPageComponent, {
       remove: {
-        imports: [HostRoutingSettingComponent, LaneRotationSettingComponent],
+        imports: [
+          HostRoutingSettingComponent,
+          LaneRotationSettingComponent,
+          PerformanceRoutingSettingComponent,
+          RoutingEvidenceComponent,
+        ],
       },
-      add: { imports: [HostRoutingStubComponent, LaneRotationStubComponent] },
+      add: {
+        imports: [
+          HostRoutingStubComponent,
+          LaneRotationStubComponent,
+          PerformanceRoutingStubComponent,
+          RoutingEvidenceStubComponent,
+        ],
+      },
     }),
   );
   it('shows the back action and RPC-backed band', async () => {
@@ -82,6 +112,11 @@ describe('DecisionMatrixPageComponent', () => {
     expect(refresh.textContent).not.toContain('?');
     expect(root.querySelector('ptah-host-routing-setting')).not.toBeNull();
     expect(root.querySelector('ptah-lane-rotation-setting')).not.toBeNull();
+    expect(
+      root.querySelector(
+        'ptah-lane-rotation-setting + ptah-performance-routing-setting + ptah-routing-evidence',
+      ),
+    ).not.toBeNull();
     // Before the routing read succeeds, the band makes no claim about the model.
     expect(
       root.querySelector(

@@ -1,14 +1,8 @@
-import {
-  SEED_LABEL_SCORE,
-  STALENESS_AGE_MS,
-  type SeedLabel,
-} from '../routing-constants';
-import {
-  CAPABILITY_MATRIX_VERSION,
-  type CapabilityMatrix,
-  type MatrixCell,
-  type MatrixProfile,
-} from './matrix.types';
+import type { CapabilityMatrix } from './matrix.types';
+import { SEED_ALIASES } from './seed-aliases';
+import { compileSeed, isStale, type SeedSourceRow } from './seed-source';
+
+export { isStale };
 
 /**
  * Shipped seed of the capability matrix (part A §3, Requirements 6.2, 6.3).
@@ -45,73 +39,26 @@ export const SEED_SOURCE_REF =
 /** What a seed value measures (Requirement 6.2). */
 export const SEED_NOTE = 'backend implementation only';
 
-export interface SeedMatrixRow {
-  /** Lane family as `laneFamilyOf` returns it. */
-  readonly family: string;
-  /** Model id exactly as the lane lists it. */
-  readonly model: string;
-  /** The model as the benchmark board names it. */
-  readonly benchmarkModel: string;
-  /** Research label for the implement kind. */
-  readonly label: SeedLabel;
-  /** Publication date of the benchmark result (`YYYY-MM-DD`). */
-  readonly asOf: string;
-}
-
-export const SEED_MATRIX_ROWS: readonly SeedMatrixRow[] = [
+export const SEED_SOURCE_ROWS: readonly SeedSourceRow[] = [
   {
-    family: 'z-ai',
-    model: 'glm-5',
+    sourceId: 'swe-bench-verified',
+    licenseId: 'NOASSERTION',
+    fetchedAt: '2026-10-14',
+    sourceRow: 'GLM-5 high',
     benchmarkModel: 'GLM-5 high',
-    label: 'strong',
+    benchmarkEffort: null,
+    taskKind: 'implement',
     asOf: '2026-02-17',
+    note: SEED_NOTE,
+    sourceRef: SEED_SOURCE_REF,
+    value: { label: 'strong' },
   },
 ];
 
 /**
- * `now - asOf > STALENESS_AGE_MS`. An `asOf` that does not parse has no
- * known age and counts as stale.
- */
-export function isStale(asOf: string, nowMs: number): boolean {
-  const asOfMs = Date.parse(asOf);
-  return Number.isNaN(asOfMs) || nowMs - asOfMs > STALENESS_AGE_MS;
-}
-
-function unknownCell(): MatrixCell {
-  return { kind: 'unknown' };
-}
-
-function seedProfile(row: SeedMatrixRow, nowMs: number): MatrixProfile {
-  return {
-    family: row.family,
-    model: row.model,
-    cells: {
-      plan: unknownCell(),
-      implement: {
-        kind: 'value',
-        score: SEED_LABEL_SCORE[row.label],
-        source: 'seed',
-        sourceRef: SEED_SOURCE_REF,
-        asOf: row.asOf,
-        stale: isStale(row.asOf, nowMs),
-        note: SEED_NOTE,
-      },
-      review: unknownCell(),
-      research: unknownCell(),
-      tests: unknownCell(),
-      docs: unknownCell(),
-    },
-  };
-}
-
-/**
- * The seed as a matrix, with `stale` computed at `nowMs`. One profile per
- * row; a repeated row is a duplicate profile that the schema rejects.
- * Returns fresh objects on every call.
+ * The seed as a matrix, with `stale` computed at `nowMs`. Returns fresh
+ * objects on every call.
  */
 export function buildSeedMatrix(nowMs: number): CapabilityMatrix {
-  return {
-    version: CAPABILITY_MATRIX_VERSION,
-    profiles: SEED_MATRIX_ROWS.map((row) => seedProfile(row, nowMs)),
-  };
+  return compileSeed(SEED_SOURCE_ROWS, SEED_ALIASES, nowMs).matrix;
 }

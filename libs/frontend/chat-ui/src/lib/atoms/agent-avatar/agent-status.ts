@@ -14,11 +14,19 @@ import type { AgentStatusWord } from './agent-avatar.types';
  * Orchestrator), never a thrown error that would blank the view.
  */
 
-/** A CLI lane (`MonitoredAgent`); any open permission request reads `waiting`. */
+/**
+ * A CLI lane (`MonitoredAgent`); any open permission request reads `waiting`.
+ * `lane.stopping`: the user pressed Stop and the process has not exited yet.
+ * `lane.stoppedByUser`: a user stop that an older host reports as `failed`
+ * still reads `stopped`.
+ */
 export function cliLaneStatusWord(
   status: AgentStatus,
   openRequests: number,
+  lane: { readonly stopping?: boolean; readonly stoppedByUser?: boolean } = {},
 ): AgentStatusWord {
+  if (lane.stopping) return 'stopping';
+  if (lane.stoppedByUser && status === 'failed') return 'stopped';
   if (openRequests > 0) return 'waiting';
   switch (status) {
     case 'starting':

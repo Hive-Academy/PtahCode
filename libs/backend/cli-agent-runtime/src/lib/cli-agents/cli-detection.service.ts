@@ -16,7 +16,7 @@ import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import { PLATFORM_TOKENS, WINDOWS_JOB_SETTING_KEY } from '@ptah-extension/platform-core';
 import type { IProcessSpawner, IWindowsJobAssigner, IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type { CliWindowsJobDependencies } from './cli-adapters/cli-windows-job';
-import type { CliType, CliDetectionResult } from '@ptah-extension/shared';
+import type { CliType, CliDetectionResult, EffortSupport } from '@ptah-extension/shared';
 import type {
   CliAdapter,
   CliModelInfo,
@@ -33,6 +33,7 @@ import { OpencodeCliAdapter } from './cli-adapters/opencode-cli.adapter';
 import { PiCliAdapter } from './cli-adapters/pi-cli.adapter';
 import { GrokCliAdapter } from './cli-adapters/grok-cli.adapter';
 import { ClaudeCliAdapter } from './cli-adapters/claude-cli.adapter';
+import { NativeEffortRegistry } from './native-effort.registry';
 
 function unavailableCodexAdapter(cause: Error): CliAdapter {
   const reason = 'Native Codex adapter is unavailable.';
@@ -89,6 +90,7 @@ export const SHELL_PATH_FIRST_SCAN_WAIT_MS = 1_000;
 @injectable()
 export class CliDetectionService {
   private readonly adapters: Map<CliType, CliAdapter> = new Map();
+  private readonly nativeEffortRegistry = new NativeEffortRegistry();
   private detectionCache: Map<CliType, CliDetectionResult> | null = null;
   private readonly lastCompleted = new Map<CliType, CliDetectionResult>();
   private readonly staleClis = new Set<CliType>();
@@ -451,6 +453,18 @@ export class CliDetectionService {
     return this.adapters.get(cli);
   }
 
+  recordNativeCatalog(laneKey: string, models: readonly CliModelInfo[]): void {
+    this.nativeEffortRegistry.recordCatalog(laneKey, models);
+  }
+
+  recordNativeSession(laneKey: string, model: string, efforts: EffortSupport): void {
+    this.nativeEffortRegistry.recordSession(laneKey, model, efforts);
+  }
+
+  nativeEfforts(laneKey: string, model: string | undefined): EffortSupport {
+    return this.nativeEffortRegistry.lookup(laneKey, model);
+  }
+
   /**
    * List available models for all installed CLIs that support listModels().
    * Results are cached until invalidateCache() is called, except a read in
@@ -491,6 +505,9 @@ export class CliDetectionService {
       try {
         const models = await adapter.listModels();
         cache.set(detection.cli, models);
+        if (this.generation === generation) {
+          this.recordNativeCatalog(detection.cli, models);
+        }
       } catch (error) {
         // degradation-audit: reported - model lookup failure is captured and omitted from the model map.
         failed = true;

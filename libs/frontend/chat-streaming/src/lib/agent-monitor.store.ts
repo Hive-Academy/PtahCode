@@ -507,6 +507,47 @@ function liveUsageOf(
   };
 }
 
+/** A stop's process exit normally follows within seconds; past this the UI stops waiting. */
+export const STOP_EXIT_FALLBACK_MS = 20_000;
+const MAX_AGENT_SUCCESSORS = 200;
+const MAX_SUCCESSOR_HOPS = 20;
+
+/**
+ * Stop fields after an exit event. The host emits a `stopped` exit as soon as
+ * it has stamped the stop (no `exitCode`), and a second one with the process
+ * `exitCode` once the lane's process is gone. "Stopping…" lasts until that
+ * process exit. It ends at once on any other terminal status, and on the one
+ * exit of a lane stopped while `starting` (no process yet, no second exit).
+ */
+export function settleStopRequest(
+  agent: Pick<MonitoredAgent, 'stopRequestedAt' | 'stopAcknowledged' | 'status'>,
+  info: Pick<AgentProcessInfo, 'status' | 'exitCode'>,
+): Pick<MonitoredAgent, 'stopRequestedAt' | 'stopAcknowledged'> {
+  const cleared = { stopRequestedAt: undefined, stopAcknowledged: undefined };
+  if (agent.stopRequestedAt === undefined) return cleared;
+  if (info.status !== 'stopped' || info.exitCode !== undefined || agent.stopAcknowledged) return cleared;
+  if (agent.status === 'starting') return cleared;
+  return { stopRequestedAt: agent.stopRequestedAt, stopAcknowledged: true };
+}
+
+/**
+ * Turn start for a re-opened card: a new turn (another `turnSeq`, or a card
+ * that was not live) starts at the host's `lastActivityAt` stamp, else now;
+ * a duplicate spawn of the live turn keeps the known start.
+ */
+export function reopenedTurnStart(
+  existing: Pick<MonitoredAgent, 'status' | 'turnSeq' | 'turnStartedAt' | 'startedAt'>,
+  info: Pick<AgentProcessInfo, 'turnSeq' | 'lastActivityAt'>,
+  now = Date.now(),
+): number {
+  const newTurn =
+    !isLiveAgentStatus(existing.status) ||
+    (info.turnSeq !== undefined && info.turnSeq !== (existing.turnSeq ?? 1));
+  if (!newTurn) return existing.turnStartedAt ?? existing.startedAt;
+  const stamped = info.lastActivityAt ? Date.parse(info.lastActivityAt) : Number.NaN;
+  return Number.isFinite(stamped) ? stamped : now;
+}
+
 export interface MonitoredAgent {
   readonly agentId: string;
   /** Latest lifecycle turn for a same-id CLI continuation. */
@@ -518,8 +559,29 @@ export interface MonitoredAgent {
   readonly effectivePolicy?: EffectiveLanePolicy;
   status: AgentStatus;
   readonly startedAt: number;
+  /**
+   * Start of the lane's current (or last) turn, epoch ms. `startedAt` is the
+   * record's first start; a warm lane runs many turns on one record, so the
+   * header timer reads this one. Absent on a restored card: use `startedAt`.
+   */
+  turnStartedAt?: number;
   /** Timestamp when agent finished. Used to freeze elapsed time display. */
   completedAt?: number;
+  /**
+   * The user pressed Stop at this time and the lane's process has not been
+   * seen to exit yet: the UI reads "Stopping…". Cleared by the exit that
+   * follows the stop (see `settleStopRequest`), a re-open, or a fallback timer.
+   */
+  stopRequestedAt?: number;
+  /** A `stopped` exit already arrived for the pending stop; the next exit is the process's own. */
+  stopAcknowledged?: boolean;
+  /** Why the last Stop failed (the host refused or errored); cleared by the next Stop or a re-open. */
+  stopError?: string;
+  /**
+   * The user stopped this run. It renders as stopped, never as failed, even
+   * when an older host reports the user stop as `failed`. Reset by a re-open.
+   */
+  stoppedByUser?: boolean;
   stdout: string;
   stderr: string;
   exitCode?: number;
@@ -968,6 +1030,10 @@ export class AgentMonitorStore implements OnDestroy {
    * Key: `${parentSessionId}::${task}` for scoped matching (CLI agent case).
    */
   private readonly _resumedAgentKeys = signal<Set<string>>(new Set());
+  /** Replaced CLI card id -> the id of the card that replaced it (a resume). */
+  private readonly _agentSuccessors = signal<ReadonlyMap<string, string>>(new Map());
+  /** One fallback timer per lane whose stop waits for its process exit. */
+  private readonly stopFallbacks = new Map<string, ReturnType<typeof setTimeout>>();
 
   /**
    * Tracks specific agent node IDs that have been resumed.
@@ -1551,6 +1617,138 @@ export class AgentMonitorStore implements OnDestroy {
     this._subagentRequestUsage.clear();
     this._pendingBackgroundIdentity.clear();
     this._pendingSubagentNotices.clear();
+    for (const timer of this.stopFallbacks.values()) clearTimeout(timer);
+    this.stopFallbacks.clear();
+  }
+
+  /**
+   * The user pressed Stop on a CLI lane. The card reads "Stopping…" until
+   * the lane's process is seen to exit, and the run renders as stopped, never
+   * as failed. A card that is not live is left alone. The fallback timer is
+   * armed here, so a lost exit event (or a stop that emits none) can never
+   * leave the card on "Stopping…".
+   */
+  markStopRequested(agentId: string): void {
+    let marked = false;
+    this.updateAgents((list) => {
+      const index = list.findIndex((agent) => agent.agentId === agentId);
+      if (index < 0 || !isLiveAgentStatus(list[index].status)) return list;
+      marked = true;
+      const next = [...list];
+      next[index] = {
+        ...list[index],
+        stopRequestedAt: Date.now(),
+        stopAcknowledged: undefined,
+        stoppedByUser: true,
+        stopError: undefined,
+      };
+      return next;
+    });
+    if (marked) this.armStopFallback(agentId);
+  }
+
+  /**
+   * The host accepted the Stop. A card that is already terminal with a
+   * non-stopped status (the turn ended before the stop landed; the host only
+   * released the idle process and emits no exit) is not stopping any more.
+   */
+  confirmStopRequest(agentId: string): void {
+    this.updateAgents((list) => {
+      const index = list.findIndex((agent) => agent.agentId === agentId);
+      if (index < 0) return list;
+      const agent = list[index];
+      if (agent.stopRequestedAt === undefined || isLiveAgentStatus(agent.status) || agent.status === 'stopped') {
+        return list;
+      }
+      this.clearStopFallback(agentId);
+      const next = [...list];
+      next[index] = { ...agent, stopRequestedAt: undefined, stopAcknowledged: undefined, stoppedByUser: undefined };
+      return next;
+    });
+  }
+
+  /**
+   * The Stop failed (the host refused it or the call errored): the lane is as
+   * it was. The pending stop and the user-stop mark go, and the reason stays
+   * on the card for the footer.
+   */
+  cancelStopRequest(agentId: string, error?: string): void {
+    this.clearStopFallback(agentId);
+    this.updateAgents((list) => {
+      const index = list.findIndex((agent) => agent.agentId === agentId);
+      if (index < 0) return list;
+      const next = [...list];
+      next[index] = {
+        ...list[index],
+        stopRequestedAt: undefined,
+        stopAcknowledged: undefined,
+        stoppedByUser: undefined,
+        stopError: error?.trim() || 'The lane could not be stopped.',
+      };
+      return next;
+    });
+  }
+
+  /**
+   * The current id of a CLI lane: a resume of a stopped lane spawns a new
+   * agent id that replaces the old card, so a selection that still names the
+   * old id follows the chain to the card that is shown now.
+   */
+  currentAgentId(agentId: string): string {
+    const successors = this._agentSuccessors();
+    let id = agentId;
+    for (let hops = 0; hops < MAX_SUCCESSOR_HOPS; hops++) {
+      const next = successors.get(id);
+      if (next === undefined || next === id) break;
+      id = next;
+    }
+    return id;
+  }
+
+  private recordSuccessor(previousId: string, nextId: string): void {
+    if (previousId === nextId) return;
+    this._agentSuccessors.update((current) => {
+      const next = new Map(current);
+      next.delete(previousId);
+      next.set(previousId, nextId);
+      while (next.size > MAX_AGENT_SUCCESSORS) {
+        const oldest = next.keys().next();
+        if (oldest.done) break;
+        next.delete(oldest.value);
+      }
+      return next;
+    });
+  }
+
+  /**
+   * Fallback for a stop whose process exit never arrives (a lost event, or a
+   * stop the host settles without an exit): "Stopping…" ends after this delay.
+   */
+  private armStopFallback(agentId: string): void {
+    this.clearStopFallback(agentId);
+    this.stopFallbacks.set(
+      agentId,
+      setTimeout(() => {
+        this.stopFallbacks.delete(agentId);
+        this.updateAgents((list) => {
+          const index = list.findIndex((agent) => agent.agentId === agentId);
+          if (index < 0 || list[index].stopRequestedAt === undefined) return list;
+          const agent = list[index];
+          const next = [...list];
+          // Still live after the wait: the stop never took, so it is no user stop.
+          next[index] = { ...agent, stopRequestedAt: undefined, stopAcknowledged: undefined,
+            ...(isLiveAgentStatus(agent.status) ? { stoppedByUser: undefined } : {}) };
+          return next;
+        });
+      }, STOP_EXIT_FALLBACK_MS),
+    );
+  }
+
+  private clearStopFallback(agentId: string): void {
+    const timer = this.stopFallbacks.get(agentId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.stopFallbacks.delete(agentId);
   }
 
   togglePanel(): void {
@@ -1656,7 +1854,12 @@ export class AgentMonitorStore implements OnDestroy {
           ...existing,
           turnSeq: info.turnSeq ?? existing.turnSeq,
           status: info.status,
+          turnStartedAt: reopenedTurnStart(existing, info),
           completedAt: undefined,
+          stopRequestedAt: undefined,
+          stopAcknowledged: undefined,
+          stoppedByUser: undefined,
+          stopError: undefined,
           exitCode: undefined,
           cliSessionId: info.cliSessionId || existing.cliSessionId,
           // A card restored without a name learns it from the respawn.
@@ -1706,6 +1909,7 @@ export class AgentMonitorStore implements OnDestroy {
       const oldCard = this.findReplacementCard(list, info, parentSessionId);
 
       if (oldCard) {
+        this.recordSuccessor(oldCard.agentId, info.agentId);
         // The replaced card may have been created before its owner resolved,
         // so key the "resumed" marker off whichever session is known.
         const resumeScope = oldCard.parentSessionId ?? parentSessionId;
@@ -1723,6 +1927,7 @@ export class AgentMonitorStore implements OnDestroy {
           task: info.task,
           status: info.status,
           startedAt: new Date(info.startedAt).getTime(),
+          turnStartedAt: new Date(info.startedAt).getTime(),
           stdout: '',
           stderr: '',
           expanded: oldCard.expanded,
@@ -1767,6 +1972,7 @@ export class AgentMonitorStore implements OnDestroy {
         task: info.task,
         status: info.status,
         startedAt: new Date(info.startedAt).getTime(),
+        turnStartedAt: new Date(info.startedAt).getTime(),
         stdout: '',
         stderr: '',
         expanded: true,
@@ -1783,6 +1989,11 @@ export class AgentMonitorStore implements OnDestroy {
         reasoningEffort: info.reasoningEffort,
         observedModel: info.observedModel,
         supportsContinuation: info.supportsContinuation,
+        // A first spawn carries the lane's capabilities too (F3: a running ACP
+        // lane without them showed no composer until its first turn ended).
+        potentialCapabilities: info.potentialCapabilities,
+        effectiveCapabilities: info.effectiveCapabilities,
+        effectivePolicy: info.effectivePolicy,
         workflowRunId: wf.workflowRunId,
         workflowName: wf.workflowName,
         usageTotals: null,
@@ -2007,10 +2218,15 @@ export class AgentMonitorStore implements OnDestroy {
       const completedAt = info.completedAt
         ? new Date(info.completedAt).getTime()
         : Date.now();
+      const stop = settleStopRequest(agent, info);
+      // The fallback armed by markStopRequested keeps running while the stop
+      // waits for its process exit; any settled stop releases it.
+      if (!stop.stopAcknowledged) this.clearStopFallback(agent.agentId);
 
       const next = [...list];
       next[foundIndex] = {
         ...agent,
+        ...stop,
         turnSeq: info.turnSeq ?? agent.turnSeq,
         status: info.status,
         exitCode: info.exitCode,

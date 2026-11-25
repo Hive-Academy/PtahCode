@@ -174,7 +174,8 @@ export function claudeLaneTurnContent(
   const text = withFileReferences(message, content?.files);
   const images = content?.images ?? [];
   if (images.length === 0) return text;
-  const blocks: Exclude<PromptTurnContent, string> = [{ type: 'text', text }];
+  // The API refuses an empty text block: an image-only turn sends images only.
+  const blocks: Exclude<PromptTurnContent, string> = text.trim() ? [{ type: 'text', text }] : [];
   for (const image of images) {
     const mediaType = resolveImageMediaType(image.mediaType, image.data);
     if (mediaType === null)
@@ -371,8 +372,12 @@ export class ClaudeSdkLaneRunner {
       emitSegment,
       emitStreamEvent,
       agentName: agentName,
-      onSessionResolved: (sessionId: string) => {
+      onSessionResolved: (sessionId: string, model?: string) => {
         resolvedSessionId = sessionId;
+        // A lane started on the CLI default (a resume with no stored model)
+        // learns its resolved model here, so the composer names it (D8).
+        // `''` is unresolved too (`PtahCliRegistry.spawnAgent` passes it when no model resolves).
+        if (!currentModel && model) currentModel = model;
         // The system init: the lane's own account can be read from here. A
         // named lane keys an unproved owner to its certified route.
         lanePlanLimits.onSystemInit(sdkQuery, context.named?.route);
@@ -398,6 +403,7 @@ export class ClaudeSdkLaneRunner {
       },
       onTurnResult: ({ subtype, userMessageUuids }) => {
         if (userMessageUuids !== undefined) reportsMessageUuids = true;
+        logResultUuids(userMessageUuids);
         reconcileSteers(userMessageUuids);
         settling = settledByResult(userMessageUuids);
         for (const turn of settling) dropTurn(turn);
@@ -453,6 +459,24 @@ export class ClaudeSdkLaneRunner {
      */
     const supportsSteer = (): boolean =>
       reportsMessageUuids && toolInFlight && turnRunning();
+    /**
+     * One debug line per result frame (D2): how many prompt uuids the CLI
+     * listed (`null` when the frame has no `user_message_uuids`) and how many
+     * pending steers it matched. Ids only, never message text. Runs before
+     * `reconcileSteers` clears the pending steers.
+     */
+    const logResultUuids = (consumed?: readonly string[]): void => {
+      const listed = new Set(consumed ?? []);
+      let matchedSteers = 0;
+      for (const uuid of pendingSteers.keys()) if (listed.has(uuid)) matchedSteers++;
+      this.logger.debug('[ClaudeLane] result frame user_message_uuids', {
+        agentName,
+        uuidCount: consumed === undefined ? null : consumed.length,
+        ...(consumed !== undefined ? { uuids: consumed.slice(0, 16) } : {}),
+        pendingSteers: pendingSteers.size,
+        matchedSteers,
+      });
+    };
     /**
      * A steer the result frame does not list was not folded in: the CLI runs
      * it as its own turn, in push order, right after the turn that was last
@@ -607,11 +631,19 @@ export class ClaudeSdkLaneRunner {
           models: models.status,
           commands: commands.status,
         });
+      const selectedModel = models.status === 'fulfilled'
+        ? models.value.find((model) => model.value === currentModel)
+        : undefined;
+      const efforts = selectedModel?.supportsEffort === false
+        ? []
+        : selectedModel?.supportsEffort === true && selectedModel.supportedEffortLevels?.length
+          ? selectedModel.supportedEffortLevels
+          : EFFORT_LEVELS;
       const catalog: LaneTurnOptionsCatalog & { readonly error?: string } = {
         models: models.status === 'fulfilled'
           ? models.value.map((model): CliModelInfo => ({ id: model.value, name: model.displayName }))
           : [],
-        efforts: [...EFFORT_LEVELS],
+        efforts: [...efforts],
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
         commands: commands.status === 'fulfilled'
@@ -749,7 +781,7 @@ export class ClaudeSdkLaneRunner {
           throw error;
         }
       },
-      // Dormant until the manifest declares steer (Batch 30, after live L4).
+      // Only where the manifest declares steer (both Claude manifests do since live L4).
       ...(context.manifestSteer?.state === 'supported' ? { steer, supportsSteer } : {}),
       applyTurnSettings,
       // The SDK accepts image blocks on every turn; whether the model can

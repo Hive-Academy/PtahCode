@@ -24,9 +24,9 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   ClaudeCliAdapter,
-  CLAUDE_NAMED_RESUME_IMAGES_TEXT,
   type ClaudeCliAdapterDependencies,
 } from './claude-cli.adapter';
+import { LANE_IMAGES_NAMED_RESUME_TEXT } from '../messaging/agent-effective-capabilities';
 import type { ClaudeCliCommandOptions } from './cli-adapter.interface';
 import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
@@ -193,6 +193,28 @@ describe('ClaudeCliAdapter constructibility', () => {
 });
 
 describe('ClaudeCliAdapter native SDK execution', () => {
+  it('lists native effort support only when the SDK reports a definite answer', async () => {
+    const f = fixture();
+    const description = 'fixture';
+    f.models.mockResolvedValue([
+      { value: 'none', displayName: 'None', description, supportsEffort: false },
+      {
+        value: 'supported', displayName: 'Supported', description,
+        supportsEffort: true, supportedEffortLevels: ['max', 'low'],
+      },
+      { value: 'absent-levels', displayName: 'Absent levels', description, supportsEffort: true },
+      { value: 'empty-levels', displayName: 'Empty levels', description, supportsEffort: true, supportedEffortLevels: [] },
+      { value: 'absent-flag', displayName: 'Absent flag', description, supportedEffortLevels: ['high'] },
+    ]);
+    await expect(f.adapter.listModels()).resolves.toStrictEqual([
+      { id: 'none', name: 'None', efforts: { provenance: 'native', supported: [], default: null } },
+      { id: 'supported', name: 'Supported', efforts: { provenance: 'native', supported: ['max', 'low'], default: null } },
+      { id: 'absent-levels', name: 'Absent levels' },
+      { id: 'empty-levels', name: 'Empty levels' },
+      { id: 'absent-flag', name: 'Absent flag' },
+    ]);
+  });
+
   it('passes phase denials into MCP assembly and SDK options', async () => {
     const f = fixture();
     const toolProfile = { disallowedTools: ['ptah_task_create'], permission: 'allow' as const };
@@ -241,11 +263,8 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       undefined,
     );
     const context = f.run.mock.calls[0][0];
-    // The manifest's steer reaches the runner; it stays unsupported (dormant).
-    expect(context.manifestSteer).toEqual({
-      state: 'unsupported',
-      reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.',
-    });
+    // The manifest's steer reaches the runner (supported since live L4).
+    expect(context.manifestSteer).toEqual({ state: 'supported' });
     expect(f.query).toHaveBeenCalledWith({
       prompt: context.mailbox.prompt,
       options: context.options,
@@ -299,7 +318,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     expect(f.adapter.supportsMcp).toBe(true);
     expect(f.adapter.roleChannel).toBe('system-prompt');
     expect(handle.supportsContinuation?.()).toBe(true);
-    expect(handle.steer).toBeUndefined();
+    // Steer is exposed, but offered only from a proved turn with a tool running.
+    expect(typeof handle.steer).toBe('function');
+    expect(handle.supportsSteer?.()).toBe(false);
     expect(typeof handle.interrupt).toBe('function');
     handle.setAgentId?.('tracked-id');
     expect(f.limits.attach).toHaveBeenCalledWith('tracked-id');
@@ -333,7 +354,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       ...f.input, resumeSessionId: 'resume-1',
       accountAdmission: { kind: 'omitted' } as unknown as ClaudeCliCommandOptions['accountAdmission'],
       turnImages: [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }],
-    })).rejects.toThrow(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
+    })).rejects.toThrow(LANE_IMAGES_NAMED_RESUME_TEXT);
     expect(f.run).not.toHaveBeenCalled();
   });
 
@@ -350,8 +371,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       .toBe(reported.messaging.continuation.state === 'supported');
     expect(typeof handle.interrupt === 'function')
       .toBe(reported.messaging.interrupt.state === 'supported');
-    expect(handle.steer).toBeUndefined();
-    expect(reported.messaging.steer.state).toBe('unsupported');
+    expect(typeof handle.steer === 'function')
+      .toBe(reported.messaging.steer.state === 'supported');
+    expect(reported.messaging.steer.state).toBe('supported');
     // Req 4.3: every claimed turn input item has its handle operation.
     expect(laneTurnInputContractViolations(handle, reported)).toEqual([]);
     expect(reported.turnInput).toMatchObject({
@@ -379,26 +401,56 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     async (request, setting, chat, expected) => {
       const f = fixture();
       f.defaults.mockReturnValue({ effort: setting, chatEffort: chat });
-      await f.adapter.runSdk({
+      const handle = await f.adapter.runSdk({
         ...f.input,
         model: 'native-model',
         reasoningEffort: request,
         role: { name: 'code-reviewer', body: '' } as AgentRoleDefinition,
       });
       expect(f.run.mock.calls[0][0].options.effort).toBe(expected);
+      expect(handle).not.toHaveProperty('effortDelivery');
       f.finish(0);
     },
   );
 
+  it.each(['native-model', 'future-model'])(
+    'keeps the spawn policy omission for %s even when adapter defaults are configured',
+    async (model) => {
+      const f = fixture();
+      const handle = await f.adapter.runSdk({
+        ...f.input,
+        model,
+        reasoningEffortResolved: true,
+        phaseKind: 'review',
+      });
+      expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+      expect(handle).not.toHaveProperty('effortDelivery');
+      f.finish(0);
+    },
+  );
+
+  it('reports when the Claude transport refuses the only effort selected by spawn policy', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({
+      ...f.input,
+      reasoningEffort: 'unsupported',
+      reasoningEffortResolved: true,
+    });
+    expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'lane-refused' });
+    f.finish(0);
+  });
+
   it('does not infer reviewer effort from a name in an implement phase', async () => {
     const f = fixture();
     f.defaults.mockReturnValue({});
-    await f.adapter.runSdk({
+    const handle = await f.adapter.runSdk({
       ...f.input,
       phaseKind: 'implement',
       role: { name: 'custom-reviewer', body: '' } as AgentRoleDefinition,
     });
     expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle).not.toHaveProperty('effortDelivery');
     f.finish(0);
   });
 
@@ -493,8 +545,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     const f = fixture();
     f.models.mockRejectedValue(new Error('unavailable'));
     await expect(f.adapter.listModels()).resolves.toEqual([]);
-    await f.adapter.runSdk({ ...f.input, reasoningEffort: 'high' });
+    const handle = await f.adapter.runSdk({ ...f.input, reasoningEffort: 'high' });
     expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'lane-refused' });
     f.finish(0);
   });
 

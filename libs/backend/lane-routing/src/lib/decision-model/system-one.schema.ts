@@ -68,7 +68,10 @@ const CompactSystemOneStateSchema = z
     legend: z.string(),
     availableExecutors: z.record(
       z.string(),
-      z.tuple([z.string(), z.string(), z.string()]),
+      z.union([
+        z.tuple([z.string(), z.string(), z.string()]),
+        z.tuple([z.string(), z.string(), z.string(), z.string()]),
+      ]),
     ),
     pastOutcomes: z.record(z.string(), z.tuple([z.number(), z.number()])),
   })

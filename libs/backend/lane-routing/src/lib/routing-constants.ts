@@ -168,6 +168,20 @@ export const DECISION_REQUEST_TIMEOUT_REMOTE_MS = 3000;
 /** Model lists for every row, each row raced on its own. */
 export const MODEL_LISTING_BUDGET_MS = 2000;
 
+/** Age at which a successful catalog read is refreshed in the background. */
+export const CATALOG_REFRESH_AGE_MS = 10 * 60 * 1000;
+/** Deadline for one background catalog read, above the underlying source bounds. */
+export const CATALOG_REFRESH_TIMEOUT_MS = 20_000;
+/** Time before retrying a failed catalog read. */
+export const CATALOG_RETRY_AFTER_MS = 60 * 1000;
+/** Global state storage key for the lane catalog snapshot. */
+export const CATALOG_STORAGE_KEY = 'laneRouting.catalog.v1';
+
+/** One routed run in this many explores an under-sampled pair. */
+export const EXPLORATION_PERIOD = 5;
+/** Number of recent route records retained for spawn lookup. */
+export const ROUTE_RECORD_CAP = 200;
+
 /** Gather budget inside the overall call budget. Separate from listing. */
 export const GATHER_BUDGET_MS = 2000;
 

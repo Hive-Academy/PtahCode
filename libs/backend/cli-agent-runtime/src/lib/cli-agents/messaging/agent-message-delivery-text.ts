@@ -43,6 +43,8 @@ export function formatAgentMessageDeliveryText(
   body: string,
   ackRequested: boolean,
 ): string {
-  const text = `[Ptah message ${messageId} from ${agentMessageSenderLabel(sender)}]\n\n${body}`;
+  const header = `[Ptah message ${messageId} from ${agentMessageSenderLabel(sender)}]`;
+  // An image-only message has no text: the header stands alone.
+  const text = body.trim() ? `${header}\n\n${body}` : header;
   return ackRequested ? `${text}\n\n${agentMessageAckLine(messageId)}` : text;
 }

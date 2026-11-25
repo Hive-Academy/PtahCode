@@ -33,6 +33,7 @@ const EnvelopeLineageSchema = z.object({
   terminalAt: z.number().int().nonnegative().optional(),
   mode: z.string().optional(),
   bodyBytes: z.number().int().nonnegative().optional(),
+  bodyStored: z.literal(true).optional(),
   everDispatched: z.boolean().optional(),
 });
 

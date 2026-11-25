@@ -166,8 +166,13 @@ export function buildSessionAgentRoster(
         cliId: a.cli,
         providerId: a.providerId ?? null,
         agentType: null,
-        status: cliLaneStatusWord(a.status, openRequestIds.length),
-        startedAt: a.startedAt,
+        status: cliLaneStatusWord(a.status, openRequestIds.length, {
+          stopping: a.stopRequestedAt !== undefined,
+          stoppedByUser: a.stoppedByUser,
+        }),
+        // The current (or last) turn, not the record's first start: a warm
+        // lane's header timer must not count the idle time between turns.
+        startedAt: a.turnStartedAt ?? a.startedAt,
         endedAt: a.completedAt ?? null,
         activity: cliActivity(a),
         usageTotals: a.usageTotals,
@@ -202,7 +207,8 @@ export function buildSessionAgentRoster(
       agent.status === 'starting' ||
       agent.status === 'running' ||
       agent.status === 'waiting' ||
-      agent.status === 'queued',
+      agent.status === 'queued' ||
+      agent.status === 'stopping',
   );
   return [
     orchestratorAgent(

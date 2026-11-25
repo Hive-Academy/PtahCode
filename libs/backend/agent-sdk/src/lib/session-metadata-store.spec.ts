@@ -131,6 +131,137 @@ const RESTORE_MANIFEST: CliAdapterManifest = {
   mcp: { state: 'unsupported', reason: 'No MCP transport.' },
 };
 
+/**
+ * Faithful copies of current `capabilities()` output (cli-agent-runtime):
+ * the Claude lane (yolo), the Codex app-server lane, and the two ACP lanes
+ * whose `turnInput`, `usage` and `prompts` come from `acpLaneManifestSections`.
+ */
+function acpSections(
+  blocked: string[],
+  usage: NonNullable<CliAdapterManifest['usage']>,
+  reason: string,
+): Required<Pick<CliAdapterManifest, 'turnInput' | 'usage' | 'prompts'>> {
+  return {
+    turnInput: {
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported', onSteer: false },
+      files: { state: 'supported', delivery: 'reference' },
+      commands: { state: 'supported', blocked },
+      skills: { state: 'supported' },
+    },
+    usage,
+    prompts: {
+      approvals: { state: 'unsupported', reason },
+      questions: { state: 'unsupported', reason },
+    },
+  };
+}
+const CURRENT_MANIFESTS: ReadonlyArray<[string, CliAdapterManifest]> = [
+  ['claude', {
+    messaging: {
+      steer: { state: 'supported' }, interrupt: { state: 'supported' },
+      continuation: { state: 'supported' }, resume: { state: 'supported' },
+    },
+    roleChannel: 'system-prompt',
+    permissionModes: {
+      plan: { state: 'supported', nativeMode: 'plan', networkModes: ['allow'] },
+      ask: { state: 'supported', nativeMode: 'default', networkModes: ['allow'] },
+      'auto-edit': { state: 'supported', nativeMode: 'acceptEdits', networkModes: ['allow'] },
+      yolo: { state: 'supported', nativeMode: 'bypassPermissions', networkModes: ['allow'] },
+    },
+    networkModes: {
+      allow: { state: 'supported' },
+      deny: { state: 'unsupported', reason: 'The Claude SDK has no verified general network sandbox.' },
+    },
+    limitReader: { state: 'available', source: 'anthropic' },
+    mcp: { state: 'supported' },
+    turnInput: {
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported', onSteer: false, onResume: true },
+      files: { state: 'supported', delivery: 'path-text' },
+      commands: { state: 'supported', blocked: [] },
+      skills: { state: 'supported' },
+    },
+    usage: { timing: 'live' },
+    prompts: {
+      approvals: { state: 'unsupported', reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.' },
+      questions: { state: 'supported' },
+    },
+  }],
+  ['codex', {
+    messaging: {
+      steer: { state: 'supported' }, interrupt: { state: 'supported' },
+      continuation: { state: 'supported' }, resume: { state: 'supported' },
+    },
+    roleChannel: 'developer-instructions',
+    permissionModes: {
+      plan: { state: 'supported', nativeMode: 'read-only', networkModes: ['deny'] },
+      ask: { state: 'unsupported', reason: 'Codex lanes force approvalPolicy never; no Ptah approval route exists.', networkModes: [] },
+      'auto-edit': { state: 'supported', nativeMode: 'workspace-write', networkModes: ['allow', 'deny'] },
+      yolo: { state: 'supported', nativeMode: 'danger-full-access', networkModes: ['allow'] },
+    },
+    networkModes: { allow: { state: 'supported' }, deny: { state: 'supported' } },
+    limitReader: { state: 'available', source: 'openai-codex' },
+    mcp: { state: 'supported' },
+    turnInput: {
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported', onSteer: true },
+      files: { state: 'supported', delivery: 'reference' },
+      commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
+      skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
+    },
+    usage: { timing: 'live' },
+    prompts: {
+      approvals: { state: 'unsupported', reason: 'Codex lanes force approvalPolicy never; no Ptah approval route exists.' },
+      questions: { state: 'unsupported', reason: 'Codex lane questions do not reach Ptah.' },
+    },
+  }],
+  ['grok', {
+    messaging: {
+      steer: { state: 'unsupported', reason: 'ACP messages begin the next turn.' },
+      interrupt: { state: 'supported' }, continuation: { state: 'supported' }, resume: { state: 'supported' },
+    },
+    roleChannel: 'task-prompt',
+    permissionModes: {
+      plan: { state: 'unsupported', reason: 'Grok exposes no native read-only plan flag.', networkModes: [] },
+      ask: { state: 'unsupported', reason: 'Grok exposes no native per-lane ask flag.', networkModes: [] },
+      'auto-edit': { state: 'unsupported', reason: 'Grok exposes no native scoped edit flag.', networkModes: [] },
+      yolo: { state: 'supported', nativeMode: '--always-approve', networkModes: ['allow'] },
+    },
+    networkModes: {
+      allow: { state: 'supported' },
+      deny: { state: 'unsupported', reason: 'No verified ACP network sandbox exists.' },
+    },
+    limitReader: { state: 'available', source: 'grok' },
+    mcp: { state: 'supported' },
+    ...acpSections(['always-approve'], { timing: 'live' }, 'Grok exposes no native per-lane ask flag.'),
+  }],
+  ['antigravity', {
+    messaging: {
+      steer: { state: 'unsupported', reason: 'ACP messages begin the next turn.' },
+      interrupt: { state: 'supported' }, continuation: { state: 'supported' }, resume: { state: 'supported' },
+    },
+    roleChannel: 'task-prompt',
+    permissionModes: {
+      plan: { state: 'supported', nativeMode: 'ACP mode plan', networkModes: ['allow'] },
+      ask: { state: 'unsupported', reason: 'A lane has no approval route; tool approvals are decided headlessly.', networkModes: [] },
+      'auto-edit': { state: 'supported', nativeMode: 'ACP mode accept-edits', networkModes: ['allow'] },
+      yolo: { state: 'supported', nativeMode: '--dangerously-skip-permissions, ACP mode auto', networkModes: ['allow'] },
+    },
+    networkModes: {
+      allow: { state: 'supported' },
+      deny: { state: 'unsupported', reason: 'No verified general network sandbox exists.' },
+    },
+    limitReader: { state: 'available', source: 'antigravity' },
+    mcp: { state: 'supported' },
+    ...acpSections([], { timing: 'turn-end', reason: 'Antigravity reports token usage when the turn ends.' },
+      'A lane has no approval route; tool approvals are decided headlessly.'),
+  }],
+];
+
 function cliRef(
   overrides: Partial<CliSessionReference> = {},
 ): CliSessionReference {
@@ -2710,6 +2841,54 @@ describe('SessionMetadataStore', () => {
       const [run] = await store.getCliSessionsForRestore('sess-1');
       expect(run.potentialCapabilities).toEqual(RESTORE_MANIFEST);
       expect(run.workspaceKey).toBe('/workspace/root');
+    });
+
+    it.each(CURRENT_MANIFESTS)('round-trips a current %s manifest with turnInput, usage and prompts', async (_cli, manifest) => {
+      await seedRun(undefined, { potentialCapabilities: manifest });
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run.potentialCapabilities).toEqual(manifest);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        '[SessionMetadataStore] Dropped an invalid persisted lane manifest', expect.anything(),
+      );
+    });
+
+    it('still restores a manifest persisted before the optional sections existed', async () => {
+      const { turnInput: _turnInput, usage: _usage, prompts: _prompts, ...legacy } = CURRENT_MANIFESTS[0][1];
+      await seedRun(undefined, { potentialCapabilities: legacy });
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run.potentialCapabilities).toEqual(legacy);
+    });
+
+    it.each<[string, (manifest: CliAdapterManifest) => unknown]>([
+      ['an unknown turn input key', (m) => ({ ...m, turnInput: { ...m.turnInput, extra: { state: 'supported' } } })],
+      ['an unknown image flag', (m) => ({ ...m, turnInput: { ...m.turnInput, images: { state: 'supported', secret: true } } })],
+      ['a bad usage timing', (m) => ({ ...m, usage: { timing: 'sometimes' } })],
+      ['a prompts section without questions', (m) => ({ ...m, prompts: { approvals: { state: 'supported' } } })],
+      ['an unknown top-level key', (m) => ({ ...m, commands: [] })],
+    ])('drops a manifest with %s and warns with its issue paths', async (_name, mutate) => {
+      await seedRun(undefined, { potentialCapabilities: mutate(CURRENT_MANIFESTS[0][1]) });
+      const [run] = await store.getCliSessionsForRestore('sess-1');
+      expect(run).not.toHaveProperty('potentialCapabilities');
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[SessionMetadataStore] Dropped an invalid persisted lane manifest',
+        { agentId: expect.any(String), issuePaths: expect.arrayContaining([expect.any(String)]) },
+      );
+    });
+
+    it('logs no persisted value when it drops a manifest', async () => {
+      await seedRun(undefined, {
+        potentialCapabilities: {
+          ...RESTORE_MANIFEST,
+          messaging: { ...RESTORE_MANIFEST.messaging, secret: 'do-not-restore' },
+        },
+      });
+      await store.getCliSessionsForRestore('sess-1');
+      const warned = logger.warn.mock.calls.filter(
+        ([message]) => message === '[SessionMetadataStore] Dropped an invalid persisted lane manifest',
+      );
+      expect(warned).toHaveLength(1);
+      expect(warned[0][1]).toEqual({ agentId: expect.any(String), issuePaths: ['messaging'] });
+      expect(JSON.stringify(warned)).not.toContain('do-not-restore');
     });
 
     it('drops only a malformed manifest and keeps a valid workspace key', async () => {

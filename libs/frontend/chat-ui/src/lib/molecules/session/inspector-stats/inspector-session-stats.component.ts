@@ -1,14 +1,16 @@
+import { sessionModelDisplayName } from '../session-model-name';
 import {
   ChangeDetectionStrategy,
   Component,
   computed,
   inject,
   input,
+  linkedSignal,
 } from '@angular/core';
 import { ModelStateService } from '@ptah-extension/core';
 import {
   PtahBadgeDirective,
-  PtahDisclosureComponent,
+  NativePopoverComponent,
   PtahMeterComponent,
   PtahStatComponent,
   PtahTimerComponent,
@@ -17,8 +19,7 @@ import {
   type PtahMeterSegment,
   type PtahTimeInput,
 } from '@ptah-extension/ui';
-import { resolveModelDisplayName } from '@ptah-extension/shared';
-import { Bot, Boxes, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
+import { Bot, Boxes, ChevronDown, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
 import { formatExpandedUsageCost, inspectorBudgetDisplay, SDK_BUDGET_SCOPE } from '../session-budget-format';
 import { SessionModelBreakdownComponent } from '../session-model-breakdown.component';
 import { StatsTileExpansionState } from '../plan-limits/stats-tile-expansion.state';
@@ -41,7 +42,7 @@ let nextSessionId = 0;
   imports: [
     LucideAngularModule,
     PtahBadgeDirective,
-    PtahDisclosureComponent,
+    NativePopoverComponent,
     PtahMeterComponent,
     PtahStatComponent,
     PtahTimerComponent,
@@ -142,35 +143,59 @@ let nextSessionId = 0;
           <lucide-angular ptahStatIcon class="stat-icon" [img]="AgentsIcon" aria-hidden="true" />
         </ptah-stat>
 
-        <ptah-disclosure
-          class="models contents"
+        <div
+          class="metric models-cell min-w-0 border-l border-surface-border pl-2 pt-2"
           [class.models-wide]="!budget()"
-          label="Models"
-          size="sm"
-          [region]="true"
-          [open]="modelsOpen()"
-          (openChange)="setModelsOpen($event)"
-          (keydown.escape)="closeModels($event, modelsHost)"
+          data-testid="session-models"
         >
-          <span ptahDisclosureSummary class="col-span-2 grid min-w-0">
-            <span class="inline-flex items-center gap-1 text-sm font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
-              <lucide-angular class="size-3 shrink-0 text-base-content-muted" [img]="ModelsIcon" aria-hidden="true" />
-              {{ modelNames().length || '—' }}
-            </span>
-            @if (modelSummary(); as summary) {
-              <span class="truncate text-xs font-normal text-base-content-muted">{{ summary }}</span>
-            }
-          </span>
-          <div #modelsHost>
-            @if (modelsOpen()) {
-              <ptah-session-model-breakdown
-                class="block pt-2"
-                [snapshot]="stats().snapshot"
-                [sources]="metrics()"
-              />
-            }
-          </div>
-        </ptah-disclosure>
+          <ptah-native-popover
+            class="block min-w-0"
+            [isOpen]="modelsOpen()"
+            placement="bottom-end"
+            [hasBackdrop]="true"
+            backdropClass="transparent"
+            (closed)="setModelsOpen(false)"
+          >
+            <button
+              trigger
+              type="button"
+              class="models-trigger grid w-full min-w-0 gap-0.5 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              aria-haspopup="dialog"
+              [attr.aria-expanded]="modelsOpen()"
+              [attr.aria-controls]="modelsOpen() ? modelsPanelId : null"
+              (click)="setModelsOpen(!modelsOpen())"
+            >
+              <span class="flex items-center gap-1 text-xs text-base-content-muted">
+                Models
+                <lucide-angular class="size-3 shrink-0" [img]="ModelsChevron" aria-hidden="true" />
+              </span>
+              <span class="inline-flex items-center gap-1 text-sm font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
+                <lucide-angular class="size-3 shrink-0 text-base-content-muted" [img]="ModelsIcon" aria-hidden="true" />
+                {{ modelNames().length || '—' }}
+              </span>
+              @if (modelSummary(); as summary) {
+                <span class="truncate text-xs font-normal text-base-content-muted" [title]="modelDetail()"
+                  data-testid="session-models-summary">{{ summary }}</span>
+              }
+            </button>
+            <div
+              content
+              [id]="modelsPanelId"
+              class="w-[21rem] max-w-[calc(100vw-2rem)]"
+              role="dialog"
+              aria-label="Usage by model"
+            >
+              @if (modelsOpen()) {
+                <ptah-session-model-breakdown
+                  class="block"
+                  [snapshot]="stats().snapshot"
+                  [sources]="metrics()"
+                  [currentModel]="currentModelId()"
+                />
+              }
+            </div>
+          </ptah-native-popover>
+        </div>
 
         @if (budget(); as view) {
           <ptah-stat
@@ -255,34 +280,9 @@ let nextSessionId = 0;
     .metric ::ng-deep [ptahStatIcon].source-swatch { top: 0.25rem; }
     .stat-icon { width: 0.75rem; height: 0.75rem; color: var(--bcm, oklch(var(--bc) / 0.6)); }
     .session-section ::ng-deep > section { padding: 0.75rem; gap: 0.5rem; }
-    .models { display: contents; }
-    .models ::ng-deep > div:first-child {
-      grid-area: 2 / 2 / 3 / 3;
-      min-width: 0;
-      border-inline-start: 1px solid var(--surface-border);
-      padding: 0.5rem;
-      align-items: start;
-    }
-    .models-wide ::ng-deep > div:first-child { grid-column-end: 4; }
-    .models ::ng-deep > div:first-child > button {
-      display: grid;
-      grid-template-columns: auto auto;
-      justify-content: start;
-      column-gap: 0.25rem;
-      row-gap: 0.125rem;
-      font-weight: normal;
-    }
-    .models ::ng-deep > div:first-child > button > svg {
-      grid-column: 2;
-      grid-row: 1;
-      width: 0.75rem;
-      height: 0.75rem;
-    }
-    .models ::ng-deep > div:first-child > button > span:nth-child(2) {
-      grid-column: 1;
-      grid-row: 1;
-    }
-    .models ::ng-deep > div:last-child { grid-area: 3 / 1 / 4 / -1; min-width: 0; }
+    .models-cell { grid-area: 2 / 2 / 3 / 3; }
+    .models-cell.models-wide { grid-column-end: 4; }
+    .models-cell ::ng-deep .popover-trigger { display: block; min-width: 0; }
     .source-swatch { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 0.125rem; }
     .sdk-swatch { background: var(--ptah-gold, var(--ptah-accent-ink)); }
     .cli-swatch { background: var(--state-ink-run); }
@@ -317,6 +317,8 @@ export class InspectorSessionStatsComponent {
   });
 
   protected readonly headingId = `ptah-session-heading-${++nextSessionId}`;
+  protected readonly modelsPanelId = `ptah-session-models-${nextSessionId}`;
+  protected readonly ModelsChevron = ChevronDown;
   protected readonly TokensIcon = Coins;
   protected readonly CostIcon = CircleDollarSign;
   protected readonly TimeIcon = Clock;
@@ -372,29 +374,62 @@ export class InspectorSessionStatsComponent {
     return count === null ? 'Agents unavailable' : `Agents: ${count}${live ? `, ${live}` : ''}`;
   });
 
-  protected readonly modelsOpen = computed(() => this.expansion.isOpen(this.sessionKey(), 'models'));
-  protected readonly modelNames = computed(() => {
-    const { snapshot, liveModelStats } = this.stats();
-    const primary = liveModelStats?.model ?? snapshot?.model;
-    const rows = snapshot?.modelUsageList;
-    const ids = rows?.length ? rows.map(({ model }) => model) : primary ? [primary] : [];
-    return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
+  /**
+   * Local, and closed again on a session switch: a popover is a top-layer
+   * dialog with a backdrop, so it must never reopen on its own after a remount.
+   */
+  protected readonly modelsOpen = linkedSignal({ source: this.sessionKey, computation: () => false });
+  /**
+   * The model the session runs now: the model pill's model (the selection the
+   * next turn uses), else the latest turn's primary model, else the snapshot's.
+   * The latest turn's pick ranks by cost, so a session that switched to Haiku
+   * can still report an older model there; the pill does not (round 6).
+   * When a usage row is the same model (a dated id, a tier alias), the row's
+   * id is used, so it is matched and named once.
+   */
+  protected readonly currentModelId = computed(() => {
+    const { snapshot, liveModelStats, currentModel } = this.stats();
+    const id = currentModel || liveModelStats?.model || snapshot?.model || null;
+    if (!id) return null;
+    const rows = (snapshot?.modelUsageList ?? []).filter((row) => sameModel(row.model, id));
+    if (rows.length <= 1) return rows[0]?.model ?? id;
+    // Several rows match (a tier alias such as `haiku` over two Haiku
+    // versions): the exact id, else the row the latest turn ran, else the
+    // newest first-used row (the list is in first-use order).
+    const live = liveModelStats?.model;
+    return (rows.find((row) => row.model === id) ??
+      (live ? rows.find((row) => row.model.toLowerCase() === live.toLowerCase()) : undefined) ??
+      rows[rows.length - 1]).model;
   });
+  protected readonly modelNames = computed(() => {
+    const { snapshot } = this.stats();
+    const primary = this.currentModelId();
+    const rows = snapshot?.modelUsageList;
+    const used = rows?.length ? rows.map(({ model }) => model) : [];
+    // The session's current model leads the summary ("Haiku 4.5 +2"); the
+    // usage list is in first-use order, so its head is the session's first
+    // model, not the one it runs now. Display names, raw ids only when unknown.
+    const ids = primary ? [primary, ...used.filter((id) => id !== primary)] : used;
+    return ids.map((id) => sessionModelDisplayName(id, this.modelState.availableModels()));
+  });
+  /** "Haiku 4.5 +2 earlier": the current model, then how many ran only in earlier turns. */
   protected readonly modelSummary = computed(() => {
     const [first, ...other] = this.modelNames();
-    return other.length ? `${first} +${other.length}` : first;
+    if (!other.length) return first;
+    return this.currentModelId() ? `${first} +${other.length} earlier` : `${first} +${other.length}`;
+  });
+  /** The summary's tooltip: which model is current and which ran earlier in this session. */
+  protected readonly modelDetail = computed(() => {
+    const [first, ...other] = this.modelNames();
+    if (!first) return '';
+    if (!this.currentModelId()) return [first, ...other].join(', ');
+    return other.length
+      ? `Current model: ${first}. Earlier in this session: ${other.join(', ')}.`
+      : `Current model: ${first}.`;
   });
 
   protected setModelsOpen(open: boolean): void {
-    this.expansion.setOpen(this.sessionKey(), 'models', open);
-  }
-
-  protected closeModels(event: Event, body: HTMLElement): void {
-    if (!this.modelsOpen()) return;
-    event.preventDefault();
-    event.stopPropagation();
-    this.setModelsOpen(false);
-    body.closest('ptah-disclosure')?.querySelector('button')?.focus();
+    this.modelsOpen.set(open);
   }
 
   private metric(id: UsageMetric, total: UsageTotal) {
@@ -436,4 +471,22 @@ export class InspectorSessionStatsComponent {
       laneCount: laneAmounts.length,
     } as const;
   }
+}
+
+/** A provider date suffix: `-20251001` or `-2025-10-01`. */
+const MODEL_DATE_SUFFIX = /^-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * Whether two model ids name the same model: equal ignoring case, one is the
+ * other plus a date suffix, or one is a tier alias (`haiku`) of the other.
+ */
+export function sameModel(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  if (x === y) return true;
+  const dated = (longer: string, base: string) => longer.startsWith(base) && MODEL_DATE_SUFFIX.test(longer.slice(base.length));
+  if (dated(x, y) || dated(y, x)) return true;
+  // A tier word after the vendor prefix: `haiku` names `claude-haiku-4-5`, `claude` names nothing.
+  const alias = (word: string, id: string) => !word.includes('-') && id.split('-').slice(1).includes(word);
+  return alias(x, y) || alias(y, x);
 }

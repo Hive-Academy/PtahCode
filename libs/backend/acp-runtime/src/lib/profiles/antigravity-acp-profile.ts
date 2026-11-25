@@ -53,6 +53,7 @@ import type {
 
 const SIGN_IN_HINT = 'Run agy once in a terminal to sign in.';
 const JSONRPC_INVALID_PARAMS = -32602;
+const EFFORT_CONFIG_ID = 'thought_level';
 
 /** The effort suffix of an `agy models` id; such an id needs no `thought_level`. */
 const MODEL_EFFORT_SUFFIX = /-(?:low|medium|high|xhigh|max)$/;
@@ -256,6 +257,7 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   displayName: 'Antigravity',
   signInHint: SIGN_IN_HINT,
   cancelBehavior: 'await-reply',
+  effortConfigId: EFFORT_CONFIG_ID,
 
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     const windows = process.platform === 'win32';
@@ -336,7 +338,7 @@ export const antigravityAcpProfile: AcpVendorProfile = {
       ? THOUGHT_LEVELS[options.reasoningEffort]
       : undefined;
     if (level && !(options.model && MODEL_EFFORT_SUFFIX.test(options.model))) {
-      entries.push({ configId: 'thought_level', value: level });
+      entries.push({ configId: EFFORT_CONFIG_ID, value: level });
     }
     return entries;
   },

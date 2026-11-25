@@ -146,8 +146,12 @@ export function sqliteFixture(file: string): {
       ended_at INTEGER NOT NULL, duration_ms INTEGER, input_tokens INTEGER,
       output_tokens INTEGER, cost_usd REAL, routing_source TEXT NOT NULL,
       revise_rounds INTEGER NOT NULL DEFAULT 0, final_review TEXT,
-      deliverables_declared_at INTEGER, created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      deliverables_declared_at INTEGER, model_source TEXT, resolved_model TEXT,
+      resolved_model_provenance TEXT, requested_effort TEXT, effort TEXT,
+      effort_source TEXT, effort_provenance TEXT, effort_disposition TEXT,
+      resolved_effort TEXT, resolved_effort_provenance TEXT, routed_model TEXT,
+      routed_effort TEXT, decision_model TEXT, proposal_confidence REAL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS lane_outcome_report_receipts (
       report_id TEXT NOT NULL PRIMARY KEY, run_id TEXT NOT NULL,
