@@ -9,6 +9,7 @@ import type { LaneLimitState } from '@ptah-extension/shared';
 import {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,
+  type ChosenEntry,
   type LimitEvidence,
   type ModelEffort,
   type ModelTier,
@@ -24,6 +25,8 @@ import {
   DIAGNOSTIC_LINE_MAX_CHARS,
   DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
   EXPLANATION_PREFERENCE_DIAGNOSTICS_CAP,
+  EXPLORATION_MIN_SAMPLES,
+  EXPLORATION_PERIOD,
   SCORE_MAX,
   SCORE_MIN,
 } from '../routing-constants';
@@ -103,6 +106,8 @@ export interface ChosenReasonFacts {
   readonly executor: ChosenExecutor;
   readonly model: string;
   readonly score: number;
+  readonly parts?: ScoreParts;
+  readonly effortCheck?: ChosenEntry['effortCheck'];
   readonly source: ChoiceSource;
   readonly cell: MatrixCell;
   readonly limitState: LaneLimitState;
@@ -606,10 +611,17 @@ export function compileChosenReason(input: ChosenReasonInput): string {
   if (!input.inputRowIds.includes(input.executor.id)) {
     throw new Error(`chosen executor ${input.executor.id} is not an input row`);
   }
-  return joinClauses([
+  const { effort, evidence, explore, sampleCount = 0 } = input.parts ?? {};
+  const scoredPair =
+    input.executor.kind === 'lane' &&
+    effort !== undefined &&
+    evidence !== undefined;
+  const clauses = [
     `phase ${input.phaseId}`,
     executorClause(input.executor),
-    `model ${input.model}`,
+    scoredPair
+      ? `model ${input.model} effort ${effort} (${evidence}, ${sampleCount} samples)`
+      : `model ${input.model}`,
     `score ${input.score}`,
     provenanceClause(input.cell),
     `limit state ${input.limitState}`,
@@ -617,7 +629,18 @@ export function compileChosenReason(input: ChosenReasonInput): string {
     preferenceClause(input.preferenceChangedChoice, input.preferenceSource),
     modelProbabilityClause(input.source, input.reportedConfidence),
     fallbackClause(input.fallbackCause),
-  ]);
+  ];
+  if (scoredPair && explore === true) {
+    clauses.push(
+      `explore ${input.model}/${effort}: ${sampleCount}/${EXPLORATION_MIN_SAMPLES} samples, 1 of every ${EXPLORATION_PERIOD} routed runs`,
+    );
+  }
+  if (input.executor.kind === 'lane' && input.effortCheck?.inList === false) {
+    clauses.push(
+      `effort ${input.effortCheck.requested} not in ${input.executor.id} native list; spawn sends no effort at this step`,
+    );
+  }
+  return joinClauses(clauses);
 }
 
 export function compileUnavailableReason(

@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B17 COMPLETE. B19 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B17, B19 COMPLETE. B18 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -470,7 +470,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B18 - WU14b Codex lane native values + WU15b ACP lane handle
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 49729dd5, one lane for A+B)
 - **Shape / weight**: logic / lane A (WU14b) est. 10,500; lane B (WU15b) est. 10,200. **Actual tokens**: pending
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/`):
@@ -490,8 +490,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B19 - WU7r reasons + WU9b evidence view service
 
-- **Status**: IN_PROGRESS (lane A codex 632d6454, lane B codex 01f931ea)
-- **Shape / weight**: logic / lane A (WU7r) est. 11,200; lane B (WU9b) est. 9,000. **Actual tokens**: pending
+- **Status**: COMPLETE (lane A codex 632d6454, lane B codex 01f931ea; decision 32; notes added to B25, B27)
+- **Shape / weight**: logic / lane A (WU7r) est. 11,200; lane B (WU9b) est. 9,000. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: A: `W/libs/backend/lane-routing/src/lib/reasons/compile-reasons.ts` (whole, 868 lines); `.../reasons/compile-reasons.spec.ts:1-120` + one chosen-entry describe; `.../contracts/route-decide-result.schema.ts` parts (after B17); PLAN:999-1004, PLAN:507-509. B: `.../matrix/choice-evidence.ts`, `.../catalog/lane-catalog.types.ts`, `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; `.../matrix/capability-matrix.store.ts:280-360` (summaries source); PLAN:540-605
 - **Write set**: A: `.../reasons/compile-reasons.ts`; `.../reasons/compile-reasons.spec.ts`. B: `.../evidence/routing-evidence.service.ts` (new); `.../evidence/routing-evidence.service.spec.ts` (new) (all under `W/libs/backend/lane-routing/src/lib/`)
@@ -583,6 +583,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Read set**: `W/libs/backend/lane-routing/src/lib/pipeline/phase-plan.ts` (ranges that build `ScoreInput` and call `score()`, find by `rg -n "score\(" ...phase-plan.ts`, about 250 lines); `.../pipeline/assemble-gate.ts:600-734`; `.../pipeline/assemble-gate.spec.ts:1-80`; `.../pipeline/tier-effort-policy.ts:140-195`; `.../ranking/choice.types.ts`; `.../pipeline/route-off-golden.spec.ts` (read only, harness reuse); PLAN:893-901, PLAN:502-509, PLAN:982-997
 - **Write set**: `W/libs/backend/lane-routing/src/lib/pipeline/phase-plan.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/assemble-gate.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/route-choice.spec.ts` (new)
 - **Contract excerpt**: `planRoutePhases` builds `ChoiceInput` per lane candidate only in on mode (`policyEffort`, `effortFixed`, `exploreTurn` §4.4); `assembleGateResult` writes pair model/effort/provenance/score, `effortCheck` (both modes, lane entries with listed `efforts`), reason text, and the `routeId` it receives as input; off mode `ChosenEntry.effort = plan.policy.effort`. Spec drives gather + plan + assemble with an injected `routeId` (V7).
+- **Added by decision 32**: in `pipeline/assemble-gate.ts` pass `selected.parts` as `ChosenReasonFacts.parts` and the ChosenEntry `effortCheck` to `compile-reasons` (both optional, B19). Off path passes today's parts unchanged; the golden must stay green.
 - **Depends on**: B23, B17, B19
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, high-capability tier. **Fallback**: Task subagent `backend-developer`
@@ -600,6 +601,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Read set**: `W/libs/backend/lane-routing/src/lib/route-decide.service.ts` (whole, 674 lines); `.../di/register.ts:180-285`; `.../di/tokens.ts` (whole); `W/libs/backend/lane-routing/src/index.ts` (whole); `W/libs/backend/rpc-handlers/src/lib/handlers/capability-matrix-rpc.handlers.ts:90-100` (`RotationStateReader` pattern); PLAN:511-525, PLAN:886-901, PLAN:1264 (D25)
 - **Write set**: `W/libs/backend/lane-routing/src/lib/route-decide.service.ts`; `.../route/route-record.registry.ts` (new); `.../route/route-record.registry.spec.ts` (new); `.../di/register.ts`; `.../di/tokens.ts`; `W/libs/backend/lane-routing/src/index.ts`
 - **Contract excerpt**: optional deps `performanceRouting?: { isEnabled(): boolean }` (absent = off, D25), `catalog?`, `newRouteId?: () => string` (default `crypto.randomUUID()`); read the setting once per gate call; registry insertion-order `Map` capped at `ROUTE_RECORD_CAP`, memory only; store `RouteSpawnFacts` per chosen entry (both modes) with `decisionModel` truncated to 128 and set only with a `modelProposal`; service implements `RouteRecordReader`; tokens `LANE_CATALOG_STORE`, `ROUTING_EVIDENCE_SERVICE`; DI always provides the reader; barrel exports `RouteRecordReader`, `RoutingEvidenceService`, token names.
+- **Note from B19 lane B**: register `new RoutingEvidenceService({ catalog, outcomeReader, performanceRouting })` (catalog: `get`/`refreshIfDue`; outcomeReader: the existing optional `LaneOutcomeReader`; performanceRouting: `isEnabled()`). Token, DI registration and barrel export are B25 work.
 - **Depends on**: B24, B19
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, high-capability tier. **Fallback**: Task subagent `backend-developer`
@@ -634,6 +636,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Read set**: `W/libs/backend/rpc-handlers/src/lib/handlers/capability-matrix-rpc.handlers.ts` (whole); `.../handlers/capability-matrix-rpc.handlers.spec.ts` (whole); `.../handlers/index.ts` (whole); `W/libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts:130-165`; `W/libs/backend/rpc-handlers/src/lib/host-profile/manifest.ts:165-195`; `W/libs/backend/rpc-handlers/src/index.ts` (check for handler class names); `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; PLAN:597-603
 - **Write set**: `W/libs/backend/rpc-handlers/src/lib/handlers/routing-evidence-rpc.handlers.ts` (new); `.../handlers/routing-evidence-rpc.handlers.spec.ts` (new); `.../handlers/index.ts`; `W/libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts`; `W/libs/backend/rpc-handlers/src/lib/host-profile/manifest.ts`; `W/libs/backend/rpc-handlers/src/index.ts` (only if it lists handler classes)
 - **Contract excerpt**: method `agent:getRoutingEvidence`, params `Record<string, never>` (refuse other keys); resolve `LANE_ROUTING_TOKENS.ROUTING_EVIDENCE_SERVICE`; absent or failed -> `RpcUserError('Routing evidence is unavailable.', 'PERSISTENCE_UNAVAILABLE')` as `unavailable()`.
+- **Note from B19 lane B**: the handler passes host-detected CLI rows to `service.read(rows)`; CLI detection stays out of lane-routing DI. The service rejects when persistence is known unavailable; map that to `unavailable()`.
 - **Depends on**: B25, B14
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, balanced tier. **Fallback**: Task subagent `backend-developer`
