@@ -47,10 +47,13 @@ export function codexLaneModels(input: readonly CodexModelInfo[]): CliModelInfo[
 
 /**
  * The effort levels the live catalog advertises: the union of every model's
- * `supportedEfforts` that a lane can send, in catalog order. Empty when the
+ * `supportedEfforts` in catalog order. Empty when the
  * catalog advertises none; Ptah adds no static list here.
  */
 export function codexAdvertisedEfforts(catalog: readonly CodexModelInfo[]): string[] {
-  return [...new Set(catalog.flatMap((model) => model.supportedEfforts ?? []))]
-    .filter((effort) => validatedEffort(effort) !== undefined);
+  return [...new Set(catalog.flatMap((model) => model.supportedEfforts ?? []))];
+}
+
+export function codexUnsendableEfforts(efforts: readonly string[]): string[] {
+  return efforts.filter((effort) => validatedEffort(effort) === undefined);
 }

@@ -21,6 +21,7 @@ import {
 } from './lane-delivery-limit.gate';
 import {
   createDetection,
+  createHandle,
   createLogger,
   harness,
   idOf,
@@ -54,6 +55,57 @@ function outageOnDispatch(h: ReturnType<typeof harness>): void {
 }
 
 describe('AgentMessageCoordinator', () => {
+  describe('turn options', () => {
+    it.each([
+      { efforts: ['low', 'future-effort', 'high'], unsendableEfforts: ['future-effort'] },
+      { efforts: ['low', 'high'] },
+    ])('preserves the stopped Codex effort catalog (%j)', async (efforts) => {
+      const h = harness();
+      stopLane(h);
+      h.setInfo({ cli: 'codex' });
+      const catalog = {
+        models: [{ id: 'gpt-x', name: 'GPT X' }],
+        ...efforts,
+      };
+      (h.detection.getAdapter as jest.Mock).mockReturnValue({
+        stoppedLaneCatalog: async () => catalog,
+      });
+
+      await expect(h.coordinator.turnOptions(h.agentId)).resolves.toStrictEqual({
+        ...catalog,
+        commands: [],
+        unavailableReason: 'Commands and skills appear when the lane is running.',
+      });
+    });
+
+    it('keeps cached unsendable efforts after the lane stops, including on a model lookup failure', async () => {
+      const h = harness();
+      h.setInfo({ cli: 'codex' });
+      const catalog = {
+        models: [{ id: 'gpt-x', name: 'GPT X' }],
+        efforts: ['high', 'future-effort'],
+        unsendableEfforts: ['future-effort'],
+        commands: [],
+      };
+      const listModels = jest.fn(async () => catalog.models);
+      (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels });
+      h.tracked.sdkHandle = {
+        ...createHandle(),
+        listTurnOptions: async () => catalog,
+      };
+
+      await expect(h.coordinator.turnOptions(h.agentId)).resolves.toEqual(catalog);
+      stopLane(h);
+      await expect(h.coordinator.turnOptions(h.agentId)).resolves.toEqual(catalog);
+
+      listModels.mockRejectedValueOnce(new Error('Model lookup failed'));
+      await expect(h.coordinator.turnOptions(h.agentId)).resolves.toEqual({
+        ...catalog,
+        error: 'Lane options could not be read.',
+      });
+    });
+  });
+
   describe('durable delivery', () => {
     it('writes dispatching durably before a live send and records the started turn', async () => {
       const h = harness();

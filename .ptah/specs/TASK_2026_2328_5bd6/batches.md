@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B21, B23-B25 COMPLETE. B22 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B25 COMPLETE. B26-B28 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -543,8 +543,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B22 - WU20a Codex native effort list for the composer (decisions.md row 20)
 
-- **Status**: IN_PROGRESS (codex 76d257a7)
-- **Shape / weight**: logic / est. 11,300. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 76d257a7)
+- **Shape / weight**: logic / est. 11,300. **Actual tokens**: unavailable
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/`): `cli-adapters/codex/codex-app-server-lane-models.ts` (whole, after B18); `cli-adapters/codex/codex-app-server-lane-models.spec.ts` (whole, after B18); `cli-adapters/codex/codex-app-server-lane-rejection.ts:1-25`; `cli-adapters/codex/codex-app-server-lane.adapter.ts:285-300,880-930`; `cli-adapters/cli-adapter.interface.ts:78-87,405-412`; `messaging/agent-message-coordinator.service.ts:100-145,520-600`; `messaging/agent-message-coordinator.service.spec.ts` (describe that covers turn options, find by `rg -n "turnOptions" ...spec.ts`)
 - **Write set**: `cli-adapters/codex/codex-app-server-lane-models.ts`; `cli-adapters/codex/codex-app-server-lane-models.spec.ts`; `cli-adapters/codex/codex-app-server-lane.adapter.ts`; `cli-adapters/cli-adapter.interface.ts`; `messaging/agent-message-coordinator.service.ts`; `messaging/agent-message-coordinator.service.spec.ts`
@@ -614,7 +614,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B26 - WU9c service-level route cases
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (antigravity 88d5a24c)
 - **Shape / weight**: test / est. 6,900. **Actual tokens**: pending
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/route-decide.gate.spec.ts:1-300` + the last 60 lines; `.../route-decide.service.ts` deps (after B25); PLAN:886-901
@@ -631,7 +631,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B27 - WU10b evidence RPC
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 154005ae)
 - **Shape / weight**: contract / est. 10,100. **Actual tokens**: pending
 - **Projects**: rpc-handlers (1)
 - **Read set**: `W/libs/backend/rpc-handlers/src/lib/handlers/capability-matrix-rpc.handlers.ts` (whole); `.../handlers/capability-matrix-rpc.handlers.spec.ts` (whole); `.../handlers/index.ts` (whole); `W/libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts:130-165`; `W/libs/backend/rpc-handlers/src/lib/host-profile/manifest.ts:165-195`; `W/libs/backend/rpc-handlers/src/index.ts` (check for handler class names); `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; PLAN:597-603
@@ -649,7 +649,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B28 - WU4b route fact lookup at spawn
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 28562547)
 - **Shape / weight**: logic / est. 10,700. **Actual tokens**: pending
 - **Projects**: vscode-lm-tools (1)
 - **Read set** (prefix `W/libs/backend/vscode-lm-tools/src/lib/code-execution/`): `namespace-builders/agent-namespace.builder.ts:1-60,700-830` (spawn path; find `markSpawnReplied` at `:796`); `namespace-builders/agent-namespace.builder.spec.ts:1-150` + one spawn describe; `ptah-api-builder.service.ts` (range that builds the agent namespace, find by `rg -n "buildAgentNamespace\|AgentNamespace"`); `W/libs/backend/lane-routing/src/index.ts` (after B25); PLAN:718-721, PLAN:898-901

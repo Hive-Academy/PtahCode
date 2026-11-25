@@ -1786,7 +1786,8 @@ describe('CodexAppServerLaneAdapter', () => {
           efforts: { provenance: 'native', supported: ['high', 'xhigh', 'bogus'], default: null },
         },
       ],
-      efforts: ['low', 'high', 'xhigh'],
+      efforts: ['low', 'high', 'xhigh', 'bogus'],
+      unsendableEfforts: ['bogus'],
     });
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(opened + 1);
   });
@@ -1922,7 +1923,8 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     ];
     await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
       models: [{ id: 'gpt-x', name: 'GPT X (Codex default)' }],
-      efforts: ['low', 'high'],
+      efforts: ['low', 'high', 'none'],
+      unsendableEfforts: ['none'],
       commands: [],
     });
     h.context.models = [{ id: 'k2', model: 'gpt-y', displayName: 'GPT Y', isDefault: false }];

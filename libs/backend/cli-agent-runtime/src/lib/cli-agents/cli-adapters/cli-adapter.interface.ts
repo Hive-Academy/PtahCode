@@ -87,6 +87,7 @@ export interface CliModelInfo {
 export interface LaneTurnOptionsCatalog {
   readonly models: readonly CliModelInfo[];
   readonly efforts: readonly string[];
+  readonly unsendableEfforts?: readonly string[];
   readonly currentModel?: string;
   readonly currentEffort?: string;
   readonly commands: readonly LaneComposerCommandOption[];
@@ -422,6 +423,7 @@ export interface ContinuationOutcome {
 export interface StoppedLaneCatalog {
   readonly models: CliModelInfo[];
   readonly efforts: readonly string[];
+  readonly unsendableEfforts?: readonly string[];
 }
 
 export interface CliAdapter {

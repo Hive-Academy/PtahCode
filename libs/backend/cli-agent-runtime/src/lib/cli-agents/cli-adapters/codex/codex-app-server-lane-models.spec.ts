@@ -1,4 +1,4 @@
-import { codexLaneModels } from './codex-app-server-lane-models';
+import { codexAdvertisedEfforts, codexLaneModels, codexUnsendableEfforts } from './codex-app-server-lane-models';
 
 describe('codexLaneModels', () => {
   it('keeps the server model default and exact effort values', () => {
@@ -48,4 +48,26 @@ describe('codexLaneModels', () => {
       }])).toEqual([{ id: 'codex-model', name: 'Codex Model' }]);
     },
   );
+});
+
+describe('Codex catalog efforts', () => {
+  it('keeps native efforts in catalog order and identifies efforts Ptah cannot send', () => {
+    const efforts = codexAdvertisedEfforts([
+      {
+        id: 'first', model: 'first', displayName: 'First', isDefault: true,
+        supportedEfforts: ['future-effort', 'high', 'low'],
+      },
+      {
+        id: 'second', model: 'second', displayName: 'Second', isDefault: false,
+        supportedEfforts: ['high', 'none', 'xhigh', 'future-effort'],
+      },
+    ]);
+
+    expect(efforts).toEqual(['future-effort', 'high', 'low', 'none', 'xhigh']);
+    expect(codexUnsendableEfforts(efforts)).toEqual(['future-effort', 'none']);
+  });
+
+  it('returns no unsendable efforts when all efforts can be sent', () => {
+    expect(codexUnsendableEfforts(['low', 'medium', 'high', 'xhigh'])).toEqual([]);
+  });
 });

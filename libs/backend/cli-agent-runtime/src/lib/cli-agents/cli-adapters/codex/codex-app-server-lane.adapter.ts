@@ -74,7 +74,7 @@ import {
   FileCodexLaneCredentialProbe,
   type CodexLaneCredentialProbe,
 } from './codex-app-server-lane-auth';
-import { codexAdvertisedEfforts, codexLaneModels } from './codex-app-server-lane-models';
+import { codexAdvertisedEfforts, codexLaneModels, codexUnsendableEfforts } from './codex-app-server-lane-models';
 import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
 /** Safety bound for app-server builds that omit a trailing usage notification. */
@@ -296,7 +296,13 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         () => this.runtime.openCatalog(binary.path, home, binary.selection),
         this.logger,
       );
-      return { models: codexLaneModels(catalog), efforts: codexAdvertisedEfforts(catalog) };
+      const efforts = codexAdvertisedEfforts(catalog);
+      const unsendableEfforts = codexUnsendableEfforts(efforts);
+      return {
+        models: codexLaneModels(catalog),
+        efforts,
+        ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
+      };
     } catch (error: unknown) {
       // degradation-audit: reported - logged here and rethrown to the caller.
       this.logger.warn(
@@ -951,11 +957,13 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       if (closed || !context) throw new Error('Codex lane is closed');
       const { catalog, models } = await readModelCatalog(context);
       const advertised = codexAdvertisedEfforts(catalog);
+      const unsendableEfforts = codexUnsendableEfforts(advertised);
       return {
         models,
         efforts: advertised.length > 0
           ? advertised
           : CLI_REASONING_EFFORT_VALUES.filter((effort) => validatedEffort(effort) !== undefined),
+        ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
         commands: [],
