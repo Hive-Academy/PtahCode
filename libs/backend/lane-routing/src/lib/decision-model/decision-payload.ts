@@ -1,4 +1,5 @@
 import type { LaneLimitState } from '@ptah-extension/shared';
+import type { EffortBucket } from '../matrix/choice-evidence';
 import type {
   CompactSystemOneState,
   SystemOneQuestions,
@@ -38,10 +39,12 @@ export interface FixedCriteriaQuestionInput {
 export type DecisionQuestionInput =
   LaneChoiceQuestionInput | FixedCriteriaQuestionInput;
 
-/** Aggregated outcome figures for one lane and task kind. */
+/** Aggregated outcome figures for one lane and task kind, optionally by choice. */
 export interface DecisionOutcomeFigures {
   readonly laneId: string;
   readonly taskKind: string;
+  readonly model?: string;
+  readonly effort?: EffortBucket;
   readonly delivered: number;
   readonly failed: number;
 }

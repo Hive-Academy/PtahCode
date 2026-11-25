@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B14 COMPLETE. B15 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B15 COMPLETE. B16 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -415,8 +415,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B15 - WU6 evidence index and funnel
 
-- **Status**: IN_PROGRESS (codex 41abf2d9)
-- **Shape / weight**: logic / est. 12,800. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 41abf2d9; FA7.2 on-mode wiring moved to B21, decision 28)
+- **Shape / weight**: logic / est. 12,800. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/matrix/local-derivation.ts` (whole, 504 lines); `.../matrix/outcome-figures.ts` (whole); `.../decision-model/decision-payload.ts:30-60`; `.../catalog/lane-catalog.types.ts` (after B10); `.../routing-constants.ts:15-40,210-225`; failure-class constants (`rg -n CAPACITY_FAILURE_CLASSES libs/backend/lane-routing/src`); PLAN:392-460, PLAN:1035-1039
 - **Write set**: `.../matrix/blend.ts` (new); `.../matrix/local-derivation.ts`; `.../matrix/choice-evidence.ts` (new); `.../matrix/choice-evidence.spec.ts` (new); `.../matrix/outcome-figures.ts`; `.../decision-model/decision-payload.ts` (all under `W/libs/backend/lane-routing/src/lib/`)
@@ -530,6 +530,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Read set**: `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.ts` (whole, 738 lines); `.../matrix/capability-matrix.store.spec.ts:1-140` + the `resolve` describe; `.../matrix/choice-evidence.ts` exports; `.../matrix/matrix.types.ts` (after B3); PLAN:886-892, PLAN:914-927, PLAN:774-778
 - **Write set**: `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.ts`; `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.spec.ts`
 - **Contract excerpt**: `load({ nowMs, outcomeQueries, choice?: boolean })`; with `choice: true` the snapshot also carries `evidence: ChoiceEvidence` from the same `summaries`; new pair resolve reads `user`/`seed` from (m,e) then (m,*); today's `resolve(family, model, taskKind)` and the view ignore effort profiles; without `choice` the snapshot equals today's.
+- **Added by decision 28 (FA7.2)**: at `capability-matrix.store.ts:353` pass `{ byModelEffort: <performanceRouting on> }` to `outcomeFiguresFrom`; off mode passes `false` and its decision payload bytes stay unchanged. Spec pins both modes. Read `.../matrix/outcome-figures.ts` (after B15).
 - **Depends on**: B19 (project serialization), B15, B3
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, balanced tier. **Fallback**: Task subagent `backend-developer`
