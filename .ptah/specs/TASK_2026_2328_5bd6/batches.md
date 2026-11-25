@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Write files | 134 write-set entries, 130 unique files (35 new, 95 changed). Files written twice: `codex-app-server-lane-models.ts`, its spec, `codex-app-server-lane.adapter.ts` (B18, B22) and `cli-adapter.interface.ts` (B6, B22) |
+| Status | B1-B10, B12 COMPLETE. B11, B13 IN_PROGRESS. All others PENDING |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -140,8 +140,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B1 - WU0 off-mode golden (test only, unchanged code)
 
-- **Status**: IN_PROGRESS
-- **Shape / weight**: test / est. 7,800. **Actual tokens**: pending
+- **Status**: COMPLETE (commit 6da0941f7; 2 lane rounds, golden revised once)
+- **Shape / weight**: test / est. 7,800. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**:
   - `W/libs/backend/lane-routing/src/lib/route-decide.gate.spec.ts:1-300` (imports, `harness()` at :204, service build at :240)
@@ -166,8 +166,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B2 - WU1 shared contracts
 
-- **Status**: PENDING
-- **Shape / weight**: contract / est. 10,400. **Actual tokens**: pending
+- **Status**: COMPLETE (commit a118a5241; codex lane 2696dac7. Electron and renderer typecheck runs after B3)
+- **Shape / weight**: contract / est. 10,400. **Actual tokens**: unavailable
 - **Projects**: shared (1)
 - **Read set**:
   - `W/libs/shared/src/lib/types/lane-outcome.types.ts` (whole, 233 lines)
@@ -192,8 +192,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B3 - WU19 seed format
 
-- **Status**: PENDING
-- **Shape / weight**: logic / est. 8,900. **Actual tokens**: pending
+- **Status**: COMPLETE (commit db5e90e72; claude e606cde6 partial, codex b3055aa9 finished, round 2 codex 35d3495b fixed store spec fixture)
+- **Shape / weight**: logic / est. 8,900. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**:
   - `W/libs/backend/lane-routing/src/lib/matrix/matrix.types.ts` (whole)
@@ -219,8 +219,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B4 - WU11 setting key
 
-- **Status**: PENDING
-- **Shape / weight**: mechanical / est. 4,500. **Actual tokens**: pending
+- **Status**: COMPLETE (commit f64eb2971; claude lane bcf3e713 stopped by user request after its edits, coordinator verified the edits and checks)
+- **Shape / weight**: mechanical / est. 4,500. **Actual tokens**: unavailable
 - **Projects**: platform-core, agent-sdk (2)
 - **Read set**: `W/libs/backend/platform-core/src/file-settings-keys.ts:130-160,380-410`; `W/libs/backend/platform-core/src/file-settings-manager.ts:40-70`; `W/libs/backend/agent-sdk/src/lib/types/settings-export.types.ts:80-110`; `W/libs/backend/lane-routing/src/lib/scope/lane-rotation-setting.ts` (key pattern); PLAN:527-538
 - **Write set**: `W/libs/backend/platform-core/src/file-settings-keys.ts`; `W/libs/backend/platform-core/src/file-settings-manager.ts`; `W/libs/backend/agent-sdk/src/lib/types/settings-export.types.ts`
@@ -236,8 +236,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B5 - WU2 row schema and migration 0078
 
-- **Status**: PENDING
-- **Shape / weight**: contract / est. 9,300. **Actual tokens**: pending
+- **Status**: COMPLETE (commit d85e23c52; antigravity 52ee4241 (write-only), round 2 0f64264e fixed 3 test files)
+- **Shape / weight**: contract / est. 9,300. **Actual tokens**: unavailable
 - **Projects**: lane-outcomes, persistence-sqlite (2)
 - **Read set**: `W/libs/backend/persistence-sqlite/src/lib/migrations/0075_phase_grade_keys.ts` (whole); `W/libs/backend/persistence-sqlite/src/lib/migrations/0077_code_symbol_files.spec.ts:1-80`; `W/libs/backend/persistence-sqlite/src/lib/migrations/index.ts:1-30,480-528`; `W/libs/backend/lane-outcomes/src/lib/lane-outcome.schema.ts` (whole); `W/libs/backend/lane-outcomes/src/lib/store/sqlite-lane-outcome.store.ts:1-110`; `W/libs/backend/lane-outcomes/src/lib/store/sqlite-lane-outcome.store.spec.ts:1-120`; `W/libs/shared/src/lib/types/lane-outcome.types.ts` (after B2); PLAN:221-252
 - **Write set**: `W/libs/backend/persistence-sqlite/src/lib/migrations/0078_lane_outcome_choice_keys.ts` (new); `W/libs/backend/persistence-sqlite/src/lib/migrations/0078_lane_outcome_choice_keys.spec.ts` (new); `W/libs/backend/persistence-sqlite/src/lib/migrations/index.ts`; `W/libs/backend/lane-outcomes/src/lib/lane-outcome.schema.ts`; `W/libs/backend/lane-outcomes/src/lib/store/sqlite-lane-outcome.store.ts`; `W/libs/backend/lane-outcomes/src/lib/store/sqlite-lane-outcome.store.spec.ts`
@@ -257,8 +257,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B6 - WU3a effort policy and native effort registry
 
-- **Status**: PENDING
-- **Shape / weight**: logic / est. 12,100. **Actual tokens**: pending
+- **Status**: COMPLETE (commit 9ea49dddd; codex 1b8c57b8, round 2 codex 261cda0c updated 3 specs. Review note: refused reviewer default falls through to step 5 (plan 2.12.4 step 3). Electron typecheck at full gate)
+- **Shape / weight**: logic / est. 12,100. **Actual tokens**: unavailable
 - **Projects**: cli-agent-runtime (1)
 - **Read set**: `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/lane-spawn-policy.ts` (whole, 499 lines); `.../cli-agents/lane-spawn-policy.spec.ts` (whole); `.../cli-agents/cli-adapters/cli-adapter.interface.ts:55-100,130-150,400-490`; `.../cli-agents/cli-detection.service.ts:1-80,430-520`; `W/libs/shared/src/lib/types/lane-native-values.types.ts` (after B2); PLAN:607-731 (§2.12.1, §2.12.4) (all `.../cli-agents/` = `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/`)
 - **Write set**: `.../cli-agents/cli-adapters/cli-adapter.interface.ts`; `.../cli-agents/lane-spawn-policy.ts`; `.../cli-agents/lane-spawn-policy.spec.ts`; `.../cli-agents/native-effort.registry.ts` (new); `.../cli-agents/native-effort.registry.spec.ts` (new); `.../cli-agents/cli-detection.service.ts`
@@ -276,8 +276,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B7 - WU14a Codex runtime native values
 
-- **Status**: PENDING
-- **Shape / weight**: logic / est. 9,000. **Actual tokens**: pending
+- **Status**: COMPLETE (commit 232150f5f; codex 4b2ea746, round 2 codex 04116a4f fixed codex-runtime.spec.ts and restored .min(1))
+- **Shape / weight**: logic / est. 9,000. **Actual tokens**: unavailable
 - **Projects**: codex-runtime (1)
 - **Read set**: `W/libs/backend/codex-runtime/src/lib/codex-context.ts:340-380,1030-1070,1450-1490`; `W/libs/backend/codex-runtime/src/lib/codex-runtime.types.ts` (range with `CodexModelInfo`, find by `rg -n "CodexModelInfo"`); `W/libs/backend/codex-runtime/src/lib/codex-context.spec.ts:1-120` + the `listModels` describe; `codex-protocol-schemas.ts:440-470,635-650` and `codex-protocol-methods.ts:40-60` (same folder); PLAN:637,654
 - **Write set**: `W/libs/backend/codex-runtime/src/lib/codex-context.ts`; `W/libs/backend/codex-runtime/src/lib/codex-runtime.types.ts`; `W/libs/backend/codex-runtime/src/lib/codex-context.spec.ts`
@@ -292,9 +292,9 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Acceptance**: `listModels` keeps `defaultReasoningEffort` (FA8.1); `reportedSettings()` from server frames only (FA8.2); absent field stays absent (R0, FA8.3)
 
 ### B8 - WU15a ACP reported state
-
-- **Status**: PENDING
-- **Shape / weight**: logic / est. 11,000. **Actual tokens**: pending
+- **Status**: COMPLETE (12cebc8e6; codex e373f408 + round 2 891407c1: native default null)
+- **Status**: IN_PROGRESS (codex e373f408 delivered; gate passed; NOT ACCEPTED round 1: getReportedState sets native default = currentValue, which can be Ptah's own hint. Fix: default null (ACP reports no vendor default))
+- **Shape / weight**: logic / est. 11,000. **Actual tokens**: unavailable
 - **Projects**: acp-runtime (1)
 - **Read set**: `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.ts:1060-1120` + the session-reply handling range (find `currentModelId`, `configOptions`); `W/libs/backend/acp-runtime/src/lib/acp-session-helpers.ts` (whole, 234 lines); `W/libs/backend/acp-runtime/src/lib/acp-vendor-profile.ts:180-230`; `W/libs/backend/acp-runtime/src/lib/profiles/grok-acp-profile.ts:195-225`; `W/libs/backend/acp-runtime/src/lib/profiles/antigravity-acp-profile.ts` (effort option range, find `thought_level`); `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.spec.ts:1-120`; PLAN:638,655
 - **Write set**: `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.ts`; `.../acp-session-helpers.ts`; `.../acp-vendor-profile.ts`; `.../profiles/grok-acp-profile.ts`; `.../profiles/antigravity-acp-profile.ts`; `.../acp-session-runtime.spec.ts` (all under `W/libs/backend/acp-runtime/src/lib/`)
@@ -310,8 +310,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B9 - WU4a spawn argument `route`
 
-- **Status**: PENDING
-- **Shape / weight**: contract / est. 10,200. **Actual tokens**: pending
+- **Status**: COMPLETE (3b52b2225; antigravity 44552c4c + coordinator fix: route_decide description budget, tool list snapshot)
+- **Shape / weight**: contract / est. 10,200. **Actual tokens**: unavailable
 - **Projects**: vscode-lm-tools (1)
 - **Read set** (prefix `W/libs/backend/vscode-lm-tools/src/lib/code-execution/`): `mcp-core/agent-spawn-args.schema.ts` (whole); `mcp-core/agent-spawn-args.schema.spec.ts:1-120`; `mcp-core/protocol-dispatcher.ts:1395-1480`; `mcp-stdio/agent-tool.dispatcher.ts:485-545`; `mcp-core/tool-description.builder.ts:940-995`; `mcp-core/route-tools.ts` (whole); `W/libs/shared/src/lib/types/agent-process.types.ts` (`SpawnAgentRequest.route`, after B2); PLAN:898-901
 - **Write set**: `mcp-core/agent-spawn-args.schema.ts`; `mcp-core/protocol-dispatcher.ts`; `mcp-stdio/agent-tool.dispatcher.ts`; `mcp-core/tool-description.builder.ts`; `mcp-core/route-tools.ts`; `mcp-core/agent-spawn-args.schema.spec.ts` (same prefix)
@@ -326,9 +326,9 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Acceptance**: `route` accepted with bounds, `routeFacts` not accepted from callers (FA5); both dispatchers pass it (FA5.1)
 
 ### B10 - WU5 catalog snapshot + WU19b seed tests
-
+- **Status**: COMPLETE (a2e5ed439; lane A codex b4dae4de, lane B codex 2b402052)
 - **Status**: PENDING
-- **Shape / weight**: logic / lane A (WU5) est. 9,400; lane B (WU19b) est. 5,200. **Actual tokens**: pending
+- **Shape / weight**: logic / lane A (WU5) est. 9,400; lane B (WU19b) est. 5,200. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: lane A: `W/libs/backend/lane-routing/src/lib/lane-model-listing.port.ts`; `W/libs/backend/lane-routing/src/lib/routing-constants.ts` (whole); `W/libs/backend/lane-routing/src/lib/ranking/rotation.store.ts:130-175`; `W/libs/backend/lane-routing/src/lib/pipeline/gather.ts:495-540`; `W/libs/backend/rpc-handlers/src/lib/services/lane-model-listing.adapter.ts:85-100`; PLAN:324-390, PLAN:848-865. Lane B: `W/libs/backend/lane-routing/src/lib/matrix/seed-source.ts`, `seed-aliases.ts` (after B3); PLAN:780-842; PLAN:1110
 - **Write set**: lane A: `W/libs/backend/lane-routing/src/lib/lane-model-listing.port.ts`; `.../routing-constants.ts`; `.../catalog/lane-catalog.types.ts` (new); `.../catalog/lane-catalog.store.ts` (new); `.../catalog/lane-catalog.store.spec.ts` (new). Lane B: `W/libs/backend/lane-routing/src/lib/matrix/seed-source.spec.ts` (new)
@@ -344,7 +344,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B11 - WU2b key-value guard test + WU12b e2e harness fixture
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (antigravity c9dba3c0)
 - **Shape / weight**: test / est. 6,600. **Actual tokens**: pending
 - **Projects**: lane-outcomes, webview-e2e-harness (2)
 - **Read set**: `W/libs/backend/lane-outcomes/src/lib/store/key-value-lane-outcome.store.spec.ts` (whole); `W/libs/backend/lane-outcomes/src/lib/store/key-value-lane-outcome.store.ts:60-80`; `W/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings.fixtures.ts:800-840`; `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts` (after B2)
@@ -361,8 +361,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B12 - WU15a2 ACP profile tests
 
-- **Status**: PENDING
-- **Shape / weight**: test / est. 5,400. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 183def93)
+- **Shape / weight**: test / est. 5,400. **Actual tokens**: unavailable
 - **Projects**: acp-runtime (1)
 - **Read set**: `W/libs/backend/acp-runtime/src/lib/profiles/grok-acp-profile.spec.ts:1-80`; `W/libs/backend/acp-runtime/src/lib/profiles/antigravity-acp-profile.spec.ts:1-80`; the two profile files (effort option ranges, after B8)
 - **Write set**: `W/libs/backend/acp-runtime/src/lib/profiles/grok-acp-profile.spec.ts`; `W/libs/backend/acp-runtime/src/lib/profiles/antigravity-acp-profile.spec.ts`
@@ -378,7 +378,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B13 - WU3b-w completion writer + WU13a Claude adapter + WU16 Pi session state
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 649578a3)
 - **Shape / weight**: logic / lane A (WU3b-w) est. 7,300; lane B (WU13a) est. 9,800; lane C (WU16) est. 8,600. **Actual tokens**: pending
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/`):
@@ -441,6 +441,7 @@ phase reviewer comes from a different model family than the executor of the batc
   - C: `cli-agents/cli-adapters/opencode-cli.adapter.ts:950-975,1155-1190`; `cli-agents/cli-adapters/opencode-cli.adapter.spec.ts` (telemetry model describe); PLAN:657
 - **Write set**: A: `cli-agents/agent-process-manager.service.ts`; `cli-agents/agent-process-manager.spawn-effort.spec.ts` (new, TL3). B: `claude/claude-sdk-lane-runner.ts`; `claude/claude-sdk-lane-runner.spec.ts`. C: `cli-agents/cli-adapters/opencode-cli.adapter.ts`; `cli-agents/cli-adapters/opencode-cli.adapter.spec.ts`
 - **Contract excerpt**: A: at spawn `resolveLaneEffort({ ..., nativeEfforts: cliDetection.nativeEfforts(laneKey, resolvedModel) })` -> `info.spawnEffort`, `info.modelSource`, `info.routeFacts = request.routeFacts`; apply `sdkHandle.effortDelivery`; at each turn end and terminal transition copy `sdkHandle.reportedSession?.()` to `info.reportedSession` and call `recordSession` for native efforts. Step 1 = V4 verification (2 spec cases + gap report). B: composer efforts = current model's native list; `EFFORT_LEVELS` only without one. C: report model only from a paired `modelID`+`providerID` stream frame, never the request seed (`:963`).
+- **Coordinator note (B6, decisions row 27)**: APM records a session list through the public `CliDetectionService.recordNativeSession(laneKey, model, efforts)` (B6), only when a `reportedSession()` read has native `efforts`. The registry stays private to `CliDetectionService`.
 - **Depends on**: B13 (project serialization), B6
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: three CLI lanes (A high-capability tier; B, C balanced tier). **Fallback**: Task subagent `backend-developer`
@@ -477,6 +478,7 @@ phase reviewer comes from a different model family than the executor of the batc
   - B: `provider-session/provider-session-lane-handle.ts:110-150` + effort-hint and `listTurnOptions` ranges; `provider-session/provider-session-lane-handle.spec.ts:1-120` (V2: append); `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.ts` `getReportedState` (after B8); PLAN:638, PLAN:655, PLAN:728-729
 - **Write set**: A: `codex/codex-app-server-lane-models.ts`; `codex/codex-app-server-lane-models.spec.ts` (new); `codex/codex-app-server-lane.adapter.ts`; `codex/codex-app-server-lane.adapter.spec.ts`. B: `provider-session/provider-session-lane-handle.ts`; `provider-session/provider-session-lane-handle.spec.ts` (EXISTS, append)
 - **Contract excerpt**: A: `codexLaneModels` sets `efforts: { provenance: 'native', supported: supportedEfforts, default: defaultEffort ?? null }` unfiltered, only for a non-empty server list; handle `reportedSession()` mirrors `context.reportedSettings()` with the current model's native efforts. Do NOT touch `codexAdvertisedEfforts` (that is B22). B: `reportedSession()` from `getReportedState()`; composer prefers the session's native list; `acpProfileEfforts` stays as labeled fallback; refused hint -> `effortDelivery.disposition = 'lane-refused'`.
+- **Coordinator note (B6, decisions row 27)**: `CliModelInfo` has `readonly isDefault?: boolean` (B6). The Codex model mapping sets `isDefault: true` only when Codex marks the model default (its native `isDefault` flag), and leaves it absent otherwise. Pin it in the models spec.
 - **Depends on**: B16 (project serialization), B6, B7, B8
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: two CLI lanes, balanced tier. **Fallback**: Task subagent `backend-developer`

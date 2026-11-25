@@ -382,6 +382,10 @@ describe('antigravityAcpProfile — MCP, modes, config', () => {
     expect(antigravityAcpProfile.modeFor?.(base)).toBeUndefined();
   });
 
+  it('identifies thought_level as the reported effort option', () => {
+    expect(antigravityAcpProfile.effortConfigId).toBe('thought_level');
+  });
+
   it('sends the model as a binding option and the effort as thought_level', () => {
     expect(
       antigravityAcpProfile.sessionConfig?.({
