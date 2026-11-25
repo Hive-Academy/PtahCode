@@ -1192,6 +1192,117 @@ describe('SkillRecommendationService judge assembly, identity, and deadlines', (
     expect(result.judge.items[4].judgedBy).toBe('none');
   });
 
+  it('labels Decision failed on hard-deadline and unexpected judge backstops while keeping pre-dispatch skipped', async () => {
+    const stackItem: StackSummaryItem = {
+      kind: 'framework',
+      name: 'Angular',
+      evidence: 'package.json',
+      sourcePhase: 'stack',
+    };
+    const search = async () => [entry];
+
+    // 1. Hard-deadline backstop (+70s) after judge() has been invoked.
+    jest.useFakeTimers({ now: new Date('2026-06-01T12:00:00.000Z') });
+    const rpcEntry = Date.now();
+    const hangingJudge = {
+      judge: jest.fn(() => new Promise<never>(() => undefined)),
+    };
+    const hangingService = new SkillRecommendationService(
+      logger as Logger,
+      hangingJudge,
+    );
+    const pending = hangingService.recommendAnalysis({
+      workspaceRoot,
+      rpcEntry,
+      resolved: SETUP_SNAPSHOT,
+      summarySource: 'structured',
+      items: [stackItem],
+      search,
+    });
+    await jest.advanceTimersByTimeAsync(70_000);
+    const timedOutResult = await pending;
+    jest.useRealTimers();
+
+    expect(hangingJudge.judge).toHaveBeenCalledTimes(1);
+    expect(timedOutResult.judge.method).toBe('none');
+    expect(timedOutResult.judge.stages).toEqual([
+      {
+        stage: 'decision',
+        status: 'failed',
+        category: 'timed-out',
+        itemsJudged: 0,
+        invalidItemIds: [],
+      },
+      {
+        stage: 'normal',
+        status: 'failed',
+        category: 'timed-out',
+        pairConfigured: SETUP_PAIR,
+        itemsJudged: 0,
+        invalidItemIds: [],
+      },
+    ]);
+    expect(timedOutResult.skills).toHaveLength(1);
+
+    // 2. Unexpected throw backstop after judge() has been invoked.
+    const throwingJudge = {
+      judge: jest.fn().mockRejectedValue(new Error('raw-provider-secret')),
+    };
+    const throwingService = new SkillRecommendationService(
+      logger as Logger,
+      throwingJudge,
+    );
+    const failedResult = await throwingService.recommendAnalysis({
+      workspaceRoot,
+      resolved: SETUP_SNAPSHOT,
+      summarySource: 'structured',
+      items: [stackItem],
+      search,
+    });
+    expect(failedResult.judge.method).toBe('none');
+    expect(failedResult.judge.stages).toEqual([
+      {
+        stage: 'decision',
+        status: 'failed',
+        category: 'unavailable',
+        itemsJudged: 0,
+        invalidItemIds: [],
+      },
+      {
+        stage: 'normal',
+        status: 'failed',
+        category: 'provider-error',
+        pairConfigured: SETUP_PAIR,
+        itemsJudged: 0,
+        invalidItemIds: [],
+      },
+    ]);
+    expect(JSON.stringify(failedResult)).not.toContain('raw-provider-secret');
+
+    // 3. Pre-dispatch deadline exhaustion (judge() never invoked): Decision stays skipped.
+    const neverCalledJudge = { judge: jest.fn() };
+    const expiredService = new SkillRecommendationService(
+      logger as Logger,
+      neverCalledJudge,
+    );
+    const expiredResult = await expiredService.recommendAnalysis({
+      workspaceRoot,
+      rpcEntry: Date.now() - 75_000,
+      resolved: SETUP_SNAPSHOT,
+      summarySource: 'structured',
+      items: [stackItem],
+      search,
+    });
+    expect(neverCalledJudge.judge).not.toHaveBeenCalled();
+    expect(expiredResult.judge.stages[0]).toEqual({
+      stage: 'decision',
+      status: 'skipped',
+      category: 'timed-out',
+      itemsJudged: 0,
+      invalidItemIds: [],
+    });
+  });
+
   it('registers SKILL_JUDGE_SERVICE, SKILL_DRAFT_GENERATION_SERVICE, and SKILL_RECOMMENDATION_SERVICE in DI', () => {
     const child = rootContainer.createChildContainer();
     child.registerInstance(TOKENS.LOGGER, logger as Logger);

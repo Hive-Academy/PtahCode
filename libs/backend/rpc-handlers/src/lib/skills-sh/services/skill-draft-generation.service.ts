@@ -65,6 +65,13 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+function sanitizeDraftDescription(raw: string): string {
+  return raw
+    .replace(/\r\n?/g, ' ')
+    .replace(/[\p{Cc}\p{Bidi_Control}]/gu, ' ')
+    .trim();
+}
+
 function projectEvidence(
   items: WizardGenerateSkillDraftParams['items'],
 ): string {
@@ -180,7 +187,8 @@ export class SkillDraftGenerationService {
     const body = /^## Project evidence[ \t]*$/m.test(normalizedBody)
       ? normalizedBody
       : `${normalizedBody}${normalizedBody.endsWith('\n') ? '\n' : '\n\n'}${projectEvidence(params.items)}`;
-    const description = parsed.data.description;
+    const description = sanitizeDraftDescription(parsed.data.description);
+    if (!description) return failure('invalid-output');
     const serialized = serializeSkillDocument({
       name: slugName,
       description,

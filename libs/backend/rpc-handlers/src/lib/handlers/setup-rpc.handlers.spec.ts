@@ -1058,6 +1058,142 @@ describe('SetupRpcHandlers', () => {
       expect(commitSetupPair).toHaveBeenCalledWith({ provider: '', model: '' });
     });
 
+    it('names the stored Setup provider ID in SETUP_MODEL_INVALID errors when known', async () => {
+      const h = makeHarness();
+      const validateSetupPair = jest
+        .fn()
+        .mockResolvedValueOnce({
+          kind: 'invalid',
+          source: 'setup',
+          provider: 'anthropic',
+          model: 'stale',
+          cause: 'model-stale',
+        } satisfies SetupResolution)
+        .mockResolvedValueOnce({
+          kind: 'invalid',
+          source: 'setup',
+          provider: null,
+          model: 'stale',
+          cause: 'provider-missing',
+        } satisfies SetupResolution)
+        .mockRejectedValueOnce(new Error('secret-token-value'));
+      h.resolveSetup.mockResolvedValueOnce({
+        kind: 'unavailable',
+        source: 'workspace',
+        provider: 'openrouter',
+        model: 'gpt-4o',
+        cause: 'provider-unavailable',
+      } satisfies SetupResolution);
+      h.container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+        resolveSetup: h.resolveSetup,
+        validateSetupPair,
+      });
+      h.handlers.register();
+
+      const setupNamed = await callRaw(h, 'wizard:set-setup-model', {
+        provider: 'anthropic',
+        model: 'stale',
+      });
+      expect(setupNamed).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(setupNamed.error).toContain('Setup provider anthropic: model-stale');
+
+      const providerMissing = await callRaw(h, 'wizard:set-setup-model', {
+        provider: 'anthropic',
+        model: 'stale',
+      });
+      expect(providerMissing).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(providerMissing.error).toContain('(Setup: provider-missing)');
+      expect(providerMissing.error).not.toContain('null');
+
+      const thrownValidation = await callRaw(h, 'wizard:set-setup-model', {
+        provider: 'ollama-cloud',
+        model: 'qwen',
+      });
+      expect(thrownValidation).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(thrownValidation.error).toContain('Setup provider ollama-cloud');
+      expect(thrownValidation.error).not.toContain('secret-token-value');
+
+      const workspaceUnavailable = await callRaw(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-1' },
+      );
+      expect(workspaceUnavailable).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(workspaceUnavailable.error).toContain(
+        'workspace provider openrouter: provider-unavailable',
+      );
+    });
+
+    it('post-commit resolution failure still returns the committed receipt', async () => {
+      const h = makeHarness();
+      const pair = { provider: 'anthropic', model: 'model-a' };
+      const validateSetupPair = jest
+        .fn()
+        .mockResolvedValue(setupResolution(pair));
+      h.resolveSetup
+        .mockRejectedValueOnce(new Error('raw resolver failure with secret'))
+        .mockRejectedValueOnce(new Error('second resolver failure'));
+      h.container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+        resolveSetup: h.resolveSetup,
+        validateSetupPair,
+      });
+      const commitSetupPair = jest
+        .fn()
+        .mockResolvedValueOnce(pair)
+        .mockResolvedValueOnce(null);
+      h.container.__register(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, {
+        commitSetupPair,
+      });
+      h.handlers.register();
+
+      const setResult = await call<WizardSetSetupModelResult>(
+        h,
+        'wizard:set-setup-model',
+        pair,
+      );
+      expect(setResult).toEqual({
+        committed: pair,
+        commitSeq: expect.any(Number),
+        state: {
+          kind: 'unavailable',
+          source: 'setup',
+          provider: pair.provider,
+          model: pair.model,
+          cause: 'provider-unavailable',
+        },
+      });
+      expect(JSON.stringify(setResult)).not.toContain('secret');
+
+      const clearResult = await call<WizardSetSetupModelResult>(
+        h,
+        'wizard:set-setup-model',
+        { provider: '', model: '' },
+      );
+      expect(clearResult).toEqual({
+        committed: null,
+        commitSeq: setResult.commitSeq + 1,
+        state: {
+          kind: 'unavailable',
+          source: 'workspace',
+          provider: '',
+          model: '',
+          cause: 'provider-unavailable',
+        },
+      });
+    });
+
     it('concurrent wizard:set-setup-model RPCs return distinct committed receipts and monotonic commitSeq matching disk read-back', async () => {
       const h = makeHarness();
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-rpc-'));
@@ -1203,6 +1339,15 @@ describe('SetupRpcHandlers', () => {
       {
         ...draft,
         items: [{ ...draft.items[0], buildReasons: ['a'.repeat(2001)] }],
+      },
+      {
+        ...draft,
+        items: [
+          {
+            ...draft.items[0],
+            buildReasons: Array.from({ length: 11 }, (_, i) => `Reason ${i}`),
+          },
+        ],
       },
     ])('rejects a draft outside the input limits', async (params) => {
       const h = makeHarness();

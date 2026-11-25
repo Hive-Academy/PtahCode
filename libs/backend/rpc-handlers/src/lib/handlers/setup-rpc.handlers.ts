@@ -149,7 +149,7 @@ const DraftParamsSchema = z.strictObject({
         name: draftText(200).pipe(z.string().min(1)),
         kind: draftText(200).pipe(z.string().min(1)),
         evidence: draftText(2_000, true),
-        buildReasons: z.array(draftText(2_000, true)),
+        buildReasons: z.array(draftText(2_000, true)).max(10),
       }),
     )
     .min(1)
@@ -175,12 +175,37 @@ async function beforeDeadline<T>(
   }
 }
 
+function sanitizeProviderId(
+  provider: string | null | undefined,
+): string | null {
+  const cleaned = provider
+    ?.replace(/[\p{Cc}\p{Bidi_Control}]/gu, ' ')
+    .trim();
+  return cleaned ? cleaned.slice(0, 64) : null;
+}
+
 function setupModelError(
   resolution?: Extract<SetupResolution, { kind: 'invalid' | 'unavailable' }>,
+  fallbackProvider?: string,
 ): RpcUserError {
-  const detail = resolution
-    ? ` (${resolution.source === 'setup' ? 'Setup' : 'workspace'}: ${resolution.cause})`
-    : '';
+  const provider = sanitizeProviderId(resolution?.provider ?? fallbackProvider);
+  const sourceLabel = resolution
+    ? resolution.source === 'setup'
+      ? 'Setup'
+      : 'workspace'
+    : null;
+  const parts: string[] = [];
+  if (sourceLabel && provider) {
+    parts.push(`${sourceLabel} provider ${provider}`);
+  } else if (sourceLabel) {
+    parts.push(sourceLabel);
+  } else if (provider) {
+    parts.push(`Setup provider ${provider}`);
+  }
+  if (resolution) {
+    parts.push(resolution.cause);
+  }
+  const detail = parts.length > 0 ? ` (${parts.join(': ')})` : '';
   return new RpcUserError(
     `The Setup model could not be resolved${detail}. Update Background models and retry.`,
     'SETUP_MODEL_INVALID',
@@ -350,7 +375,7 @@ export class SetupRpcHandlers {
     deadline = Date.now() + SETUP_RESOLUTION_MS,
     pair?: ModelPair,
   ): Promise<SetupResolution> {
-    const failure = setupModelError();
+    const failure = setupModelError(undefined, pair?.provider);
     try {
       return await beforeDeadline(
         deadline,
@@ -406,7 +431,21 @@ export class SetupRpcHandlers {
         );
       }
       const commitSeq = ++setupCommitSeq;
-      const state = setupPairState(await this.resolveSetup(workspaceRoot));
+      let state: SetupPairState;
+      try {
+        state = setupPairState(await this.resolveSetup(workspaceRoot));
+      } catch {
+        this.logger.warn(
+          'Could not resolve the Setup model state after commit.',
+        );
+        state = {
+          kind: 'unavailable',
+          source: committed ? 'setup' : 'workspace',
+          provider: committed?.provider ?? '',
+          model: committed?.model ?? '',
+          cause: 'provider-unavailable',
+        };
+      }
       return { committed, state, commitSeq };
     });
   }

@@ -252,6 +252,79 @@ describe('SkillDraftGenerationService', () => {
     }
   });
 
+  it('replaces control characters in AI description with spaces before serialization and stays byte-equal on disk', async () => {
+    const { service, run } = makeService();
+    run.mockImplementation(async (args) => {
+      if (args.execute.stageTrace) {
+        args.execute.stageTrace.pairUsed = {
+          provider: 'setup-provider',
+          model: 'setup-model',
+        };
+      }
+      return {
+        structuredOutput: {
+          name: 'Control Clean',
+          description: 'Alpha\r\nBeta\tGamma\u0000Delta\u001b[0m\u202eEnd',
+          body: '# Body',
+        },
+        terminal: { kind: 'success' },
+      };
+    });
+
+    const result = await service.generateDraft(PARAMS, '/workspace/project');
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.description).toBe('Alpha Beta Gamma Delta [0m End');
+    expect(result.content).toContain(
+      'description: "Alpha Beta Gamma Delta [0m End"',
+    );
+    expect(result.description).not.toMatch(/[\p{Cc}\p{Bidi_Control}]/u);
+
+    const temporaryHome = await mkdtemp(
+      path.join(os.tmpdir(), 'skill-draft-ctrl-test-'),
+    );
+    jest.mocked(os.homedir).mockReturnValue(temporaryHome);
+    try {
+      const writer = new HarnessFsService(null as never, null as never);
+      const saved = await writer.createSkillPlugin({
+        name: result.name,
+        description: result.description,
+        content: result.body,
+      });
+      expect(await readFile(saved.skillPath)).toEqual(
+        Buffer.from(result.content, 'utf8'),
+      );
+    } finally {
+      jest.mocked(os.homedir).mockReset();
+      await rm(temporaryHome, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an AI description made only of control characters as invalid-output', async () => {
+    const { service, run } = makeService();
+    run.mockImplementation(async (args) => {
+      if (args.execute.stageTrace) {
+        args.execute.stageTrace.pairUsed = {
+          provider: 'setup-provider',
+          model: 'setup-model',
+        };
+      }
+      return {
+        structuredOutput: {
+          name: 'Only Controls',
+          description: '\u0000\u0007\u001b',
+          body: '# Body',
+        },
+        terminal: { kind: 'success' },
+      };
+    });
+
+    const result = await service.generateDraft(PARAMS, '/workspace/project');
+
+    expect(result).toMatchObject({ ok: false, category: 'invalid-output' });
+  });
+
   it.each([
     {
       resolution: {

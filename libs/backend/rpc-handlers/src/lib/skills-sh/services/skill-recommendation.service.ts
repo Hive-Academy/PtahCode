@@ -612,22 +612,23 @@ export class SkillRecommendationService {
       ? { provider: input.resolved.providerId, model: input.resolved.model }
       : undefined;
     const fallback = (
+      decisionStatus: 'failed' | 'skipped',
       decisionCategory: SkillJudgeStageCategory,
       normalStatus: 'failed' | 'skipped',
       normalCategory: SkillJudgeStageCategory,
     ) =>
       buildFallbackJudgeResult(judgeInputItems, [
-        makeStage('decision', 'skipped', decisionCategory),
+        makeStage('decision', decisionStatus, decisionCategory),
         makeStage('normal', normalStatus, normalCategory, pairConfigured),
       ]);
 
     if (!this.skillJudge || !input.resolved) {
-      return fallback('unavailable', 'skipped', 'unavailable');
+      return fallback('skipped', 'unavailable', 'skipped', 'unavailable');
     }
 
     const remainingHardMs = hardDeadlineAt - Date.now();
     if (remainingHardMs <= 0) {
-      return fallback('timed-out', 'failed', 'timed-out');
+      return fallback('skipped', 'timed-out', 'failed', 'timed-out');
     }
 
     const timedOut = Symbol('Skill judge hard deadline');
@@ -646,11 +647,11 @@ export class SkillRecommendationService {
       ]);
       if (outcome !== timedOut) return outcome;
       this.logger.warn('[SkillRecommendation] Skill judge hit hard deadline');
-      return fallback('timed-out', 'failed', 'timed-out');
+      return fallback('failed', 'timed-out', 'failed', 'timed-out');
     } catch {
       // degradation-audit: reported - unexpected judge errors preserve registry candidates.
       this.logger.warn('[SkillRecommendation] Skill judge failed unexpectedly');
-      return fallback('unavailable', 'failed', 'provider-error');
+      return fallback('failed', 'unavailable', 'failed', 'provider-error');
     } finally {
       if (timer) clearTimeout(timer);
     }
