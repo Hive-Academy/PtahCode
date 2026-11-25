@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B25, B27, B28 COMPLETE. B26 IN_PROGRESS. All others PENDING. Manifest red fixed by B27 |
+| Status | B1-B28 COMPLETE. B29, B30 IN_PROGRESS. All others PENDING. Manifest red fixed by B27 |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | See the Status row above |
@@ -614,8 +614,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B26 - WU9c service-level route cases
 
-- **Status**: IN_PROGRESS (antigravity 8e7036b8, resumed after host restart)
-- **Shape / weight**: test / est. 6,900. **Actual tokens**: pending
+- **Status**: COMPLETE (antigravity 88d5a24c, resumed 8e7036b8)
+- **Shape / weight**: test / est. 6,900. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/route-decide.gate.spec.ts:1-300` + the last 60 lines; `.../route-decide.service.ts` deps (after B25); PLAN:886-901
 - **Write set**: `W/libs/backend/lane-routing/src/lib/route-decide.gate.spec.ts` (append a `describe`)
@@ -666,7 +666,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B29 - WU20b composer contract pass-through
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex db4f4093)
 - **Shape / weight**: contract / est. 6,300. **Actual tokens**: pending
 - **Projects**: shared, rpc-handlers (2)
 - **Read set**: `W/libs/shared/src/lib/types/rpc/rpc-agents.types.ts:75-100`; `W/libs/backend/rpc-handlers/src/lib/handlers/agent-message-rpc.handlers.ts:155-190`; `W/libs/backend/rpc-handlers/src/lib/handlers/agent-message-rpc.handlers.spec.ts` (composer options describe); `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/messaging/agent-message-coordinator.service.ts:100-110` (after B22)
@@ -683,7 +683,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B30 - WU12 Electron settings UI
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 22dcf71f)
 - **Shape / weight**: logic (UI) / est. 11,400. **Actual tokens**: pending
 - **Projects**: chat (1)
 - **Read set**: `W/libs/frontend/chat/src/lib/settings/ptah-ai/lane-rotation-setting.component.ts` (whole); `.../lane-rotation-setting.component.spec.ts` (whole); `.../decision-matrix-page.component.ts` (whole, 307 lines); `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; `W/libs/shared/src/lib/types/lane-native-values.types.ts`; PLAN:540-605, PLAN:1202-1205
