@@ -1293,7 +1293,7 @@ describe('SdkInternalQueryCuratorLlm — inherits the curated workspace provider
       makeWorkspace('', '/ws/active'),
       null,
       null,
-      { resolveForPath },
+      { resolveForPath, resolveSetup: jest.fn() },
     );
     return { adapter, capture, resolveForPath, internalQuery };
   }
@@ -1568,6 +1568,7 @@ describe('SdkInternalQueryCuratorLlm — unsupported Codex provider', () => {
         resolveForPath: jest.fn(async () => {
           throw error;
         }),
+        resolveSetup: jest.fn(),
       },
     );
     return { adapter, internalQuery, logger };

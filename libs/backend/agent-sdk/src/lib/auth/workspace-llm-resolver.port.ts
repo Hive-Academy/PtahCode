@@ -1,3 +1,4 @@
+import type { SetupPairState } from '@ptah-extension/shared';
 import type { OneShotAuthOverride } from '../helpers/sdk-query-runner.service';
 
 /**
@@ -41,6 +42,29 @@ export interface WorkspaceLlmResolveOptions {
 }
 
 /**
+ * A {@link WorkspaceLlmSnapshot} whose `auth` is always present. A Setup
+ * query never rides the process-wide `AuthEnv`: without isolated credentials
+ * the resolution fails (`not-signed-in` / `provider-unavailable`) instead of
+ * reaching whichever provider was configured last.
+ */
+export type ResolvedSetupSnapshot = WorkspaceLlmSnapshot & {
+  readonly auth: OneShotAuthOverride;
+};
+
+/**
+ * Strict resolution of the Setup provider/model pair.
+ *
+ * Success carries the pair's snapshot with isolated auth. Failure mirrors the
+ * `invalid` / `unavailable` variants of `SetupPairState` exactly (`source`
+ * separates a stored Setup pair that cannot run from an unset workspace whose
+ * effective pair cannot run), so a failure can be surfaced as a
+ * `SetupPairState` without re-mapping.
+ */
+export type SetupResolution =
+  | { kind: 'set' | 'unset'; snapshot: ResolvedSetupSnapshot }
+  | Extract<SetupPairState, { kind: 'invalid' | 'unavailable' }>;
+
+/**
  * Resolves a {@link WorkspaceLlmSnapshot} for an explicit workspace path.
  *
  * Declared in `agent-sdk`, implemented in `auth-providers` (which depends on
@@ -58,4 +82,14 @@ export interface IWorkspaceLlmResolver {
     workspaceRoot: string | undefined,
     options?: WorkspaceLlmResolveOptions,
   ): Promise<WorkspaceLlmSnapshot>;
+
+  /**
+   * Resolves the Setup provider/model pair for one workspace, strictly.
+   *
+   * Never reads the chat-tab `overrideModel` or the chat picker, and never
+   * substitutes another workspace's provider: when the stored Setup pair
+   * (or, when unset, the workspace's effective pair) cannot run, the
+   * resolution fails with the reason instead of falling back.
+   */
+  resolveSetup(workspaceRoot: string | undefined): Promise<SetupResolution>;
 }
