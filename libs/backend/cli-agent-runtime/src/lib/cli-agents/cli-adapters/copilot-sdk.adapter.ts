@@ -81,6 +81,7 @@ import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { UnverifiedLaneModel } from './lane-unverified-model';
+import { probeCopilotEffortFlag } from './copilot-effort-flag';
 import type { CopilotPermissionBridge } from './copilot-permission-bridge';
 
 /** Shell/command execution tool names across providers */
@@ -311,6 +312,13 @@ export class CopilotSdkAdapter implements CliAdapter {
 
     const resolvedBinaryPath = binaryPath;
     const spawnDescriptor = await resolveDirectSpawn(resolvedBinaryPath);
+    const { version } = await probeCliVersionDetailed(
+      resolvedBinaryPath,
+      undefined,
+      undefined,
+      this.spawner,
+    ).catch(() => ({ version: undefined }));
+    const effortFlag = await probeCopilotEffortFlag(resolvedBinaryPath, version, this.spawner);
     let capturedSessionId: string | undefined;
     let turnSequence = 0;
     let activeChild: ReturnType<typeof spawnCli> | undefined;
@@ -381,8 +389,8 @@ export class CopilotSdkAdapter implements CliAdapter {
       }
 
       const effort = nextTurn.reasoningEffort ?? options.reasoningEffort;
-      if (effort) {
-        args.push('--effort', effort);
+      if (effort && effortFlag) {
+        args.push(effortFlag, effort);
       }
       if (options.mcpPort && options.mcpToken) {
         const mcpConfig = JSON.stringify({
@@ -575,6 +583,9 @@ export class CopilotSdkAdapter implements CliAdapter {
     );
 
     return {
+      ...(!effortFlag && options.reasoningEffort ? {
+        effortDelivery: { sent: null, disposition: 'cli-has-no-effort-flag' as const },
+      } : {}),
       outcomeUsageIsTurnTotal: true,
       usageScope: 'turn',
       abort: abortController,

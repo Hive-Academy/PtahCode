@@ -98,6 +98,7 @@ import type {
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { CopilotSdkAdapter } from './copilot-sdk.adapter';
+import { probeCliStdout } from './cli-stdout-probe';
 import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
   buildTaskPrompt,
@@ -106,12 +107,20 @@ import {
 } from './cli-adapter.utils';
 import { CopilotPermissionBridge } from './copilot-permission-bridge';
 
+jest.mock('./cli-stdout-probe', () => ({
+  probeCliStdout: jest.fn(),
+}));
+
+const mockProbeCliStdout = jest.mocked(probeCliStdout);
+
 describe('CopilotSdkAdapter', () => {
   let adapter: CopilotSdkAdapter;
   let bridge: CopilotPermissionBridge;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockProbeCliVersionDetailed.mockResolvedValue({ version: 'copilot 1.0.26', exitCode: 0 });
+    mockProbeCliStdout.mockResolvedValue('  --effort <level>');
     currentChild = null;
 
     mockSpawnCli.mockImplementation(() => {
@@ -1017,6 +1026,32 @@ describe('CopilotSdkAdapter', () => {
     });
   });
 
+  describe('runSdk() effort transport', () => {
+    const options = { task: 'Task', workingDirectory: '/proj', reasoningEffort: 'high' };
+
+    it('uses the preferred flag for the initial spawn', async () => {
+      mockProbeCliStdout.mockResolvedValue('  --reasoning-effort <level>\n  --effort <level>');
+      const handle = await adapter.runSdk({ ...options, binaryPath: '/opt/preferred/copilot' });
+      const [, args] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      expect(args[args.indexOf('--reasoning-effort') + 1]).toBe('high');
+      expect(args).not.toContain('--effort');
+      expect(handle.effortDelivery).toBeUndefined();
+      currentChild?.emitClose(0);
+      await handle.done;
+    });
+
+    it('omits effort from argv and reports when the CLI has no effort flag', async () => {
+      mockProbeCliStdout.mockResolvedValue('  --model <model>');
+      const handle = await adapter.runSdk({ ...options, binaryPath: '/opt/unsupported/copilot' });
+      const [, args] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      expect(args).not.toContain('--effort');
+      expect(args).not.toContain('--reasoning-effort');
+      expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'cli-has-no-effort-flag' });
+      currentChild?.emitClose(0);
+      await handle.done;
+    });
+  });
+
   describe('runSdk() — role delivery (task-prompt)', () => {
     const role: AgentRoleDefinition = {
       name: 'reviewer',
@@ -1136,6 +1171,8 @@ describe('CopilotSdkAdapter lane turn input (B9)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockProbeCliVersionDetailed.mockResolvedValue({ version: 'copilot 1.0.26', exitCode: 0 });
+    mockProbeCliStdout.mockResolvedValue('  --effort <level>');
     currentChild = null;
     mockSpawnCli.mockImplementation(() => {
       currentChild = createFakeChild();
