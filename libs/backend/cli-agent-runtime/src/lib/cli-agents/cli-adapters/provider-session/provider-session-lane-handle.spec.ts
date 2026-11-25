@@ -2110,3 +2110,66 @@ describe('acpProfileEfforts (stopped-lane efforts)', () => {
     expect(live?.efforts).toEqual([]);
   });
 });
+
+describe('createProviderSessionLaneHandle — raw command turns (F9)', () => {
+  const COMMANDS = {
+    sessionUpdate: 'available_commands_update',
+    availableCommands: [
+      { name: 'context', description: 'Show context window usage and session stats' },
+      { name: 'compact', description: 'Compress conversation history' },
+    ],
+  };
+  /** First turn advertises the commands; later prompts answer with `reply`. */
+  function commandLane(reply: (fake: FakeAcpAgent, sessionId: string) => Promise<void> = async () => undefined) {
+    let prompts = 0;
+    return start({
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          const sessionId = String(params['sessionId']);
+          if (++prompts === 1) await fake.sessionUpdate(sessionId, COMMANDS);
+          else await reply(fake, sessionId);
+          // No usage on any turn: a command that called no model reports none.
+          return { result: { stopReason: 'end_turn' } };
+        }),
+    });
+  }
+
+  it('keeps a raw command turn without usage out of the telemetry and says it returned nothing', async () => {
+    const h = commandLane();
+    await expect(h.handle.done).resolves.toBe(0);
+    const before = h.segments.filter((segment) => segment.turnTelemetry).length;
+    const next = await h.handle.continue?.('/context');
+    await expect(next?.done).resolves.toBe(0);
+    expect(promptText(sent(h.agent, 'session/prompt')[1])).toBe('/context');
+    expect(h.segments.filter((segment) => segment.turnTelemetry)).toHaveLength(before);
+    expect(h.infos()).toContain(`${NAME} ran /context and returned no output.`);
+  });
+
+  it('shows the command output and adds no notice when the agent answers', async () => {
+    const h = commandLane(async (fake, sessionId) => {
+      await fake.sessionUpdate(sessionId, {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'Context: 12k of 256k tokens' },
+      });
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const next = await h.handle.continue?.('/context');
+    await expect(next?.done).resolves.toBe(0);
+    expect(h.segments).toContainEqual({ type: 'text', content: 'Context: 12k of 256k tokens' });
+    expect(h.infos()).not.toContain(`${NAME} ran /context and returned no output.`);
+  });
+
+  it('still reports missing usage for an ordinary turn and for an unadvertised /command', async () => {
+    const h = commandLane();
+    await expect(h.handle.done).resolves.toBe(0);
+    const before = h.segments.filter((segment) => segment.turnTelemetry?.status === 'unavailable').length;
+    const prose = await h.handle.continue?.('[Ptah message m1 from the user]\n\n/context');
+    await expect(prose?.done).resolves.toBe(0);
+    await settle();
+    const unknown = await h.handle.continue?.('/usr/bin is missing');
+    await expect(unknown?.done).resolves.toBe(0);
+    expect(h.segments.filter((segment) => segment.turnTelemetry?.status === 'unavailable'))
+      .toHaveLength(before + 2);
+    expect(h.infos().filter((text) => text.includes('returned no output'))).toEqual([]);
+  }, 20_000);
+});

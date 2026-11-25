@@ -246,6 +246,7 @@ describe('PtahCliLaneResumer', () => {
       {
         spawn: jest.fn(),
         prepareSdkHandleSpawn: h.manager.prepareSdkHandleSpawn,
+        findAgentInfo: jest.fn(),
         releaseIdleForResume: jest.fn(async () => undefined),
       },
       h.resumer,

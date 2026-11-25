@@ -1429,7 +1429,7 @@ export class AgentProcessManager {
         cli,
         agentId,
       ),
-      ...(previous ? { resumedFromAgentId: previous.agentId } : {}),
+      ...this.resumedFromField(request.resumedFromAgentId, cli, previous),
       displayName,
       model: resolvedModel,
       ...(request.resumeSessionId
@@ -3800,6 +3800,23 @@ export class AgentProcessManager {
    * Guarded shape because `unref` exists on Node's `Timeout` but not on the
    * DOM's numeric handle, and not on every fake-timer implementation.
    */
+  /**
+   * The card link of a resumed lane (F2). The resumer names the record it
+   * resumes; that link holds even when the resume gate started a fresh
+   * handoff (no session id, so no `previous` by session). Only a tracked
+   * record of the same CLI is linked, so a caller cannot point a new lane at
+   * an unrelated card. Without one, the record that held the session links.
+   */
+  private resumedFromField(
+    requested: string | undefined,
+    cli: CliType,
+    previous: AgentProcessInfo | undefined,
+  ): Pick<AgentProcessInfo, 'resumedFromAgentId'> {
+    const named = requested ? this.agents.get(requested)?.info : undefined;
+    const source = named && named.cli === cli ? named : previous;
+    return source ? { resumedFromAgentId: source.agentId } : {};
+  }
+
   private unrefTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
     if (typeof (timer as { unref?: () => void }).unref === 'function') {
       (timer as { unref: () => void }).unref();

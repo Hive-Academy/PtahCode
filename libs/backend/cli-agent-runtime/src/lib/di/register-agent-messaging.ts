@@ -21,6 +21,7 @@ import { AgentOutputJournal } from '../cli-agents/agent-output-journal.service';
 import type { AgentDeliveryReceiptEventSink } from '../cli-agents/messaging/agent-delivery-receipt-event-sink';
 import { AgentIdAliasRegistry } from '../cli-agents/messaging/agent-id-alias.registry';
 import { AgentLaneResumeService } from '../cli-agents/messaging/agent-lane-resume.service';
+import { laneResumeModelLookup } from '../cli-agents/messaging/lane-resumers/lane-last-model';
 import { AgentMessageAckService } from '../cli-agents/messaging/agent-message-ack.service';
 import { AgentMessageCoordinator } from '../cli-agents/messaging/agent-message-coordinator.service';
 import { AgentMessageDeliveryScheduler } from '../cli-agents/messaging/agent-message-delivery.scheduler';
@@ -193,7 +194,10 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         },
         c.resolve<Logger>(TOKENS.LOGGER),
         parentLevel,
-      ), parentLevel);
+      ), parentLevel, laneResumeModelLookup(
+        (agentId, cursor, sessionId) => metadata().getAgentOutputPage(agentId, cursor, undefined, sessionId),
+        c.resolve<Logger>(TOKENS.LOGGER),
+      ));
     }),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ACK, {

@@ -1801,6 +1801,18 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(runSdkCall.role).toBe(roleDefinition);
     });
 
+    it('carries the potential and effective capabilities on the first spawned event (F3)', async () => {
+      const spawnedInfos: AgentProcessInfo[] = [];
+      manager.events.on('agent:spawned', (info: AgentProcessInfo) => spawnedInfos.push(info));
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      expect(spawnedInfos).toHaveLength(1);
+      expect(spawnedInfos[0].potentialCapabilities).toEqual(sdkAdapter.capabilities());
+      expect(spawnedInfos[0].effectiveCapabilities).toMatchObject({
+        source: 'live-handle',
+        messaging: { continuation: { state: 'unsupported' } },
+      });
+    });
+
     it('stamps role, delivery and channel on the record, the spawned event and the result', async () => {
       const spawnedInfos: AgentProcessInfo[] = [];
       manager.events.on('agent:spawned', (info: AgentProcessInfo) =>
@@ -2652,6 +2664,40 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(
         (sdkAdapter.runSdk as jest.Mock).mock.calls[0][0].resumeSessionId,
       ).toBeUndefined();
+    });
+
+    it('links a fresh handoff of a restored lane to the record it resumes (F2)', async () => {
+      manager.restoreAgents(
+        [
+          {
+            cliSessionId: SESSION,
+            cli: 'codex',
+            agentId: 'orphan-previous' as CliSessionReference['agentId'],
+            task: 'Implement the parser',
+            startedAt: '2026-10-04T08:00:00.000Z',
+            completedAt: '2026-10-04T08:01:00.000Z',
+            status: 'stopped',
+          },
+        ],
+        '/workspace/root',
+      );
+      resumeGate.evaluate.mockResolvedValueOnce({
+        decision: 'fresh', reason: 'lifetime budget expired', contextTokens: null, source: 'estimate', idleMs: 0,
+      });
+      const result = await manager.spawn({
+        task: 'Continue', cli: 'codex', workingDirectory: '/workspace/root',
+        resumeSessionId: SESSION, resumedFromAgentId: 'orphan-previous',
+      });
+      expect(result.resumeDecision?.decision).toBe('fresh');
+      const info = manager.getStatus(result.agentId) as AgentProcessInfo;
+      expect(info.resumedFromAgentId).toBe('orphan-previous');
+    });
+
+    it('ignores a resumed-from id that names no record of the same CLI (F2)', async () => {
+      const result = await manager.spawn({
+        task: 'Fresh', cli: 'codex', workingDirectory: '/workspace/root', resumedFromAgentId: 'no-such-lane',
+      });
+      expect(manager.getStatus(result.agentId)).not.toHaveProperty('resumedFromAgentId');
     });
 
     it('does not inherit an owner from a restored lane when resume omits the owner', async () => {
