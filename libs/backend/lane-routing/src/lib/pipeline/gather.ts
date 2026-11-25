@@ -873,6 +873,7 @@ function orderedMissing(items: readonly MissingInput[]): MissingInput[] {
 
 /** Marks a started read as handled; its awaiting caller still sees the outcome. */
 function observeLateFailure(promise: Promise<unknown>): void {
+  // degradation-audit: reported - the caller that awaits this promise logs and handles its rejection.
   promise.catch(() => undefined);
 }
 

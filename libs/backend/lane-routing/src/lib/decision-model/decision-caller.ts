@@ -151,6 +151,7 @@ export class DecisionCaller {
       const value = this.deps.readPrefillTokensPerSecond?.();
       return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
     } catch (error: unknown) {
+      // degradation-audit: reported - an unreadable prefill setting is logged; the gate uses the measured rate.
       this.deps.logger.warn('[lane-routing] decision model prefill setting could not be read', {
         name: loggableErrorName(error),
       });
