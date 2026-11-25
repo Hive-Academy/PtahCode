@@ -1,5 +1,5 @@
 import { signal } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { TestBed, fakeAsync, flushMicrotasks } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import {
   AppStateManager,
@@ -228,6 +228,64 @@ describe('AnalyzeWorkspacePage', () => {
   });
 
   describe('Setup model card', () => {
+    it('consumes a deferred route Re-run as soon as the user chooses a saved analysis', fakeAsync(() => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      let finishSelection!: (result: 'loaded') => void;
+      store.selectAnalysis.mockImplementationOnce(
+        () =>
+          new Promise<'loaded'>((resolve) => {
+            finishSelection = resolve;
+          }).then((result) => {
+            selected.set('saved');
+            return result;
+          }),
+      );
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      fixture.detectChanges();
+      flushMicrotasks();
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      const use = Array.from(element.querySelectorAll('button')).find(
+        (button) => button.textContent?.trim() === 'Use',
+      );
+      if (!use) throw new Error('Missing saved analysis Use action');
+      expect(navigate).not.toHaveBeenCalled();
+      use.click();
+      expect(store.selectAnalysis).toHaveBeenCalledWith('saved');
+      expect(navigate).toHaveBeenCalledWith([], {
+        queryParams: { rerun: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+
+      setupStateResponse = {
+        kind: 'unset',
+        effective: { provider: 'claude', model: 'claude-sonnet-4' },
+      };
+      window.dispatchEvent(new Event('focus'));
+      flushMicrotasks();
+      expect(fixture.componentInstance['setupReady']()).toBe(true);
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(store.clearSelection).not.toHaveBeenCalled();
+
+      finishSelection('loaded');
+      flushMicrotasks();
+      expect(selected()).toBe('saved');
+      expect(navigate).toHaveBeenLastCalledWith([], {
+        queryParams: { analysis: 'saved' },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+      fixture.destroy();
+    }));
+
     it('blocks Start after the initial Setup read rejects and shows a safe Retry', async () => {
       claudeRpcCall.mockRejectedValueOnce(new Error('raw provider error'));
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
@@ -318,6 +376,83 @@ describe('AnalyzeWorkspacePage', () => {
       expect(
         element.textContent?.includes('Could not switch to the workspace model.'),
       ).toBe(!success);
+      fixture.destroy();
+    });
+
+    it.each<SetupPairState>([
+      { kind: 'set', pair: { provider: 'claude', model: 'claude-sonnet-4' } },
+      {
+        kind: 'unset',
+        effective: { provider: 'claude', model: 'claude-sonnet-4' },
+      },
+    ])('clears a failed Setup write alert on return from Settings with $kind Setup', async (recoveredState) => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      claudeRpcCall.mockResolvedValueOnce({ isSuccess: () => false });
+      element
+        .querySelector<HTMLButtonElement>(
+          '[data-testid="setup-model-use-workspace"]',
+        )
+        ?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const alertText = 'Could not switch to the workspace model. Try again.';
+      expect(element.textContent).toContain(alertText);
+
+      currentView.set('settings');
+      fixture.detectChanges();
+      setupStateResponse = recoveredState;
+      currentView.set('onboarding');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(element.textContent).not.toContain(alertText);
+      expect(
+        element.querySelector('[data-testid="setup-model-alert"]'),
+      ).toBeNull();
+      fixture.destroy();
+    });
+
+    it('only gives Start the primary treatment when Setup is ready', async () => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      const start = element.querySelector<HTMLButtonElement>(
+        '[data-testid="start-analysis-button"]',
+      );
+      expect(start?.disabled).toBe(true);
+      expect(start?.classList.contains('btn-primary')).toBe(false);
+      expect(start?.textContent?.trim()).toBe('Start analysis');
+
+      setupStateResponse = {
+        kind: 'unset',
+        effective: { provider: 'claude', model: 'claude-sonnet-4' },
+      };
+      await fixture.componentInstance['refreshSetupModel']();
+      fixture.detectChanges();
+
+      expect(start?.disabled).toBe(false);
+      expect(start?.classList.contains('btn-primary')).toBe(true);
       fixture.destroy();
     });
 

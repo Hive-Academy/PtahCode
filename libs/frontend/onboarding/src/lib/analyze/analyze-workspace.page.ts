@@ -442,7 +442,8 @@ function describeSetupIssue(
           </p>
           <button
             type="button"
-            [ptahSetupAction]="'primaryFull'"
+            class="btn mt-4"
+            [class.btn-primary]="setupReady()"
             [disabled]="!setupReady()"
             data-testid="start-analysis-button"
             (click)="startFresh()"
@@ -739,8 +740,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       if (this.destroyed || seq !== this.setupRequestSeq) return;
       this.ngZone.run(() => {
         if (response.isSuccess()) {
-          this.setupState.set(response.data.state);
+          const state = response.data.state;
+          this.setupState.set(state);
           this.setupReadFailed.set(false);
+          if (state.kind === 'set' || state.kind === 'unset') {
+            this.setupActionError.set(null);
+          }
         } else {
           this.setupReadFailed.set(true);
         }
@@ -843,7 +848,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
   protected async useSaved(filename: string): Promise<void> {
     try {
-      const result = await this.store.selectAnalysis(filename);
+      const [, result] = await Promise.all([
+        this.consumePendingRerun(),
+        this.store.selectAnalysis(filename),
+      ]);
       if (this.destroyed || result === 'superseded') return;
       this.selectError.set(
         result === 'loaded'
@@ -865,18 +873,20 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
   private async startPendingRerun(): Promise<void> {
     if (!this.pendingRerun || !this.setupReady() || this.destroyed) return;
+    await this.startFresh();
+  }
+  private async consumePendingRerun(): Promise<void> {
+    if (!this.pendingRerun) return;
     this.pendingRerun = false;
-    await Promise.all([
-      this.startFresh(),
-      this.router.navigate([], {
-        queryParams: { rerun: null },
-        queryParamsHandling: 'merge',
-        replaceUrl: true,
-      }),
-    ]);
+    await this.router.navigate([], {
+      queryParams: { rerun: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
   protected async startFresh(): Promise<void> {
     if (!this.setupReady()) return;
+    const rerunNavigation = this.consumePendingRerun();
     this.pendingAnalysis = null;
     this.wizardState.reset();
     this.runner.reset();
@@ -884,18 +894,19 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.store.clearSelection();
     this.interrupted.set(false);
     this.startClock();
-    await this.runner.startFreshAnalysis();
+    await Promise.all([this.runner.startFreshAnalysis(), rerunNavigation]);
     if (this.destroyed) return;
     await this.loadSaved();
   }
   protected async continuePrevious(): Promise<void> {
     if (!this.setupReady()) return;
+    const rerunNavigation = this.consumePendingRerun();
     this.pendingAnalysis = null;
     this.store.clearSelection();
     this.interrupted.set(false);
     this.stopRecovery.set(false);
     this.startClock();
-    await this.runner.resumeAnalysis();
+    await Promise.all([this.runner.resumeAnalysis(), rerunNavigation]);
     await this.loadSaved();
   }
   protected async retry(): Promise<void> {
