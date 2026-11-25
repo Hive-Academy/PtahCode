@@ -55,7 +55,7 @@ export class LensStageRunner {
       const row: ReviewStageRecord = { attemptId: claim.attemptId, stage: name, ordinal: 0, state: 'running',
         startedAt, endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
       await this.repository.saveStage(row);
-      // True only while this lens owns an open pending run marker: after begin, before the lane save.
+      // True only while this lens owns an open pending run marker: after begin, until the lane returns.
       let pendingRun = false;
       try {
         const builtPrompt = prompt(context.promptInput);
@@ -66,9 +66,10 @@ export class LensStageRunner {
           attemptId: claim.attemptId, attemptRoot: context.attemptRoot, headSha: claim.headSha,
           kind: lens, prompt: builtPrompt, runDeadlineMs: deadline, signal, attempt,
           usedFamilies: usedFamilies(results), laterLenses: lenses.slice(index + 1).map(([later]) => later) });
+        // The lane returned: a failed save below keeps the marker, so its usage reads as unknown and partial.
+        pendingRun = false;
         // Always record the lane and its usage, also on abort, so the pending run marker is closed (req 7.1, 7.6).
         await this.repository.saveStageLane(claim.attemptId, name, 0, result.lane ?? null, result.run);
-        pendingRun = false;
         if (signal?.aborted) {
           // No checkpoint: the lens reruns on resume (req 7.4).
           await this.repository.closeRunningStage(claim.attemptId, name, 0, startedAt, new Date().toISOString());

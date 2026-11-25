@@ -355,6 +355,21 @@ describe('LensStageRunner lane usage and abort (M6) on in-memory SQLite', () => 
     } finally { store.db.close(); }
   });
 
+  it('keeps this run\'s pending marker when saving the returned lane fails, so usage reads partial', async () => {
+    const store = await sqlite();
+    try {
+      const laneDoc = await withStaleMarker(store);
+      const save = jest.spyOn(store.repository, 'saveStageLane').mockRejectedValueOnce(new Error('lane save failed'));
+      const h = harness({ repository: store.repository, spawn: async () => ({ usage: usage(5) }) });
+      await expect(h.run(store.target)).rejects.toThrow('lane save failed');
+      expect(save).toHaveBeenCalledTimes(1);
+      const runs = (await laneDoc() as { usage: { runs: { ended: boolean }[] } }).usage.runs;
+      expect(runs).toEqual([expect.objectContaining({ ended: false }), expect.objectContaining({ ended: false })]);
+      expect((await store.lensStage('correctness-lifecycle'))?.usage).toMatchObject({ tokensPartial: true });
+      expect(store.row(FIRST)).toMatchObject({ state: 'failed', errorSummary: 'lane save failed' });
+    } finally { store.db.close(); }
+  });
+
   it('reruns an aborted lens on resume: the new lane replaces the old one and usage sums (req 7.4)', async () => {
     const store = await sqlite();
     try {
