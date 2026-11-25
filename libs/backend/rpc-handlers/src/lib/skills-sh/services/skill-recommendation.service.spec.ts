@@ -1,8 +1,38 @@
 import 'reflect-metadata';
+import { container as rootContainer } from 'tsyringe';
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import type {
+  InternalQueryConfig,
+  InternalQueryHandle,
+  InternalQueryService,
+  IWorkspaceLlmResolver,
+  ResolvedSetupSnapshot,
+} from '@ptah-extension/agent-sdk';
+import type { SkillRankingCallerService } from '@ptah-extension/lane-routing';
+import type { SkillShEntry, StackSummaryItem } from '@ptah-extension/shared';
+import { TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { SkillShEntry } from '@ptah-extension/shared';
-import type { SkillRankingService } from './skill-ranking.service';
+import { registerSkillServices } from '../../di/register';
+import {
+  SKILL_DRAFT_GENERATION_SERVICE,
+  SKILL_JUDGE_SERVICE,
+  SKILL_RECOMMENDATION_SERVICE,
+} from '../../di/tokens';
+import { HarnessLlmRunner } from '../../harness/ai/harness-llm-runner.service';
+import type { HarnessStreamBroadcaster } from '../../harness/streaming/harness-stream-broadcaster.service';
+import { HARNESS_TOKENS } from '../../harness/tokens';
+import { SkillDraftGenerationService } from './skill-draft-generation.service';
+import { SkillJudgeService } from './skill-judge.service';
 import { SkillRecommendationService } from './skill-recommendation.service';
+
+jest.mock('node:fs/promises', () => ({
+  ...jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'),
+}));
+
+const fs = jest.requireMock<typeof import('node:fs/promises')>(
+  'node:fs/promises',
+);
 
 const entry: SkillShEntry = {
   source: 'owner/repo',
@@ -12,19 +42,61 @@ const entry: SkillShEntry = {
   installs: 10,
   isInstalled: false,
 };
-const logger = { warn: jest.fn(), debug: jest.fn() } as Pick<
+
+const SETUP_SNAPSHOT: ResolvedSetupSnapshot = {
+  providerId: 'setup-provider',
+  model: 'setup-model',
+  auth: { env: { ANTHROPIC_AUTH_TOKEN: 'setup-auth-fixture' } },
+};
+
+const SETUP_PAIR = {
+  provider: SETUP_SNAPSHOT.providerId,
+  model: SETUP_SNAPSHOT.model,
+};
+
+const DECISION_PAIR = {
+  provider: 'decision-provider',
+  model: 'decision-model',
+};
+
+const logger = { warn: jest.fn(), debug: jest.fn(), error: jest.fn() } as Pick<
   Logger,
-  'warn' | 'debug'
+  'warn' | 'debug' | 'error'
 >;
 const service = new SkillRecommendationService(logger as Logger);
 
+function makeStream(...messages: SDKMessage[]): InternalQueryHandle {
+  return {
+    stream: (async function* () {
+      yield* messages;
+    })(),
+    close: jest.fn(),
+    abort: jest.fn(),
+  };
+}
+
+function makeSuccessMessage(structuredOutput: unknown): SDKMessage {
+  return {
+    type: 'result',
+    subtype: 'success',
+    structured_output: structuredOutput,
+    result: '',
+    usage: { input_tokens: 1, output_tokens: 1 },
+  } as SDKMessage;
+}
+
 describe('SkillRecommendationService.recommendAnalysis', () => {
-  const item = {
-    kind: 'framework' as const,
+  const item: StackSummaryItem = {
+    kind: 'framework',
     name: 'Angular',
     evidence: 'package.json',
     sourcePhase: 'project-profile',
   };
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
 
   it.each([
     ['Node.js 24.x', 'nodejs'],
@@ -69,6 +141,10 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
     expect(search).toHaveBeenCalledTimes(1);
     expect(search).toHaveBeenCalledWith('nx');
     expect(result.skills).toHaveLength(1);
+    expect(result.judge.items.map(({ itemId }) => itemId)).toEqual([
+      'framework:nx 24.0.0',
+      'framework:@nx/angular',
+    ]);
   });
 
   it.each([8, 0])(
@@ -304,6 +380,10 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
       { item: 'Angular', reason: 'Search failed' },
     ]);
     expect(result.unmatchedItems).toEqual([]);
+    expect(result.judge.items[0]).toMatchObject({
+      registry: 'search-failed',
+      registryFailure: { kind: 'registry-error', reason: 'Search failed' },
+    });
   });
 
   it('leaves one-character terms unmatched and requires a full token for two-character terms', async () => {
@@ -349,46 +429,109 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
   });
 });
 
-describe('SkillRecommendationService ranking integration', () => {
-  const workspaceRoot = 'D:\\fake-workspace';
-  const items = [
-    {
-      kind: 'framework' as const,
-      name: 'Angular',
-      evidence: 'private evidence',
-      sourcePhase: 'project-profile',
-    },
-    {
-      kind: 'language' as const,
-      name: 'TypeScript',
-      evidence: 'private evidence',
-      sourcePhase: 'project-profile',
-    },
-  ];
-  const shared = {
-    ...entry,
-    name: 'Angular TypeScript',
-    skillId: 'angular-typescript',
-    installs: 100,
-  };
-  const angular = {
-    ...entry,
-    name: 'Angular alternative',
-    skillId: 'angular-alternative',
-    installs: 1,
-  };
-  const typescript = {
-    ...entry,
-    name: 'TypeScript alternative',
-    skillId: 'typescript-alternative',
-    installs: 1,
-  };
-  const search = async (query: string) => [
-    shared,
-    query === 'angular' ? angular : typescript,
-  ];
+describe('SkillRecommendationService judge assembly, identity, and deadlines', () => {
+  const workspaceRoot = '/fake-workspace';
 
-  it('preserves selection when the optional ranker is explicitly undefined', async () => {
+  function createJudgeHarness() {
+    const localLogger = {
+      warn: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+    };
+    const execute = jest.fn<
+      Promise<InternalQueryHandle>,
+      [InternalQueryConfig]
+    >();
+    const rankSkillCandidates = jest
+      .fn<
+        ReturnType<SkillRankingCallerService['rankSkillCandidates']>,
+        Parameters<SkillRankingCallerService['rankSkillCandidates']>
+      >()
+      .mockResolvedValue({
+        status: 'skipped',
+        category: 'not-configured',
+        items: {},
+        itemRejections: {},
+      });
+    const broadcaster = {
+      createStreamEmitter: () => ({
+        emitter: { emit: jest.fn() },
+        operationId: 'judge',
+      }),
+      teeStreamWithFlatEvents: (output: AsyncIterable<SDKMessage>) => output,
+      broadcastComplete: jest.fn(),
+      broadcastFlatComplete: jest.fn(),
+    } as unknown as HarnessStreamBroadcaster;
+    const runner = new HarnessLlmRunner(
+      localLogger as unknown as Logger,
+      { execute } as unknown as InternalQueryService,
+      broadcaster,
+      {
+        resolveForPath: jest.fn(),
+        resolveSetup: jest.fn(),
+      } as unknown as IWorkspaceLlmResolver,
+    );
+    const judgeService = new SkillJudgeService(
+      localLogger as unknown as Logger,
+      { rankSkillCandidates },
+      runner,
+    );
+    const recommendationService = new SkillRecommendationService(
+      localLogger as unknown as Logger,
+      judgeService,
+    );
+    return {
+      logger: localLogger,
+      execute,
+      rankSkillCandidates,
+      judgeService,
+      recommendationService,
+    };
+  }
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+    jest.clearAllMocks();
+  });
+
+  it('preserves heuristic selection when the optional judge is explicitly undefined', async () => {
+    const items: StackSummaryItem[] = [
+      {
+        kind: 'framework',
+        name: 'Angular',
+        evidence: 'package.json',
+        sourcePhase: 'project-profile',
+      },
+      {
+        kind: 'language',
+        name: 'TypeScript',
+        evidence: 'tsconfig.json',
+        sourcePhase: 'project-profile',
+      },
+    ];
+    const shared = {
+      ...entry,
+      name: 'Angular TypeScript',
+      skillId: 'angular-typescript',
+      installs: 100,
+    };
+    const angular = {
+      ...entry,
+      name: 'Angular alternative',
+      skillId: 'angular-alternative',
+      installs: 1,
+    };
+    const typescript = {
+      ...entry,
+      name: 'TypeScript alternative',
+      skillId: 'typescript-alternative',
+      installs: 1,
+    };
+    const search = async (query: string) => [
+      shared,
+      query === 'angular' ? angular : typescript,
+    ];
     const input = {
       workspaceRoot,
       items,
@@ -401,6 +544,9 @@ describe('SkillRecommendationService ranking integration', () => {
       undefined,
     ).recommendAnalysis(input);
     expect(result).toEqual(baseline);
+    expect(result.judge.method).toBe('none');
+    expect(result.analysisPair).toBeNull();
+    expect(result.rankedBy).toBe('heuristic');
     expect(result.skills.map((skill) => skill.skill.skillId)).toEqual([
       'angular-typescript',
       'typescript-alternative',
@@ -410,88 +556,667 @@ describe('SkillRecommendationService ranking integration', () => {
       true,
     );
   });
-  it.each(['decision-model', 'session-model', 'heuristic'] as const)(
-    'uses %s order and chooses one best free candidate per item',
-    async (rankedBy) => {
-      const rank = jest.fn().mockResolvedValue({
-        rankedBy,
-        items: {
-          '0': {
-            order: ['1', '0'],
-            rankedBy,
-            reason: 'More relevant Angular guidance',
-          },
-          '1': {
-            order: ['1', '0'],
-            rankedBy,
-            reason: 'More relevant TypeScript guidance',
-          },
-        },
-      });
-      const subject = new SkillRecommendationService(
-        logger as Logger,
-        { rank } as unknown as SkillRankingService,
+
+  it('keeps full first-seen candidate pool and independent per-item assessments without cross-item truncation', async () => {
+    const { recommendationService, execute } = createJudgeHarness();
+    const sharedCandidate: SkillShEntry = {
+      ...entry,
+      source: 'Org/Shared',
+      skillId: 'angular-playwright',
+      name: 'Angular Playwright',
+      installs: 1000,
+    };
+    const angularAlt: SkillShEntry = {
+      ...entry,
+      source: 'Org/Angular',
+      skillId: 'angular-patterns',
+      name: 'Angular patterns',
+      installs: 50,
+    };
+    const deprecatedCandidate: SkillShEntry = {
+      ...entry,
+      source: 'Org/Old',
+      skillId: 'playwright-legacy',
+      name: 'Playwright legacy',
+      description: 'Deprecated Playwright helper',
+      installs: 500,
+    };
+    const playwrightAlt: SkillShEntry = {
+      ...entry,
+      source: 'Org/Playwright',
+      skillId: 'playwright-e2e',
+      name: 'Playwright e2e',
+      installs: 20,
+    };
+
+    execute.mockImplementation(async (config) => {
+      config.onProviderSubmit?.(SETUP_PAIR);
+      return makeStream(
+        makeSuccessMessage({
+          items: [
+            {
+              itemId: 'framework:angular',
+              outcomes: [
+                {
+                  verdict: 'install',
+                  candidateId: 'org/angular/angular-patterns',
+                  reason: 'Matches Angular components in workspace.',
+                },
+              ],
+              rejections: [
+                {
+                  candidateId: 'org/shared/angular-playwright',
+                  reason: 'Too broad for Angular-only work.',
+                },
+              ],
+            },
+            {
+              itemId: 'test-tool:playwright',
+              outcomes: [
+                {
+                  verdict: 'install',
+                  candidateId: 'org/playwright/playwright-e2e',
+                  reason: 'Focused on Playwright E2E coverage.',
+                },
+              ],
+              rejections: [
+                {
+                  candidateId: 'org/shared/angular-playwright',
+                  reason: 'Mixed Angular focus.',
+                },
+              ],
+            },
+          ],
+        }),
       );
-      const result = await subject.recommendAnalysis({
-        workspaceRoot,
-        items,
-        search,
-        summarySource: 'structured',
-      });
-      expect(result.skills).toHaveLength(2);
-      expect(result.skills.map((skill) => skill.skill.skillId).sort()).toEqual([
-        'angular-alternative',
-        'typescript-alternative',
-      ]);
-      expect(result.rankedBy).toBe(rankedBy);
-      for (const [index, recommendation] of result.skills.entries()) {
-        expect(recommendation.rank).toBe(index + 1);
-        expect(recommendation.rankedBy).toBe(rankedBy);
-        expect(['decision-model', 'session-model', 'heuristic']).toContain(
-          recommendation.rankedBy,
-        );
-        if (rankedBy !== 'heuristic') {
-          expect(recommendation.reason).toBeTruthy();
-          expect(recommendation.reason?.length).toBeLessThan(140);
-        }
-      }
-    },
-  );
-  it('skips an already selected candidate and picks the next free candidate', async () => {
-    const rank = jest.fn().mockResolvedValue({
-      rankedBy: 'decision-model',
-      items: {
-        '0': {
-          order: ['0', '1'],
-          rankedBy: 'decision-model',
-          reason: 'Best match',
-        },
-        '1': {
-          order: ['0', '1'],
-          rankedBy: 'decision-model',
-          reason: 'Best match',
-        },
-      },
     });
-    const subject = new SkillRecommendationService(
-      logger as Logger,
-      { rank } as unknown as SkillRankingService,
-    );
-    const result = await subject.recommendAnalysis({
+
+    const savedPair = { provider: 'anthropic', model: 'claude-sonnet-4' };
+    const result = await recommendationService.recommendAnalysis({
       workspaceRoot,
+      resolved: SETUP_SNAPSHOT,
+      analysisPair: savedPair,
+      summarySource: 'structured',
+      items: [
+        {
+          kind: 'framework',
+          name: 'Angular',
+          evidence: 'package.json declares @angular/core',
+          sourcePhase: 'stack',
+        },
+        {
+          kind: 'test-tool',
+          name: 'Playwright',
+          evidence: 'playwright.config.ts present',
+          sourcePhase: 'stack',
+        },
+      ],
+      search: async (query) =>
+        query === 'angular'
+          ? [sharedCandidate, angularAlt]
+          : [sharedCandidate, deprecatedCandidate, playwrightAlt],
+    });
+
+    // Global candidate pool keeps all four candidates in first-seen order.
+    expect(
+      result.judge.candidates.map(({ candidateId }) => candidateId),
+    ).toEqual([
+      'org/shared/angular-playwright',
+      'org/angular/angular-patterns',
+      'org/old/playwright-legacy',
+      'org/playwright/playwright-e2e',
+    ]);
+    // Both items retain the shared candidate independently in candidateIds.
+    expect(result.judge.items[0].candidateIds).toEqual([
+      'org/shared/angular-playwright',
+      'org/angular/angular-patterns',
+    ]);
+    expect(result.judge.items[1].candidateIds).toEqual([
+      'org/shared/angular-playwright',
+      'org/old/playwright-legacy',
+      'org/playwright/playwright-e2e',
+    ]);
+    expect(result.judge.items[1].candidateAssessments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          candidateId: 'org/old/playwright-legacy',
+          eligible: false,
+        }),
+      ]),
+    );
+    expect(result.rankedBy).toBe('session-model');
+    expect(result.skills.map(({ skill }) => skill.skillId)).toEqual([
+      'angular-patterns',
+      'playwright-e2e',
+    ]);
+    // Copied immutable analysisPair does not share reference with input.
+    expect(result.analysisPair).toEqual(savedPair);
+    expect(result.analysisPair).not.toBe(savedPair);
+  });
+
+  it('preserves equal-name/different-kind and duplicate item identity while coalescing searches and mapping failures', async () => {
+    const { recommendationService, execute } = createJudgeHarness();
+    const jestSkill: SkillShEntry = {
+      ...entry,
+      source: 'Org/Testing',
+      skillId: 'jest-unit',
+      name: 'Jest unit testing',
+      installs: 200,
+    };
+
+    const search = jest.fn(async (query: string) => {
+      if (query === 'jest') return [jestSkill];
+      if (query === 'redis') throw new Error('network down');
+      return [];
+    });
+
+    execute.mockImplementation(async (config) => {
+      config.onProviderSubmit?.(SETUP_PAIR);
+      return makeStream(
+        makeSuccessMessage({
+          items: [
+            {
+              itemId: 'framework:jest',
+              outcomes: [
+                {
+                  verdict: 'no-skill',
+                  reason: 'Not used as an app framework.',
+                },
+              ],
+            },
+            {
+              itemId: 'test-tool:jest',
+              outcomes: [
+                {
+                  verdict: 'install',
+                  candidateId: 'org/testing/jest-unit',
+                  reason: 'Runs unit tests in jest.config.ts.',
+                },
+              ],
+            },
+            {
+              itemId: 'test-tool:jest#2',
+              outcomes: [
+                {
+                  verdict: 'no-skill',
+                  reason: 'Already covered by primary Jest test-tool entry.',
+                },
+              ],
+            },
+            {
+              itemId: 'library:redis',
+              outcomes: [
+                {
+                  verdict: 'build',
+                  reason: 'Registry failed; project uses Redis queues.',
+                  proposal: {
+                    name: 'Redis Queue Conventions',
+                    description: 'Local Redis queue patterns.',
+                  },
+                },
+              ],
+            },
+            {
+              itemId: 'pattern:redis',
+              outcomes: [
+                {
+                  verdict: 'no-skill',
+                  reason: 'No separate pattern skill needed.',
+                },
+              ],
+            },
+            {
+              itemId: 'library:obscurelib',
+              outcomes: [
+                {
+                  verdict: 'no-skill',
+                  reason: 'Minimal usage.',
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    });
+
+    const items: StackSummaryItem[] = [
+      {
+        kind: 'framework',
+        name: 'Jest',
+        evidence: 'jest.config.ts',
+        sourcePhase: 'stack',
+      },
+      {
+        kind: 'test-tool',
+        name: 'Jest',
+        evidence: 'package.json devDependencies.jest',
+        sourcePhase: 'stack',
+      },
+      {
+        kind: 'test-tool',
+        name: 'Jest',
+        evidence: 'apps/web/jest.config.ts',
+        sourcePhase: 'arch',
+      },
+      {
+        kind: 'library',
+        name: 'Redis',
+        evidence: 'package.json ioredis',
+        sourcePhase: 'stack',
+      },
+      {
+        kind: 'pattern',
+        name: 'Redis',
+        evidence: 'cache layer',
+        sourcePhase: 'arch',
+      },
+      {
+        kind: 'library',
+        name: 'ObscureLib',
+        evidence: 'package.json',
+        sourcePhase: 'stack',
+      },
+    ];
+
+    const result = await recommendationService.recommendAnalysis({
+      workspaceRoot,
+      resolved: SETUP_SNAPSHOT,
+      analysisPair: null,
+      summarySource: 'structured',
       items,
       search,
-      summarySource: 'structured',
     });
-    expect(result.skills.map((skill) => skill.skill.skillId)).toEqual([
-      'angular-typescript',
-      'typescript-alternative',
+
+    // Coalesced: 3 unique terms queried once each, mapped back to all 6 itemIds.
+    expect(search).toHaveBeenCalledTimes(3);
+    expect(result.judge.items.map(({ itemId }) => itemId)).toEqual([
+      'framework:jest',
+      'test-tool:jest',
+      'test-tool:jest#2',
+      'library:redis',
+      'pattern:redis',
+      'library:obscurelib',
     ]);
+    expect(result.judge.items.map(({ registry }) => registry)).toEqual([
+      'matched',
+      'matched',
+      'matched',
+      'search-failed',
+      'search-failed',
+      'no-match',
+    ]);
+    // Both Redis items receive the mapped search failure.
+    expect(result.searchFailures).toEqual([
+      { item: 'Redis', reason: 'Search failed' },
+      { item: 'Redis', reason: 'Search failed' },
+    ]);
+    // Only the zero-result successful search enters unmatchedItems.
+    expect(result.unmatchedItems).toEqual([items[5]]);
+    // Never substitutes live Setup when saved analysisPair is null.
+    expect(result.analysisPair).toBeNull();
+  });
+
+  it('supports opposite per-item verdicts on a shared candidate and preserves case-sensitive consent keys', async () => {
+    const { recommendationService, rankSkillCandidates, execute } =
+      createJudgeHarness();
+
+    const sharedCandidate: SkillShEntry = {
+      source: 'AcmeOrg/SkillRepo',
+      skillId: 'Angular-Signals',
+      name: 'Angular Signals & Playwright',
+      description: 'Angular signals and Playwright integration',
+      installs: 420,
+      isInstalled: false,
+    };
+
+    rankSkillCandidates.mockResolvedValue({
+      status: 'used',
+      pairConfigured: DECISION_PAIR,
+      pairAttempted: DECISION_PAIR,
+      pairUsed: DECISION_PAIR,
+      items: {
+        'framework:angular': {
+          verdict: 'install',
+          candidateId: 'acmeorg/skillrepo/angular-signals',
+          reason: 'Angular signals are used in core components.',
+          stage: 'decision',
+          order: ['acmeorg/skillrepo/angular-signals'],
+          rejections: {},
+        },
+      },
+      itemRejections: {},
+    });
+
+    execute.mockImplementation(async (config) => {
+      config.onProviderSubmit?.(SETUP_PAIR);
+      return makeStream(
+        makeSuccessMessage({
+          items: [
+            {
+              itemId: 'test-tool:playwright',
+              outcomes: [
+                {
+                  verdict: 'build',
+                  reason: 'Playwright suite uses custom Electron fixtures.',
+                  proposal: {
+                    name: 'Electron Playwright Fixtures',
+                    description: 'Guide for Electron Playwright tests.',
+                  },
+                },
+              ],
+              rejections: [
+                {
+                  candidateId: 'acmeorg/skillrepo/angular-signals',
+                  reason:
+                    'Mostly Angular signals; does not cover Electron fixtures.',
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    });
+
+    const result = await recommendationService.recommendAnalysis({
+      workspaceRoot,
+      resolved: SETUP_SNAPSHOT,
+      summarySource: 'structured',
+      items: [
+        {
+          kind: 'framework',
+          name: 'Angular',
+          evidence: 'package.json @angular/core',
+          sourcePhase: 'stack',
+        },
+        {
+          kind: 'test-tool',
+          name: 'Playwright',
+          evidence: 'e2e/playwright.config.ts',
+          sourcePhase: 'stack',
+        },
+      ],
+      search: async () => [sharedCandidate],
+    });
+
+    // Mixed stage attribution maps legacy rankedBy to decision-model.
+    expect(result.judge.method).toBe('mixed');
+    expect(result.rankedBy).toBe('decision-model');
+
+    // Case-preserving consent key vs canonical lowercase candidateId.
+    expect(result.judge.candidates).toHaveLength(1);
+    expect(result.judge.candidates[0]).toMatchObject({
+      candidateId: 'acmeorg/skillrepo/angular-signals',
+      selectionKey: 'AcmeOrg/SkillRepo/Angular-Signals',
+    });
+
+    // Opposite verdicts on the same shared candidate stay independent per item.
+    const [angularItem, playwrightItem] = result.judge.items;
+    expect(angularItem.outcomes).toEqual([
+      {
+        verdict: 'install',
+        candidateId: 'acmeorg/skillrepo/angular-signals',
+        reason: 'Angular signals are used in core components.',
+        stage: 'decision',
+      },
+    ]);
+    expect(angularItem.candidateAssessments[0].rejection).toBeUndefined();
+    expect(playwrightItem.outcomes[0]).toMatchObject({
+      verdict: 'build',
+      stage: 'normal',
+    });
+    expect(playwrightItem.candidateAssessments[0].rejection).toEqual({
+      reason: 'Mostly Angular signals; does not cover Electron fixtures.',
+      stage: 'normal',
+    });
+
+    // skills[] only lists Install candidates with only the installing item's evidence,
+    // and its source/skillId preserves the exact consent selectionKey.
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0]).toMatchObject({
+      evidence: 'Angular',
+      rankedBy: 'decision-model',
+      reason: 'Angular signals are used in core components.',
+      rank: 1,
+    });
     expect(
-      new Set(result.skills.map((skill) => skill.skill.skillId)).size,
-    ).toBe(2);
-    expect(result.skills[0].reason).toBe('Best match');
-    expect(result.skills[1]).not.toHaveProperty('reason');
-    expect(result.skills[1].rankedBy).toBe('decision-model');
+      `${result.skills[0].skill.source}/${result.skills[0].skill.skillId}`,
+    ).toBe('AcmeOrg/SkillRepo/Angular-Signals');
+  });
+
+  it('handles 30-item deadline regression: 2s pre-search, +26s search cap, 500ms assembly, 3s Decision, queued/late Normal with >=30s budget settled by 70s', async () => {
+    jest.useFakeTimers({ now: new Date('2026-06-01T12:00:00.000Z') });
+    const rpcEntry = Date.now();
+
+    // Keep Normal's scratch I/O on the same schedule as the fake clock.
+    jest.spyOn(fs, 'mkdtemp').mockResolvedValue('/tmp/ptah-skill-judge-test');
+    jest.spyOn(fs, 'rm').mockResolvedValue(undefined);
+
+    // 2 s pre-search latency (Setup resolution + saved-analysis load).
+    await jest.advanceTimersByTimeAsync(2_000);
+
+    const { judgeService, rankSkillCandidates, execute, logger: localLogger } =
+      createJudgeHarness();
+
+    // 30 distinct stack items.
+    const thirtyItems: StackSummaryItem[] = Array.from(
+      { length: 30 },
+      (_, index) => ({
+        kind: 'library' as const,
+        name: `Tech${String(index + 1).padStart(2, '0')}`,
+        evidence: `package.json dependency tech${index + 1}`,
+        sourcePhase: 'stack',
+      }),
+    );
+
+    const lateResolvers: Array<() => void> = [];
+    const search = jest.fn((query: string): Promise<SkillShEntry[]> => {
+      const num = Number(query.replace('tech', ''));
+      const hit: SkillShEntry = {
+        source: 'Org/Repo',
+        skillId: `${query}-guide`,
+        name: `${query} guide`,
+        description: `Guide for ${query}`,
+        installs: 100 + num,
+        isInstalled: false,
+      };
+      // Items 1..12 succeed in 6s per wave (3 waves * 4 workers: +2s -> +20s).
+      if (num <= 12) {
+        return new Promise((resolve) => {
+          setTimeout(() => resolve([hit]), 6_000);
+        });
+      }
+      // Items 13..16 start at +20s and hang past +26s (aborted at +26s; resolve late at +30s).
+      return new Promise((resolve) => {
+        lateResolvers.push(() => resolve([hit]));
+        setTimeout(() => resolve([hit]), 10_000);
+      });
+    });
+
+    // Inject 500 ms assembly overhead before calling the real SkillJudgeService.
+    const assemblyTimedJudge: Pick<SkillJudgeService, 'judge'> = {
+      judge: async (req) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+        return judgeService.judge(req);
+      },
+    };
+
+    const recommendationService = new SkillRecommendationService(
+      localLogger as unknown as Logger,
+      assemblyTimedJudge,
+    );
+
+    // 3 s Decision stage judging the first 4 matched items.
+    rankSkillCandidates.mockImplementation(async (decisionItems) => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 3_000));
+      const answered = Object.fromEntries(
+        decisionItems.slice(0, 4).map((decisionItem) => [
+          decisionItem.key,
+          {
+            verdict: 'install' as const,
+            candidateId: decisionItem.candidates[0].label,
+            reason: `Decision matched ${decisionItem.name} from package.json.`,
+            stage: 'decision' as const,
+            order: [decisionItem.candidates[0].label],
+            rejections: {},
+          },
+        ]),
+      );
+      return {
+        status: 'used',
+        pairConfigured: DECISION_PAIR,
+        pairAttempted: DECISION_PAIR,
+        pairUsed: DECISION_PAIR,
+        items: answered,
+        itemRejections: {},
+      };
+    });
+
+    // Queued/late Normal provider: capture remaining budget at dispatch, queue 5s, submit, then stall past +65s.
+    let normalRemainingAtDispatch = -1;
+    let normalRemainingAtSubmit = -1;
+    let normalConfig: InternalQueryConfig | undefined;
+    let resolveLateNormal!: (handle: InternalQueryHandle) => void;
+    const lateNormalHandle = new Promise<InternalQueryHandle>((resolve) => {
+      resolveLateNormal = resolve;
+    });
+
+    execute.mockImplementation(async (config) => {
+      normalConfig = config;
+      normalRemainingAtDispatch = rpcEntry + 65_000 - Date.now();
+      // Queued for 5 s before provider submission.
+      setTimeout(() => {
+        if (!config.abortController?.signal.aborted) {
+          normalRemainingAtSubmit = rpcEntry + 65_000 - Date.now();
+          config.onProviderSubmit?.(SETUP_PAIR);
+        }
+      }, 5_000);
+      return lateNormalHandle;
+    });
+
+    let elapsedMs: number | undefined;
+    const pending = recommendationService
+      .recommendAnalysis({
+        workspaceRoot,
+        rpcEntry,
+        resolved: SETUP_SNAPSHOT,
+        analysisPair: { provider: 'anthropic', model: 'claude-opus-4' },
+        summarySource: 'structured',
+        items: thirtyItems,
+        search,
+      })
+      .then((result) => {
+        elapsedMs = Date.now() - rpcEntry;
+        return result;
+      });
+
+    // Advance through search cap (+2s -> +26s = 24s), assembly (500ms), Decision (3s) -> Normal dispatched at +29.5s.
+    await jest.advanceTimersByTimeAsync(27_500);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(normalRemainingAtDispatch).toBeGreaterThanOrEqual(30_000);
+
+    // Trigger any late search resolvers after +26s to verify the settled guard blocks late writes.
+    for (const resolveLate of lateResolvers) resolveLate();
+    await jest.advanceTimersByTimeAsync(0);
+
+    // Advance through queued submission (+34.5s) and the Normal cap (+65s).
+    await jest.advanceTimersByTimeAsync(40_500);
+    expect(elapsedMs).toBeLessThanOrEqual(70_000);
+    const result = await pending;
+
+    // Registry search schedule: 12 matched, 4 timed-out at +26s, 14 unstarted not-searched.
+    expect(search).toHaveBeenCalledTimes(16);
+    const matched = result.judge.items.filter(
+      ({ registry }) => registry === 'matched',
+    );
+    const failed = result.judge.items.filter(
+      ({ registry }) => registry === 'search-failed',
+    );
+    const notSearched = result.judge.items.filter(
+      ({ registry }) => registry === 'not-searched',
+    );
+    expect(matched).toHaveLength(12);
+    expect(failed).toHaveLength(4);
+    expect(notSearched).toHaveLength(14);
+    for (const item of failed) {
+      expect(item.registryFailure).toEqual({
+        kind: 'timed-out',
+        reason: 'Search timed out',
+      });
+    }
+    for (const item of notSearched) {
+      expect(item.registryFailure).toEqual({
+        kind: 'budget-exceeded',
+        reason: 'Search budget reached',
+      });
+    }
+    expect(result.unmatchedItems).toEqual([]);
+    expect(result.searchFailures).toHaveLength(4);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(normalRemainingAtSubmit).toBeGreaterThanOrEqual(30_000);
+    expect(normalConfig?.abortController?.signal.aborted).toBe(true);
+
+    // Decision verdicts preserved; Normal timed out with pairAttempted and without pairUsed.
+    expect(result.judge.method).toBe('decision');
+    expect(result.judge.counts).toEqual({
+      decision: 4,
+      normal: 0,
+      notJudged: 26,
+    });
+    expect(result.rankedBy).toBe('decision-model');
+    expect(result.skills).toHaveLength(4);
+    expect(result.judge.stages[1]).toEqual({
+      stage: 'normal',
+      status: 'failed',
+      category: 'timed-out',
+      pairConfigured: SETUP_PAIR,
+      pairAttempted: SETUP_PAIR,
+      itemsJudged: 0,
+      invalidItemIds: [],
+    });
+
+    // Late Normal stream arriving after settlement is closed and cannot mutate result.
+    const lateStream = makeStream(
+      makeSuccessMessage({
+        items: [
+          {
+            itemId: 'library:tech05',
+            outcomes: [{ verdict: 'no-skill', reason: 'Too late.' }],
+          },
+        ],
+      }),
+    );
+    resolveLateNormal(lateStream);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(lateStream.close).toHaveBeenCalledTimes(1);
+    expect(result.judge.items[4].judgedBy).toBe('none');
+  });
+
+  it('registers SKILL_JUDGE_SERVICE, SKILL_DRAFT_GENERATION_SERVICE, and SKILL_RECOMMENDATION_SERVICE in DI', () => {
+    const child = rootContainer.createChildContainer();
+    child.registerInstance(TOKENS.LOGGER, logger as Logger);
+    child.registerInstance(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+      resolveForPath: jest.fn(),
+      resolveSetup: jest.fn(),
+    } as unknown as IWorkspaceLlmResolver);
+    child.registerInstance(HARNESS_TOKENS.LLM_RUNNER, {
+      run: jest.fn(),
+    } as unknown as HarnessLlmRunner);
+
+    registerSkillServices(child);
+
+    const judge = child.resolve<SkillJudgeService>(SKILL_JUDGE_SERVICE);
+    const draft = child.resolve<SkillDraftGenerationService>(
+      SKILL_DRAFT_GENERATION_SERVICE,
+    );
+    const recommendation = child.resolve<SkillRecommendationService>(
+      SKILL_RECOMMENDATION_SERVICE,
+    );
+
+    expect(judge).toBeInstanceOf(SkillJudgeService);
+    expect(draft).toBeInstanceOf(SkillDraftGenerationService);
+    expect(recommendation).toBeInstanceOf(SkillRecommendationService);
+    expect(child.resolve(SKILL_JUDGE_SERVICE)).toBe(judge);
+    expect(child.resolve(SKILL_DRAFT_GENERATION_SERVICE)).toBe(draft);
   });
 });

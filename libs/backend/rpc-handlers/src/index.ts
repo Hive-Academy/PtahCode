@@ -11,10 +11,18 @@ export { SessionHandoffCloser } from './lib/handlers/session-handoff-closer';
 export {
   SKILL_RECOMMENDATION_SERVICE,
   SKILL_RANKING_SERVICE,
+  SKILL_JUDGE_SERVICE,
+  SKILL_DRAFT_GENERATION_SERVICE,
   SKILL_PROJECT_GUIDANCE_SERVICE,
   SKILL_SELECTION_SERVICE,
   SKILL_CONSENT_SERVICE,
 } from './lib/di/tokens';
+export {
+  SkillJudgeService,
+  SkillDraftGenerationService,
+  type SkillJudgeInputItem,
+  type SkillJudgeRequest,
+} from './lib/skills-sh/services';
 
 export {
   AgentRpcHandlers,
