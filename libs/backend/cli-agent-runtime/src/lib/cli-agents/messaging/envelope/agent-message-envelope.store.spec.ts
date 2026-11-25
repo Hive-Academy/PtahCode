@@ -440,6 +440,24 @@ describe('AgentMessageEnvelopeStore', () => {
     await expect(restored.getBody(body.envelopeId)).resolves.toBe('orphan body');
   });
 
+  it('drops an orphaned image-only body instead of re-indexing a header-only message (CR)', async () => {
+    const envelopes = store();
+    await envelopes.ready;
+    storage.failIndexWrites = 1;
+    await expect(envelopes.put(input({ turn: { imageCount: 1 } }), '')).rejects.toBeInstanceOf(AgentMessageStorageError);
+    const bodyKey = storage.keys().find((key) => key.startsWith(AGENT_MESSAGE_BODY_PREFIX));
+    if (!bodyKey) throw new Error('Expected an orphan body key');
+    const body = storage.get<AgentMessageBody>(bodyKey);
+    if (!body) throw new Error('Expected an orphan body record');
+
+    const logger = createLogger();
+    const restored = store(logger);
+    await expect(restored.get(body.envelopeId)).resolves.toBeUndefined();
+    expect(storage.get(bodyKey)).toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith('[AgentMessageEnvelopeStore] Dropped an orphaned image-only body',
+      { id: body.envelopeId });
+  });
+
   it('drops malformed index entries and recovers their bodies', async () => {
     const first = store();
     const { envelope } = await first.put(input(), 'malformed body');

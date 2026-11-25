@@ -596,3 +596,22 @@ The backend now emits host notices as `CliOutputSegment` `{ type: 'info', conten
   - one paste on the textarea while the lane runs calls `onPaste` exactly once and expands the composer. Without the guard this test fails with "Received number of calls: 2", which I confirmed by disabling the guard temporarily;
   - one paste on the folded bar calls it once.
 - Verification: `lane-composer.component.spec.ts` 73/73; eslint clean; `tsc` on the chat lib: 0 errors.
+
+## PR 1512 review, round 3 (head 548b1fc59)
+
+All three items were checked against the code and fixed.
+
+- **(a) Fixed: `inspector-session-stats.component.ts` current row.** `currentModelId` took the first usage row that `sameModel` matched, so a tier alias such as `haiku` over two Haiku versions picked the oldest one.
+  - When several rows match, it now prefers the exact id, then the row the latest turn ran (`liveModelStats.model`), then the newest first-used row.
+  - Spec: alias `haiku` over three Haiku rows marks the latest turn's `claude-haiku-4-5` as current.
+- **(b) Fixed: `lane-delivery.controller.ts` `processReceipt`.** A failed, expired or interrupted receipt was recovered only when the accepted message had text, so an image-only message was lost. It now also recovers a message whose snapshot has files or images.
+  - Spec: a failed image-only send returns its image to the tray.
+- **(c) Fixed: `lane-delivery.controller.ts` `processReceipt`.** A failed message was always restored into the draft with `restore()`, after whatever the user was typing, so several failures, or a failure while typing, merged into one draft.
+  - It now follows the one-at-a-time rule of "Recover text": into an empty draft and tray, else held for the lane's composer (`holdForLane`). The drain then loads it alone once the draft is empty.
+  - The empty check is a shared `draftIsEmpty()`.
+  - Specs: a failure while typing waits and then loads alone; the Req 2.8 spec now expects the typed draft to stay, then the message with its files, images and pick after the draft is emptied. Held files come back by path, as for any held message.
+- Verification:
+  - Jest, chat: `lane-delivery.controller` and `lane-composer` specs, 130/130.
+  - Jest, chat-ui: `inspector-session-stats.component.spec.ts`, 23/23.
+  - `tsc` on the chat and chat-ui libs: 0 errors. eslint: 0 errors.
+  - ui-class audit: 0 over baseline. degradation audit: 0 unsuppressed sites.

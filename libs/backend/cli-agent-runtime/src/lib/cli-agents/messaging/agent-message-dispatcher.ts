@@ -133,6 +133,8 @@ export class AgentMessageDispatcher {
     const images = imageCount > 0 ? this.deps.attachments?.take(envelope.id) : undefined;
     if (imageCount > 0 && (!images || images.length < imageCount))
       return { refusal: 'attachments-unavailable' };
+    // An empty body is deliverable only with its images: never a header-only turn.
+    if (!attempt.body.trim() && !images?.length) return { refusal: 'body-unavailable' };
     const stored = envelope.turn;
     const turn: LaneTurnRequest | undefined = stored || images ? {
       ...(stored?.model !== undefined ? { model: stored.model } : {}),

@@ -255,6 +255,24 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(when).toEqual(['earlier in this session', 'current']);
   });
 
+  it('picks the row the latest turn ran when a tier alias matches several rows (PR 1512 review)', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'claude-haiku-4-5', modelUsageList: [
+          { model: 'claude-haiku-3-5', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'claude-haiku-4-5', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'claude-haiku-5-0', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'claude-haiku-4-5', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+      currentModel: 'haiku',
+    });
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current', 'earlier in this session']);
+  });
+
   it('labels each breakdown row current or earlier in this session', () => {
     const { fixture, models, root } = render({
       snapshot: {

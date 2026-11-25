@@ -356,9 +356,7 @@ export class LaneDeliveryController {
       if (!sources || !this.preferred()) return;
       const agentId = this.agentId();
       if (!this.store.recovered().has(agentId)) return;
-      const empty = sources.draft().trim() === '' &&
-        this.attachments.files().length === 0 && this.attachments.images().length === 0;
-      if (!empty) return;
+      if (!this.draftIsEmpty()) return;
       untracked(() => {
         // A recovered message with neither text nor attachments has nothing
         // to restore; skip to the next. Attachments alone are a message (PR 1512 review).
@@ -645,15 +643,26 @@ export class LaneDeliveryController {
   private processReceipt(receipt: AgentDeliveryReceipt): void {
     if (this.cancelling.has(receipt.id)) return;
     const pending = acceptedMessages.get(receipt.id);
-    if (!pending || pending.agentId !== this.agentId() || !pending.text) return;
+    // An image-only message has no text but is still a message to recover (PR 1512 review).
+    if (!pending || pending.agentId !== this.agentId() || (!pending.text && !hasAttachments(pending.snapshot))) return;
     if (receipt.state === 'failed' || receipt.state === 'expired' || receipt.state === 'interrupted-undelivered') {
       if (!this.receivesMessageOf(pending.owner)) return;
-      this.restore(pending.text, pending.snapshot);
+      // One message at a time, as for "Recover text": into an empty draft and
+      // tray, else queued for the lane's composer, never merged into what the
+      // user is writing or into another recovered message (PR 1512 review).
+      if (this.draftIsEmpty()) this.restore(pending.text, pending.snapshot);
+      else this.holdForLane(pending.agentId, pending.text, pending.snapshot);
       // The composer holds it now: the thread row must not offer Recover text too (M4).
       this.store.markRestored(receipt.id);
       this._error.set(`${this.store.receiptStatus(receipt).label}: ${receiptRefusalText(receipt)}`);
       acceptedMessages.delete(receipt.id);
     } else if (receipt.state === 'settled') acceptedMessages.delete(receipt.id);
+  }
+
+  /** The draft has no text and the tray no attachment. */
+  private draftIsEmpty(): boolean {
+    return (this.sources()?.draft().trim() ?? '') === '' &&
+      this.attachments.files().length === 0 && this.attachments.images().length === 0;
   }
 
   /**

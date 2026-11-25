@@ -43,6 +43,8 @@ describe('lastRunModelFromOutput (F1)', () => {
     const read = pages([
       { type: 'info', content: 'usage', usage: { model: 'claude-haiku-4-5' } },
       { type: 'info', content: 'usage', usage: { model: 'claude/unknown' } },
+      { type: 'info', content: 'usage', usage: { model: 'multi-model' } },
+      { type: 'info', content: 'usage', usage: { model: 'claude/multi-model' } },
     ]);
     await expect(lastRunModelFromOutput(read, info)).resolves.toEqual({ model: 'claude-haiku-4-5', truncated: false });
   });

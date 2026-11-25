@@ -391,7 +391,15 @@ export class InspectorSessionStatsComponent {
     const { snapshot, liveModelStats, currentModel } = this.stats();
     const id = currentModel || liveModelStats?.model || snapshot?.model || null;
     if (!id) return null;
-    return snapshot?.modelUsageList?.find((row) => sameModel(row.model, id))?.model ?? id;
+    const rows = (snapshot?.modelUsageList ?? []).filter((row) => sameModel(row.model, id));
+    if (rows.length <= 1) return rows[0]?.model ?? id;
+    // Several rows match (a tier alias such as `haiku` over two Haiku
+    // versions): the exact id, else the row the latest turn ran, else the
+    // newest first-used row (the list is in first-use order).
+    const live = liveModelStats?.model;
+    return (rows.find((row) => row.model === id) ??
+      (live ? rows.find((row) => row.model.toLowerCase() === live.toLowerCase()) : undefined) ??
+      rows[rows.length - 1]).model;
   });
   protected readonly modelNames = computed(() => {
     const { snapshot } = this.stats();

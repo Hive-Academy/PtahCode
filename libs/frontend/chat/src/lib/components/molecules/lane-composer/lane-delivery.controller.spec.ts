@@ -204,9 +204,15 @@ describe('LaneDeliveryController', () => {
 
       push({ ...sent, state: 'failed', reason, lastError: 'Model opus is not offered by this lane', updatedAt: sent.updatedAt + 1 });
 
-      expect(draft()).toBe('Typed meanwhile\nUse the new model');
-      expect(attachments.files()).toEqual([FILE]);
-      expect(attachments.images()).toEqual([IMAGE]);
+      // Never merged into the message being typed (PR 1512 review): it waits,
+      // then comes back alone with its own attachments and pick.
+      expect(draft()).toBe('Typed meanwhile');
+      expect(attachments.files()).toEqual([]);
+      draft.set('');
+      TestBed.tick();
+      expect(draft()).toBe('Use the new model');
+      expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+      expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
       expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
       expect(controller.error()).toContain('Not delivered:');
       expect(controller.error()).toContain('Model opus is not offered by this lane');
@@ -348,6 +354,32 @@ describe('LaneDeliveryController', () => {
     push({ ...held, state: 'expired', updatedAt: 50 });
     expect(draft()).toBe('Wait for reset');
     expect(attachments.files()).toEqual([FILE]);
+  });
+
+  it('recovers an image-only message whose delivery failed (PR 1512 review)', async () => {
+    const sent = receipt();
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+    attachments.images.set([IMAGE]);
+    await controller.send('queue');
+    expect(attachments.images()).toEqual([]);
+    push({ ...sent, state: 'failed', updatedAt: 50 });
+    expect(draft()).toBe('');
+    expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
+  });
+
+  it('keeps a failed message separate when the user is writing another one: it waits, then loads alone (PR 1512 review)', async () => {
+    const sent = receipt();
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+    draft.set('First message');
+    await controller.send('queue');
+    draft.set('Second, being written');
+    push({ ...sent, state: 'failed', updatedAt: 50 });
+    // Not merged into the draft: held for the lane's composer.
+    expect(draft()).toBe('Second, being written');
+    expect(store.holdForComposer).toHaveBeenCalledWith(AGENT, { text: 'First message' });
+    draft.set('');
+    TestBed.tick();
+    expect(draft()).toBe('First message');
   });
 
   it('puts recovered text from a Recover text action into the draft once the draft is empty', () => {

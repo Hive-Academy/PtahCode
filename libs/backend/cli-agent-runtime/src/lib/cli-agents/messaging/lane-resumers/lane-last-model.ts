@@ -31,7 +31,8 @@ export function segmentModel(cli: AgentProcessInfo['cli'], segment: CliOutputSeg
   const reported = segment.turnTelemetry ? observedModelFrom(cli, segment.turnTelemetry) : undefined;
   if (reported) return reported;
   const usage = segment.usage?.model?.trim();
-  if (!usage || usage === 'unknown' || usage.endsWith('/unknown') || usage.endsWith('/multi-model')) return undefined;
+  if (!usage || usage === 'unknown' || usage === 'multi-model' ||
+    usage.endsWith('/unknown') || usage.endsWith('/multi-model')) return undefined;
   return usage.slice(0, 128);
 }
 

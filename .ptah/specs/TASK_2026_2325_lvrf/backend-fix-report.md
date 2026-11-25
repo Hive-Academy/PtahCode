@@ -502,3 +502,31 @@ Verification:
 - **Not completed:** the rpc-handlers spec-config tsc ran out of the default 2 GB heap. ts-jest
   compiled the changed RPC spec in its passing run.
 - eslint: 0 errors. Degradation audit: 0 unsuppressed sites. Line endings: LF.
+
+## 14. PR #1512 CodeRabbit threads, round 3 (on 548b1fc59)
+
+1. `agent-message-envelope.store.ts:407`, recovered empty bodies: **fixed**.
+   - Valid. When the index write fails, `put` leaves the body record; restart re-indexing rebuilt
+     the envelope from that record alone, without its `turn.imageCount`. The images were held in
+     memory only, so a retry could have sent a header-only turn.
+   - Fix, two layers:
+     - `reindexOrphans` drops an orphaned empty body record: its images are gone, so nothing is
+       deliverable. It logs `[AgentMessageEnvelopeStore] Dropped an orphaned image-only body`
+       `{ id }` and does not index it. This replaces the section 13 rule that set `bodyStored` on
+       re-index.
+     - The dispatcher's `deliveryForm` refuses a blank body with no images as `body-unavailable`
+       before any dispatch, so no path can send a header-only turn.
+   - Specs:
+     - store: an orphaned image-only body after a failed index write is not re-indexed, its key
+       is deleted, and the warning is logged
+     - dispatcher: an empty body with no images is refused `body-unavailable`, sends nothing, and
+       the envelope is failed
+2. `lane-last-model.ts:34`, bare `multi-model` placeholder: **fixed**.
+   - Valid: only `unknown` and the namespaced placeholders were skipped.
+   - `segmentModel` now also rejects `multi-model`.
+   - Spec: the usage fallback skips both `multi-model` and `claude/multi-model`.
+- Verification:
+  - `npx jest --runInBand --coverage=false --runTestsByPath` on the envelope store, dispatcher,
+    last-model and both coordinator specs: 144 passed.
+  - `npx tsc --noEmit` on the cli-agent-runtime lib and spec configs: clean.
+  - eslint: 0 errors. Degradation audit: 0 unsuppressed sites. Line endings: LF.

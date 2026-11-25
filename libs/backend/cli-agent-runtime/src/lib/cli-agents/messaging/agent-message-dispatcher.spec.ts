@@ -245,6 +245,17 @@ describe('AgentMessageDispatcher', () => {
     });
   });
 
+  describe('empty body without images (CR)', () => {
+    it('refuses an empty body with no images held, and sends no header-only turn', async () => {
+      const s = setup({ advertised: [] });
+      const { attempt, id } = await s.attempt('');
+      const outcome = await s.dispatcher.attempt(attempt);
+      expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'body-unavailable' });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect(await s.h.store.get(id)).toMatchObject({ state: 'failed', reason: 'body-unavailable' });
+    });
+  });
+
   describe('image-only cold echo (CR)', () => {
     it('echoes an image-only message on the resumed lane with its images', async () => {
       const s = setup({ advertised: [], live: false });

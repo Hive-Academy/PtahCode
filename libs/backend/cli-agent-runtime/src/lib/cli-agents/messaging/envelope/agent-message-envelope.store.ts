@@ -388,6 +388,16 @@ export class AgentMessageEnvelopeStore {
       const parsed = AgentMessageBodySchema.safeParse(this.storage.get<unknown>(key));
       if (!parsed.success || this.envelopes.has(parsed.data.envelopeId)) continue;
       const body = parsed.data;
+      // An empty body belonged to an image-only message, whose images lived only
+      // in memory: without them there is nothing to deliver. Drop the record so
+      // it can never go out as a header-only turn.
+      if (body.text === '') {
+        if (await this.deleteBodyLocked(body.envelopeId))
+          this.logger?.warn('[AgentMessageEnvelopeStore] Dropped an orphaned image-only body', {
+            id: body.envelopeId,
+          });
+        continue;
+      }
       const now = this.clock();
       const envelope = AgentMessageEnvelopeSchema.parse({
         id: body.envelopeId,
@@ -404,7 +414,6 @@ export class AgentMessageEnvelopeStore {
         updatedAt: now,
         attemptCount: 0,
         bodyBytes: Buffer.byteLength(body.text, 'utf8'),
-        ...(body.text === '' ? { bodyStored: true } : {}),
       });
       this.envelopes.set(envelope.id, envelope);
     }
