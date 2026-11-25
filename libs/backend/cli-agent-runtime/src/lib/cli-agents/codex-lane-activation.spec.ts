@@ -107,6 +107,7 @@ function activationHarness(adapterOverride?: CliAdapter, withMcp = false): Activ
   };
   const detection = Object.assign(Object.create(null), {
     getAdapter: jest.fn(() => adapterOverride ?? adapter),
+    nativeEfforts: jest.fn().mockReturnValue({ provenance: 'unknown' }),
     getDetection: jest.fn(() => (adapterOverride ?? adapter).detect()),
   }) as ManagerArgs[1];
   const workspace = Object.assign(Object.create(null), {

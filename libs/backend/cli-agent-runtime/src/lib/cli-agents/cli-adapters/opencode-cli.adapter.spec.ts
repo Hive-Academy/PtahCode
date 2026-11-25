@@ -1070,6 +1070,30 @@ describe('OpencodeCliAdapter', () => {
       expect(info[1].turnTelemetry).toEqual(expect.objectContaining({
         status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'billed-provider/billed-model' }),
       }));
+      expect(handle.reportedSession?.()).toEqual({
+        model: 'billed-provider/billed-model', effort: null, efforts: { provenance: 'unknown' },
+      });
+    });
+
+    it('reports only complete model/provider pairs from the active session', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'requested/model' });
+      const writeEvent = (event: object) => currentChild?.stdout.write(JSON.stringify(event) + '\n');
+      const unknown = { model: null, effort: null, efforts: { provenance: 'unknown' } };
+      expect(handle.reportedSession?.()).toEqual(unknown);
+      writeEvent({ type: 'step_start', sessionID: 'ses_1', providerID: 'provider', part: { modelID: 'model' } });
+      writeEvent({ type: 'step_start', sessionID: 'other', providerID: 'other', modelID: 'model' });
+      writeEvent({ type: 'step_start', sessionID: 'ses_1', modelID: 'model' });
+      expect(handle.reportedSession?.()).toEqual(unknown);
+      writeEvent({ type: 'step_start', sessionID: 'ses_1', part: { providerID: 'native', modelID: 'model' } });
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(handle.reportedSession?.()).toEqual({ ...unknown, model: 'native/model' });
+
+      const continuation = await handle.continue?.('next turn');
+      writeEvent({ type: 'step_start', sessionID: 'ses_1' });
+      currentChild?.emitClose(0);
+      await continuation?.done;
+      expect(handle.reportedSession?.()).toEqual(unknown);
     });
 
     it('charges every step of a multi-step turn', async () => {

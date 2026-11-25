@@ -151,6 +151,7 @@ export class AgentSpawnEnvironment {
       readonly effort?: string;
       readonly roleName?: string;
       readonly phaseKind?: LaneEffortInput['phaseKind'];
+      readonly nativeEfforts?: LaneEffortInput['nativeEfforts'];
     } = {},
   ): LaneEffortResolution {
     const settingKey = AgentSpawnEnvironment.EFFORT_CONFIG_KEYS[cli];
@@ -168,6 +169,7 @@ export class AgentSpawnEnvironment {
       chatEffort: this.reasoningSettings.effort.get(),
       roleName: spawn.roleName,
       phaseKind: spawn.phaseKind,
+      nativeEfforts: spawn.nativeEfforts,
     });
   }
 

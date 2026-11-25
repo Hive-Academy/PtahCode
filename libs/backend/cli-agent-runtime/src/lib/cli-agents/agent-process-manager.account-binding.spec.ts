@@ -168,7 +168,8 @@ function harness(
   const resume = gate();
   const manager = new AgentProcessManager(
     logger,
-    stub<Args[1]>({ getAdapter: jest.fn().mockReturnValue(adapter), getDetection: jest.fn().mockResolvedValue({ installed: true }) }),
+    stub<Args[1]>({ getAdapter: jest.fn().mockReturnValue(adapter), getDetection: jest.fn().mockResolvedValue({ installed: true }),
+      nativeEfforts: jest.fn().mockReturnValue({ provenance: 'unknown' }) }),
     stub<Args[2]>({ getRunningBySession: jest.fn().mockReturnValue([]) }),
     stub<Args[3]>({ captureException: jest.fn() }),
     stub<Args[4]>({ flushPending: jest.fn().mockResolvedValue(undefined), discardPending: jest.fn() }),

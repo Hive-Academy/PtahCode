@@ -236,6 +236,16 @@ describe('AgentSpawnEnvironment', () => {
   });
 
   describe('resolveReasoningEffort()', () => {
+    it('checks configured effort against the native list before applying fallback precedence', () => {
+      const { environment } = makeEnvironment({
+        config: { codexReasoningEffort: 'max' },
+        effort: 'high',
+      });
+      expect(environment.resolveReasoningEffort('codex', {
+        nativeEfforts: { provenance: 'native', supported: ['max'], default: null },
+      })).toMatchObject({ effort: 'max', step: 2, disposition: 'native-match' });
+    });
+
     it('lets the UI effort selection drive codex and copilot when no setting is set', () => {
       const { environment } = makeEnvironment({ effort: 'high' });
       expect(environment.resolveReasoningEffort('codex').effort).toBe('high');

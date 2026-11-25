@@ -218,6 +218,7 @@ interface OpencodeTurnLaunch {
   /** The child closed or failed to start; its PID must no longer be used. */
   readonly onExited: (child: ReturnType<typeof spawnCli>) => void;
   readonly onSessionId: (sessionId: string) => void;
+  readonly onNativeModel: (model: string) => void;
   readonly expectedSessionId?: string;
 }
 
@@ -795,6 +796,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     const spawnDescriptor = await resolveDirectSpawn(binary);
 
     let turnSequence = 0;
+    let reportedModel: string | null = null;
     const startTurn = (
       prompt: string,
       sessionId: string | undefined,
@@ -822,9 +824,11 @@ export class OpencodeCliAdapter implements CliAdapter {
           turnModel = options.model;
         return code;
       };
+      const turnNumber = ++turnSequence;
+      reportedModel = null;
       return this.runTurn({
         windowsJobPolicy: standalone === true ? 'job' : 'no-job',
-        turnNumber: ++turnSequence,
+        turnNumber,
         runId: options.agentId,
         requestedModelId: model,
         command: spawnDescriptor.command,
@@ -834,6 +838,9 @@ export class OpencodeCliAdapter implements CliAdapter {
         signal: abortController.signal,
         emitOutput: output.emit,
         emitSegment: segment.emit,
+        onNativeModel: (modelId) => {
+          if (turnNumber === turnSequence) reportedModel = modelId;
+        },
         onSpawned: (child) => {
           activeChild = child;
         },
@@ -872,6 +879,11 @@ export class OpencodeCliAdapter implements CliAdapter {
       // The resumed id counts before (or without) any reported `sessionID`,
       // so the manager can still record which session the lane ran on.
       getSessionId: resumableSessionId,
+      reportedSession: () => ({
+        model: reportedModel,
+        effort: null,
+        efforts: { provenance: 'unknown' },
+      }),
       getPid: () => activeChild?.pid,
       supportsContinuation: () => resumableSessionId() !== undefined,
       continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> => {
@@ -1003,7 +1015,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           return false;
         }
         return true;
-      });
+      }, launch.onNativeModel);
 
     let lineBuf = '';
     child.stdout?.on('data', (data: string) => {
@@ -1145,6 +1157,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     emitSegment: (segment: CliOutputSegment) => void,
     turn: OpencodeTurnState,
     acceptSession: (event: OpencodeEvent) => boolean,
+    onNativeModel: (model: string) => void,
   ): void {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -1161,9 +1174,12 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
 
     if (!acceptSession(event)) return;
-    const modelId = event.modelID ?? event.part?.modelID;
-    const providerId = event.providerID ?? event.part?.providerID;
-    if (modelId && providerId) turn.observedModelId = `${providerId}/${modelId}`;
+    const frame = event.modelID && event.providerID ? event : event.part;
+    if (typeof frame?.modelID === 'string' && frame.modelID &&
+        typeof frame.providerID === 'string' && frame.providerID) {
+      turn.observedModelId = `${frame.providerID}/${frame.modelID}`;
+      onNativeModel(turn.observedModelId);
+    }
 
     switch (event.type) {
       case 'step_start':

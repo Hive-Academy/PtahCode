@@ -607,11 +607,19 @@ export class ClaudeSdkLaneRunner {
           models: models.status,
           commands: commands.status,
         });
+      const selectedModel = models.status === 'fulfilled'
+        ? models.value.find((model) => model.value === currentModel)
+        : undefined;
+      const efforts = selectedModel?.supportsEffort === false
+        ? []
+        : selectedModel?.supportsEffort === true && selectedModel.supportedEffortLevels?.length
+          ? selectedModel.supportedEffortLevels
+          : EFFORT_LEVELS;
       const catalog: LaneTurnOptionsCatalog & { readonly error?: string } = {
         models: models.status === 'fulfilled'
           ? models.value.map((model): CliModelInfo => ({ id: model.value, name: model.displayName }))
           : [],
-        efforts: [...EFFORT_LEVELS],
+        efforts: [...efforts],
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
         commands: commands.status === 'fulfilled'

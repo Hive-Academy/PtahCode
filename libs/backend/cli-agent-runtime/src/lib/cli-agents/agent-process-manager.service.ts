@@ -34,6 +34,7 @@ import {
   SpawnAgentResult,
   AgentOutput,
   CliType,
+  OUTCOME_EFFORT_SOURCES,
   normalizeWorkspaceRoot,
   isAgentBudgetStopReason,
   formatBudgetAskReadOnly,
@@ -1405,7 +1406,20 @@ export class AgentProcessManager {
       effort: request.effort,
       roleName: roleDefinition?.name,
       phaseKind,
+      nativeEfforts: this.cliDetection.nativeEfforts(cli, resolvedModel),
     });
+    const spawnSettings = {
+      model: resolvedModel,
+      modelSource: laneModel.source,
+      spawnEffort: {
+        requested: laneEffort.requested ?? null,
+        sent: laneEffort.effort ?? null,
+        source: OUTCOME_EFFORT_SOURCES[laneEffort.step - 1] ?? 'none',
+        provenance: laneEffort.provenance,
+        disposition: laneEffort.disposition,
+      },
+      ...(request.routeFacts ? { routeFacts: request.routeFacts } : {}),
+    };
     const laneBudgets =
       cli === 'codex' ? this.spawnEnvironment.resolveLaneBudgets() : undefined;
     const roleStamp: AgentRoleStamp | undefined = roleDefinition
@@ -1430,7 +1444,7 @@ export class AgentProcessManager {
       ),
       ...(previous ? { resumedFromAgentId: previous.agentId } : {}),
       displayName,
-      model: resolvedModel,
+      ...spawnSettings,
       ...(request.resumeSessionId
         ? { cliSessionId: request.resumeSessionId }
         : {}),
@@ -1499,8 +1513,19 @@ export class AgentProcessManager {
     let sdkHandle: SdkHandle;
     let issuedMcpToken: string | undefined;
     try {
-      if (ticket && this.agents.get(agentId)?.info.status !== 'starting') {
-        throw new Error(`Spawn stopped before launch: ${agentId}`);
+      if (ticket) {
+        const admitted = this.agents.get(agentId);
+        if (!admitted || admitted.info.status !== 'starting') {
+          throw new Error(`Spawn stopped before launch: ${agentId}`);
+        }
+        // An acknowledged spawn can write an outcome even if runSdk throws.
+        admitted.info = {
+          ...admitted.info,
+          ...spawnSettings,
+          cli,
+          taskKind: info.taskKind,
+          routingSource: info.routingSource,
+        };
       }
       const laneMcpCapability = laneMcpTokenCapability(cli);
       const mcpToken =
@@ -1729,6 +1754,8 @@ export class AgentProcessManager {
        */
       model?: string;
       reasoningEffort?: string;
+      spawnEffort?: AgentProcessInfo['spawnEffort'];
+      routeFacts?: AgentProcessInfo['routeFacts'];
     },
   ): Promise<SpawnAgentResult> {
     if (!meta.admission) await this.reserveSpawnSlot();
@@ -1777,6 +1804,8 @@ export class AgentProcessManager {
         ptahCliId: meta.ptahCliId,
         ...(meta.model ? { model: meta.model } : {}),
         ...(meta.reasoningEffort ? { reasoningEffort: meta.reasoningEffort } : {}),
+        ...(meta.spawnEffort ? { spawnEffort: meta.spawnEffort } : {}),
+        ...(meta.routeFacts ? { routeFacts: meta.routeFacts } : {}),
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
@@ -1880,6 +1909,12 @@ export class AgentProcessManager {
     }
     const reference = handleReference ?? requestedReference;
     info = { ...info, ...reference };
+    if (info.spawnEffort && sdkHandle.effortDelivery) {
+      info = {
+        ...info,
+        spawnEffort: { ...info.spawnEffort, ...sdkHandle.effortDelivery },
+      };
+    }
     const potential =
       info.potentialCapabilities ??
       this.cliDetection
@@ -3624,6 +3659,7 @@ export class AgentProcessManager {
     this.clearInactivityTimers(tracked);
     const droppedIds = tracked.pendingMessages.map((entry) => entry.messageId);
     this.messageRouter.discardPending(agentId, tracked);
+    this.captureReportedSession(tracked);
     this.events.emit('agent:turn-settled', {
       ...tracked.info,
       turnSeq: tracked.info.turnSeq,
@@ -4212,6 +4248,7 @@ export class AgentProcessManager {
         code === 0 && !structuredLimitTexts.length ? null : limit,
         observedAt,
       );
+      this.captureReportedSession(tracked);
     } else if (!tracked.info.completedAt) {
       const completedAt = new Date().toISOString();
       tracked.info = {
@@ -4508,6 +4545,19 @@ export class AgentProcessManager {
       },
       info.quotaOwner,
     );
+  }
+
+  private captureReportedSession(tracked: TrackedAgent): void {
+    const reported = tracked.sdkHandle?.reportedSession?.();
+    if (!reported) return;
+    tracked.info.reportedSession = reported;
+    if (reported.model && reported.efforts.provenance === 'native') {
+      this.cliDetection.recordNativeSession(
+        tracked.info.ptahCliId ?? tracked.info.cli,
+        reported.model,
+        reported.efforts,
+      );
+    }
   }
 
   /**

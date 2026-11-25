@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B15, B17 COMPLETE. B16 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B17 COMPLETE. B19 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -432,8 +432,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B16 - WU3b-a APM capture + WU13b Claude composer + WU18 OpenCode native model
 
-- **Status**: IN_PROGRESS (codex 78795f48, one lane for A+B+C)
-- **Shape / weight**: logic / lane A (WU3b-a) est. 11,900; lane B (WU13b) est. 7,200; lane C (WU18) est. 8,100. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 78795f48, one lane for A+B+C; decision 29; V4 pinned, no synthetic row. Review note: spawnEffort.source maps OUTCOME_EFFORT_SOURCES by step index)
+- **Shape / weight**: logic / lane A (WU3b-a) est. 11,900; lane B (WU13b) est. 7,200; lane C (WU18) est. 8,100. **Actual tokens**: unavailable
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/`):
   - A: `cli-agents/agent-process-manager.service.ts:780-860,1361-1560,2100-2130,4524-4600`; `cli-agents/lane-completion-notifier.service.ts:560-640`; `cli-agents/agent-process-manager.service.spec.ts:1-140,555-640` (harness only); `cli-agents/cli-detection.service.ts` new methods (after B6); `ptah-cli/ptah-cli-registry.ts:805-825`; PLAN:718-721, PLAN:867-875, PLAN:1068
@@ -490,7 +490,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B19 - WU7r reasons + WU9b evidence view service
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (lane A codex 632d6454, lane B codex 01f931ea)
 - **Shape / weight**: logic / lane A (WU7r) est. 11,200; lane B (WU9b) est. 9,000. **Actual tokens**: pending
 - **Projects**: lane-routing (1)
 - **Read set**: A: `W/libs/backend/lane-routing/src/lib/reasons/compile-reasons.ts` (whole, 868 lines); `.../reasons/compile-reasons.spec.ts:1-120` + one chosen-entry describe; `.../contracts/route-decide-result.schema.ts` parts (after B17); PLAN:999-1004, PLAN:507-509. B: `.../matrix/choice-evidence.ts`, `.../catalog/lane-catalog.types.ts`, `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; `.../matrix/capability-matrix.store.ts:280-360` (summaries source); PLAN:540-605

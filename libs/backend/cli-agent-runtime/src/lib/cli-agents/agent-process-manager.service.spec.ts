@@ -352,6 +352,7 @@ function createMockCliDetection(
 
   return {
     getAdapter: jest.fn().mockReturnValue(adapter),
+    nativeEfforts: jest.fn().mockReturnValue({ provenance: 'unknown' }),
     getDetection: jest.fn().mockResolvedValue(det),
     getInstalledClis: jest.fn().mockResolvedValue([det]),
     detectAll: jest.fn().mockResolvedValue([det]),
