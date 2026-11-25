@@ -714,11 +714,12 @@ async function captureRolesOpen(
   await expect(page.locator('[data-testid="cli-matrix"]')).toBeVisible();
   await expect(page.locator('[data-testid="consumer-table"]')).toBeVisible();
   // Batch 35 revise R1: every role's Provider & model cell is one line in both hosts (the label truncates instead).
+  // Four rows: Setup, Memory curator, Enhancement, and Decision model (TASK_2026_2325_899d added Setup).
   const consumers = page.locator('[data-testid="consumer-table"]');
   const consumerRows = consumers.locator(
     'article[data-testid^="consumer-row-"]',
   );
-  await expect(consumerRows).toHaveCount(3);
+  await expect(consumerRows).toHaveCount(4);
   // Card grids can vary in height; each assignment label must stay on one line.
   const cellHeights = await consumers
     .locator('[data-testid^="consumer-summary-"]')
@@ -731,7 +732,7 @@ async function captureRolesOpen(
   console.log(
     `B35 role cells ${host}/${theme}: cell heights ${cellHeights.join(',')}; row heights ${rowHeights.join(',')}`,
   );
-  expect(cellHeights).toHaveLength(3);
+  expect(cellHeights).toHaveLength(4);
   for (const height of cellHeights)
     expect(height, 'role cell is one line').toBeLessThanOrEqual(24);
   await consumers.scrollIntoViewIfNeeded();

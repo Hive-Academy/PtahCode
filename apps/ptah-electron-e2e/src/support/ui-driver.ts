@@ -1,5 +1,11 @@
 import { expect } from '@playwright/test';
 import type { ElectronApplication, Locator, Page } from '@playwright/test';
+import type {
+  ModelPair,
+  SetupPairState,
+  WizardGetSetupModelResult,
+  WizardSetSetupModelResult,
+} from '@ptah-extension/shared';
 import { visibleNewSessionTrigger } from './new-session-trigger';
 
 export type ElectronView =
@@ -66,6 +72,26 @@ const NAMESPACE_EMPTY_DEFAULTS: Record<string, unknown> = {
   guilds: [],
 };
 
+interface SetupModelMockState {
+  pair: ModelPair | null;
+  commitSeq: number;
+}
+
+/**
+ * Fallback effective workspace pair for the default `ui` fixture
+ * (`authMethod: 'apiKey'`, `anthropicProviderId: null`). When a spec or
+ * preview overrides `auth:getAuthStatus`, `auth:getEffectiveRoute`, or
+ * `config:model-get` via `mockRpc`, the Setup resolver derives the active
+ * pair from those overrides first.
+ */
+const DEFAULT_SETUP_EFFECTIVE_PAIR: ModelPair = {
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-5',
+};
+
+/** Marker key for a mocked RPC resolver to answer with `success: false`. */
+const UI_RPC_ERROR_KEY = '__uiRpcError';
+
 const DEFAULT_STARTUP_CONFIG: StartupConfigSeed = {
   initialView: 'chat',
   workspaceRoot: 'C:\\ptah-e2e-ws',
@@ -79,104 +105,224 @@ export class UiDriver {
   ) {}
 
   public async installFakeRpcListener(): Promise<void> {
-    await this.app.evaluate(({ ipcMain, BrowserWindow }, namespaceDefaults) => {
-      const g = globalThis as unknown as {
-        __uiMockStatics?: Record<string, unknown>;
-        __uiMockFns?: Record<string, string>;
-        __uiCompiledFns?: Map<string, (params: unknown) => unknown>;
-        __uiNamespaceDefaults?: Record<string, unknown>;
-        __uiObservedCalls?: { method: string; params: unknown }[];
-        __uiObservedMessages?: { type: string; payload: unknown }[];
-      };
-      g.__uiMockStatics = g.__uiMockStatics ?? {};
-      g.__uiMockFns = g.__uiMockFns ?? {};
-      // Keyed by the resolver's own source text, not by method: a spec that
-      // embeds a large literal (e.g. thousands of fixture events) in the
-      // resolver body would otherwise pay `new Function` parse+compile cost
-      // on EVERY inbound call for that method, serializing what should be
-      // independent concurrent RPC replies behind main-process compile work
-      // (found in Batch 22 code-logic-review.md, TASK_2026_437). Never
-      // bounded or cleared within a page's lifetime — harmless today because
-      // `fixtures.ts` launches a fresh Electron app per test, so this Map's
-      // lifetime is bounded by the test itself; a future spec that reuses one
-      // page across multiple tests would need to revisit this.
-      g.__uiCompiledFns = g.__uiCompiledFns ?? new Map();
-      g.__uiNamespaceDefaults = namespaceDefaults;
-      g.__uiObservedCalls = [];
-      g.__uiObservedMessages = [];
+    await this.app.evaluate(
+      ({ ipcMain, BrowserWindow }, seed) => {
+        const g = globalThis as unknown as {
+          __uiMockStatics?: Record<string, unknown>;
+          __uiMockFns?: Record<string, string>;
+          __uiCompiledFns?: Map<string, (params: unknown) => unknown>;
+          __uiNamespaceDefaults?: Record<string, unknown>;
+          __uiSetupModelState?: SetupModelMockState;
+          __uiObservedCalls?: { method: string; params: unknown }[];
+          __uiObservedMessages?: { type: string; payload: unknown }[];
+        };
+        g.__uiMockStatics = g.__uiMockStatics ?? {};
+        g.__uiMockFns = g.__uiMockFns ?? {};
+        // Keyed by the resolver's own source text, not by method: a spec that
+        // embeds a large literal (e.g. thousands of fixture events) in the
+        // resolver body would otherwise pay `new Function` parse+compile cost
+        // on EVERY inbound call for that method, serializing what should be
+        // independent concurrent RPC replies behind main-process compile work
+        // (found in Batch 22 code-logic-review.md, TASK_2026_437). Never
+        // bounded or cleared within a page's lifetime — harmless today because
+        // `fixtures.ts` launches a fresh Electron app per test, so this Map's
+        // lifetime is bounded by the test itself; a future spec that reuses one
+        // page across multiple tests would need to revisit this.
+        g.__uiCompiledFns = g.__uiCompiledFns ?? new Map();
+        g.__uiNamespaceDefaults = seed.namespaceDefaults;
+        g.__uiSetupModelState = { pair: null, commitSeq: 0 };
+        g.__uiObservedCalls = [];
+        g.__uiObservedMessages = [];
 
-      ipcMain.removeAllListeners('rpc');
-      ipcMain.on('rpc', (event: Electron.IpcMainEvent, message: unknown) => {
-        if (!message || typeof message !== 'object') return;
-        const msg = message as Record<string, unknown>;
-        // Every renderer -> main postMessage() lands on this one 'rpc'
-        // channel (preload.ts), whether it's a correlated RPC call
-        // ({type:'rpc:call', payload:{method,params,correlationId}}) or a
-        // fire-and-forget protocol message like
-        // ask-user-question:response ({type, payload}, no `method`).
-        // Record the raw {type, payload} shape for the latter — the method
-        // branch below only ever sees/pushes messages that DO carry a
-        // `method`.
-        const msgType = msg['type'] as string | undefined;
-        if (msgType) {
-          (g.__uiObservedMessages ?? []).push({
-            type: msgType,
-            payload: msg['payload'],
+        const readNonEmptyString = (
+          obj: unknown,
+          key: string,
+        ): string | null => {
+          if (obj === null || typeof obj !== 'object') return null;
+          const value = (obj as Record<string, unknown>)[key];
+          if (typeof value !== 'string') return null;
+          const trimmed = value.trim();
+          return trimmed.length > 0 ? trimmed : null;
+        };
+
+        const resolveEffectiveSetupPair = (): ModelPair => {
+          const statics = g.__uiMockStatics ?? {};
+          const provider =
+            readNonEmptyString(
+              statics['auth:getAuthStatus'],
+              'anthropicProviderId',
+            ) ??
+            readNonEmptyString(
+              statics['auth:getEffectiveRoute'],
+              'driverProviderId',
+            ) ??
+            seed.defaultSetupEffective.provider;
+          const model =
+            readNonEmptyString(statics['config:model-get'], 'model') ??
+            seed.defaultSetupEffective.model;
+          return { provider, model };
+        };
+
+        const buildSetupPairState = (
+          setupState: SetupModelMockState,
+        ): SetupPairState =>
+          setupState.pair
+            ? { kind: 'set', pair: { ...setupState.pair } }
+            : { kind: 'unset', effective: resolveEffectiveSetupPair() };
+
+        const handleDefaultGetSetupModel = (): WizardGetSetupModelResult => {
+          const setupState =
+            g.__uiSetupModelState ??
+            (g.__uiSetupModelState = { pair: null, commitSeq: 0 });
+          return { state: buildSetupPairState(setupState) };
+        };
+
+        const handleDefaultSetSetupModel = (
+          rawParams: unknown,
+        ): WizardSetSetupModelResult | Record<string, string> => {
+          if (
+            rawParams === null ||
+            typeof rawParams !== 'object' ||
+            Array.isArray(rawParams)
+          ) {
+            return {
+              [seed.rpcErrorKey]:
+                'Setup pair must supply string provider and model values.',
+            };
+          }
+          const raw = rawParams as Record<string, unknown>;
+          if (Object.keys(raw).some((k) => k !== 'provider' && k !== 'model')) {
+            return {
+              [seed.rpcErrorKey]:
+                'Setup pair accepts only provider and model fields.',
+            };
+          }
+          const rawProvider = raw['provider'];
+          const rawModel = raw['model'];
+          if (typeof rawProvider !== 'string' || typeof rawModel !== 'string') {
+            return {
+              [seed.rpcErrorKey]:
+                'Setup pair must supply string provider and model values.',
+            };
+          }
+          const provider = rawProvider.trim();
+          const model = rawModel.trim();
+          if (Boolean(provider) !== Boolean(model)) {
+            return {
+              [seed.rpcErrorKey]:
+                'Setup pair must specify both provider and model, or both empty strings to clear.',
+            };
+          }
+          const setupState =
+            g.__uiSetupModelState ??
+            (g.__uiSetupModelState = { pair: null, commitSeq: 0 });
+          setupState.pair = provider && model ? { provider, model } : null;
+          setupState.commitSeq += 1;
+          return {
+            committed: setupState.pair ? { ...setupState.pair } : null,
+            state: buildSetupPairState(setupState),
+            commitSeq: setupState.commitSeq,
+          };
+        };
+
+        ipcMain.removeAllListeners('rpc');
+        ipcMain.on('rpc', (event: Electron.IpcMainEvent, message: unknown) => {
+          if (!message || typeof message !== 'object') return;
+          const msg = message as Record<string, unknown>;
+          // Every renderer -> main postMessage() lands on this one 'rpc'
+          // channel (preload.ts), whether it's a correlated RPC call
+          // ({type:'rpc:call', payload:{method,params,correlationId}}) or a
+          // fire-and-forget protocol message like
+          // ask-user-question:response ({type, payload}, no `method`).
+          // Record the raw {type, payload} shape for the latter — the method
+          // branch below only ever sees/pushes messages that DO carry a
+          // `method`.
+          const msgType = msg['type'] as string | undefined;
+          if (msgType) {
+            (g.__uiObservedMessages ?? []).push({
+              type: msgType,
+              payload: msg['payload'],
+            });
+          }
+          const rpcData = (msg['payload'] || msg) as Record<string, unknown>;
+          const method = rpcData['method'] as string | undefined;
+          const params = rpcData['params'] as unknown;
+          const correlationId =
+            (rpcData['correlationId'] as string) ||
+            (rpcData['requestId'] as string) ||
+            '';
+          if (!method) return;
+          (g.__uiObservedCalls ?? []).push({ method, params });
+
+          let data: unknown;
+          // Only the built-in Setup setter can fail; spec mocks never do.
+          let setupFailure: string | undefined;
+          const fns = g.__uiMockFns ?? {};
+          const statics = g.__uiMockStatics ?? {};
+          if (Object.prototype.hasOwnProperty.call(fns, method)) {
+            const source = fns[method];
+            const compiled = g.__uiCompiledFns ?? new Map();
+            let resolver = compiled.get(source);
+            if (!resolver) {
+              // `source` is the string form of a resolver function literal
+              // authored in a spec file (e.g. fixtures.ts, a *.spec.ts) and
+              // handed to page.evaluate/addInitScript, which serializes it to
+              // text to cross the Playwright -> Electron main-process boundary.
+              // There is no other channel to reconstitute a function from that
+              // boundary, and nothing here is user- or network-supplied: only
+              // e2e specs in this repo populate __uiMockFns, and only e2e runs
+              // this file.
+              const body = `return (${source})(params);`;
+              resolver = new Function('params', body) as typeof resolver; // NOSONAR typescript:S1523 — test-authored source, see above
+              compiled.set(source, resolver);
+              g.__uiCompiledFns = compiled;
+            }
+            data = resolver(params);
+          } else if (Object.prototype.hasOwnProperty.call(statics, method)) {
+            data = statics[method];
+          } else if (method === 'wizard:get-setup-model') {
+            data = handleDefaultGetSetupModel();
+          } else if (method === 'wizard:set-setup-model') {
+            const reply = handleDefaultSetSetupModel(params);
+            const failure = (reply as Record<string, unknown>)[
+              seed.rpcErrorKey
+            ];
+            if (typeof failure === 'string') setupFailure = failure;
+            else data = reply;
+          } else {
+            const defaults = g.__uiNamespaceDefaults ?? {};
+            const merged: Record<string, unknown> = {};
+            for (const key of Object.keys(defaults)) {
+              merged[key] = defaults[key];
+            }
+            data = merged;
+          }
+
+          const win = BrowserWindow.fromWebContents(event.sender);
+          const target = win ?? BrowserWindow.getAllWindows()[0];
+          if (setupFailure !== undefined) {
+            target?.webContents.send('to-renderer', {
+              type: 'rpc:response',
+              correlationId,
+              success: false,
+              error: setupFailure,
+            });
+            return;
+          }
+          target?.webContents.send('to-renderer', {
+            type: 'rpc:response',
+            correlationId,
+            success: true,
+            data,
           });
-        }
-        const rpcData = (msg['payload'] || msg) as Record<string, unknown>;
-        const method = rpcData['method'] as string | undefined;
-        const params = rpcData['params'] as unknown;
-        const correlationId =
-          (rpcData['correlationId'] as string) ||
-          (rpcData['requestId'] as string) ||
-          '';
-        if (!method) return;
-        (g.__uiObservedCalls ?? []).push({ method, params });
-
-        let data: unknown = {};
-        const fns = g.__uiMockFns ?? {};
-        const statics = g.__uiMockStatics ?? {};
-        if (Object.prototype.hasOwnProperty.call(fns, method)) {
-          const source = fns[method];
-          const compiled = g.__uiCompiledFns ?? new Map();
-          let resolver = compiled.get(source);
-          if (!resolver) {
-            // `source` is the string form of a resolver function literal
-            // authored in a spec file (e.g. fixtures.ts, a *.spec.ts) and
-            // handed to page.evaluate/addInitScript, which serializes it to
-            // text to cross the Playwright -> Electron main-process boundary.
-            // There is no other channel to reconstitute a function from that
-            // boundary, and nothing here is user- or network-supplied: only
-            // e2e specs in this repo populate __uiMockFns, and only e2e runs
-            // this file.
-            const body = `return (${source})(params);`;
-            resolver = new Function('params', body) as typeof resolver; // NOSONAR typescript:S1523 — test-authored source, see above
-            compiled.set(source, resolver);
-            g.__uiCompiledFns = compiled;
-          }
-          data = resolver(params);
-        } else if (Object.prototype.hasOwnProperty.call(statics, method)) {
-          data = statics[method];
-        } else {
-          const defaults = g.__uiNamespaceDefaults ?? {};
-          const merged: Record<string, unknown> = {};
-          for (const key of Object.keys(defaults)) {
-            merged[key] = defaults[key];
-          }
-          data = merged;
-        }
-
-        const win = BrowserWindow.fromWebContents(event.sender);
-        const target = win ?? BrowserWindow.getAllWindows()[0];
-        target?.webContents.send('to-renderer', {
-          type: 'rpc:response',
-          correlationId,
-          success: true,
-          data,
         });
-      });
-    }, NAMESPACE_EMPTY_DEFAULTS);
+      },
+      {
+        namespaceDefaults: NAMESPACE_EMPTY_DEFAULTS,
+        defaultSetupEffective: DEFAULT_SETUP_EFFECTIVE_PAIR,
+        rpcErrorKey: UI_RPC_ERROR_KEY,
+      },
+    );
   }
 
   public async seedStartupConfig(
