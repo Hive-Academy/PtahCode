@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import { PERSISTENCE_TOKENS, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
+import type { ReviewUsageTotal } from '@ptah-extension/review-contracts';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
 import { ReviewArtifactWriter, type ReviewPreviewInput } from '../lanes/review-artifact.writer';
 import { ReviewPolicyService } from '../review-policy.service';
@@ -12,6 +13,8 @@ import { persistExportArtifact } from './publication-artifact.persistence';
 import { ReviewPublicationService } from '../publication/review-publication.service';
 import { PublicationOutboxRepository } from '../publication/publication-outbox.repository';
 import type { VerificationResult } from './verification-stage.runner';
+import { readStageLaneRecords } from '../persistence/review-stage-lane-record';
+import { aggregateReviewUsage } from '../usage/review-usage-total';
 
 export interface PublicationResult { artifactPath: string; exportPath: string; acceptedCount: number; suppressedCount: number }
 
@@ -79,7 +82,13 @@ export class PublicationStageRunner {
       verdicts, operatorSettings, baseConfig, secrets, context.incrementalScope, signal,
       lenses.map(({ lens, result }) => ({ lens, family: result.status === 'completed' ? result.family : 'unavailable',
         status: result.status === 'completed' ? 'completed' : `unavailable: ${result.reason}` })),
-      { diffTruncated: context.coverage.includes('diff-truncated') });
+      { diffTruncated: context.coverage.includes('diff-truncated'), usage: this.runUsage(claim.attemptId) });
     return { artifactPath, exportPath, acceptedCount: accepted.length, suppressedCount: suppressed.length };
+  }
+
+  /** Token total of every lane run this attempt stored; null without SQLite or without runs. */
+  private runUsage(attemptId: string): ReviewUsageTotal | null {
+    if (!this.sqlite) return null;
+    return aggregateReviewUsage([...readStageLaneRecords(this.sqlite.db, attemptId).values()].flatMap((record) => record.runs));
   }
 }

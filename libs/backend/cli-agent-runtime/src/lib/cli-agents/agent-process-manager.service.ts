@@ -1656,6 +1656,8 @@ export class AgentProcessManager {
         selectedEffort: laneEffort.effort ?? 'none',
       },
       ticket?.agentId,
+      undefined,
+      request.usageWorkspaceRoot,
     );
     timing?.mark('trackMs');
     return resumeDecision ? { ...spawned, resumeDecision } : spawned;
@@ -1848,6 +1850,8 @@ export class AgentProcessManager {
    * @param captureSessionId - Optional callback to capture CLI session ID
    *   from async init events (e.g., the init JSONL segment). Called on
    *   each structured segment until a session ID is captured.
+   * @param usageWorkspaceRoot - Host-internal ledger key for this lane's usage
+   *   rows, copied onto the tracked record only (not onto `AgentProcessInfo`).
    */
   private trackSdkHandle(
     sdkHandle: SdkHandle,
@@ -1858,6 +1862,7 @@ export class AgentProcessManager {
     modelLog?: LaneModelLogState,
     admittedAgentId?: AgentId,
     externalOwner?: ExternalOwnerKey,
+    usageWorkspaceRoot?: string,
   ): SpawnAgentResult {
     const agentId = info.agentId;
     const handleReference = snapshotLaneAccountReference(
@@ -1928,6 +1933,7 @@ export class AgentProcessManager {
       reportsDelivered: 0,
       turnSegmentStart: 0,
       turnStartedAt: info.startedAt,
+      ...(usageWorkspaceRoot ? { usageWorkspaceRoot } : {}),
     };
 
     if (admittedAgentId) {
@@ -2763,6 +2769,20 @@ export class AgentProcessManager {
   findAgentInfo(agentId: string): AgentProcessInfo | undefined {
     const tracked = this.agents.get(agentId);
     return tracked ? { ...tracked.info } : undefined;
+  }
+
+  /**
+   * The usage total of this agent's latest turn, or `undefined` for an unknown
+   * agent or one that reported no usage. Returns a copy, including the
+   * `models` array, so a caller cannot change the record. Never throws.
+   */
+  findAgentUsage(agentId: string): CliOutputSegment['usage'] | undefined {
+    const usage = this.agents.get(agentId)?.outcomeUsage;
+    if (!usage) return undefined;
+    return {
+      ...usage,
+      ...(usage.models ? { models: usage.models.map((m) => ({ ...m })) } : {}),
+    };
   }
 
   /**
@@ -4539,6 +4559,7 @@ export class AgentProcessManager {
         tracked.sdkHandle?.getObservedNativeThreadId?.() ?? null,
         this.usageReconciliationTrigger,
         tracked.turnStartedAt,
+        tracked.usageWorkspaceRoot,
       );
     }
     const context = {

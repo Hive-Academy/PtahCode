@@ -167,4 +167,46 @@ describe('PublicationStageRunner', () => {
     expect(writes.size).toBe(0);
     db.close();
   });
+
+  it('passes the token total of the stored lane runs to publication', async () => {
+    const attemptRoot = await mkdtemp(join(tmpdir(), 'review-publication-usage-'));
+    await mkdir(join(attemptRoot, 'out'));
+    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase;
+    const db = new Database(':memory:');
+    for (const version of [65, 66]) {
+      const migration = MIGRATIONS.find((entry) => entry.version === version);
+      if (!migration?.sql) throw new Error(`Review migration ${version} missing`);
+      db.exec(migration.sql);
+    }
+    const repoId = 'hive-academy/ptahcode';
+    db.prepare(`INSERT INTO review_repositories (repo_id, owner, name, created_at, updated_at) VALUES (?, ?, ?, 1, 1)`)
+      .run(repoId, 'Hive-Academy', 'PtahCode');
+    db.prepare(`INSERT INTO review_heads (repo_id, pr_number, head_sha, state, discovered_at) VALUES (?, 1, ?, 'active', 1)`)
+      .run(repoId, sha);
+    db.prepare(`INSERT INTO review_attempts (attempt_id, repo_id, pr_number, head_sha, attempt_number, trigger, state, queued_at)
+      VALUES ('attempt-1', ?, 1, ?, 0, 'automatic', 'running', 1)`).run(repoId, sha);
+    db.prepare(`INSERT INTO review_stages (attempt_id, stage, ordinal, state) VALUES ('attempt-1', 'publication', 4, 'running')`).run();
+    const laneRun = (inputTokens: number | null) => ({ inputTokens, outputTokens: 100, cacheReadTokens: 10, cacheWriteTokens: 1,
+      costUsd: 0.25, model: null, partial: false, ended: true });
+    const insertLane = (stage: string, ordinal: number, runs: ReturnType<typeof laneRun>[]) => db.prepare(
+      `INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES ('attempt-1', ?, ?, 'completed', ?)`)
+      .run(`checkpoint:lane:${stage}`, ordinal, JSON.stringify({ version: 1, lane: 'claude', model: null, family: 'claude',
+        fallback: [], usage: { runs } }));
+    insertLane('triage', 1, [laneRun(1000)]);
+    insertLane('lens:correctness-lifecycle', 2, [laneRun(500), laneRun(null)]);
+    const fs: ReviewArtifactFileSystem = { realpath: async (path) => path,
+      writeFile: async (path, data) => { await writeFile(path, data); }, readFile: async () => 'Observed behavior' };
+    const publication = new ReviewPublicationService({ db },
+      new PublicationOutboxService({ db }, { publish: jest.fn() }), new ReviewPolicyService());
+    const publish = jest.spyOn(publication, 'publish').mockResolvedValue();
+    const runner = new PublicationStageRunner(new ReviewArtifactWriter(fs), new ReviewPolicyService(), {
+      resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => settings, baseConfig: async () => null,
+    }, { db }, publication);
+    await runner.run(claim, { ...context, attemptRoot }, [], []);
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.calls[0]?.[10]).toEqual({ diffTruncated: false, usage: { inputTokens: 1500, outputTokens: 300,
+      cacheReadTokens: 30, cacheWriteTokens: 3, totalTokens: 1833, costUsd: 0.75, tokensPartial: true, costPartial: false, runs: 3 } });
+    db.close();
+    await rm(attemptRoot, { recursive: true, force: true });
+  });
 });

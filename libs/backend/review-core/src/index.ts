@@ -25,6 +25,8 @@ export type { IReviewArtifactReader } from './lib/persistence/review-artifact.re
 export type { IReviewSecretPresence } from './lib/persistence/review-secret-presence.port';
 export * from './lib/lanes/review-lane-admission.service';
 export * from './lib/lanes/review-lane.runner';
+export * from './lib/lanes/review-lane-usage';
+export { aggregateReviewUsage, type StoredLaneRun } from './lib/usage/review-usage-total';
 export * from './lib/lanes/review-lane-selection';
 export * from './lib/lanes/review-lane-attempt';
 export * from './lib/lanes/review-lane-selection.service';
@@ -36,6 +38,7 @@ export * from './lib/context/review-worktree.service';
 export * from './lib/context/review-context.service';
 export * from './lib/context/review-dependencies.service';
 export * from './lib/context/review-checks.service';
+export { findRepositoryWorkspaceFolder, type RepositoryWorkspaceFolderInput } from './lib/context/repository-workspace-folder';
 export { ReviewPromptInputSchema } from './lib/lanes/prompts/prompt-fence';
 export type { ReviewPromptInput } from './lib/lanes/prompts/prompt-fence';
 export { buildTriagePrompt } from './lib/lanes/prompts/triage.prompt';

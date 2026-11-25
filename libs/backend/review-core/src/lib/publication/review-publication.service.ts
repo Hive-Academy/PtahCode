@@ -1,6 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { PERSISTENCE_TOKENS, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
-import { ReviewFindingSchema, rightAnchorKey } from '@ptah-extension/review-contracts';
+import { ReviewFindingSchema, rightAnchorKey, type ReviewUsageTotal } from '@ptah-extension/review-contracts';
 import { ReviewPolicyService } from '../review-policy.service';
 import type { ReviewQueueClaim } from '../review-queue.service';
 import type { VerificationResult } from '../stages/verification-stage.runner';
@@ -59,7 +59,7 @@ export class ReviewPublicationService {
   async publish(claim: ReviewQueueClaim, walkthrough: string | TriageContent, diff: string, verdicts: readonly VerificationResult[],
     settingsInput: unknown, baseConfig: unknown | null, secrets: readonly string[],
     scope?: IncrementalScope, signal?: AbortSignal, runRows: readonly ReviewRunRow[] = [],
-    options: { readonly diffTruncated?: boolean } = {}): Promise<void> {
+    options: { readonly diffTruncated?: boolean; readonly usage?: ReviewUsageTotal | null } = {}): Promise<void> {
     const decision = claim.dryRun ? { allowed: false } : this.policy.publication(settingsInput, baseConfig, claim.repo);
     if (!decision.allowed) return;
     const settings = this.policy.effectiveSettings(settingsInput, baseConfig);
@@ -144,7 +144,7 @@ export class ReviewPublicationService {
     }
     const overflow = selected.filter(item => !inline.includes(item));
     const overview = renderSummary(claim.headSha, runRows, inline, suppressed.length,
-      followUps.map(item => item.body), value => safeText(value, secrets))
+      followUps.map(item => item.body), value => safeText(value, secrets), options.usage ?? null)
       + (overflow.length ? `\n\n${overflow.length} additional findings held locally.` : '');
     const unavailable = suppressed.filter((entry) => entry.endsWith(': verifier-unavailable')).length;
     const counts = { Critical: 0, Major: 0, Minor: 0, Nitpick: 0 };

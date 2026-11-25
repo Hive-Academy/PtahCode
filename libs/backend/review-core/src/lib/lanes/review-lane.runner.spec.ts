@@ -2,8 +2,13 @@ import type { ReviewLaneSettings } from '@ptah-extension/review-contracts';
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway, type ReviewLaneRequest } from './review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from './review-lane-admission.service';
 import { ReviewLaneAttempt } from './review-lane-attempt';
+import { ReviewLaneSpawnError, UNKNOWN_LANE_RUN_USAGE } from './review-lane-usage';
 
 const sha = 'a'.repeat(40);
+/** What a gateway that read no usage resolves with. */
+const ended = { usage: UNKNOWN_LANE_RUN_USAGE(false) };
+const unknownRun = UNKNOWN_LANE_RUN_USAGE(false);
+const counted = { inputTokens: 10, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, costUsd: null, model: null };
 const repo = { owner: 'Hive-Academy', name: 'PtahCode' } as const;
 const baseRequest = { repo, prKey: 'repo#1', attemptId: 'attempt-1', attemptRoot: '/attempt', headSha: sha, kind: 'triage', prompt: 'review', runDeadlineMs: 1000 } as const;
 const verdict = JSON.stringify({ schemaVersion: 1, candidateId: 'candidate', headSha: sha, verdict: 'inconclusive',
@@ -29,7 +34,7 @@ describe('ReviewLaneRunner', () => {
       list: async () => ({ lanes: [{ id: 'lane', label: 'lane', family: 'family-a', limitState: 'confirmed-room' }], maxConcurrentAgents: 4 }),
       listModels: async () => ({}),
       modelBlocked: () => false,
-      spawn: async () => undefined,
+      spawn: async () => ended,
     };
     request = { ...baseRequest, attempt: attemptFor() };
     files = { prepare: jest.fn().mockResolvedValue('same'), sourceChecksum: jest.fn().mockResolvedValue('same'),
@@ -66,6 +71,7 @@ describe('ReviewLaneRunner', () => {
           severity: 'Major', category: 'functional', confidence: 0.9, suggestedDiff: null, fixPrompt: 'Fix the defect',
         }], coverage: ['finding'] });
       }
+      return ended;
     });
     files.readOutput = jest.fn().mockImplementation(async (_root: string, name: string) => {
       if (name === 'walkthrough.md') return '# Observed behavior\n# Inferred risks\n# Risk map\n';
@@ -78,7 +84,7 @@ describe('ReviewLaneRunner', () => {
   });
 
   it('reads the file after spawn instead of treating stdout as the payload', async () => {
-    gateway.spawn = async () => undefined;
+    gateway.spawn = async () => ended;
     expect(await runner.run(request)).toMatchObject({ status: 'completed' });
   });
 
@@ -156,7 +162,7 @@ describe('ReviewLaneRunner', () => {
   });
 
   it('removes a partial walkthrough when triage is aborted after spawn', async () => {
-    gateway.spawn = async () => { now = 1000; };
+    gateway.spawn = async () => { now = 1000; return ended; };
     expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: 'deadline' });
     expect(files.clearOutput).toHaveBeenLastCalledWith('/attempt', true);
   });
@@ -180,7 +186,7 @@ describe('ReviewLaneRunner', () => {
     files.prepare = jest.fn().mockResolvedValue('before');
     const checksum = jest.fn().mockResolvedValue('after');
     files.sourceChecksum = checksum;
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'source-mutated', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'source-mutated', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] }, run: unknownRun });
     expect(checksum).toHaveBeenCalledTimes(1);
   });
 
@@ -194,22 +200,23 @@ describe('ReviewLaneRunner', () => {
   it('marks a lane that finishes after its deadline partial', async () => {
     gateway.spawn = async () => {
       now = 1000;
+      return ended;
     };
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] }, run: unknownRun });
     expect(files.sourceChecksum).toHaveBeenCalledTimes(1);
   });
 
   it('reports deadline when the after-spawn snapshot aborts', async () => {
-    gateway.spawn = async () => { now = 1000; };
+    gateway.spawn = async () => { now = 1000; return ended; };
     files.sourceChecksum = jest.fn().mockRejectedValue(new Error('Review snapshot aborted'));
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] }, run: unknownRun });
   });
 
   it('reports caller abort when the after-spawn snapshot aborts', async () => {
     const caller = new AbortController();
-    gateway.spawn = async () => { caller.abort(); };
+    gateway.spawn = async () => { caller.abort(); return ended; };
     files.sourceChecksum = jest.fn().mockRejectedValue(new Error('Review snapshot aborted'));
-    expect(await runner.run({ ...request, signal: caller.signal })).toEqual({ status: 'partial', reason: 'aborted', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    expect(await runner.run({ ...request, signal: caller.signal })).toEqual({ status: 'partial', reason: 'aborted', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] }, run: unknownRun });
   });
 
   it('allows the verifier the same 480 second lane window as lenses', async () => {
@@ -293,5 +300,90 @@ describe('ReviewLaneRunner', () => {
     ], maxConcurrentAgents: 4 });
     expect(await runner.run({ ...request, kind: 'contracts-callers', usedFamilies: ['family-a'] }))
       .toMatchObject({ status: 'completed', family: 'family-b' });
+  });
+
+  describe('lane run usage', () => {
+    it('(a) carries the resolved usage on a completed result', async () => {
+      gateway.spawn = async () => ({ usage: { ...counted, partial: false } });
+      expect(await runner.run(request)).toMatchObject({ status: 'completed', run: { ...counted, partial: false } });
+    });
+
+    it('(b) keeps unread counters null, never 0 (Req 1.3)', async () => {
+      gateway.spawn = async () => ({ usage: { ...UNKNOWN_LANE_RUN_USAGE(false), inputTokens: 10 } });
+      expect((await runner.run(request)).run).toEqual({ ...counted, partial: false });
+    });
+
+    it('(c) keeps the usage of a started lane that failed (Req 1.6)', async () => {
+      gateway.spawn = async () => { throw new ReviewLaneSpawnError(new Error('status-failed: quota'), true, { ...counted, partial: true }); };
+      const result = await runner.run(request);
+      expect(result).toMatchObject({ status: 'partial', reason: 'status-failed: quota', lane: { lane: 'lane' } });
+      expect(result.run).toMatchObject({ inputTokens: 10, partial: true });
+    });
+
+    it('records an unknown partial run when a started lane failed without usage', async () => {
+      gateway.spawn = async () => { throw new ReviewLaneSpawnError(new Error('timeout'), true, null); };
+      expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: 'timeout', run: UNKNOWN_LANE_RUN_USAGE(true) });
+    });
+
+    it('(d) records no run for a lane that never started (Req 1.5)', async () => {
+      gateway.spawn = async () => { throw new ReviewLaneSpawnError(new Error('Review lane unavailable'), false, null); };
+      const result = await runner.run(request);
+      expect(result.status).toBe('partial');
+      expect(result).not.toHaveProperty('run');
+    });
+
+    it('(e) records no run and keeps the reason for a plain error (Req 1.4, F1)', async () => {
+      gateway.spawn = async () => { throw new Error('status-failed: quota'); };
+      expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'status-failed: quota',
+        lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    });
+
+    it('(e2) keeps the reason of a wrapped error byte-identical, name included (F2)', async () => {
+      const bare = new TypeError('boom');
+      gateway.spawn = async () => { throw bare; };
+      const plain = await runner.run(request);
+      gateway.spawn = async () => { throw ReviewLaneSpawnError.from(bare, true, null); };
+      const wrapped = await runner.run(request);
+      expect(plain).toMatchObject({ status: 'partial', reason: 'lane-failed: lane; TypeError; boom' });
+      expect(wrapped).toMatchObject({ status: 'partial', reason: 'lane-failed: lane; TypeError; boom', run: UNKNOWN_LANE_RUN_USAGE(true) });
+    });
+
+    it('(f) carries partial usage when the caller aborts mid-spawn (Req 1.2)', async () => {
+      const caller = new AbortController();
+      gateway.spawn = async () => {
+        caller.abort();
+        throw new ReviewLaneSpawnError(new Error('cancelled'), true, { ...counted, partial: true });
+      };
+      expect(await runner.run({ ...request, signal: caller.signal })).toEqual({ status: 'partial', reason: 'aborted',
+        lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] }, run: { ...counted, partial: true } });
+    });
+
+    it('carries the run when the lane mutated the source', async () => {
+      gateway.spawn = async () => ({ usage: { ...counted, partial: false } });
+      files.sourceChecksum = jest.fn().mockResolvedValue('after');
+      expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: 'source-mutated', run: { ...counted, partial: false } });
+    });
+
+    it('(g) records an unknown, not partial run when an old gateway resolves undefined', async () => {
+      // An old fake that resolves void; only a cast can model it against the current port.
+      gateway.spawn = (async () => undefined) as unknown as IReviewLaneGateway['spawn'];
+      expect(await runner.run(request)).toMatchObject({ status: 'completed', run: UNKNOWN_LANE_RUN_USAGE(false) });
+    });
+
+    it('records an unknown run when the resolved usage is invalid', async () => {
+      gateway.spawn = async () => ({ usage: { ...counted, inputTokens: -1, partial: false } });
+      expect((await runner.run(request)).run).toEqual(UNKNOWN_LANE_RUN_USAGE(false));
+    });
+
+    it('passes the repository to the gateway', async () => {
+      const spawn = jest.spyOn(gateway, 'spawn');
+      await runner.run(request);
+      expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ repo }));
+    });
+
+    it('records no run when the role stops before spawn', async () => {
+      now = 1000;
+      expect(await runner.run(request)).not.toHaveProperty('run');
+    });
   });
 });

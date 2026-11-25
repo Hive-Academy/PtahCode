@@ -9,6 +9,7 @@ import { ReviewLaneAdmissionService, REVIEW_LANE_TOKENS, type IReviewLaneClock }
 import type { ReviewLaneSource } from './review-lane-selection';
 import { LANE_SETTINGS_UNAVAILABLE, ReviewLaneSettingsUnavailableError, type ReviewLaneAttempt, type ReviewLaneAttemptChoice } from './review-lane-attempt';
 import { ReviewOutputParser } from './review-output.parser';
+import { ReviewLaneRunUsageSchema, ReviewLaneSpawnError, UNKNOWN_LANE_RUN_USAGE, type ReviewLaneRunUsage, type ReviewLaneSpawnResult } from './review-lane-usage';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
 import type { ReviewStageEnvironment } from '../stages/context-stage.runner';
 import { sanitizeReviewFailureMessage } from '../review-failure-sanitizer';
@@ -16,8 +17,12 @@ import { hasLegacyHeadings, parseTriageOutputDetailed } from '../publication/wal
 
 /** The host port: the lane list, catalogs and block check of `ReviewLaneSource`, plus spawn. */
 export interface IReviewLaneGateway extends ReviewLaneSource {
-  /** `model` is sent only when set; without it the lane's own model setting or CLI default applies. */
-  spawn(input: { laneId: string; model?: string; cwd: string; prompt: string; signal: AbortSignal }): Promise<void>;
+  /**
+   * `model` is sent only when set; without it the lane's own model setting or CLI default applies.
+   * Resolves with the lane's usage once it ended. A rejection that comes after the lane started is a
+   * `ReviewLaneSpawnError` with `spawned: true`, carrying what the lane used before it stopped.
+   */
+  spawn(input: { laneId: string; model?: string; cwd: string; prompt: string; signal: AbortSignal; repo: RepoIdentity }): Promise<ReviewLaneSpawnResult>;
 }
 
 /** The lane a role used (or found none for), its model, and the pin/pool entries skipped before it. */
@@ -61,11 +66,26 @@ export interface ReviewLaneRequest {
 
 /**
  * `lane` is set on every result once selection ran, including `no-confirmed-room`. It is absent when
- * the role stopped before selection (abort, deadline, unreadable lane settings).
+ * the role stopped before selection (abort, deadline, unreadable lane settings). `run` is the usage of
+ * the lane run; it is absent when no lane was started.
  */
 export type ReviewLaneResult =
-  | { status: 'completed'; family: string; limitCheck?: 'unavailable'; lane?: ReviewLaneUse; output: ReturnType<ReviewOutputParser['parseLens']> | ReturnType<ReviewOutputParser['parseVerdict']> | ReturnType<ReviewOutputParser['parseVerdictBatch']> }
-  | { status: 'partial'; reason: string; limitCheck?: 'unavailable'; lane?: ReviewLaneUse };
+  | { status: 'completed'; family: string; limitCheck?: 'unavailable'; lane?: ReviewLaneUse; run?: ReviewLaneRunUsage; output: ReturnType<ReviewOutputParser['parseLens']> | ReturnType<ReviewOutputParser['parseVerdict']> | ReturnType<ReviewOutputParser['parseVerdictBatch']> }
+  | { status: 'partial'; reason: string; limitCheck?: 'unavailable'; lane?: ReviewLaneUse; run?: ReviewLaneRunUsage };
+
+/**
+ * The usage of one spawn call. A resolved value is parsed (an unreadable one is unknown, not partial);
+ * a rejection carries usage only when the gateway proved the lane started.
+ */
+function laneRunOf(outcome: { ok: true; value: unknown } | { ok: false; error: unknown }): ReviewLaneRunUsage | undefined {
+  if (outcome.ok) {
+    const usage = typeof outcome.value === 'object' && outcome.value !== null && 'usage' in outcome.value ? outcome.value.usage : undefined;
+    const parsed = ReviewLaneRunUsageSchema.safeParse(usage);
+    return parsed.success ? parsed.data : UNKNOWN_LANE_RUN_USAGE(false);
+  }
+  if (!(outcome.error instanceof ReviewLaneSpawnError) || !outcome.error.spawned) return undefined;
+  return outcome.error.usage ?? UNKNOWN_LANE_RUN_USAGE(true);
+}
 
 @injectable()
 export class ReviewLaneRunner {
@@ -154,18 +174,23 @@ export class ReviewLaneRunner {
     if (request.signal?.aborted) controller.abort();
     const timer = this.clock.setTimeout(() => controller.abort(), Math.max(0, deadline - this.clock.now()));
     let completed = false;
+    // Set right after the spawn call, so every later return, including a failure, carries it.
+    let run: ReviewLaneRunUsage | undefined;
     try {
       const before = await this.files.prepare(request.repo, request.attemptRoot, request.headSha, controller.signal);
       if (controller.signal.aborted || this.clock.now() >= deadline) return { status: 'partial', reason: request.signal?.aborted ? 'aborted' : 'deadline', lane };
       await this.files.clearOutput(request.attemptRoot, request.kind === 'triage');
       let spawnError: unknown;
+      let resolved: unknown;
       try {
-        await this.gateway.spawn({ laneId: choice.lane.id, ...(choice.model !== null ? { model: choice.model } : {}),
-          cwd: request.attemptRoot, prompt: request.prompt, signal: controller.signal });
+        resolved = await this.gateway.spawn({ laneId: choice.lane.id, ...(choice.model !== null ? { model: choice.model } : {}),
+          cwd: request.attemptRoot, prompt: request.prompt, signal: controller.signal, repo: request.repo });
       } catch (error: unknown) { spawnError = error; }
+      run = laneRunOf(spawnError === undefined ? { ok: true, value: resolved } : { ok: false, error: spawnError });
       const after = await this.files.sourceChecksum(request.repo, request.attemptRoot, request.headSha, controller.signal);
       if (before !== after) throw new Error('Lane mutated source');
-      if (controller.signal.aborted || this.clock.now() >= deadline) return { status: 'partial', reason: request.signal?.aborted ? 'aborted' : 'deadline', lane };
+      if (controller.signal.aborted || this.clock.now() >= deadline)
+        return { status: 'partial', reason: request.signal?.aborted ? 'aborted' : 'deadline', lane, ...(run ? { run } : {}) };
       if (spawnError !== undefined) throw spawnError;
       let raw: string;
       try {
@@ -190,17 +215,17 @@ export class ReviewLaneRunner {
       if (request.kind === 'triage') await this.checkTriageOutput(request.attemptRoot);
       completed = true;
       return { status: 'completed', family: choice.lane.family,
-        ...(choice.lane.limitState === 'unknown' ? { limitCheck: 'unavailable' as const } : {}), lane, output };
+        ...(choice.lane.limitState === 'unknown' ? { limitCheck: 'unavailable' as const } : {}), lane, ...(run ? { run } : {}), output };
     } catch (error: unknown) {
       if (controller.signal.aborted || this.clock.now() >= deadline)
-        return { status: 'partial', reason: request.signal?.aborted ? 'aborted' : 'deadline', lane };
+        return { status: 'partial', reason: request.signal?.aborted ? 'aborted' : 'deadline', lane, ...(run ? { run } : {}) };
       const failure = error instanceof Error ? error : new Error('Review lane failed');
       this.logger.error(new Error(failure.message === 'Lane mutated source' ? 'Lane mutated source' : 'Review lane failed'));
       const precise = /^(output-missing|output-invalid:|status-failed:|timeout|cancelled)/.test(failure.message);
       return { status: 'partial', reason: failure.message === 'Lane mutated source' ? 'source-mutated' :
         precise ? sanitizeReviewFailureMessage(failure.message) :
           `lane-failed: ${sanitizeReviewFailureMessage(choice.lane.id).slice(0, 80)}; ${sanitizeReviewFailureMessage(failure.name).slice(0, 40)}; ${sanitizeReviewFailureMessage(failure.message)}`,
-        ...(choice.lane.limitState === 'unknown' ? { limitCheck: 'unavailable' as const } : {}), lane };
+        ...(choice.lane.limitState === 'unknown' ? { limitCheck: 'unavailable' as const } : {}), lane, ...(run ? { run } : {}) };
     } finally {
       if (request.kind === 'triage' && !completed) {
         try { await this.files.clearOutput(request.attemptRoot, true); }

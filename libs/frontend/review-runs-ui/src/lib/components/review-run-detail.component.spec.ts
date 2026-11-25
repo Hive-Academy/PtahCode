@@ -281,4 +281,63 @@ describe('ReviewRunDetailComponent', () => {
     fixture.nativeElement.querySelector('#review-live-rerun-confirm')?.parentElement?.querySelectorAll('button')[1]?.click();
     expect(store.rerun).toHaveBeenCalledWith(run.attemptId, false);
   });
+  describe('usage', () => {
+    const total = (overrides: Partial<NonNullable<ReviewRun['usage']>>): NonNullable<ReviewRun['usage']> => ({
+      inputTokens: 1000, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1500,
+      costUsd: 0.0123, tokensPartial: false, costPartial: false, runs: 1, ...overrides,
+    });
+    const render = (value: ReviewRun): HTMLElement => {
+      TestBed.configureTestingModule({ imports: [ReviewRunDetailComponent], providers: [{ provide: ReviewRunsStore, useValue: {
+        rerunState: signal('idle'), hasToken: signal(false), settings: signal(null), rerun: jest.fn(),
+      } }] });
+      const fixture = TestBed.createComponent(ReviewRunDetailComponent);
+      fixture.componentRef.setInput('run', value);
+      fixture.detectChanges();
+      return fixture.nativeElement as HTMLElement;
+    };
+    /** The text a sighted reader sees: the line without its screen-reader-only spans. */
+    const visible = (element: Element | null): string => {
+      const copy = element?.cloneNode(true) as Element | undefined;
+      copy?.querySelectorAll('.sr-only').forEach((node) => node.remove());
+      return (copy?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    };
+
+    it('shows the run total in the coverage section and each stage and lens usage', () => {
+      const element = render({ ...run, usage: total({ totalTokens: 12345, costUsd: 1.5, runs: 3 }), stages: [
+        { name: 'triage', status: 'succeeded', family: 'codex', scope: null, durationMs: 100, error: null, artifactPath: null,
+          usage: total({ totalTokens: 2000, costUsd: 0.25, runs: 1 }) },
+        { name: 'lenses', status: 'succeeded', family: 'codex', scope: 'security-privacy', durationMs: 100, error: null, artifactPath: null,
+          usage: total({ totalTokens: 10345, costUsd: 1.25, runs: 2 }) },
+      ] });
+      expect(visible(element.querySelector('[data-testid="review-detail-usage"]'))).toBe('Usage: 12,345 tokens · $1.50');
+      const stages = Array.from(element.querySelectorAll('[data-testid="review-stage-usage"]')).map(visible);
+      expect(stages).toEqual(['2,000 tokens · $0.2500', '10,345 tokens · $1.25 · 2 runs']);
+    });
+
+    it('marks a partial cost beside an exact token total, with a title and a screen reader sentence', () => {
+      const element = render({ ...run, usage: total({ totalTokens: 1500, costUsd: 2, costPartial: true }) });
+      const line = element.querySelector('[data-testid="review-detail-usage"]');
+      expect(line?.textContent).toContain('1,500 tokens');
+      expect(line?.textContent).not.toContain('≥ 1,500');
+      expect(line?.textContent).toContain('≥ $2.00');
+      expect(line?.querySelector('[title="At least $2.00; some costs were not reported"]')).not.toBeNull();
+      expect(line?.querySelector('.sr-only')?.textContent).toBe('At least $2.00; some costs were not reported');
+    });
+
+    it('shows unknown values as a dash, never 0', () => {
+      const element = render({ ...run, usage: total({ totalTokens: null, costUsd: null }) });
+      const line = element.querySelector('[data-testid="review-detail-usage"]');
+      expect(visible(line)).toBe('Usage: — · —');
+      expect(line?.textContent).not.toContain('$0');
+      expect(Array.from(line?.querySelectorAll('.sr-only') ?? []).map((node) => node.textContent)).toEqual(['Token usage unknown', 'Cost unknown']);
+    });
+
+    it('renders an older run without usage: a dash total and no stage usage lines', () => {
+      const element = render(run);
+      const line = element.querySelector('[data-testid="review-detail-usage"]');
+      expect(visible(line)).toBe('Usage: —');
+      expect(line?.querySelector('.sr-only')?.textContent).toBe('unknown');
+      expect(element.querySelector('[data-testid="review-stage-usage"]')).toBeNull();
+    });
+  });
 });

@@ -80,6 +80,11 @@ export interface TrackedAgent {
   accumulatedSegments: CliOutputSegment[];
   /** Usage reported for the current turn, retained even if output is capped. */
   outcomeUsage?: CliOutputSegment['usage'];
+  /**
+   * Host-internal ledger key copied from `SpawnAgentRequest.usageWorkspaceRoot`.
+   * When set, this lane's usage rows are keyed here instead of `workingDirectory`.
+   */
+  usageWorkspaceRoot?: string;
   /** Accumulated rich stream events for persistence (Ptah CLI only, capped at MAX_ACCUMULATED_STREAM_EVENTS) */
   accumulatedStreamEvents: FlatStreamEventUnion[];
   /** True once the stream-events cap has been logged — suppresses per-event log spam for long-running agents. */

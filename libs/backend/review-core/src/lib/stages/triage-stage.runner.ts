@@ -19,11 +19,29 @@ export class TriageStageRunner {
     signal?: AbortSignal): Promise<ReviewLaneResult> {
     const prompt = buildTriagePrompt(context.promptInput);
     recordPromptTruncation(prompt, context.coverage);
-    const result = await this.lanes.run({ repo: claim.repo, prKey: `${claim.repo.owner}/${claim.repo.name}#${claim.prNumber}`, attemptId: claim.attemptId,
-      attemptRoot: context.attemptRoot, headSha: claim.headSha, kind: 'triage',
-      prompt, runDeadlineMs: deadline, signal, attempt });
-    if (result.lane && !signal?.aborted)
-      await this.repository.saveStageLane(claim.attemptId, TRIAGE_STAGE.name, TRIAGE_STAGE.ordinal, result.lane);
+    const { name, ordinal } = TRIAGE_STAGE;
+    await this.repository.beginStageLaneRun(claim.attemptId, name, ordinal);
+    let result: ReviewLaneResult;
+    // The try spans only the lane run: the marker is removed only after begin and before the lane save (P2 m3).
+    try {
+      result = await this.lanes.run({ repo: claim.repo, prKey: `${claim.repo.owner}/${claim.repo.name}#${claim.prNumber}`, attemptId: claim.attemptId,
+        attemptRoot: context.attemptRoot, headSha: claim.headSha, kind: 'triage',
+        prompt, runDeadlineMs: deadline, signal, attempt });
+    } catch (error: unknown) {
+      await this.removePendingRun(claim.attemptId);
+      throw error;
+    }
+    // Always record the lane and its usage, also on abort, so the pending run marker is closed (req 7.1, 7.6).
+    await this.repository.saveStageLane(claim.attemptId, name, ordinal, result.lane ?? null, result.run);
     return result;
+  }
+
+  /** Clears the pending run marker after the lane throws; the lane error stays the one rethrown. */
+  private async removePendingRun(attemptId: string): Promise<void> {
+    try {
+      await this.repository.saveStageLane(attemptId, TRIAGE_STAGE.name, TRIAGE_STAGE.ordinal, null, undefined);
+    } catch {
+      // degradation-audit: reported — the caller rethrows the lane error; a stale marker reads as partial usage.
+    }
   }
 }

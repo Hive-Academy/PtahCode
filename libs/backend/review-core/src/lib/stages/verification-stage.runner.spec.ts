@@ -3,6 +3,7 @@ import { MIGRATIONS, type SqliteDatabase } from '@ptah-extension/persistence-sql
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
+import { ReviewLaneSpawnError, UNKNOWN_LANE_RUN_USAGE, type ReviewLaneRunUsage } from '../lanes/review-lane-usage';
 import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import type { IReviewRepository } from '../persistence/review-repository.interface';
 import type { ReviewQueueClaim } from '../review-queue.service';
@@ -160,13 +161,17 @@ function authoredBy(authors: string[]): LensStageResult {
 }
 
 /** A real `ReviewLaneRunner` and `ReviewLaneAttempt` over a fake gateway (the #1481 verifier seam). */
-async function verifyWith(options: { lanes: ReviewLaneCandidate[]; authors: string[]; settings?: ReviewLaneSettings }) {
+async function verifyWith(options: { lanes: ReviewLaneCandidate[]; authors: string[]; settings?: ReviewLaneSettings;
+  spawn?: IReviewLaneGateway['spawn']; signal?: AbortSignal; deadline?: number }) {
   const spawned: { laneId: string; model?: string }[] = [];
   const gateway: IReviewLaneGateway = {
     list: async () => ({ lanes: options.lanes, maxConcurrentAgents: 4 }),
     listModels: async () => ({}),
     modelBlocked: () => false,
-    spawn: async (input) => { spawned.push({ laneId: input.laneId, ...(input.model !== undefined ? { model: input.model } : {}) }); },
+    spawn: async (input) => {
+      spawned.push({ laneId: input.laneId, ...(input.model !== undefined ? { model: input.model } : {}) });
+      return (await options.spawn?.(input)) ?? { usage: UNKNOWN_LANE_RUN_USAGE(false) };
+    },
   };
   const lenses = authoredBy(options.authors);
   const files: IReviewLaneFiles = { prepare: async () => 'same', sourceChecksum: async () => 'same', clearOutput: async () => undefined,
@@ -175,11 +180,17 @@ async function verifyWith(options: { lanes: ReviewLaneCandidate[]; authors: stri
     { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => operatorSettings, baseConfig: async () => null });
   const attempt = new ReviewLaneAttempt({ source: gateway, clock, logger: { warn: jest.fn() },
     settings: { get: async () => options.settings ?? { pool: [], pins: {} } } });
-  const saveStageLane = jest.fn<ReturnType<IReviewRepository['saveStageLane']>, Parameters<IReviewRepository['saveStageLane']>>()
+  const order: string[] = [];
+  const saveStageLane = jest.fn<ReturnType<IReviewRepository['saveStageLane']>, Parameters<IReviewRepository['saveStageLane']>>(
+    async () => { order.push('save'); });
+  const beginStageLaneRun = jest.fn<ReturnType<IReviewRepository['beginStageLaneRun']>, Parameters<IReviewRepository['beginStageLaneRun']>>(
+    async () => { order.push('begin'); });
+  const closeRunningStage = jest.fn<ReturnType<IReviewRepository['closeRunningStage']>, Parameters<IReviewRepository['closeRunningStage']>>()
     .mockResolvedValue(undefined);
-  const repository = Object.assign(Object.create(null) as IReviewRepository, { saveStageLane });
-  const results = await new VerificationStageRunner(runner, null, null, repository).run(claim, context, lenses, 10_000_000, attempt);
-  return { results, spawned, saveStageLane };
+  const repository = Object.assign(Object.create(null) as IReviewRepository, { saveStageLane, beginStageLaneRun, closeRunningStage });
+  const verification = new VerificationStageRunner(runner, null, null, repository);
+  const results = verification.run(claim, context, lenses, options.deadline ?? 10_000_000, attempt, options.signal);
+  return { results: await results.catch(() => []), settled: results, spawned, saveStageLane, beginStageLaneRun, closeRunningStage, order };
 }
 
 describe('VerificationStageRunner verifier lane through the real lane runner (#1481)', () => {
@@ -189,7 +200,7 @@ describe('VerificationStageRunner verifier lane through the real lane runner (#1
     expect(spawned).toEqual([{ laneId: 'gemini' }]);
     expect(results.map(({ verification }) => verification)).toEqual(['cross-family', 'cross-family', 'cross-family']);
     expect(saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3,
-      { lane: 'gemini', model: null, family: 'gemini', fallback: [] });
+      { lane: 'gemini', model: null, family: 'gemini', fallback: [] }, UNKNOWN_LANE_RUN_USAGE(false));
   });
 
   it('picks the family with the fewest candidates when every family authored some (Req 3.4)', async () => {
@@ -221,6 +232,84 @@ describe('VerificationStageRunner verifier lane through the real lane runner (#1
     expect(saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, { lane: null, model: null, family: null, fallback: [
       { source: 'pin', lane: 'ptah-cli:pc-gone', model: null, reason: 'lane-not-listed' },
       { source: 'pool', lane: 'codex', model: null, reason: 'at-limit' },
-    ] });
+    ] }, undefined);
+  });
+});
+
+describe('VerificationStageRunner lane usage and abort (M6)', () => {
+  const usage = (inputTokens: number, partial = false): ReviewLaneRunUsage => ({ inputTokens, outputTokens: null,
+    cacheReadTokens: null, cacheWriteTokens: null, costUsd: null, model: null, partial });
+  const gemini = { lane: 'gemini', model: null, family: 'gemini', fallback: [] };
+
+  it('begins the run before the lane and records the lane and usage when the caller aborts mid-lane (req 7.1, 7.6)', async () => {
+    const controller = new AbortController();
+    const h = await verifyWith({ lanes: [lane('codex'), lane('gemini')], authors: ['codex'], signal: controller.signal,
+      spawn: async () => { controller.abort(); return { usage: usage(7) }; } });
+    expect(h.order).toEqual(['begin', 'save']);
+    expect(h.beginStageLaneRun).toHaveBeenCalledWith(claim.attemptId, 'verification', 3);
+    expect(h.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, gemini, usage(7));
+    // Today's mapping: an aborted verifier batch marks every candidate unavailable.
+    expect(h.results).toEqual([expect.objectContaining({ verification: 'unavailable',
+      result: expect.objectContaining({ status: 'partial', reason: 'aborted' }) })]);
+  });
+
+  it('records the usage of a started verifier lane that rejected, keeping the partial outcome (req 1.6, A5)', async () => {
+    const h = await verifyWith({ lanes: [lane('codex'), lane('gemini')], authors: ['codex'],
+      spawn: async () => { throw new ReviewLaneSpawnError(new Error('status-failed: quota'), true, usage(10, true)); } });
+    expect(h.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, gemini, usage(10, true));
+    expect(h.results).toEqual([expect.objectContaining({ verification: 'unavailable',
+      result: expect.objectContaining({ status: 'partial', reason: 'status-failed: quota' }) })]);
+  });
+
+  it('removes the pending run and rethrows when the lane runner throws before selection (req 7.2)', async () => {
+    const h = await verifyWith({ lanes: [lane('codex')], authors: ['codex'], deadline: Number.NaN });
+    await expect(h.settled).rejects.toThrow('Invalid run deadline');
+    expect(h.order).toEqual(['begin', 'save']);
+    expect(h.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, null, undefined);
+    expect(h.spawned).toEqual([]);
+  });
+
+  it('rethrows the lane error when removing the pending run also fails', async () => {
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    jest.spyOn(lanes, 'run').mockRejectedValue(new Error('lane exploded'));
+    const repository = Object.assign(Object.create(null) as IReviewRepository, {
+      beginStageLaneRun: jest.fn().mockResolvedValue(undefined),
+      saveStageLane: jest.fn().mockRejectedValue(new Error('disk full')) });
+    await expect(new VerificationStageRunner(lanes, null, null, repository)
+      .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('lane exploded');
+  });
+
+  it('writes no lane document when begin itself throws, so an older marker stays (P2 m3)', async () => {
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    const run = jest.spyOn(lanes, 'run');
+    const repository = Object.assign(Object.create(null) as IReviewRepository, {
+      beginStageLaneRun: jest.fn().mockRejectedValue(new Error('begin failed')), saveStageLane: jest.fn() });
+    await expect(new VerificationStageRunner(lanes, null, null, repository)
+      .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('begin failed');
+    expect(run).not.toHaveBeenCalled();
+    expect(repository.saveStageLane).not.toHaveBeenCalled();
+  });
+
+  it('does not remove a marker once the lane was saved and a later step throws (P2 m3)', async () => {
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    // A completed batch without a verdict array throws after the lane save.
+    jest.spyOn(lanes, 'run').mockResolvedValue({ status: 'completed', family: 'gemini', lane: gemini, run: usage(4),
+      output: {} as never });
+    const repository = Object.assign(Object.create(null) as IReviewRepository, {
+      beginStageLaneRun: jest.fn().mockResolvedValue(undefined), saveStageLane: jest.fn().mockResolvedValue(undefined) });
+    await expect(new VerificationStageRunner(lanes, null, null, repository)
+      .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('Verifier batch output missing');
+    expect(repository.saveStageLane).toHaveBeenCalledTimes(1);
+    expect(repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, gemini, usage(4));
+  });
+
+  it('begins no run when nothing needs verifying or the caller already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const h = await verifyWith({ lanes: [lane('codex')], authors: ['codex'], signal: controller.signal });
+    expect(h.results).toEqual([]);
+    expect(h.beginStageLaneRun).not.toHaveBeenCalled();
+    expect(h.saveStageLane).not.toHaveBeenCalled();
+    expect((await verifyWith({ lanes: [lane('codex')], authors: [] })).beginStageLaneRun).not.toHaveBeenCalled();
   });
 });

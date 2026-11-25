@@ -727,6 +727,8 @@ export function buildAgentNamespace(
           roleDefinition: _callerRoleDefinition,
           systemPrompt: _callerSystemPrompt,
           accountSelection: _rawAccountSelection,
+          // Host-internal ledger key: a caller must not re-key its usage rows.
+          usageWorkspaceRoot: _rawUsageWorkspaceRoot,
           ...requestFields
         } = request;
 
@@ -772,7 +774,13 @@ export function buildAgentNamespace(
     resolveCallerParentId,
     spawn: (request, force?: boolean) => executeNamespaceSpawn(request, undefined, force),
     beginSpawn: (request) => {
-      const { accountSelection: _accountSelection, externalOwner: _rawExternalOwner, ...safeRequest } = request;
+      const {
+        accountSelection: _accountSelection,
+        externalOwner: _rawExternalOwner,
+        // Only the trusted review gateway keys a lane's spend to a workspace.
+        usageWorkspaceRoot: _rawUsageWorkspaceRoot,
+        ...safeRequest
+      } = request;
       const rawSessionId = isMcpRequestInFlight()
         ? getCallerSessionId()?.trim() || undefined
         : request.parentSessionId?.trim() || undefined;

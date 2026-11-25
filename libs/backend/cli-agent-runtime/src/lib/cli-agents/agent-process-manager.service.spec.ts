@@ -3030,6 +3030,115 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       );
     });
 
+    describe('findAgentUsage and the ledger workspace key', () => {
+      const recordUsage = jest.fn();
+      let emit: (segment: CliOutputSegment) => void;
+
+      beforeEach(() => {
+        recordUsage.mockReset();
+        (manager as unknown as { usageSink: { recordUsage: jest.Mock } }).usageSink =
+          { recordUsage };
+        const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
+        Object.assign(sdkControls.handle, {
+          outcomeUsageIsTurnTotal: true,
+          onSegment: (cb: (segment: CliOutputSegment) => void) => {
+            segmentCallbacks.push(cb);
+          },
+          getSessionId: () => SESSION,
+        });
+        emit = (segment) => {
+          for (const cb of segmentCallbacks) cb(segment);
+        };
+      });
+
+      const usageSegment: CliOutputSegment = {
+        type: 'info',
+        content: 'Usage',
+        usage: {
+          inputTokens: 120,
+          outputTokens: 30,
+          models: [
+            { modelId: 'gpt-5', inputTokens: 120, outputTokens: 30, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          ],
+        },
+      };
+
+      it('returns the turn total after completion, as a copy', async () => {
+        const { agentId } = await manager.spawn({
+          task: 'Review',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        emit(usageSegment);
+        sdkControls.resolve(0);
+        await Promise.resolve();
+
+        const first = manager.findAgentUsage(agentId);
+        expect(first).toEqual(usageSegment.usage);
+        first?.models?.push({ modelId: 'extra', inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 });
+        if (first?.models?.[0]) first.models[0].inputTokens = 999;
+
+        expect(manager.findAgentUsage(agentId)).toEqual(usageSegment.usage);
+      });
+
+      it('returns the turn total after stop()', async () => {
+        const { agentId } = await manager.spawn({
+          task: 'Review',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        emit(usageSegment);
+        // stop() awaits the handle's teardown; the mock settles it here.
+        const stopping = manager.stop(agentId);
+        sdkControls.resolve(0);
+        await stopping;
+
+        expect(manager.findAgentUsage(agentId)).toEqual(usageSegment.usage);
+      });
+
+      it('returns undefined for an unknown agent or a lane without usage', async () => {
+        expect(manager.findAgentUsage('no-such-agent')).toBeUndefined();
+        const { agentId } = await manager.spawn({
+          task: 'Review',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        expect(manager.findAgentUsage(agentId)).toBeUndefined();
+      });
+
+      it('keys ledger rows by the spawn request usageWorkspaceRoot', async () => {
+        const { agentId } = await manager.spawn({
+          task: 'Review',
+          cli: 'codex',
+          workingDirectory: '/workspace/root/.reviews/worktree',
+          usageWorkspaceRoot: '/workspace/root',
+        });
+        expect(manager.findAgentInfo(agentId)).not.toHaveProperty('usageWorkspaceRoot');
+        emit(usageSegment);
+        sdkControls.resolve(0);
+        await Promise.resolve();
+
+        expect(recordUsage).toHaveBeenCalledWith(
+          expect.objectContaining({ runId: String(agentId), workspaceKey: '/workspace/root' }),
+        );
+      });
+
+      it('keys ledger rows by workingDirectory without an override', async () => {
+        const { agentId } = await manager.spawn({
+          task: 'Review',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        emit(usageSegment);
+        sdkControls.resolve(0);
+        await Promise.resolve();
+
+        expect(recordUsage).toHaveBeenCalledWith(
+          expect.objectContaining({ runId: String(agentId), workspaceKey: '/workspace/root' }),
+        );
+      });
+    });
+
     it('hands each mid-turn usage increment to the buffer before the turn ends, and records the turn total', async () => {
       const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
       Object.assign(sdkControls.handle, {

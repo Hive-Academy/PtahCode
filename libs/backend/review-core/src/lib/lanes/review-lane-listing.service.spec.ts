@@ -22,7 +22,7 @@ function setup(lanes: ReviewLaneCandidate[]) {
 }
 
 describe('ReviewLaneListingService', () => {
-  it('lists lanes with their catalogs, a failed catalog for unread lanes, and blocked saved models', async () => {
+  it('lists lanes with their catalogs, a failed catalog for unread lanes, blocked saved models and a blocked default', async () => {
     const { service, source } = setup([
       { id: 'codex', label: 'Codex', family: 'codex', limitState: 'confirmed-room' },
       { id: 'ptah-cli:pc-1', label: 'My CLI', family: 'claude', limitState: 'at-limit', defaultModelBlocked: true },
@@ -30,13 +30,16 @@ describe('ReviewLaneListingService', () => {
     const read: ReviewLaneCatalog = { status: 'read', models: ['gpt-5.3-codex'], truncated: false, verifiable: true };
     source.listModels.mockResolvedValue({ codex: read });
     source.modelBlocked.mockImplementation((model) => model === 'gemini-3-pro');
-    await expect(service.list()).resolves.toEqual({
+    const listing = await service.list();
+    expect(listing).toEqual({
       lanes: [
         { id: 'codex', label: 'Codex', family: 'codex', limitState: 'confirmed-room', catalog: read },
-        { id: 'ptah-cli:pc-1', label: 'My CLI', family: 'claude', limitState: 'at-limit', catalog: failed },
+        { id: 'ptah-cli:pc-1', label: 'My CLI', family: 'claude', limitState: 'at-limit', catalog: failed, defaultModelBlocked: true },
       ],
       blockedModels: ['gemini-3-pro'],
     });
+    // An unblocked default carries no key at all (8.1).
+    expect(Object.prototype.hasOwnProperty.call(listing.lanes[0], 'defaultModelBlocked')).toBe(false);
     expect(source.listModels).toHaveBeenCalledWith(['codex', 'ptah-cli:pc-1'], expect.any(AbortSignal));
     // Each distinct saved model is checked once.
     expect(source.modelBlocked.mock.calls.map(([model]) => model)).toEqual(['gpt-5.3-codex', 'gemini-3-pro']);

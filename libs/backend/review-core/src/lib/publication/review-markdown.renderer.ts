@@ -1,4 +1,4 @@
-import type { ReviewFinding, RepoIdentity } from '@ptah-extension/review-contracts';
+import type { ReviewFinding, RepoIdentity, ReviewUsageTotal } from '@ptah-extension/review-contracts';
 
 export interface ReviewRunRow { lens: string; family: string; status: string }
 export interface RenderedFinding { findingId: string; finding: ReviewFinding; body: string }
@@ -56,8 +56,21 @@ export function renderInline(finding: ReviewFinding, repo: RepoIdentity, headSha
   return parts.join('\n\n');
 }
 
+const groupedNumber = new Intl.NumberFormat('en-US');
+
+/** The token total of the run. Cost is never read: the PR comment shows no USD (requirement 5.3). */
+export function renderUsageLine(usage: ReviewUsageTotal | null): string {
+  if (!usage || usage.totalTokens === null) return 'Usage: unavailable';
+  const split = ([['input', usage.inputTokens], ['output', usage.outputTokens], ['cache read', usage.cacheReadTokens],
+    ['cache write', usage.cacheWriteTokens]] as const)
+    .flatMap(([label, value]) => value === null ? [] : [`${label} ${groupedNumber.format(value)}`]);
+  return `Usage: ${usage.tokensPartial ? '≥ ' : ''}${groupedNumber.format(usage.totalTokens)} tokens`
+    + (split.length ? ` (${split.join(' · ')})` : '');
+}
+
 export function renderSummary(headSha: string, rows: readonly ReviewRunRow[], findings: readonly RenderedFinding[],
-  suppressedCount: number, followUps: readonly string[], redact: (value: string) => string = value => value): string {
+  suppressedCount: number, followUps: readonly string[], redact: (value: string) => string = value => value,
+  usage: ReviewUsageTotal | null = null): string {
   const safe = (value: string) => escapeText(redact(value));
   const lines = [`## PtahCode review · ${headSha.slice(0, 12)}`, '',
     `${findings.length} verified findings; ${suppressedCount} held locally.`, '',
@@ -74,6 +87,6 @@ export function renderSummary(headSha: string, rows: readonly ReviewRunRow[], fi
   // Follow-up model text is escaped by the service before its trusted marker is appended.
   if (followUps.length) lines.push('', `### Finding follow-ups (${followUps.length})`, '', ...followUps.map(item => `- ${item}`));
   lines.push('', '<details><summary>Run metadata</summary>', '', `Head: \`${headSha}\`  `,
-    'Usage: unavailable', '', '</details>');
+    renderUsageLine(usage), '', '</details>');
   return lines.join('\n');
 }

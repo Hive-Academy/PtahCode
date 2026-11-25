@@ -8,9 +8,9 @@ import type { ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueHead } from '../r
 import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord, ReviewStatusSyncRecord } from './review-repository.interface';
 import { NON_RETRYABLE_REVIEW_FAILURE_CODES } from '../review-failure-retry';
 import type { ReviewLaneUse } from '../lanes/review-lane.runner';
+import type { ReviewLaneRunUsage } from '../lanes/review-lane-usage';
+import { beginLaneRun, mergeLaneRun, parseStageLaneDocument, type ReviewStageLaneDocument } from './review-stage-lane-record';
 
-/** Version of the `checkpoint:lane:<stage>` JSON document; `ReviewQueryRepository` reads it. */
-export const REVIEW_STAGE_LANE_RECORD_VERSION = 1;
 const UPSERT_CHECKPOINT = `INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES (?, ?, ?, 'completed', ?)
       ON CONFLICT(attempt_id, stage, ordinal) DO UPDATE SET state = 'completed', outcome = excluded.outcome`;
 
@@ -320,14 +320,35 @@ export class SqliteReviewRepository implements IReviewRepository {
     db.transaction(() => db.prepare(UPSERT_CHECKPOINT).run(attemptId, `checkpoint:${stage}`, ordinal, payload))();
   }
 
-  async saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse): Promise<void> {
+  async beginStageLaneRun(attemptId: string, stage: string, ordinal: number): Promise<void> {
+    this.updateLaneDocument(attemptId, stage, ordinal, beginLaneRun);
+  }
+
+  async saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse | null, run?: ReviewLaneRunUsage): Promise<void> {
     const db = this.sqlite.db;
-    const payload = JSON.stringify({ version: REVIEW_STAGE_LANE_RECORD_VERSION, lane: use.lane, model: use.model,
-      family: use.family, fallback: use.fallback });
     db.transaction(() => {
-      db.prepare(`UPDATE review_stages SET family = ? WHERE attempt_id = ? AND stage = ? AND ordinal = ?`)
+      if (use) db.prepare(`UPDATE review_stages SET family = ? WHERE attempt_id = ? AND stage = ? AND ordinal = ?`)
         .run(use.family, attemptId, stage, ordinal);
-      db.prepare(UPSERT_CHECKPOINT).run(attemptId, `checkpoint:lane:${stage}`, ordinal, payload);
+      this.updateLaneDocument(attemptId, stage, ordinal, (doc) => mergeLaneRun(doc, use, run));
+    })();
+  }
+
+  async closeRunningStage(attemptId: string, stage: string, ordinal: number, startedAt: string, endedAt: string): Promise<void> {
+    this.sqlite.db.prepare(`UPDATE review_stages SET state = 'interrupted', ended_at = ?
+      WHERE attempt_id = ? AND stage = ? AND ordinal = ? AND state = 'running' AND started_at = ?`)
+      .run(ms(endedAt), attemptId, stage, ordinal, ms(startedAt));
+  }
+
+  /** One read-modify-write of the `checkpoint:lane:<stage>` document; nests inside a caller's transaction. */
+  private updateLaneDocument(attemptId: string, stage: string, ordinal: number,
+    update: (doc: ReviewStageLaneDocument | null) => ReviewStageLaneDocument): void {
+    const db = this.sqlite.db;
+    const key = `checkpoint:lane:${stage}`;
+    db.transaction(() => {
+      const row = z.object({ outcome: z.string().nullable() }).safeParse(
+        db.prepare(`SELECT outcome FROM review_stages WHERE attempt_id = ? AND stage = ? AND ordinal = ?`).get(attemptId, key, ordinal));
+      const doc = update(parseStageLaneDocument(row.success ? row.data.outcome : null));
+      db.prepare(UPSERT_CHECKPOINT).run(attemptId, key, ordinal, JSON.stringify(doc));
     })();
   }
 
