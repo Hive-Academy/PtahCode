@@ -503,6 +503,7 @@ export class AgentToolDispatcher {
             effort: p.effort,
             taskKind: p.taskKind,
             routingSource: p.routingSource,
+            route: p.route,
             accountSelection: p.accountSelection,
             permission: p.permission,
             network: p.network,
