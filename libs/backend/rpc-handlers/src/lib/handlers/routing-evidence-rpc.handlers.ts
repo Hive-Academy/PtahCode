@@ -2,8 +2,12 @@ import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import { z } from 'zod';
 import { TOKENS, RpcUserError } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
-import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
-import type { CliDetectionService } from '@ptah-extension/cli-agent-runtime';
+import { PLATFORM_TOKENS, type IWorkspaceProvider } from '@ptah-extension/platform-core';
+import {
+  CLI_AGENT_RUNTIME_TOKENS,
+  type CliDetectionService,
+  type PtahCliRegistry,
+} from '@ptah-extension/cli-agent-runtime';
 import {
   LANE_ROUTING_TOKENS,
   type RoutingEvidenceService,
@@ -12,6 +16,7 @@ import {
   loggableErrorName,
   type AgentGetRoutingEvidenceParams,
   type AgentGetRoutingEvidenceResult,
+  type CliDetectionResult,
   type RpcMethodName,
 } from '@ptah-extension/shared';
 
@@ -31,6 +36,8 @@ export class RoutingEvidenceRpcHandlers {
     private readonly runtimeContainer: DependencyContainer,
     @inject(TOKENS.CLI_DETECTION_SERVICE)
     private readonly cliDetection: Pick<CliDetectionService, 'detectAll'>,
+    @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+    private readonly workspace: Pick<IWorkspaceProvider, 'getConfiguration'>,
   ) {}
 
   register(): void {
@@ -57,10 +64,44 @@ export class RoutingEvidenceRpcHandlers {
 
     try {
       const service = this.runtimeContainer.resolve<Pick<RoutingEvidenceService, 'read'>>(token);
-      const rows = await this.cliDetection.detectAll();
-      return await service.read(rows);
+      return await service.read(await this.listLaneRows());
     } catch (error: unknown) {
       throw this.unavailable('routing evidence request failed', error);
+    }
+  }
+
+  private async listLaneRows(): Promise<CliDetectionResult[]> {
+    const detected = await this.cliDetection.detectAll();
+    const disabledClis =
+      this.workspace.getConfiguration<string[]>('ptah', 'agentOrchestration.disabledClis', []) ?? [];
+    const rows = detected.map((row) =>
+      disabledClis.includes(row.cli) ? { ...row, disabled: true } : row,
+    );
+
+    const token = CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY;
+    if (!this.runtimeContainer.isRegistered(token, true)) return rows;
+
+    try {
+      const registry = this.runtimeContainer.resolve<Pick<PtahCliRegistry, 'listAgents'>>(token);
+      const agents = await registry.listAgents();
+      const ptahCliRows: CliDetectionResult[] = agents
+        .filter((agent) => agent.enabled && agent.hasApiKey)
+        .map((agent) => ({
+          cli: 'ptah-cli',
+          installed: true,
+          messagingMode: 'queue',
+          ptahCliId: agent.id,
+          ptahCliName: agent.name,
+          providerName: agent.providerName,
+          providerId: agent.providerId,
+        }));
+      return [...rows, ...ptahCliRows];
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - retain system CLI evidence.
+      this.logger.warn(`RPC: ${METHOD} could not list Ptah CLI lanes`, {
+        errorName: loggableErrorName(error),
+      });
+      return rows;
     }
   }
 
