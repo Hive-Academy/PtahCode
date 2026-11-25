@@ -151,7 +151,10 @@ import type {
   LaneLimitLookupService,
 } from '@ptah-extension/cli-agent-runtime';
 import { buildSessionNamespace } from './namespace-builders/session-namespace.builder';
-import { buildRouteNamespace } from './namespace-builders/route-namespace.builder';
+import {
+  buildRouteNamespace,
+  resolveRouteDecideService,
+} from './namespace-builders/route-namespace.builder';
 import type { OutcomeReportDependencies } from './mcp-core/tools/outcome-report.tool';
 import { adaptOutcomeLogger } from './mcp-core/tools/outcome-report.handler';
 import {
@@ -776,6 +779,7 @@ export class PtahAPIBuilder {
               : undefined,
           agentProcessManager: this.agentProcessManager,
           cliDetectionService: this.cliDetectionService,
+          getRouteRecordReader: () => resolveRouteDecideService(this.container),
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           resolveSessionId: (tabIdOrSessionId: string) => {
             try {

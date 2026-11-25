@@ -15,8 +15,12 @@ import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { resolveWorkspaceSkillPath } from '@ptah-extension/platform-core';
-import { parsePhaseDispatch } from '@ptah-extension/lane-routing';
 import {
+  parsePhaseDispatch,
+  type RouteRecordReader,
+} from '@ptah-extension/lane-routing';
+import {
+  AgentSpawnArgsSchema,
   MAX_EFFORT_LENGTH,
   agentSpawnAccountRefusal,
 } from '../mcp-core/agent-spawn-args.schema';
@@ -236,6 +240,8 @@ export interface AgentNamespaceDependencies {
   getPluginPaths?: () => Promise<string[] | undefined>;
   /** Lazy resolver for PtahCliRegistry (avoids hard dependency on agent-sdk) */
   getPtahCliRegistry?: () => PtahCliRegistryLike | undefined;
+  /** Lazy reader backed by the same route service that issued the route ID. */
+  getRouteRecordReader?: () => RouteRecordReader | undefined;
   /** Returns CLI types that are disabled by the user. Called at spawn/list time to filter out disabled agents. */
   getDisabledClis?: () => string[];
   /** Returns the user's preferred agent order for sorting list() results. */
@@ -411,6 +417,7 @@ export function buildAgentNamespace(
     getProjectGuidance,
     getPluginPaths,
     getPtahCliRegistry,
+    getRouteRecordReader,
     getDisabledClis,
     getPreferredAgentOrder,
     resolveSessionId,
@@ -441,6 +448,7 @@ export function buildAgentNamespace(
           request.routingSource,
           OUTCOME_ROUTING_SOURCES,
         );
+        const route = AgentSpawnArgsSchema.shape.route.parse(request.route);
         const resolvedSkills = resolvedSkillsSchema.parse(
           request.skills === undefined
             ? (request.phase?.skills ?? [])
@@ -530,6 +538,21 @@ export function buildAgentNamespace(
         }
         if (timing && roleStartedAt !== null) {
           timing.roleMs = Math.round(performance.now() - roleStartedAt);
+        }
+        let routeFacts: SpawnAgentRequest['routeFacts'];
+        if (route) {
+          const { routeId, phaseId } = route;
+          const laneId = request.ptahCliId || request.cli;
+          const facts = getRouteRecordReader?.()?.spawnFacts(routeId, phaseId);
+          if (facts && facts.laneId === laneId) {
+            routeFacts = facts;
+          } else {
+            logger.warn('ptah.agent.spawn: No route facts for the spawn lane.', {
+              routeId,
+              phaseId,
+              laneId,
+            });
+          }
         }
         if (request.ptahCliId) {
           const registry = getPtahCliRegistry?.();
@@ -621,6 +644,16 @@ export function buildAgentNamespace(
               task: request.task,
               taskKind: request.taskKind,
               routingSource: request.routingSource,
+              ...(routeFacts ? { routeFacts } : {}),
+              spawnEffort: {
+                requested: request.effort ?? null,
+                sent: null,
+                source: request.effort === undefined ? 'none' : 'request',
+                provenance: 'unknown',
+                disposition: request.effort === undefined
+                  ? 'none-requested'
+                  : 'fallback-allowlist',
+              },
               cli: 'ptah-cli',
               workingDirectory,
               taskFolder: request.taskFolder,
@@ -727,6 +760,8 @@ export function buildAgentNamespace(
           roleDefinition: _callerRoleDefinition,
           systemPrompt: _callerSystemPrompt,
           accountSelection: _rawAccountSelection,
+          // Only the route reader can supply facts for a spawn.
+          routeFacts: _callerRouteFacts,
           // Host-internal ledger key: a caller must not re-key its usage rows.
           usageWorkspaceRoot: _rawUsageWorkspaceRoot,
           ...requestFields
@@ -735,6 +770,7 @@ export function buildAgentNamespace(
         const enrichedRequest = {
           ...requestFields,
           task: deliveredTask,
+          ...(routeFacts && { routeFacts }),
           ...(accountSelection && { accountSelection }),
           ...(workingDirectory && { workingDirectory }),
           ...(activeSessionId && { parentSessionId: activeSessionId }),
@@ -777,6 +813,7 @@ export function buildAgentNamespace(
       const {
         accountSelection: _accountSelection,
         externalOwner: _rawExternalOwner,
+        routeFacts: _callerRouteFacts,
         // Only the trusted review gateway keys a lane's spend to a workspace.
         usageWorkspaceRoot: _rawUsageWorkspaceRoot,
         ...safeRequest
