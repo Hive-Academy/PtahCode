@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
-import { TabManagerService, parseLaneKey } from '@ptah-extension/chat';
+import { TabManagerService, laneKey as buildLaneKey, parseLaneKey } from '@ptah-extension/chat';
 import { AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
 import { CanvasStore } from '../canvas.store';
 import { CanvasAttentionLaneOpener } from './canvas-attention-lane-opener.service';
@@ -25,7 +25,20 @@ export class CanvasDetailService {
   readonly laneKey = computed(() => this.laneKeyFor(this.detailTabId() ?? ''));
 
   laneKeyFor(tabId: string): string {
-    return this._laneKeys().get(tabId) ?? 'orchestrator';
+    return this.currentLaneKey(this._laneKeys().get(tabId) ?? 'orchestrator');
+  }
+
+  /**
+   * Resuming a stopped CLI lane spawns a new agent id that replaces the old
+   * card. A selection that names the old id follows it to the new card, so
+   * the user stays on the lane they sent from instead of dropping to the
+   * Orchestrator (D3).
+   */
+  private currentLaneKey(key: string): string {
+    const parsed = parseLaneKey(key);
+    if (parsed?.kind !== 'cli') return key;
+    const current = this.monitor.currentAgentId(parsed.id);
+    return current === parsed.id ? key : buildLaneKey('cli', current);
   }
 
   selectLaneFor(tabId: string, key: string): void {

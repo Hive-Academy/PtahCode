@@ -174,7 +174,10 @@ export class AgentMonitorMessageHandler implements MessageHandler {
 
   handleMessage(message: { type: string; payload?: unknown }): void {
     if (message.type === MESSAGE_TYPES.AGENT_MONITOR_OUTPUT) {
-      this.pendingOutput.push(message.payload as AgentOutputDelta);
+      const delta = message.payload as AgentOutputDelta;
+      // Not batched: the lane composer refetches its Send now preview at once.
+      if (typeof delta?.steerAvailable === 'boolean') this.delivery.onSteerAvailability(delta.agentId);
+      this.pendingOutput.push(delta);
       this.scheduleOutputFlush();
       return;
     }

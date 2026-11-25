@@ -95,6 +95,7 @@ describe('LaneComposerComponent', () => {
     markRestored: jest.fn(),
     receipt: () => undefined,
     newIdempotencyKey: () => `key-${++keys}`,
+    steerChange: () => 0,
     takeRecoveredMessage: (id: string) => {
       const message = recovered().get(id) ?? null;
       recovered.set(new Map());
@@ -200,7 +201,8 @@ describe('LaneComposerComponent', () => {
 
   it('renders main chat card, labelled field, aria-live hint and the resume path', async () => {
     store.composerState.mockReturnValue(previews({ usesResume: true }, { supported: false, mode: 'unsupported' }));
-    const fixture = await mount({ stopped: true, resumePath: 'Resume CLI session 01a1bc68' });
+    store.agentsById.set(new Map([[agentId, { status: 'stopped', cli: 'codex', cliSessionId: '01a1bc68-0000-4000' }]]));
+    const fixture = await mount({ stopped: true });
     const card = root(fixture).querySelector('[data-glass-surface="tile"]') as HTMLElement;
     expect(card.querySelector('textarea')).not.toBeNull();
     const label = root(fixture).querySelector('label') as HTMLLabelElement;
@@ -337,10 +339,10 @@ describe('LaneComposerComponent', () => {
     expect(root(fixture).querySelector('[data-testid="queued-sender-note"]')?.textContent).toContain('Sent by the parent session');
   });
 
-  it('coalesces a new draft with an accepted queued message', async () => {
+  it('queues each message on its own, with its own card, like main chat (T2)', async () => {
+    const second = { ...receipt, id: 'message-2', preview: 'New thought', updatedAt: 3 };
     sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt })
-      .mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: { ...receipt, id: 'message-2', updatedAt: 3 } });
-    cancelMessage.mockResolvedValue({ ...receipt, state: 'failed', reason: 'cancelled-by-user', updatedAt: 2 });
+      .mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: second });
     const fixture = await mount();
     type(fixture, 'Earlier text');
     await clickSend(fixture);
@@ -348,47 +350,13 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     type(fixture, 'New thought');
     await clickSend(fixture);
-    expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String), undefined);
-    // The earlier message leaves the queue before the combined one is sent.
-    expect(cancelMessage.mock.invocationCallOrder[0]).toBeLessThan(sendMessage.mock.invocationCallOrder[1]);
-  });
-
-  it('does not restore coalesced text when the cancel push arrives before the cancel RPC resolves', async () => {
-    sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt })
-      .mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: { ...receipt, id: 'message-2', updatedAt: 3 } });
-    const cancelledPush = { ...receipt, state: 'failed', reason: 'cancelled-by-user', updatedAt: 4 };
-    const fixture = await mount();
-    cancelMessage.mockImplementation(async () => {
-      receipts.set(new Map([[agentId, [cancelledPush]]]));
-      fixture.detectChanges();
-      return cancelledPush;
-    });
-    type(fixture, 'Earlier text');
-    await clickSend(fixture);
-    receipts.set(new Map([[agentId, [receipt]]]));
+    expect(sendMessage.mock.calls.map((call) => call[1])).toEqual(['Earlier text', 'New thought']);
+    expect(cancelMessage).not.toHaveBeenCalled();
+    receipts.set(new Map([[agentId, [receipt, second]]]));
     fixture.detectChanges();
-    type(fixture, 'New thought');
-    await clickSend(fixture);
-    expect(cancelMessage).toHaveBeenCalledWith(agentId, 'message-1');
+    expect(root(fixture).querySelector('[aria-label="Withdraw: Earlier text"]')).not.toBeNull();
+    expect(root(fixture).querySelector('[aria-label="Withdraw: New thought"]')).not.toBeNull();
     expect(field(fixture).value).toBe('');
-    expect(root(fixture).querySelector('[role="alert"]')).toBeNull();
-  });
-
-  it('puts the earlier message back in front of the new draft when a combined send is refused', async () => {
-    sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt })
-      .mockResolvedValueOnce({ mode: 'unsupported', detail: 'Lane is unavailable' });
-    cancelMessage.mockResolvedValue({ ...receipt, state: 'cancelled', reason: 'cancelled-by-user', updatedAt: 2 });
-    const fixture = await mount();
-    type(fixture, 'Earlier text');
-    await clickSend(fixture);
-    receipts.set(new Map([[agentId, [receipt]]]));
-    fixture.detectChanges();
-    type(fixture, 'New thought');
-    await clickSend(fixture);
-    expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String), undefined);
-    expect(cancelMessage).toHaveBeenCalledWith(agentId, 'message-1');
-    expect(field(fixture).value).toBe('Earlier text\nNew thought');
-    expect(root(fixture).querySelector('[role="alert"]')?.textContent).toContain('Lane is unavailable');
   });
 
   it('treats a lane-at-limit hold as accepted and uses a fresh idempotency key on a later send', async () => {
@@ -397,7 +365,6 @@ describe('LaneComposerComponent', () => {
       .mockResolvedValueOnce({ mode: 'queue-next-turn', receipt })
       .mockResolvedValueOnce({ mode: 'unsupported', detail: 'lane-at-limit', reasonCode: 'lane-at-limit', receipt: held })
       .mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: { ...receipt, id: 'message-3', updatedAt: 5 } });
-    cancelMessage.mockResolvedValue({ ...receipt, state: 'failed', reason: 'cancelled-by-user', updatedAt: 4 });
     const fixture = await mount();
     type(fixture, 'Earlier text');
     await clickSend(fixture);
@@ -405,13 +372,12 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     type(fixture, 'New thought');
     await clickSend(fixture);
-    expect(sendMessage).toHaveBeenNthCalledWith(2, agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String), undefined);
-    expect(cancelMessage).toHaveBeenCalledWith(agentId, 'message-1');
+    expect(sendMessage).toHaveBeenNthCalledWith(2, agentId, 'New thought', 'queue', false, expect.any(String), undefined);
     expect(field(fixture).value).toBe('');
     expect(root(fixture).querySelector('[role="alert"]')).toBeNull();
     receipts.set(new Map([[agentId, []]]));
     fixture.detectChanges();
-    type(fixture, 'Earlier text\nNew thought');
+    type(fixture, 'New thought');
     await clickSend(fixture);
     expect(sendMessage.mock.calls[2][4]).not.toBe(sendMessage.mock.calls[1][4]);
   });
@@ -475,7 +441,8 @@ describe('LaneComposerComponent', () => {
       const fixture = await mount();
       type(fixture, 'Draft text');
       key(fixture, { ctrlKey: true });
-      fixture.detectChanges();
+      // Send now reads fresh previews before it decides (D1).
+      await settle(fixture);
       const stage = root(fixture).querySelector('.ptah-composer-stage') as HTMLElement;
       const queued = root(fixture).querySelector('ptah-queued-message-list') as HTMLElement;
       expect(stage.hasAttribute('inert')).toBe(true);
@@ -496,7 +463,8 @@ describe('LaneComposerComponent', () => {
       const fixture = await mount();
       type(fixture, 'Now');
       key(fixture, { ctrlKey: true });
-      fixture.detectChanges();
+      // Send now reads fresh previews before it decides (D1).
+      await settle(fixture);
       const keep = Array.from(root(fixture).querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button'))
         .find((button) => button.textContent?.trim() === 'Keep current turn') as HTMLButtonElement;
       keep.click();
@@ -513,7 +481,7 @@ describe('LaneComposerComponent', () => {
       const fixture = await mount();
       type(fixture, 'Now');
       key(fixture, { ctrlKey: true });
-      fixture.detectChanges();
+      await settle(fixture);
       expect(root(fixture).querySelector('[role="alertdialog"]')?.textContent)
         .toContain('Work this turn has not finished will be discarded. Codex keeps the conversation');
     });
@@ -524,7 +492,7 @@ describe('LaneComposerComponent', () => {
       const fixture = await mount();
       type(fixture, 'Now');
       key(fixture, { ctrlKey: true });
-      fixture.detectChanges();
+      await settle(fixture);
       expect(sendMessage).not.toHaveBeenCalled();
       (root(fixture).querySelector('[role="alertdialog"] button.btn-warning') as HTMLButtonElement).click();
       await settle(fixture);
@@ -542,7 +510,7 @@ describe('LaneComposerComponent', () => {
       const sendNow = root(fixture).querySelector('[data-testid="queued-follow-up-send-now"]') as HTMLButtonElement;
       expect(sendNow.textContent?.trim()).toBe('Interrupt & send');
       sendNow.click();
-      fixture.detectChanges();
+      await settle(fixture);
       expect(cancelMessage).not.toHaveBeenCalled();
       (root(fixture).querySelector('[role="alertdialog"] button.btn-warning') as HTMLButtonElement).click();
       await settle(fixture);
@@ -661,7 +629,8 @@ describe('LaneComposerComponent', () => {
     await settle(fixture);
     expect(sendMessage).not.toHaveBeenCalled();
     const badge = root(fixture).querySelector('[data-testid="lane-limited-badge"]') as HTMLElement;
-    expect(badge.getAttribute('title')).toContain('Image input is not confirmed for the Copilot lane.');
+    expect(badge.textContent?.trim()).toBe('1 limited');
+    expect(badge.getAttribute('aria-label')).toBe('1 control is limited on this lane: Images');
   });
 
   it('gates model and effort with the backend reason and reveals it on the status line', async () => {
@@ -852,6 +821,215 @@ describe('LaneComposerComponent', () => {
     const resume = root(fixture).querySelector('[data-testid="lane-resume-btn"]') as HTMLButtonElement;
     expect(resume.getAttribute('aria-label')).toBe('Resume Codex session');
     expect(resume.title).toBe('Resume session');
+  });
+  describe('the "N limited" badge (D12)', () => {
+    it('does not show for a lane whose approval mode is reported and whose controls all work', async () => {
+      // The default capabilities: approvals off ("Auto") with its reason, everything supported.
+      const fixture = await mount();
+      expect(root(fixture).querySelector('[data-testid="lane-limited-badge"]')).toBeNull();
+    });
+
+    it('names the limited controls, is focusable, and shows each reason in a tooltip', async () => {
+      store.composerState.mockReturnValue({
+        ...previews({}, { supported: false, mode: 'unsupported' },
+          capabilities(turnInput({ model: { state: 'unsupported', reason: 'Model is set at spawn for this lane.' } }))),
+        nowDisabledReason: 'Codex cannot steer.',
+      });
+      const fixture = await mount();
+      document.body.appendChild(fixture.nativeElement);
+      try {
+        const badge = root(fixture).querySelector('[data-testid="lane-limited-badge"]') as HTMLElement;
+        expect(badge.textContent?.trim()).toBe('2 limited');
+        expect(badge.getAttribute('aria-label')).toBe('2 controls are limited on this lane: Model, Send now');
+        expect(badge.getAttribute('tabindex')).toBe('0');
+        expect(badge.getAttribute('role')).toBe('note');
+        expect(badge.hasAttribute('title')).toBe(false);
+        badge.focus();
+        badge.dispatchEvent(new FocusEvent('focus'));
+        await settle(fixture);
+        expect(document.querySelector('[role="tooltip"]')?.textContent)
+          .toBe('Model: Model is set at spawn for this lane. Send now: Codex cannot steer.');
+      } finally {
+        fixture.destroy();
+        fixture.nativeElement.remove();
+      }
+    });
+
+    it('counts an approval mode the lane did not report', async () => {
+      const caps = { ...capabilities(), effectiveApproval: { mode: 'unknown', reason: 'Codex did not report its approval mode.' } };
+      store.composerState.mockReturnValue(previews({}, {}, caps));
+      const fixture = await mount();
+      const badge = root(fixture).querySelector('[data-testid="lane-limited-badge"]') as HTMLElement;
+      expect(badge.getAttribute('aria-label')).toBe('1 control is limited on this lane: Approval');
+    });
+  });
+
+  describe('resume button tint (D11)', () => {
+    async function resumeButton(status: string, stoppedByUser?: boolean): Promise<HTMLButtonElement> {
+      store.agentsById.set(new Map([[agentId, { status, stoppedByUser, cli: 'codex', cliSessionId: 'abc' }]]));
+      store.composerState.mockReturnValue(previews({ usesResume: true }, { supported: false, mode: 'unsupported' }));
+      const fixture = await mount({ stopped: true, resumable: true, showLaneControls: true });
+      return root(fixture).querySelector('[data-testid="lane-resume-btn"]') as HTMLButtonElement;
+    }
+
+    it('uses the primary tint on a lane that finished or was stopped', async () => {
+      for (const status of ['completed', 'stopped']) {
+        const button = await resumeButton(status);
+        expect(button.classList).toContain('bg-primary/15');
+        expect(button.classList).not.toContain('bg-error/15');
+      }
+    });
+
+    it('keeps the error tint on a lane that failed', async () => {
+      expect((await resumeButton('failed')).classList).toContain('bg-error/15');
+    });
+
+    it('uses the primary tint for a user stop that an older host reports as failed', async () => {
+      expect((await resumeButton('failed', true)).classList).toContain('bg-primary/15');
+    });
+  });
+
+  describe('restart wording of a lane with no running turn (D9)', () => {
+    it('says "continue" for an idle lane that keeps its warm session', async () => {
+      store.agentsById.set(new Map([[agentId, { status: 'completed', cli: 'claude', supportsContinuation: true }]]));
+      store.composerState.mockReturnValue(previews({ mode: 'start-turn', usesResume: false }, { supported: false, mode: 'unsupported' }));
+      const fixture = await mount({ stopped: true, laneLabel: 'Claude', cli: 'Claude' });
+      expect(field(fixture).placeholder).toBe('Continue Claude with a message…');
+      expect(statusText(fixture)).toBe('Send: continues the warm session');
+      expect(sendButton(fixture).getAttribute('aria-label')).toBe('Continue with message');
+    });
+
+    it('says "resume" (cold) for a user-stopped lane that still reports a warm session', async () => {
+      store.agentsById.set(new Map([[agentId, {
+        status: 'stopped', cli: 'claude', supportsContinuation: true, cliSessionId: 'd91df773-1111',
+      }]]));
+      store.composerState.mockReturnValue(previews({ mode: 'start-turn', usesResume: true }, { supported: false, mode: 'unsupported' }));
+      const fixture = await mount({ stopped: true, laneLabel: 'Claude', cli: 'Claude' });
+      expect(field(fixture).placeholder).toBe('Resume Claude with a message…');
+      expect(statusText(fixture)).toBe('Resume with message: Resume CLI session d91df773');
+      expect(sendButton(fixture).getAttribute('aria-label')).toBe('Resume with message');
+    });
+  });
+
+  describe('effort descriptions (D7)', () => {
+    function descriptions(fixture: ComponentFixture<LaneComposerComponent>): string[] {
+      return (fixture.componentInstance['effortOptions']() as readonly { description: string }[]).map((option) => option.description);
+    }
+
+    beforeEach(() => {
+      rpcCall.mockResolvedValue(rpcSuccess({
+        models: [{ id: 'gpt-5.5', name: 'GPT-5.5' }], efforts: ['high', 'xhigh', 'max'], currentModel: 'gpt-5.5', commands: [],
+      }));
+    });
+
+    it('drops the Claude "(Opus tier)" note on other CLIs', async () => {
+      const fixture = await mount();
+      expect(descriptions(fixture).filter((text) => text.includes('Opus'))).toEqual([]);
+      expect(descriptions(fixture)).toContain('Extra-deep reasoning');
+    });
+
+    it('keeps it on Claude lanes', async () => {
+      store.agentsById.set(new Map([[agentId, { status: 'running', cli: 'claude' }]]));
+      const fixture = await mount();
+      expect(descriptions(fixture)).toContain('Extra-deep reasoning (Opus tier)');
+      expect(descriptions(fixture)).toContain('Maximum reasoning depth (Opus tier)');
+    });
+  });
+
+  describe('Send now reads fresh previews first (D1)', () => {
+    const lossy = () => previews({}, {
+      mode: 'interrupt-resume', lossDisclosure: { kind: 'partial-turn-work-lost', confirmationRequired: true, text: 'Partial work will be lost.' },
+    });
+
+    afterEach(() => previewMessage.mockReset().mockResolvedValue(undefined));
+
+    it('steers without the loss dialog once a tool in flight makes steer available', async () => {
+      // The store's previews are a signal: the refreshed one reaches the composer.
+      const current = signal<ReturnType<typeof previews>>(lossy());
+      store.composerState.mockImplementation(() => current());
+      sendMessage.mockResolvedValue({ mode: 'steer', receipt: { ...receipt, state: 'started', delivery: 'now' } });
+      const fixture = await mount();
+      type(fixture, 'Steer now');
+      previewMessage.mockClear().mockImplementation(async () => current.set(previews()));
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      // The refresh before the decision (a mode change then refreshes once more).
+      expect(previewMessage.mock.calls.slice(0, 2).map((call) => call[1])).toEqual(['queue', 'now']);
+      expect(root(fixture).querySelector('[role="alertdialog"]')).toBeNull();
+      expect(sendMessage).toHaveBeenCalledWith(agentId, 'Steer now', 'now', false, expect.any(String), undefined);
+    });
+
+    it('asks for the confirmation when the refreshed preview says the turn would be interrupted', async () => {
+      const current = signal<ReturnType<typeof previews>>(previews());
+      store.composerState.mockImplementation(() => current());
+      const fixture = await mount();
+      type(fixture, 'Now');
+      previewMessage.mockClear().mockImplementation(async () => current.set(lossy()));
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      expect(root(fixture).querySelector('[role="alertdialog"]')?.textContent).toContain('Partial work will be lost.');
+      expect(sendMessage).not.toHaveBeenCalled();
+    });
+
+    it('sends now after an earlier failure once a refresh works: a stale error does not block it (M4)', async () => {
+      sendMessage.mockResolvedValue({ mode: 'steer', receipt: { ...receipt, state: 'started', delivery: 'now' } });
+      const fixture = await mount();
+      type(fixture, 'Now');
+      previewMessage.mockClear().mockRejectedValueOnce(new Error('offline')).mockRejectedValueOnce(new Error('offline'));
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(root(fixture).querySelector('[role="alert"]')?.textContent).toContain('Message options unavailable');
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      expect(sendMessage).toHaveBeenCalledWith(agentId, 'Now', 'now', false, expect.any(String), undefined);
+    });
+
+    it('rechecks the tray after the refresh and shows the block instead of sending (M4)', async () => {
+      store.composerState.mockReturnValue(previews({}, {}, capabilities(turnInput({
+        images: { state: 'unsupported', reason: 'Codex lanes cannot take images.' },
+      }))));
+      const fixture = await mount();
+      type(fixture, 'Now');
+      const attachments = fixture.componentRef.injector.get(ComposerAttachmentsService);
+      previewMessage.mockClear().mockImplementation(async () => {
+        attachments.images.set([
+          { id: 'img-1', data: 'aGk=', mediaType: 'image/png', dataUrl: 'data:image/png;base64,aGk=', name: 'shot.png' },
+        ]);
+      });
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(statusText(fixture)).toBe('Codex lanes cannot take images. Remove the image to send.');
+    });
+
+    it('does not send when the refresh fails, and shows why', async () => {
+      const fixture = await mount();
+      type(fixture, 'Now');
+      previewMessage.mockClear().mockRejectedValue(new Error('offline'));
+      key(fixture, { ctrlKey: true });
+      await settle(fixture);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(root(fixture).querySelector('[role="alert"]')?.textContent).toContain('Message options unavailable');
+    });
+  });
+
+  it('sends an image to a stopped lane whose resume carries images (D4: reads turnInput, decides nothing itself)', async () => {
+    store.agentsById.set(new Map([[agentId, { status: 'stopped', cli: 'claude', cliSessionId: 'abc' }]]));
+    store.composerState.mockReturnValue(previews({ mode: 'start-turn', usesResume: true }, { supported: false, mode: 'unsupported' },
+      capabilities(turnInput({ images: { state: 'supported', onResume: true } }))));
+    sendMessage.mockResolvedValue({ mode: 'start-turn', receipt: { ...receipt, state: 'started' } });
+    const fixture = await mount({ stopped: true });
+    type(fixture, 'What colour?');
+    fixture.componentRef.injector.get(ComposerAttachmentsService).images.set([
+      { id: 'img-1', data: 'aGk=', mediaType: 'image/png', dataUrl: 'data:image/png;base64,aGk=', name: 'red.png' },
+    ]);
+    fixture.detectChanges();
+    expect(root(fixture).querySelector('[data-testid="attachment-image-blocked"]')).toBeNull();
+    expect(sendButton(fixture).disabled).toBe(false);
+    await clickSend(fixture);
+    expect(sendMessage).toHaveBeenCalledWith(agentId, 'What colour?', 'queue', false, expect.any(String),
+      { images: [{ data: 'aGk=', mediaType: 'image/png' }] });
   });
 });
 

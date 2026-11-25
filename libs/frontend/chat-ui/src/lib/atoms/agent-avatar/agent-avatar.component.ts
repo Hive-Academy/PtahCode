@@ -80,6 +80,7 @@ const RING_BY_STATUS: Readonly<Record<AgentStatusWord, RingKind | null>> = {
   waiting: 'waiting',
   failed: 'solid',
   done: null,
+  stopping: null,
   stopped: null,
   queued: null,
 };
@@ -90,6 +91,7 @@ const RING_INK_BY_STATUS: Readonly<Record<AgentStatusWord, string>> = {
   waiting: 'text-state-need',
   failed: 'text-state-err',
   done: 'text-state-done',
+  stopping: 'text-state-idle',
   stopped: 'text-state-idle',
   queued: 'text-state-idle',
 };
@@ -100,6 +102,10 @@ const BADGE_BY_STATUS: Readonly<Record<AgentStatusWord, StatusBadge | null>> = {
   done: { icon: Check, inkClass: 'border-state-done text-state-done' },
   failed: { icon: CircleAlert, inkClass: 'border-state-err text-state-err' },
   waiting: { icon: Hand, inkClass: 'border-state-need text-state-need' },
+  stopping: {
+    icon: CirclePause,
+    inkClass: 'border-state-idle text-state-idle',
+  },
   stopped: {
     icon: CirclePause,
     inkClass: 'border-state-idle text-state-idle',

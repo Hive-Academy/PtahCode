@@ -29,7 +29,7 @@ type StoreSlice = Pick<
   | 'reparentAgents'
   | 'onAgentActionNotice'
 >;
-type DeliverySlice = Pick<AgentDeliveryStore, 'onMessageReceipt' | 'onParentDelivery' | 'hydrate'>;
+type DeliverySlice = Pick<AgentDeliveryStore, 'onMessageReceipt' | 'onParentDelivery' | 'hydrate' | 'onSteerAvailability'>;
 
 describe('AgentMonitorMessageHandler', () => {
   let handler: AgentMonitorMessageHandler;
@@ -44,6 +44,7 @@ describe('AgentMonitorMessageHandler', () => {
       onMessageReceipt: jest.fn(),
       onParentDelivery: jest.fn(),
       hydrate: jest.fn().mockResolvedValue(undefined),
+      onSteerAvailability: jest.fn(),
     };
     overdue = { apply: jest.fn() };
     store = {
@@ -292,6 +293,19 @@ describe('AgentMonitorMessageHandler', () => {
     expect(store.onAgentOutputBatch).toHaveBeenCalledTimes(1);
     expect(store.onAgentOutputBatch).toHaveBeenCalledWith([first, second]);
     expect(store.onAgentOutput).not.toHaveBeenCalled();
+  });
+
+  it('reports a steer-availability change at once and still batches the delta', () => {
+    jest.useFakeTimers();
+    const plain = { agentId: 'a1', stdoutDelta: 'x' };
+    const changed = { agentId: 'a1', stdoutDelta: '', steerAvailable: false };
+    handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_OUTPUT, payload: plain });
+    expect(delivery.onSteerAvailability).not.toHaveBeenCalled();
+    handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_OUTPUT, payload: changed });
+    expect(delivery.onSteerAvailability).toHaveBeenCalledWith('a1');
+    expect(store.onAgentOutputBatch).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(100);
+    expect(store.onAgentOutputBatch).toHaveBeenCalledWith([plain, changed]);
   });
 
   it('applies pending output before any other agent event', () => {

@@ -27,6 +27,7 @@ import { laneTranscriptMessages } from './lane-transcript-messages';
 import { LaneLogChoicesStore } from './lane-log-choices.store';
 import { laneThreadEntries } from './lane-thread';
 import { LaneThreadRowComponent } from './lane-thread-row.component';
+import { echoImagesFor, laneEchoImages } from './lane-echo-images';
 
 /** Message chrome is owned by MessageBubbleComponent for every transcript host. */
 @Component({
@@ -73,6 +74,19 @@ import { LaneThreadRowComponent } from './lane-thread-row.component';
             (permissionResponded)="permissionResponded.emit($event)"
             (logToggled)="toggleLog($event)"
           />
+          @if (message.role === 'user') {
+            @let images = imagesFor(message.timestamp, message.rawContent);
+            @if (images.length) {
+              <!-- The images the user sent with this message (live only: persisted output drops them). -->
+              <div class="-mt-2 flex flex-wrap justify-end gap-1.5 pb-3" role="list"
+                aria-label="Images you sent" data-testid="lane-echo-images">
+                @for (image of images; track $index) {
+                  <img role="listitem" [src]="image.src" [alt]="image.alt" [title]="image.alt" loading="lazy"
+                    class="h-16 w-16 rounded-md border border-base-content/10 object-cover" />
+                }
+              </div>
+            }
+          }
         </div>
       }
     </div>
@@ -96,13 +110,20 @@ export class LaneTranscriptComponent {
     laneTranscriptMessages(this.laneId(), this.nodes(), this.events()),
   );
   private readonly agent = computed(() => this.monitor?.agentsById?.().get(this.laneId()));
+  /** Sent images per user echo, from the lane's live `user` segments. */
+  private readonly echoImages = computed(() => laneEchoImages(this.agent()?.segments));
+  protected imagesFor(timestamp: number, body: string | undefined) {
+    return echoImagesFor(this.echoImages(), timestamp, body);
+  }
   protected readonly laneLabel = computed(() => this.agent()?.displayName ?? this.agent()?.cli ?? 'Lane');
   protected readonly thread = computed(() => {
     const agent = this.agent();
     if (!agent) return [];
     const receipts = this.delivery?.receipts().get(this.laneId()) ?? [];
     const parentDelivery = this.delivery?.parentDelivery().get(this.laneId()) ?? [];
-    const completion = agent.completedAt ? { status: agent.status, timestamp: agent.completedAt } : undefined;
+    const completion = agent.completedAt
+      ? { status: agent.status, timestamp: agent.completedAt, stopReason: agent.stopReason, stoppedByUser: agent.stoppedByUser }
+      : undefined;
     return laneThreadEntries(this.messages(), receipts, '', this.laneLabel(), agent.cli ?? 'CLI', parentDelivery, completion,
       (id) => this.laneNameOf(id));
   });

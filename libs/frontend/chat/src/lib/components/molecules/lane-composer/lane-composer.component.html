@@ -187,7 +187,7 @@
                     @else { <lucide-angular [img]="SquareIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
                   </button>
                 } @else if (resumable()) {
-                  <button type="button" [class]="stopButtonClass" [attr.aria-label]="'Resume ' + cli() + ' session'"
+                  <button type="button" [class]="resumeButtonClass()" [attr.aria-label]="'Resume ' + cli() + ' session'"
                     title="Resume session" data-testid="lane-resume-btn" [disabled]="resumePending()"
                     (click)="resumeRequested.emit($event)">
                     @if (resumePending()) { <span class="loading loading-spinner loading-xs" aria-hidden="true"></span> }
@@ -203,7 +203,7 @@
                 data-testid="lane-send-btn"
                 [disabled]="sendDisabled()"
                 [title]="sendTitle()"
-                [attr.aria-label]="stopped() ? 'Resume with message' : 'Send message'"
+                [attr.aria-label]="sendLabel()"
                 (click)="send()"
               >
                 @if (delivery.sending()) {
@@ -258,12 +258,16 @@
       aria-live="polite"
       [title]="statusText()"
     >{{ statusText() }}</span>
-    @if (limitedReasons().length > 0) {
+    @if (limitations().length > 0) {
+      <!-- Focusable so keyboard users reach the tooltip; the name says what is limited. -->
       <span
         class="ptah-lane-limited-badge flex-shrink-0 rounded-md border border-[var(--surface-border-strong)] px-1.5 text-[11px] text-base-content-muted"
-        [title]="limitedReasons().join('\n')"
+        role="note"
+        tabindex="0"
+        [attr.aria-label]="limitedLabel()"
+        [ptahTooltip]="limitedTooltip()"
         data-testid="lane-limited-badge"
-      >{{ limitedReasons().length }} limited</span>
+      >{{ limitations().length }} limited</span>
     }
   </div>
 

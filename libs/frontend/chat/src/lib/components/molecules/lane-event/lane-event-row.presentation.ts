@@ -115,7 +115,8 @@ export function deriveLaneEventPresentation(row: LaneEventRow, metrics: LaneEven
   const status = (completed?.status ?? completion?.status ?? '').toLowerCase();
   const verdict = (completed?.verdict ?? '').toLowerCase();
   const timedOut = status === 'timeout' || status === 'timed out';
-  const stopped = status === 'stopped' || status === 'cancelled';
+  // A `stopped` verdict is a caller stop (the user's Stop or ptah_agent_stop).
+  const stopped = status === 'stopped' || status === 'cancelled' || verdict === 'stopped';
   const budgetStop = stopped && isAgentBudgetStopReason(completed?.stopReason);
   const failed = ['failed', 'error', 'killed'].includes(status)
     || (verdict === 'failed' && (!stopped || Boolean(completed?.stopReason) && !budgetStop));

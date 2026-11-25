@@ -211,6 +211,20 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(document.activeElement).toBe(models);
   });
 
+  it("leads the models summary with the session's current model, not its first one (F9)", () => {
+    const { models } = render({
+      snapshot: {
+        ...snapshot, model: 'fable', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'opus', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'opus', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+    });
+    expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1/);
+    expect(models.textContent).not.toContain('claude-fable-5-2 +1');
+  });
+
   it('keeps the model count and real model category rows when multiple models are present', () => {
     const { fixture, models, root } = render({ snapshot: {
       ...snapshot, modelUsageList: [

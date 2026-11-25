@@ -83,6 +83,8 @@ export class LaneEventRowComponent {
       case 'delivered': return 'Deliverables written';
       case 'no-deliverable': return 'No deliverable';
       case 'failed': return 'Failed';
+      // A caller stop: unfinished work that can be resumed, not a failure.
+      case 'stopped': return 'Stopped';
       default: return 'Unverified';
     }
   }

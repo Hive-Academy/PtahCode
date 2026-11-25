@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { AgentDeliveryStore } from '@ptah-extension/chat-streaming';
 import { LaneThreadRowComponent } from './lane-thread-row.component';
 import type { LaneThreadEntry } from './lane-thread';
+import type { AgentId } from '@ptah-extension/shared';
 
 function render(entry: LaneThreadEntry): HTMLElement {
   const fixture = TestBed.createComponent(LaneThreadRowComponent);
@@ -43,6 +44,17 @@ describe('LaneThreadRowComponent', () => {
       timestamp: 1, body: '', verdict: 'Failed' });
     expect(item.classList.contains('border-error')).toBe(true);
     expect(item.classList.contains('border-success')).toBe(false);
+  });
+
+  it('renders a stopped completion as neutral with no "Waiting for parent" prompt (D13)', () => {
+    const item = render({ id: 'completion', sender: 'claude', senderKind: 'this-lane', kind: 'completion',
+      timestamp: 1, body: '', verdict: 'Stopped by you', stopped: true,
+      parentDelivery: { agentId: 'lane' as AgentId, kind: 'completion', state: 'pending', deliveryId: 'd1' } });
+    expect(item.classList.contains('border-error')).toBe(false);
+    expect(item.classList.contains('text-error')).toBe(false);
+    expect(item.textContent).toContain('Stopped by you');
+    expect(item.querySelector('ptah-delivery-status')).toBeNull();
+    expect(item.textContent).not.toContain('Failed');
   });
 
   it('keeps reports collapsed until the header button is clicked', () => {

@@ -50,7 +50,7 @@ import {
   COMPOSER_TEXTAREA_CLASS,
   ComposerCompactBarComponent,
 } from '@ptah-extension/chat-ui';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahTooltipDirective } from '@ptah-extension/ui';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { ComposerCompactStore } from '../../../services/composer-compact.store';
 import {
@@ -87,6 +87,16 @@ import {
   type QueuedSendNowAction,
 } from '../queued-follow-ups/queued-message-list.component';
 import { LaneDeliveryController } from './lane-delivery.controller';
+import {
+  RESUME_BUTTON_CLASS,
+  laneEffortOption,
+  laneLimitations,
+  lanePlaceholder,
+  laneSendLabel,
+  limitedLabel,
+  limitedTooltip,
+  type LaneLimitation,
+} from './lane-composer-labels';
 
 /** Per-instance suffix for element ids (several lane composers can mount). */
 let nextLaneComposerId = 0;
@@ -113,20 +123,6 @@ const APPROVAL_LABELS: Readonly<Record<LanePermissionMode, string>> = {
 
 /** What the loss dialog sends once confirmed. */
 type LossTarget = { readonly kind: 'draft' } | { readonly kind: 'queued'; readonly id: string };
-
-/** A lane effort id as an effort option; main chat's levels keep their look. */
-function effortOption(id: string): ComposerEffortOption {
-  const known = COMPOSER_EFFORT_OPTIONS.find((option) => option.value === id);
-  if (known) return known;
-  return {
-    value: id as EffortLevel,
-    label: id.charAt(0).toUpperCase() + id.slice(1),
-    description: '',
-    dotColor: 'bg-base-content/40',
-    textColor: 'text-base-content-muted',
-    bars: 3,
-  };
-}
 
 /** A provider date suffix: `-20261001` or `-2026-10-01`. */
 const DATE_SUFFIX = /^-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
@@ -197,6 +193,7 @@ function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion
     ComposerEffortPickerComponent,
     LaneApprovalChipComponent,
     QueuedMessageListComponent,
+    PtahTooltipDirective,
   ],
   providers: [
     VoiceInputService,
@@ -230,7 +227,6 @@ export class LaneComposerComponent {
   readonly laneLabel = input('lane');
   readonly cli = input('CLI');
   readonly stopped = input(false);
-  readonly resumePath = input<string | null>(null);
   /** Stop (running) or Resume session (stopped) in the toolbar and on the compact bar. */
   readonly showLaneControls = input(false);
   /** A stopped lane has a saved session to resume. */
@@ -265,6 +261,12 @@ export class LaneComposerComponent {
   protected readonly textareaClass = `ptah-fold-fade ${COMPOSER_TEXTAREA_CLASS}`;
   protected readonly sendButtonClass = COMPOSER_SEND_BUTTON_CLASS;
   protected readonly stopButtonClass = COMPOSER_STOP_BUTTON_CLASS;
+  /** Resume session keeps the error tint only on a lane that failed (a user stop is no failure). */
+  protected readonly resumeButtonClass = computed(() => {
+    const record = this.record();
+    const failed = (record?.status === 'failed' && record.stoppedByUser !== true) || record?.status === 'timeout';
+    return failed ? COMPOSER_STOP_BUTTON_CLASS : RESUME_BUTTON_CLASS;
+  });
   protected readonly statusLineClass = `${COMPOSER_STATUS_LINE_CLASS} mt-1.5 py-0.5`;
   protected readonly optionsErrorText = LANE_OPTIONS_ERROR_TEXT;
   protected readonly optionsStaleText = LANE_OPTIONS_STALE_TEXT;
@@ -348,7 +350,8 @@ export class LaneComposerComponent {
   });
   protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => [
     COMPOSER_EFFORT_OPTIONS[0],
-    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '').map(effortOption),
+    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '')
+      .map((id) => laneEffortOption(id, this.record()?.cli === 'claude')),
   ]);
   protected readonly selectedEffort = computed(
     () => (this.pending().reasoningEffort ?? this.record()?.reasoningEffort ?? this.catalog().options?.currentEffort ?? '') as EffortLevel | '',
@@ -519,17 +522,24 @@ export class LaneComposerComponent {
   protected readonly statusNeedsAction = computed(
     () => !this.revealedReason() && (this.imagesBlocked() || this.attachmentLimitText() !== null),
   );
-  /** What this lane cannot do here; the "N limited" badge (hint only). */
-  protected readonly limitedReasons = computed((): readonly string[] => {
+  /** The composer controls this lane cannot use here, with reasons: the "N limited" badge. */
+  protected readonly limitations = computed((): readonly LaneLimitation[] => {
     if (this.checking() || this.optionsFailed()) return [];
-    const reasons = [this.modelReason(), this.effortReason(), this.approvalReason(), this.imagesUnsupportedReason()];
     const action = this.sendNowAction();
-    if (action.state === 'unavailable') reasons.push(action.reason ?? 'Send now is unavailable.');
-    return reasons.filter((reason): reason is string => !!reason);
+    return laneLimitations({
+      model: this.modelReason(),
+      effort: this.effortReason(),
+      images: this.imagesUnsupportedReason(),
+      approval: this.capabilities()?.effectiveApproval,
+      sendNow: action.state === 'unavailable' ? (action.reason ?? 'Send now is unavailable.') : null,
+    });
   });
+  protected readonly limitedTooltip = computed(() => limitedTooltip(this.limitations()));
+  protected readonly limitedLabel = computed(() => limitedLabel(this.limitations()));
   protected readonly placeholder = computed(() =>
-    this.stopped() ? `Resume ${this.laneLabel()} with a message…` : `Message ${this.laneLabel()}...`,
+    lanePlaceholder(this.laneLabel(), this.stopped(), this.delivery.restart()),
   );
+  protected readonly sendLabel = computed(() => laneSendLabel(this.stopped(), this.delivery.restart()));
 
   /** The composer is folded into its one-row bar. */
   protected readonly isCompact = this.compactStore.compact;
@@ -540,7 +550,6 @@ export class LaneComposerComponent {
       draft: this.draft,
       stopped: this.stopped,
       cli: this.cli,
-      resumePath: this.resumePath,
       accepted: () => this.accepted.emit(),
     });
     this.composerInput.connect({
@@ -555,7 +564,7 @@ export class LaneComposerComponent {
         if (!this.confirmLoss()) void this.send();
       },
       submitNow: () => {
-        if (!this.confirmLoss()) this.requestNow();
+        if (!this.confirmLoss()) void this.requestNow();
       },
     });
     this.compactStore.connect({
@@ -681,18 +690,38 @@ export class LaneComposerComponent {
     } else if (this.stopped()) {
       // Until the record reports the resumed run, the stopped-lane hint
       // ("Resume with message: …") would still describe the old state (M3).
-      this.actionNote.set(`Sent. ${this.cli()} resumes with your message.`);
+      const verb = this.delivery.restart() === 'warm' ? 'continues' : 'resumes';
+      this.actionNote.set(`Sent. ${this.cli()} ${verb} with your message.`);
     }
   }
 
   /** Ctrl/Cmd+Enter: Send now for the draft, after the loss confirmation when the turn would lose work. */
-  protected requestNow(): void {
-    if (this.confirmLoss()) return;
+  protected async requestNow(): Promise<void> {
+    if (this.confirmLoss() || this.preparingNow) return;
     if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked() || this.attachmentLimitText()) return;
     if (this.waitForReads()) return;
+    // Steer or interrupt is the running turn's state now, not at the last refresh.
+    if (!(await this.prepareNow())) return;
+    if (this.confirmLoss() || this.stopped() || this.delivery.nowDisabled()) return;
+    // The tray can change during the refresh. A block shows its reason on
+    // the status line (imagesBlockedText / attachmentLimitText); a read waits.
+    if (this.imagesBlocked() || this.attachmentLimitText() || this.waitForReads()) return;
     this.lossTarget = { kind: 'draft' };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);
+  }
+
+  /** A Send now decision waits for fresh previews; a second request meanwhile is ignored. */
+  private preparingNow = false;
+
+  /** Refresh the previews before a Send now decision. False when the refresh failed (its error shows). */
+  private async prepareNow(): Promise<boolean> {
+    this.preparingNow = true;
+    try {
+      return await this.delivery.refreshBeforeSend();
+    } finally {
+      this.preparingNow = false;
+    }
   }
 
   /**
@@ -706,9 +735,11 @@ export class LaneComposerComponent {
   }
 
   /** The queued card's Send now / Interrupt & send. */
-  protected requestQueuedNow(id: string): void {
+  protected async requestQueuedNow(id: string): Promise<void> {
     // An open dialog keeps its target: confirming sends what it was opened for.
-    if (this.confirmLoss()) return;
+    if (this.confirmLoss() || this.preparingNow) return;
+    if (!(await this.prepareNow())) return;
+    if (this.confirmLoss() || this.stopped() || !this.delivery.state().now || this.delivery.state().nowDisabledReason) return;
     this.lossTarget = { kind: 'queued', id };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);

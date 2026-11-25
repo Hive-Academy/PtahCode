@@ -95,6 +95,7 @@ describe('deriveLaneEventPresentation', () => {
     [undefined, 'failed', 'Stopped', 'neutral', 'Stopped after 26s'],
     ['usage-limit', 'failed', 'Failed', 'err', 'Failed after 26s'],
     ['auth', 'failed', 'Failed', 'err', 'Failed after 26s'],
+    [undefined, 'stopped', 'Stopped', 'neutral', 'Stopped after 26s'],
   ] as const)('labels stopped lane (%s, %s)', (stopReason, verdict, label, tone, summary) => {
     const result = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', status: 'stopped',
       stopReason, verdict, body: row().events[1].body
@@ -106,6 +107,13 @@ describe('deriveLaneEventPresentation', () => {
     expect(result.stats.map(stat => stat.compact)).toContain(verdict === 'no-deliverable' ? '0/1 files' : '1/1 files');
     if (verdict === 'no-deliverable') expect(result.stats.map(stat => stat.compact)).toContain('No deliverable');
     if (verdict === 'unverified') expect(result.stats.map(stat => stat.compact)).toContain('Unverified');
+  });
+
+  it('reads a stopped verdict as a neutral stop even when the status line is missing', () => {
+    const result = deriveLaneEventPresentation(row({ events: [{ kind: 'completed', verdict: 'stopped',
+      body: 'Lane Claude ended.', timestamp: 2, messageId: 'c' }] }));
+    expect(result.chip).toMatchObject({ label: 'Stopped', tone: 'neutral' });
+    expect(result.summary).not.toContain('Failed');
   });
 
   it('shows Running only for a live report row without a later completion', () => {

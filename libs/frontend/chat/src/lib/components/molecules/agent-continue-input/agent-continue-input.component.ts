@@ -32,10 +32,9 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
             [laneLabel]="agent().displayName || agent().cli"
             [cli]="agent().displayName || agent().cli"
             [stopped]="!active()"
-            [resumePath]="resumePath()"
             [showLaneControls]="variant() === 'composer'"
             [resumable]="!!agent().cliSessionId"
-            [stopPending]="stopPending()"
+            [stopPending]="stopBusy()"
             [resumePending]="resumePending()"
             (stopRequested)="stopRequested.emit($event)"
             (resumeRequested)="resumeRequested.emit($event)"
@@ -44,8 +43,8 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
           <!-- No message field: Stop (or Resume session) stands alone. -->
           @if (active()) {
             <button type="button" [class]="stopButtonClass" aria-label="Stop generating" title="Stop generating"
-              [disabled]="stopPending()" (click)="stopRequested.emit($event)">
-              @if (stopPending()) { <span class="loading loading-spinner loading-xs"></span> }
+              [disabled]="stopBusy()" (click)="stopRequested.emit($event)">
+              @if (stopBusy()) { <span class="loading loading-spinner loading-xs"></span> }
               @else { <lucide-angular [img]="SquareIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
             </button>
           } @else if (agent().cliSessionId) {
@@ -56,8 +55,13 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
             </button>
           }
         }
+        @if (agent().stopError; as stopError) {
+          <span class="px-1 text-[11px] text-error" role="alert" data-testid="lane-stop-error">Stop failed: {{ stopError }}</span>
+        }
         @if (variant() === 'composer' && terminalStatus(); as message) {
-          <span class="px-1 text-[11px] text-warning">{{ message }}</span>
+          <span class="px-1 text-[11px]" [class.text-warning]="!stopping()"
+            [class.text-base-content-muted]="stopping()" role="status"
+            data-testid="lane-terminal-status">{{ message }}</span>
         }
       </div>
     }
@@ -78,11 +82,19 @@ export class AgentContinueInputComponent {
     const status = this.agent().status;
     return status === 'running' || status === 'starting';
   });
+  /** The user pressed Stop and the lane's process has not exited yet. */
+  protected readonly stopping = computed(() => this.agent().stopRequestedAt !== undefined);
+  protected readonly stopBusy = computed(() => this.stopPending() || this.stopping());
   protected readonly terminalStatus = computed(() => {
     const agent = this.agent();
-    const status = agent.status === 'failed' ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
-      : agent.status === 'stopped'
-        ? (isAgentBudgetStopReason(agent.stopReason) ? 'Stopped by Ptah budget monitor' : 'Stopped')
+    // Same words as the dock pill: "Stopping…" until the process exits.
+    if (this.stopping()) return 'Stopping…';
+    // A user stop reads stopped even when an older host reports it as failed.
+    const failed = agent.status === 'failed' && !agent.stoppedByUser;
+    const status = failed ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
+      : agent.status === 'stopped' || agent.status === 'failed'
+        ? (isAgentBudgetStopReason(agent.stopReason) ? 'Stopped by Ptah budget monitor'
+          : agent.stoppedByUser ? 'Stopped by you' : 'Stopped')
         : '';
     const reason = laneGuardStopText(agent.stopReason);
     return this.active() ? '' : [status, reason].filter(Boolean).join(' · ');
@@ -95,17 +107,5 @@ export class AgentContinueInputComponent {
       (agent.status === 'running' && (
         messaging?.steer.state === 'supported' || messaging?.continuation.state === 'supported'
       ));
-  });
-  protected readonly resumePath = computed(() => {
-    const agent = this.agent();
-    if (this.active()) return null;
-    if (
-      agent.supportsContinuation === true &&
-      agent.continuationExpired !== true
-    )
-      return 'Continue warm session';
-    if (agent.cliSessionId)
-      return `Resume CLI session ${agent.cliSessionId.slice(0, 8)}`;
-    return 'Start fresh handoff';
   });
 }

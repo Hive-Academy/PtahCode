@@ -48,6 +48,30 @@ describe('CLI roster activity', () => {
   });
 });
 
+describe('CLI lane status and timer (live test D9, D10)', () => {
+  const roster = (agent: MonitoredAgent) => buildSessionAgentRoster({
+    sessionId: 'session-1', tabStatus: 'streaming', subagents: [],
+    cliAgents: [agent], backgroundAgents: [], permissions: [], questions: [],
+  })[1];
+
+  it('times the current turn, not the record start, so idle gaps between turns do not count', () => {
+    const row = roster({ ...lane([]), startedAt: 1_000, turnStartedAt: 60_000 });
+    expect(row.startedAt).toBe(60_000);
+    expect(roster({ ...lane([]), startedAt: 1_000 }).startedAt).toBe(1_000);
+  });
+
+  it('reads stopping while a user stop waits for the process exit, then stopped', () => {
+    expect(roster({ ...lane([]), status: 'stopped', stopRequestedAt: 5, stopAcknowledged: true }).status).toBe('stopping');
+    expect(roster({ ...lane([]), status: 'running', stopRequestedAt: 5 }).status).toBe('stopping');
+    expect(roster({ ...lane([]), status: 'stopped', stoppedByUser: true }).status).toBe('stopped');
+  });
+
+  it('reads a user stop that an older host reports as failed as stopped', () => {
+    expect(roster({ ...lane([]), status: 'failed', stoppedByUser: true }).status).toBe('stopped');
+    expect(roster({ ...lane([]), status: 'failed' }).status).toBe('failed');
+  });
+});
+
 describe('roster order', () => {
   function laneWith(agentId: string, status: MonitoredAgent['status']): MonitoredAgent {
     return { ...lane([]), agentId, status };

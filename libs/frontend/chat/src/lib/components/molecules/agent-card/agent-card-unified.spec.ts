@@ -21,6 +21,8 @@ import {
 import {
   createMockRpcService,
   provideSurfaceActiveTesting,
+  rpcError,
+  rpcSuccess,
 } from '@ptah-extension/core/testing';
 import { AgentCardComponent } from './agent-card.component';
 import { CliAgentOutputComponent } from './cli-agent-output.component';
@@ -261,5 +263,41 @@ describe('agent card unified output regressions', () => {
     expect(text).toContain('↑ 200');
     expect(text).toContain('↓ 100');
     expect(text).toContain('Reported total: 1.0k tokens');
+  });
+
+  describe('Stop result (logic review S1)', () => {
+    function stopCard(result: unknown) {
+      const monitor = TestBed.inject(AgentMonitorStore) as unknown as Record<string, jest.Mock>;
+      monitor['markStopRequested'] = jest.fn();
+      monitor['confirmStopRequest'] = jest.fn();
+      monitor['cancelStopRequest'] = jest.fn();
+      const rpc = TestBed.inject(ClaudeRpcService) as unknown as { call: jest.Mock };
+      rpc.call.mockResolvedValue(result);
+      const fixture = TestBed.createComponent(AgentCardComponent);
+      fixture.componentRef.setInput('agent', makeAgent({ status: 'running' }));
+      return { fixture, monitor };
+    }
+
+    it('cancels the pending stop with the host error when the host refuses it inside a successful call', async () => {
+      const { fixture, monitor } = stopCard(rpcSuccess({ success: false, error: 'Agent not found: lane' }));
+      await fixture.componentInstance.stopAgent(new Event('click'));
+      expect(monitor['cancelStopRequest']).toHaveBeenCalledWith(expect.any(String), 'Agent not found: lane');
+      expect(monitor['confirmStopRequest']).not.toHaveBeenCalled();
+      expect(fixture.componentInstance.isStopping()).toBe(false);
+    });
+
+    it('cancels the pending stop when the call itself fails', async () => {
+      const { fixture, monitor } = stopCard(rpcError('RPC timeout'));
+      await fixture.componentInstance.stopAgent(new Event('click'));
+      expect(monitor['cancelStopRequest']).toHaveBeenCalledWith(expect.any(String), 'RPC timeout');
+    });
+
+    it('confirms the stop when the host accepted it', async () => {
+      const { fixture, monitor } = stopCard(rpcSuccess({ success: true }));
+      await fixture.componentInstance.stopAgent(new Event('click'));
+      expect(monitor['markStopRequested']).toHaveBeenCalledTimes(1);
+      expect(monitor['confirmStopRequest']).toHaveBeenCalledTimes(1);
+      expect(monitor['cancelStopRequest']).not.toHaveBeenCalled();
+    });
   });
 });

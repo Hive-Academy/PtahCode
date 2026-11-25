@@ -32,7 +32,7 @@ const NO_IDS: readonly string[] = [];
 /** Agent statuses that keep their turn live (work still in flight). */
 const LIVE_AGENT_STATUSES: ReadonlySet<AgentStatusWord | null> =
   new Set<AgentStatusWord | null>([
-    'starting', 'running', 'waiting', 'queued',
+    'starting', 'running', 'waiting', 'queued', 'stopping',
   ]);
 
 function sameIds(a: readonly unknown[], b: readonly unknown[]): boolean {

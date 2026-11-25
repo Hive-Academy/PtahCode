@@ -7,7 +7,23 @@ import { formatAgentDuration } from './agent-duration';
  * `waiting`.
  */
 export type AgentStatusWord =
-  'starting' | 'running' | 'waiting' | 'done' | 'failed' | 'stopped' | 'queued';
+  | 'starting'
+  | 'running'
+  | 'waiting'
+  | 'done'
+  | 'failed'
+  | 'stopping'
+  | 'stopped'
+  | 'queued';
+
+/**
+ * Display text of a status word. `stopping` reads "stopping…": the user
+ * pressed Stop and the lane's process has not exited yet.
+ */
+export function agentStatusText(word: AgentStatusWord | null): string {
+  if (word === null) return '';
+  return word === 'stopping' ? 'stopping…' : word;
+}
 
 /** Words whose duration advances while the lane is in flight. */
 export function isRunningAgentWord(word: AgentStatusWord | null): boolean {
@@ -50,7 +66,7 @@ export function agentAccessibleLabel(agent: AgentLabelParts): string {
     agent.durationMs === null || agent.durationMs === undefined
       ? null
       : formatAgentDuration(agent.durationMs);
-  const state = [agent.status, duration]
+  const state = [agentStatusText(agent.status), duration]
     .filter((part): part is string => !!part)
     .join(' ');
   return [name, kindLabel, state].filter((part) => part.length > 0).join(', ');

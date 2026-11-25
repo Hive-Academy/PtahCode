@@ -14,7 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import type { SessionAgent } from '@ptah-extension/chat';
-import { AgentAvatarComponent } from '@ptah-extension/chat-ui';
+import { AgentAvatarComponent, agentStatusText } from '@ptah-extension/chat-ui';
 import { NativeDropdownComponent } from '@ptah-extension/ui';
 import { agentDurationText, agentStatusInk, orderDockAgents } from './dock-overflow';
 
@@ -111,7 +111,7 @@ let nextMenuId = 0;
                 [agentType]="agent.agentType"
               />
               <span class="min-w-0 flex-1 truncate">{{ agent.name }}</span>
-              <span class="shrink-0 {{ statusInk(agent.status) }}">{{ agent.status ?? 'queued' }}</span>
+              <span class="shrink-0 {{ statusInk(agent.status) }}">{{ agent.status ? statusText(agent.status) : 'queued' }}</span>
               <span class="shrink-0 tabular-nums text-base-content-muted">{{ durationOf(agent) ?? '—' }}</span>
             </button>
         }
@@ -179,6 +179,8 @@ export class AgentDockMenuComponent {
       );
     });
   }
+
+  protected readonly statusText = agentStatusText;
 
   protected statusInk(status: SessionAgent['status']): string {
     return agentStatusInk(status);

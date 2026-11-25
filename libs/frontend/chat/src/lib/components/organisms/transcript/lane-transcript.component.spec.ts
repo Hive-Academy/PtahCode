@@ -172,6 +172,28 @@ describe('LaneTranscriptComponent', () => {
     expect(root.querySelector('[data-ptah-transcript-message-id]')?.textContent).toContain('Inspect files');
   });
 
+  it('shows the images the user sent under the echo bubble (D5)', () => {
+    const agentId = 'cli-images';
+    const png = 'iVBORw0KGgo=';
+    TestBed.overrideProvider(AgentMonitorStore, { useValue: {
+      agentsById: signal(new Map([[agentId, { cli: 'claude', status: 'running', segments: [
+        { type: 'user', content: 'What colour is the image?', sentAt: 5_000,
+          images: [{ data: png, mediaType: 'image/png' }, { data: '<svg/>', mediaType: 'image/svg+xml' }] },
+      ] }]])),
+    } });
+    const fixture = TestBed.createComponent(LaneTranscriptComponent);
+    fixture.componentRef.setInput('laneId', agentId);
+    fixture.componentRef.setInput('nodes', [
+      createExecutionNode({ id: 'seg-user-0', type: 'text', status: 'complete', content: 'What colour is the image?', startTime: 5_000 }),
+    ]);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const images = root.querySelectorAll<HTMLImageElement>('[data-testid="lane-echo-images"] img');
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute('src')).toBe(`data:image/png;base64,${png}`);
+    expect(images[0].alt).toBe('Image 1 of 1 you sent');
+  });
+
   it('keeps the live elapsed label ticking through the shared clock', () => {
     const now = signal(100_000);
     const release = jest.fn();

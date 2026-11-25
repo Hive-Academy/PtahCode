@@ -377,7 +377,11 @@ export class InspectorSessionStatsComponent {
     const { snapshot, liveModelStats } = this.stats();
     const primary = liveModelStats?.model ?? snapshot?.model;
     const rows = snapshot?.modelUsageList;
-    const ids = rows?.length ? rows.map(({ model }) => model) : primary ? [primary] : [];
+    const used = rows?.length ? rows.map(({ model }) => model) : [];
+    // The session's current model leads the summary ("Haiku 4.5 +2"); the
+    // usage list is in first-use order, so its head is the session's first
+    // model, not the one it runs now.
+    const ids = primary ? [primary, ...used.filter((id) => id !== primary)] : used;
     return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
   });
   protected readonly modelSummary = computed(() => {

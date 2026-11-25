@@ -13,7 +13,6 @@ class LaneComposerStubComponent {
   readonly laneLabel = input('lane');
   readonly cli = input('CLI');
   readonly stopped = input(false);
-  readonly resumePath = input<string | null>(null);
   readonly showLaneControls = input(false);
   readonly resumable = input(false);
   readonly stopPending = input(false);
@@ -131,12 +130,36 @@ describe('AgentContinueInputComponent', () => {
     expect(composer()).toBeNull();
   });
 
-  it('passes the resume path of a stopped lane', () => {
-    setup(makeAgent({ status: 'stopped', supportsContinuation: false, cliSessionId: 'cli-session-123' }));
-    expect(composer()?.resumePath()).toBe('Resume CLI session cli-sess');
-    setup(makeAgent({ status: 'completed', supportsContinuation: true }));
-    expect(composer()?.resumePath()).toBe('Continue warm session');
-    setup(makeAgent({ status: 'running' }));
-    expect(composer()?.resumePath()).toBeNull();
+  it('reads "Stopping…" until the process exits, then stopped by you (D9)', () => {
+    const stopping = makeAgent({ status: 'stopped', cliSessionId: 'cli-1', stopRequestedAt: 5, stopAcknowledged: true, stoppedByUser: true });
+    setup(stopping);
+    const line = () => (fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement | null)?.textContent?.trim();
+    expect(line()).toBe('Stopping…');
+    expect(composer()?.stopPending()).toBe(true);
+    fixture.componentRef.setInput('agent', { ...stopping, stopRequestedAt: undefined, stopAcknowledged: undefined });
+    fixture.detectChanges();
+    expect(line()).toBe('Stopped by you');
+    expect(composer()?.stopPending()).toBe(false);
+  });
+
+  it('shows why a Stop failed', () => {
+    setup(makeAgent({ status: 'running', supportsContinuation: false, stopError: 'Agent not found: lane' }));
+    const alert = fixture.nativeElement.querySelector('[data-testid="lane-stop-error"]') as HTMLElement;
+    expect(alert.getAttribute('role')).toBe('alert');
+    expect(alert.textContent).toContain('Stop failed: Agent not found: lane');
+  });
+
+  it('shows Stopping… on a running lane the moment Stop is pressed', () => {
+    setup(makeAgent({ status: 'running', stopRequestedAt: 5, stoppedByUser: true }));
+    expect((fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement).textContent?.trim()).toBe('Stopping…');
+  });
+
+  it('renders a user stop that an older host reports as failed as stopped, not failed (D13)', () => {
+    setup(makeAgent({ status: 'failed', cliSessionId: 'cli-1', stoppedByUser: true }));
+    const text = (fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement).textContent ?? '';
+    expect(text).toContain('Stopped by you');
+    expect(text).not.toContain('Failed');
+    setup(makeAgent({ status: 'failed', cliSessionId: 'cli-1' }));
+    expect(fixture.nativeElement.textContent).toContain('Failed');
   });
 });

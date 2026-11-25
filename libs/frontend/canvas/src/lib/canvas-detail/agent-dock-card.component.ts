@@ -9,6 +9,7 @@ import type { SessionAgent } from '@ptah-extension/chat';
 import {
   AGENT_KIND_LABEL,
   AgentAvatarComponent,
+  agentStatusText,
 } from '@ptah-extension/chat-ui';
 import { LucideAngularModule, MousePointerClick } from 'lucide-angular';
 import { agentStatusInk } from './dock-overflow';
@@ -49,7 +50,7 @@ import { agentStatusInk } from './dock-overflow';
       </div>
       @if (agent().status; as status) {
         <p class="mt-2 {{ statusClass() }}">
-          {{ status }}
+          {{ statusText(status) }}
           @if (durationText(); as duration) {
             <span class="tabular-nums">{{ duration }}</span>
           }
@@ -76,6 +77,7 @@ export class AgentDockCardComponent {
   readonly hovered = output<boolean>();
 
   protected readonly pointerIcon = MousePointerClick;
+  protected readonly statusText = agentStatusText;
   protected readonly kindLabel = computed(
     () => AGENT_KIND_LABEL[this.agent().kind],
   );

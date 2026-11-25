@@ -17,6 +17,7 @@ describe('CanvasDetailService', () => {
     ['agent', { parentSessionId: 'session', parentToolUseId: 'agent', status: 'running' }],
   ]));
   const agents = signal([{ parentSessionId: 'session', agentId: 'agent-1' }]);
+  const successors = signal(new Map<string, string>());
   const onTabClosed = jest.fn((_listener: (event: { tabId: string; kind: string }) => void) => jest.fn());
   let detail: CanvasDetailService;
 
@@ -28,6 +29,7 @@ describe('CanvasDetailService', () => {
     ]);
     focusTile.mockClear();
     onTabClosed.mockClear();
+    successors.set(new Map());
     TestBed.configureTestingModule({
       providers: [
         CanvasDetailService,
@@ -37,11 +39,21 @@ describe('CanvasDetailService', () => {
           findTabByIdAcrossWorkspaces: (id: string) =>
             tiles().some((tile) => tile.tabId === id) ? { tab: { claudeSessionId: 'session' } } : null,
         } },
-        { provide: AgentMonitorStore, useValue: { subagents, agents } },
+        { provide: AgentMonitorStore, useValue: { subagents, agents,
+          currentAgentId: (id: string) => successors().get(id) ?? id } },
         { provide: BackgroundAgentStore, useValue: { agents: signal([]) } },
       ],
     });
     detail = TestBed.inject(CanvasDetailService);
+  });
+
+  it('keeps the user on a resumed lane whose agent id changed (D3)', () => {
+    detail.open('a', 'cli:agent-1');
+    successors.set(new Map([['agent-1', 'agent-2']]));
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-2');
+    expect(detail.laneKey()).toBe('orchestrator');
+    detail.selectLaneFor('a', 'orchestrator');
+    expect(detail.laneKeyFor('a')).toBe('orchestrator');
   });
 
   it('focuses a known tab and accepts chat lane keys', () => {
