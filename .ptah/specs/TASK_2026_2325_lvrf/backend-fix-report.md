@@ -426,3 +426,79 @@ Paths below are relative to the worktree `D:\projects\PtahCode\.claude-worktrees
 - eslint: 0 errors.
 - Degradation audit: 0 unsuppressed sites.
 - Line endings: all LF.
+
+## 12. PR #1512 CodeRabbit threads, round 2 (on 78a3bb8a9)
+
+1. `provider-session-lane-handle.ts:553`, notice on an interrupted or stopped command turn:
+   **fixed**.
+   - Valid: `runTurn` maps a Ptah interrupt to exit 0, so `endCommandTurn` emitted "returned no
+     output" for an interrupted `/compact`.
+   - The notice now also requires the turn to have run to its end: last terminal status
+     `completed`, no interrupt requested, lane not aborted, session not closed.
+   - Spec: a held `/compact` interrupted through `interrupt()` gets no notice. A mutation check
+     (guard forced true) makes this spec fail.
+2. `lane-last-model.ts:59`, partial result at the 64-page limit: **fixed**.
+   - Valid: a scan stopped by the limit returned the last model it had seen, which can be older
+     than the last turn.
+   - `lastRunModelFromOutput` now returns `{ model, truncated }`. A scan stopped by the limit
+     reports `{ model: undefined, truncated: true }`. The store pages forward only, so a
+     newest-first scan is not available.
+   - `laneResumeModelLookup` logs `[AgentLaneResume] Lane output exceeds the scan limit; its last
+     model is unknown` `{ agentId, pages }`, then the usual CLI-default warning.
+   - Specs: a 64-page endless output gives `truncated` and no model; the lookup logs the
+     scan-limit warning.
+- Verification:
+  - `npx jest --runInBand --coverage=false --runTestsByPath` on the last-model, ACP handle and
+    resume service specs: 124 passed. The raw-command handle specs alone: 4 passed.
+  - `npx tsc --noEmit` on the cli-agent-runtime lib and spec configs: clean.
+  - eslint: 0 errors. Degradation audit: 0 unsuppressed sites. Line endings: LF.
+
+## 13. Image-only lane messages (empty text, images in `turn.images`)
+
+Path traced for an empty body, step by step:
+- **RPC** (`agent-message-rpc.handlers.ts` `sendSchema`): `message` was `min(1)` with a non-blank
+  refine. It is now `max(AGENT_MESSAGE_MAX_CHARS)` with an object-level refine: non-blank text
+  or at least one image. Neither text nor images, or files only, stays `INVALID_PARAMS`.
+- **Coordinator** (`agent-message-coordinator.service.ts` `send`): throws `Message must not be
+  empty.` only when there is no text and no image.
+- **Envelope store:** `bodyBytes > 0` was the only "a body is stored" signal, so an empty body
+  would have read as body-less (`getBody` -> undefined -> `body-unavailable`, counted as a
+  body-less terminal, no recoverable body).
+  - New schema field `bodyStored: true`, set only for an empty stored body. New helper
+    `hasStoredBody()` in `agent-message-envelope.schema.ts`.
+  - The helper is used in `isSendTimeRefusal`, `isBodylessTerminal`, `getBody`, the
+    body-capacity check, cancel, prune, the projection's `hasRecoverableBody`, and the alias
+    pin schema.
+  - Every body drop clears the marker: a `bodyBytes: 0` patch, cancel, prune.
+  - Index-lost re-indexing of an empty body record sets the marker.
+- **Preview and planner:** no text assumption. Image refusals are unchanged.
+- **Dispatcher:** `formatAgentMessageDeliveryText` sends the header alone for an empty body (no
+  trailing blank lines). Raw command detection never matches an empty body. The echo goes out
+  with images (round 7 fix).
+- **Claude SDK runner** (`claudeLaneTurnContent`): no empty text block; an image-only turn is
+  image blocks only.
+- **ACP** (`toAcpPromptContent`): already sends no empty text block. The lane text is the
+  non-empty header in any case.
+- **Echo:** the router and cold-resume echo guards admit an empty body when images ride (round 7).
+
+Specs:
+- RPC: image-only accepted; empty, blank-with-no-images and files-only rejected.
+- Delivery text: header alone for an empty body.
+- Runner: image-only content has no text block.
+- Envelope store: the empty body is stored, readable, and not body-less, and the marker is
+  cleared when the body is dropped or cancelled.
+- End-to-end coordinator spec (`agent-message-coordinator.lane-messaging.spec.ts`): the image-only
+  send stores `bodyBytes: 0, bodyStored: true`, `getBody` returns `''`, the lane text starts with
+  the header, the turn carries the images, the echo is `''`, and `getMessage` returns text `''`
+  plus the images. A send with neither text nor images is still refused and stores nothing.
+
+Verification:
+- jest cli-agent-runtime (store, both coordinator specs, delivery text, dispatcher, runner, alias
+  registry, projection): 276 tests, of which 275 passed and 1 failed (a spec assertion on an
+  undefined key). The store spec was fixed and rerun: 31 passed.
+- jest rpc-handlers `agent-message-rpc.handlers.spec.ts`: 42 passed.
+- `npx tsc --noEmit`: cli-agent-runtime lib and spec configs and the rpc-handlers lib config,
+  clean.
+- **Not completed:** the rpc-handlers spec-config tsc ran out of the default 2 GB heap. ts-jest
+  compiled the changed RPC spec in its passing run.
+- eslint: 0 errors. Degradation audit: 0 unsuppressed sites. Line endings: LF.

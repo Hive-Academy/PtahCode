@@ -516,3 +516,49 @@ The backend now emits host notices as `CliOutputSegment` `{ type: 'info', conten
 - eslint on the 8 changed files: 0 errors, 2 warnings (existing).
 - ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
 - Not run (excluded): typecheck-templates and the Electron check.
+
+## Round 8: last live check items and PR 1512 review round 2
+
+### 1. An image-only message could not be sent
+- Root cause: `lane-delivery.controller.ts` `queueDisabled` and `nowDisabled` required trimmed draft text, so Send stayed disabled and Enter did nothing with only images staged.
+- Change:
+  - A message needs text or staged images (`hasContent`), as main chat's `chat-input` requires (`!content && images.length === 0` refuses).
+  - Whether the lane takes images stays the composer's gate: `imagesBlocked` keeps Send disabled, with its reason, on a lane that refuses images.
+  - A staged file alone is still not a message.
+  - The send passes `''` as the text with the images in `turn.images`. A held message (`holdForLane`) with only attachments is kept, not dropped.
+- **Backend dependency:** `agent-message-coordinator.service.ts:217` still throws "Message must not be empty." for an empty `message`. Until the backend accepts an empty message whose `turn.images` is non-empty, the send is refused and the composer shows that error. The backend agent needs to relax that check for image-only turns.
+- Specs:
+  - controller: an image-only send is enabled and sends `''` with the images; a file alone is not enough;
+  - composer: Send is enabled and Enter sends an image-only message.
+
+### 2. Nits
+- **Host notice row:** the row's text and time ran together. `.chat-msg-slot` sets its own display, so the flex layout never applied. The slot now wraps an inner flex `<p>` with `gap-x-2` and a "·" separator before the time. The spec checks text, separator, time.
+- **Fable shown as a raw id:** the shared `formatClaudeModelDisplayName` knows only opus, sonnet and haiku.
+  - New `sessionModelDisplayName` (`chat-ui/.../session/session-model-name.ts`): the catalog name first, then the shared formatter, then a readable form of any Claude-style id (`claude-fable-5-2` → "Fable 5.2"; dated ids too). Other ids stay raw.
+  - Used by the inspector tile, the models breakdown and the stats summary.
+  - Spec: `session-model-name.spec.ts`; inspector expectations updated.
+  - The shared formatter could learn the family the same way (backend/shared owner).
+- **Compact bar while stopping:** the folded bar reads "Stopping…" when the lane state chip is Stopping…, instead of "Claude is working…". Spec added.
+
+### PR 1512 review, round 2 (verified against the code)
+- **(3) `canvas-detail.service.ts`: fixed.** The follow effect dropped a pending follow only on its next run, so a user who picked another lane and came back before that run could still be moved. `selectLaneFor` now clears the tab's pending follow as soon as an explicit pick names another lane. Spec: pick away, pick back, the resumed lane appears, and the view stays.
+- **(4) `canvas-lane-view.component.ts`: fixed.** Pending questions were `shrink-0` blocks above the panel, so tall ones could push their controls out of reach. They now sit in one area, `data-testid="lane-pending-questions"`, `max-h-[45%] shrink-0 overflow-y-auto`, and the transcript stays the main scroller. Spec added.
+- **(5) `lane-delivery.controller.ts` recovered messages: fixed.** The drain skipped a recovered message with no text even when it carried files or images. It now restores a message that has text or attachments; a held message with only attachments is kept too. Spec: an attachments-only recovered message is restored.
+- **(6) `lane-delivery.controller.ts` foreground preview refresh: fixed.** `refreshBeforeSend` returned true even when another read had superseded its own, so the store held other or older previews than the ones it read.
+  - `loadPreviews` now returns `current`, `stale` or `failed`. It is `current` only when this composer started no newer read meanwhile (`previewLoadSeq`) and the store holds this call's own answers.
+  - `refreshBeforeSend` reads again, up to 3 times, until its answer is current. Otherwise it fails with "Message options are still changing. Try again."
+  - Spec: a superseded first read makes it read again; a never-current read fails with the reason.
+
+### Verification (round 8)
+- Jest:
+
+  | Project | Specs | Result |
+  | --- | --- | --- |
+  | chat | lane-composer, lane-delivery.controller, lane-transcript, agent-continue-input | 150/150 |
+  | canvas | canvas-detail.service, canvas-lane-view | 39/39 |
+  | chat-ui | session-model-name, inspector-session-stats, session-model-breakdown, session-stats-summary | 81/81 |
+
+- `npx tsc --noEmit -p libs/frontend/{chat,chat-ui,canvas}/tsconfig.lib.json`: 0 errors.
+- eslint on the 17 changed or new frontend files: 0 errors, 6 warnings (existing).
+- ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
+- Not run (excluded): typecheck-templates and the Electron check.
