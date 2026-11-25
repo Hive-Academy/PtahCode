@@ -210,7 +210,9 @@ function echoDelivered(
   sentAt: number,
 ): void {
   const { echo } = input;
-  if (echo === undefined || echo.trim() === '' || !dispatcher.recordAgentNote) return;
+  // An image-only message has an empty body; its echo still carries the thumbnails.
+  const hasImages = (input.turn?.images?.length ?? 0) > 0;
+  if (echo === undefined || (echo.trim() === '' && !hasImages) || !dispatcher.recordAgentNote) return;
   try {
     dispatcher.recordAgentNote(agentId, userEchoSegment(echo, sentAt, input.turn?.images));
   } catch {

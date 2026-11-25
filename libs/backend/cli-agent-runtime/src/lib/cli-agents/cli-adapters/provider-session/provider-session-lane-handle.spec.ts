@@ -2142,7 +2142,9 @@ describe('createProviderSessionLaneHandle — raw command turns (F9)', () => {
     await expect(next?.done).resolves.toBe(0);
     expect(promptText(sent(h.agent, 'session/prompt')[1])).toBe('/context');
     expect(h.segments.filter((segment) => segment.turnTelemetry)).toHaveLength(before);
-    expect(h.infos()).toContain(`${NAME} ran /context and returned no output.`);
+    expect(h.segments).toContainEqual({
+      type: 'info', content: `${NAME} ran /context and returned no output.`, hostNotice: true, sentAt: expect.any(Number),
+    });
   });
 
   it('shows the command output and adds no notice when the agent answers', async () => {

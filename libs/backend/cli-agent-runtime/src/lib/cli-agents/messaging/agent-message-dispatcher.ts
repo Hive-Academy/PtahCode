@@ -350,7 +350,7 @@ export class AgentMessageDispatcher {
     sentAt: number,
     images?: readonly InlineImageAttachment[],
   ): void {
-    if (attempt.envelope.sender.kind !== 'user' || attempt.body.trim() === '') return;
+    if (attempt.envelope.sender.kind !== 'user' || (attempt.body.trim() === '' && !images?.length)) return;
     try {
       this.deps.manager.recordAgentNote?.(agentId, userEchoSegment(attempt.body, sentAt, images));
     } catch {

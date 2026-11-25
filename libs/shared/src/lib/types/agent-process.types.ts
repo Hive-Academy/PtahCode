@@ -764,6 +764,13 @@ export interface CliOutputSegment {
    * reloaded transcript shows the echo text without its images.
    */
   readonly images?: readonly import('./rpc/rpc-chat.types').InlineImageAttachment[];
+  /**
+   * A host notice for the lane transcript (on an `info` segment), not
+   * provider output: e.g. "Grok ran /context and returned no output." Stream
+   * lanes build their transcript from stream events, which carry no notice,
+   * so the transcript shows these segments as a status row at `sentAt`.
+   */
+  readonly hostNotice?: true;
 }
 
 export interface AgentOutputDelta {

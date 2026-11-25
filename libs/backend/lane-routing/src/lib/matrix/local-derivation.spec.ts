@@ -33,6 +33,15 @@ describe('capacity and open reviews', () => {
     expect(valueAt(deriveLocalMatrix([delivered, stopped], NOW), base.family, base.model))
       .toEqual(valueAt(deriveLocalMatrix([delivered], NOW), base.family, base.model));
   });
+  it('leaves a review of a caller-stopped run out of the review rate (CR)', () => {
+    const approved = summary({ ...base, runId: 'approved', verdict: 'unverified', finalReview: 'approved' });
+    const stoppedReviewed = summary({
+      ...base, runId: 'stopped', verdict: 'failed', failureClass: 'user-stop', finalReview: 'rejected',
+    });
+    expect(valueAt(deriveLocalMatrix([approved, stoppedReviewed], NOW), base.family, base.model))
+      .toEqual(valueAt(deriveLocalMatrix([approved], NOW), base.family, base.model));
+    expect(deriveLocalMatrix([stoppedReviewed], NOW).profiles).toEqual([]);
+  });
   it('counts one open revise and leaves later approval successful', () => {
     const open = summary({ ...base, runId: 'open', verdict: 'unverified', reviseRounds: 3 });
     const approved = summary({ ...base, runId: 'approved', verdict: 'unverified', reviseRounds: 3, finalReview: 'approved' });

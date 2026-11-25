@@ -1525,6 +1525,15 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     f.finish(0);
   });
 
+  it("treats an empty configured model ('') as unresolved and names the init model (CR)", async () => {
+    const query = fakeQuery();
+    const options = { ...buildClaudeSdkLaneOptions(optionsInput()), model: '', abortController: new AbortController() };
+    const f = { ...runnerFixture(Promise.resolve(), undefined, query, { options }), query };
+    f.config.onSessionResolved?.('session-1', 'claude-haiku-4-5-20251001');
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'claude-haiku-4-5-20251001');
+    f.finish(0);
+  });
+
   it('keeps the chosen model when the init reports another id (D8)', async () => {
     const f = fixture();
     f.config.onSessionResolved?.('session-1', 'claude-sonnet-4-5-20250929');

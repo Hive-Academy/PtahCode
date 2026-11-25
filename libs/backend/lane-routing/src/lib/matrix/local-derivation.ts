@@ -210,6 +210,8 @@ function countSummary(bucket: RateBucket, summary: LaneOutcomeSummary): void {
       throw new Error(`unexpected verdict ${String(unexpected)}`);
     }
   }
+  // A review of a run the caller stopped judges unfinished work: no review rate either.
+  if (summary.failureClass === LANE_USER_STOP_CLASS) return;
   switch (summary.finalReview) {
     case 'approved':
       bucket.approved += 1;

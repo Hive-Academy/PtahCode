@@ -908,6 +908,16 @@ describe('AgentMessageRouter turn input and raw body', () => {
         { type: 'user', content: 'what colour?', sentAt: expect.any(Number), images });
     });
 
+    it('echoes an image-only message: an empty body with its images (CR)', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const dispatcher = echoDispatcher();
+      const images = [{ data: 'aGk=', mediaType: 'image/png' }];
+      await router.route(AGENT_ID, idleRecord(), '[Ptah message m1 from the user]', dispatcher,
+        'queue', undefined, false, { rawBody: '', echo: '', turn: { images } });
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        { type: 'user', content: '', sentAt: expect.any(Number), images });
+    });
+
     it('echoes nothing without an echo body, or when the turn was not delivered', async () => {
       const router = new AgentMessageRouter(createLogger(), createDetection());
       const dispatcher = echoDispatcher();

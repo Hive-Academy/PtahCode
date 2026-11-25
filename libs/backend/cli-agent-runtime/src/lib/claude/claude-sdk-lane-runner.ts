@@ -375,7 +375,8 @@ export class ClaudeSdkLaneRunner {
         resolvedSessionId = sessionId;
         // A lane started on the CLI default (a resume with no stored model)
         // learns its resolved model here, so the composer names it (D8).
-        if (currentModel === undefined && model) currentModel = model;
+        // `''` is unresolved too (`PtahCliRegistry.spawnAgent` passes it when no model resolves).
+        if (!currentModel && model) currentModel = model;
         // The system init: the lane's own account can be read from here. A
         // named lane keys an unproved owner to its certified route.
         lanePlanLimits.onSystemInit(sdkQuery, context.named?.route);

@@ -5062,6 +5062,26 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(controls.continueMessages[1]).toBe('second message');
     });
 
+    it('sends the parent no completion for a completed raw /command turn, and one for the next real turn', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const agentId = await spawnWithHandle(controls.handle);
+      controls.resolve(0);
+      await settle();
+      const afterSpawnTurn = laneCompletion.signal.mock.calls.length;
+
+      await manager.sendToAgent(agentId, '/context', 'queue', undefined, false,
+        { rawBody: '/context', noSteer: true });
+      controls.resolveContinue(0);
+      await settle();
+      expect(laneCompletion.signal.mock.calls.length).toBe(afterSpawnTurn);
+
+      await manager.sendToAgent(agentId, '[Ptah message m2 from the user]\n\nnow do the work', 'queue', undefined, false,
+        { rawBody: 'now do the work' });
+      controls.resolveContinue(0);
+      await settle();
+      expect(laneCompletion.signal.mock.calls.length).toBe(afterSpawnTurn + 1);
+    });
+
     it('keeps a held budget warning off a raw /command and sends it with the next message (D6)', async () => {
       const controls = createMockSdkHandle({ supportsContinuation: true });
       const agentId = await spawnWithHandle(controls.handle);

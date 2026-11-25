@@ -551,7 +551,12 @@ export function createProviderSessionLaneHandle(
     const ended = commandTurn;
     commandTurn = undefined;
     if (ended && !ended.output && code === 0)
-      segment.emit({ type: 'info', content: `${name} ran /${ended.name} and returned no output.` });
+      segment.emit({
+        type: 'info',
+        content: `${name} ran /${ended.name} and returned no output.`,
+        hostNotice: true,
+        sentAt: Date.now(),
+      });
     return code;
   };
 

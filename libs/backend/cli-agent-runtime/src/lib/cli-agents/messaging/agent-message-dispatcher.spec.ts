@@ -245,6 +245,20 @@ describe('AgentMessageDispatcher', () => {
     });
   });
 
+  describe('image-only cold echo (CR)', () => {
+    it('echoes an image-only message on the resumed lane with its images', async () => {
+      const s = setup({ advertised: [], live: false });
+      const spawned = s.h.addLane(AgentIdFor());
+      s.h.resume.resume.mockResolvedValueOnce({ agentId: spawned.info.agentId });
+      const image = { data: 'aGk=', mediaType: 'image/png' };
+      const { attempt, id } = await s.attempt('', { turn: { imageCount: 1 } });
+      s.attachments.hold(id, [image]);
+      await s.dispatcher.attempt(attempt);
+      expect(s.recordAgentNote).toHaveBeenCalledWith(spawned.info.agentId,
+        { type: 'user', content: '', sentAt: expect.any(Number), images: [image] });
+    });
+  });
+
   describe('resume failure reason (L12)', () => {
     it('fails a policy refusal with its reason, logs it redacted, and does not retry', async () => {
       const s = setup({ advertised: [], live: false });

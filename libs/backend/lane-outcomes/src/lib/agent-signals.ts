@@ -21,7 +21,7 @@ export function computeAgentSignals(
     // A caller stop says nothing about the agent: no rate, no failure tally.
     const judged = rows.filter((row) => row.failureClass !== LANE_USER_STOP_CLASS);
     const verified = judged.filter((row) => row.verdict !== 'unverified');
-    const reviewed = rows.filter((row) => row.finalReview !== null);
+    const reviewed = judged.filter((row) => row.finalReview !== null);
     const failures = new Map<
       LaneFailureClass,
       { count: number; latest: number }

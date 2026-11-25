@@ -2,12 +2,20 @@ import {
   blockedLaneCommand,
   blockedLaneCommandReason,
   filterLaneCommands,
+  isRawCommandDelivery,
   leadingLaneCommand,
   matchesLaneCommand,
 } from './lane-command-filter';
 
 describe('lane-command-filter', () => {
   const hidden = ['always-approve'] as const;
+
+  it('recognises a raw /command delivery only when the text is the trimmed raw body', () => {
+    expect(isRawCommandDelivery('/context', '  /context')).toBe(true);
+    expect(isRawCommandDelivery('[Ptah message m1 from the user]\n\n/context', '/context')).toBe(false);
+    expect(isRawCommandDelivery('hello', 'hello')).toBe(false);
+    expect(isRawCommandDelivery('/context', undefined)).toBe(false);
+  });
 
   it('drops hidden names from the list, case-insensitively', () => {
     const commands = [

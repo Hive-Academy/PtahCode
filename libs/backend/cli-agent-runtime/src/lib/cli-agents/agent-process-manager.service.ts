@@ -96,6 +96,7 @@ import { TURN_INPUT_NOT_REPORTED } from './messaging/agent-delivery-planner';
 import {
   blockedLaneCommand,
   blockedLaneCommandReason,
+  isRawCommandDelivery,
 } from './cli-adapters/lane-command-filter';
 import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
@@ -3448,6 +3449,7 @@ export class AgentProcessManager {
 
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
+    tracked.rawCommandTurn = isRawCommandDelivery(message, rawBody);
 
     // The continuation is the reason the subprocess was kept alive — stand the
     // idle countdown down before doing anything that can await.
@@ -4617,6 +4619,15 @@ export class AgentProcessManager {
         : {}),
       ...(tracked.repeatedCalls ? { repeatedCalls: tracked.repeatedCalls } : {}),
     };
+    // A completed raw user `/command` turn (`/context`, `/compact`) is not
+    // work the parent assigned: no completion envelope, no outcome row. Its
+    // usage was recorded above. A failed or stopped one still reports.
+    if (tracked.rawCommandTurn && info.status === 'completed') {
+      this.logger.debug('[AgentProcessManager] Command turn settled without a parent completion', {
+        agentId: info.agentId,
+      });
+      return;
+    }
     const externalOwner = tracked.externalOwner;
     const deliver = (parentSessionId?: string) => {
       const completion = { ...info, parentSessionId };
