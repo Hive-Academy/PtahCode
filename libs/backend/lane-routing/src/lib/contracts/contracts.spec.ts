@@ -172,6 +172,114 @@ describe('route-decide arguments', () => {
 });
 
 describe('route-decide results', () => {
+  it('round-trips legacy roster rows and exclusions without trace fields', () => {
+    const result = {
+      ...gateOf([chosen, unavailable]),
+      excluded: [{ phaseId: 'implement', candidate: 'codex', rule: 'at-limit' }],
+    };
+    expect(RouteDecideResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('round-trips signed totals, override parts and rule and pruning details', () => {
+    const result = {
+      ...gateOf([{
+        ...chosen,
+        candidates: [
+          {
+            candidate: 'claude',
+            displayName: 'claude',
+            total: 124,
+            parts: {
+              prior: 80, learned: 15, preference: 12, limit: 0, override: 17,
+              overrideLabel: 'builtin design/visual-review subagent',
+            },
+            disposition: 'chosen',
+            preferenceSource: 'rule',
+            overriddenPreferenceSources: ['call', 'configured'],
+          },
+          {
+            candidate: 'codex',
+            displayName: 'codex',
+            total: -4,
+            disposition: 'ranked',
+            rule: 'pruned',
+            cause: 'below-band',
+            limitEvidence: { state: 'unknown', lookup: 'failed', status: null, readAt: null },
+            modelListStatus: 'timeout',
+          },
+        ],
+        explanation: 'claude ranked first',
+        traceOmitted: 1,
+      }, {
+        ...unavailable,
+        exclusionReason: 'pin-unavailable',
+        pinRule: 'user-rule:review',
+        source: 'pin',
+        excludedBy: [{ candidate: 'codex', rule: 'user-rule:review' }],
+        candidates: [{
+          candidate: 'codex',
+          displayName: 'codex',
+          total: null,
+          disposition: 'excluded',
+          rule: 'user-rule:review',
+        }],
+      }]),
+      excluded: [
+        { phaseId: 'review', candidate: 'codex', rule: 'pruned', cause: 'below-band' },
+        { phaseId: 'implement', candidate: 'codex', rule: 'user-rule:review' },
+      ],
+    };
+    expect(RouteDecideResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('accepts override labels from 1 to 120 characters', () => {
+    const withLabel = (overrideLabel: string) => gateOf([{
+      ...chosen,
+      candidates: [{
+        candidate: 'claude',
+        displayName: 'claude',
+        total: 100,
+        parts: { prior: 90, learned: 0, preference: 0, limit: -5, override: 15, overrideLabel },
+        disposition: 'chosen',
+      }],
+    }]);
+    expect(RouteDecideResultSchema.safeParse(withLabel('')).success).toBe(false);
+    expect(RouteDecideResultSchema.safeParse(withLabel('builtin design/visual-review subagent')).success).toBe(true);
+    expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(120))).success).toBe(true);
+    expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(121))).success).toBe(false);
+  });
+
+  it('allows dots, underscores and hyphens in a routing rule id up to 64 characters', () => {
+    const rule = `user-rule:A1._-${'x'.repeat(59)}`;
+    const result = {
+      ...gateOf([chosen]),
+      excluded: [{ phaseId: 'implement', candidate: 'codex', rule }],
+    };
+    expect(RouteDecideResultSchema.parse(result)).toEqual(result);
+  });
+
+  it('rejects empty, unsafe and oversized routing rule ids in exclusions', () => {
+    for (const id of ['', ' ', 'a;b', 'a\nb', 'a\n', 'x'.repeat(65)]) {
+      const result = {
+        ...gateOf([chosen]),
+        excluded: [{ phaseId: 'implement', candidate: 'codex', rule: `user-rule:${id}` }],
+      };
+      expect(RouteDecideResultSchema.safeParse(result).success).toBe(false);
+    }
+  });
+
+  it.each(['deadline', 'model-cold', 'model-busy', 'question-cap'])(
+    'accepts the %s fallback on a chosen row and a pre-flight answer',
+    (fallbackCause) => {
+      const answer = { value: null, source: 'skill-table', confidence: null, fallbackCause, modelProposal: null };
+      expect(GateResultSchema.parse(gateOf([{ ...chosen, fallbackCause }])).roster[0].fallbackCause)
+        .toBe(fallbackCause);
+      expect(PreflightResultSchema.parse({
+        stage: 'pre-flight', taskType: answer, depth: answer, overallConfidence: null, reasons: [], usage,
+      }).depth.fallbackCause).toBe(fallbackCause);
+    },
+  );
+
   it('accepts a pre-flight fallback with null answers', () => {
     const result = {
       stage: 'pre-flight',

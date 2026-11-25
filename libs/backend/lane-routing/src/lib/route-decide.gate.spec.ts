@@ -1,4 +1,10 @@
+import { container } from 'tsyringe';
+import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import { DECISION_MODEL_TIMEOUT_MIN_MS, DECISION_MODEL_TIMEOUT_SETTING_KEY, ROUTING_RULES_SETTING_KEY } from '@ptah-extension/shared';
+import { registerLaneRoutingServices } from './di/register';
+import { LANE_ROUTING_TOKENS } from './di/tokens';
 import {
+  createMockFileSystemProvider,
   createMockSecretStorage,
   createMockStateStorage,
   createMockWorkspaceProvider,
@@ -44,7 +50,9 @@ import {
 } from './route-decide.service';
 import {
   DECISION_REQUEST_TIMEOUT_MS,
-  QUESTIONS_PER_REQUEST,
+  GATHER_BUDGET_MS,
+  DECISION_QUESTIONS_PER_CALL,
+  ROUTE_RETURN_RESERVE_MS,
 } from './routing-constants';
 
 const SELECTION_KEY = 'ptah.agentOrchestration.decisionModel';
@@ -136,6 +144,10 @@ function fakeFetch(routes: Record<string, FakeRoute>): SystemOneFetch {
   };
 }
 
+const warmResidency = fakeFetch({
+  '/api/ps': { status: 200, body: '{"models":[{"name":"nimble:latest"}]}' },
+});
+
 function configFor(
   selection: unknown,
   fetchImpl: SystemOneFetch,
@@ -197,7 +209,10 @@ function harness(options: {
   readonly listing?: LaneModelListing;
   readonly structured?: StructuredDecisionCompleter;
   readonly fetchImpl?: SystemOneFetch;
+  readonly config?: DecisionModelConfig;
+  readonly realSystemOne?: boolean;
   readonly seams?: RouteDecideSeams;
+  readonly readPrefillTokensPerSecond?: () => unknown;
   readonly reply?: (
     payload: DecisionPayload,
     index: number,
@@ -223,8 +238,9 @@ function harness(options: {
     tools,
   };
   const service = new RouteDecideService({
+    readPrefillTokensPerSecond: options.readPrefillTokensPerSecond,
     rotationSetting: { isEnabled: () => options.rotate ?? true },
-    config: configFor(
+    config: options.config ?? configFor(
       options.selection === undefined ? OLLAMA : options.selection,
       options.fetchImpl ??
         (async (url) => {
@@ -246,7 +262,9 @@ function harness(options: {
       listingBudgetMs: options.seams?.listingBudgetMs,
       maxRequestBytes: options.seams?.maxRequestBytes,
       now: options.seams?.now,
-      systemOne: (clientOptions) => {
+      monotonicNow: options.seams?.monotonicNow,
+      residencyFetch: options.seams?.residencyFetch ?? warmResidency,
+      systemOne: options.realSystemOne ? undefined : (clientOptions) => {
         seen.push(clientOptions);
         if (options.seams?.systemOne !== undefined)
           return options.seams.systemOne(clientOptions);
@@ -275,6 +293,459 @@ function implement(id = 'build') {
     phases: [{ id, kind: 'implement' as const }],
   };
 }
+
+describe('gate route budget', () => {
+  it.each([0, -1])('checks the exact request floor with offset %i', async (offset) => {
+    const run = harness({ seams: { monotonicNow: () => 100 } });
+    const result = await run.service.decide(implement(), run.source, {
+      deadlineAtMs: 100 + DECISION_MODEL_TIMEOUT_MIN_MS + ROUTE_RETURN_RESERVE_MS + offset,
+    });
+    expect(run.calls).toHaveLength(offset === 0 ? 1 : 0);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[0].fallbackCause).toBe(offset === 0 ? null : 'deadline');
+    if (offset === 0) expect(run.seen[0]?.timeoutMs).toBe(DECISION_MODEL_TIMEOUT_MIN_MS);
+  });
+
+  it('skips an estimate above the target timeout and keeps cost off question-cap rows', async () => {
+    const run = harness({
+      readPrefillTokensPerSecond: () => 100,
+      seams: { monotonicNow: () => 100 },
+    });
+    const result = await run.service.decide({
+      ...implement(),
+      request: 'route '.repeat(300),
+      phases: [...implement().phases, { id: 'second', kind: 'implement' }, { id: 'third', kind: 'implement' }],
+    }, run.source);
+
+    expect(run.seen).toHaveLength(0);
+    if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+    expect(result.usage.requests).toBe(0);
+    for (const row of result.roster.slice(0, 2)) {
+      expect(row.fallbackCause).toBe('deadline');
+      expect(row.reason).toMatch(/estimated decision model cost \d+ ms exceeds 3000 ms remaining/);
+    }
+    expect(result.roster[2].fallbackCause).toBe('question-cap');
+    expect(result.roster[2].reason).not.toContain('estimated decision model cost');
+  });
+
+  it('returns model-busy for an overlapping gate and dispatches after the first aborts', async () => {
+    jest.useFakeTimers();
+    try {
+      const decide = jest.fn((payload: DecisionPayload) =>
+        Promise.resolve(answersFor(payload, () => ({ choice: 'o1', confidence: 0.9 }))));
+      decide.mockImplementationOnce(() => new Promise(() => undefined));
+      const run = harness({
+        readPrefillTokensPerSecond: () => 1000,
+        seams: { systemOne: () => ({ decide }) },
+      });
+      const pending = run.service.decide(implement(), run.source, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1800,
+      });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(decide).toHaveBeenCalledTimes(1);
+
+      const overlapping = await run.service.decide(implement(), run.source);
+      expect(overlapping).toMatchObject({ roster: [{ source: 'ranking', fallbackCause: 'model-busy' }] });
+      expect(decide).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1800);
+      expect(await pending).toMatchObject({ roster: [{ fallbackCause: 'deadline' }] });
+
+      const recovered = await run.service.decide(implement(), run.source);
+      expect(recovered).toMatchObject({ roster: [{ source: 'model', fallbackCause: null }] });
+      expect(decide).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('skips the review pass when the first pass consumes its remaining budget', async () => {
+    let now = 100;
+    const run = harness({
+      seams: { monotonicNow: () => now },
+      reply: (payload) => {
+        now = 3000;
+        return answersFor(payload, () => ({ choice: 'o1', confidence: 0.9 }));
+      },
+    });
+    const result = await run.service.decide({
+      ...implement(),
+      phases: [...implement().phases, { id: 'check', kind: 'review', reviews: ['build'] }],
+    }, run.source, { deadlineAtMs: 4100 });
+    expect(run.calls).toHaveLength(1);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    expect(result.roster[1]).toMatchObject({ status: 'chosen', source: 'ranking', fallbackCause: 'deadline' });
+  });
+
+  it('returns an assembled gate result when the rows port hangs', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({});
+      const rows = jest.fn(() => new Promise<never>(() => undefined));
+      const pending = run.service.decide(implement(), { ...run.source, rows }, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 200,
+      });
+      await jest.advanceTimersByTimeAsync(200);
+      const result = await pending;
+      expect(rows).toHaveBeenCalledTimes(1);
+      expect(result).toMatchObject({ stage: 'gate-0.1', roster: [{ phaseId: 'build' }], usage: { requests: 0 } });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('explains the deadline on an unavailable row with a null fallback cause', async () => {
+    const run = harness({ seams: { monotonicNow: () => 100 } });
+    const result = await run.service.decide({
+      ...implement(),
+      pins: [{ phaseId: 'build', executor: 'codex' }],
+    }, run.source, { deadlineAtMs: 100 + ROUTE_RETURN_RESERVE_MS });
+
+    expect(run.rows).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      roster: [{ status: 'unavailable', fallbackCause: null, reason: expect.stringContaining('route deadline reached') }],
+    });
+  });
+
+  it('attributes a gather rows timeout only to the unavailable pin inside the eight-second gate', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({});
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [...implement().phases, { id: 'other', kind: 'implement' }],
+        pins: [{ phaseId: 'build', executor: 'codex' }],
+      }, { ...run.source, rows: () => new Promise(() => undefined) });
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+      const result = await pending;
+      if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+      expect(result.roster[0]).toMatchObject({
+        status: 'unavailable',
+        fallbackCause: null,
+        reason: expect.stringContaining('route deadline reached'),
+        explanation: expect.stringContaining('route deadline reached'),
+      });
+      expect(result.roster[1].status).toBe('chosen');
+      expect(result.roster[1].reason).not.toContain('route deadline reached');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('attributes reviewer-family unavailability to the timed-out rows read', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({ selection: { kind: 'unset' } });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [...implement().phases, { id: 'check', kind: 'review', reviews: ['build'] }],
+      }, { ...run.source, rows: () => new Promise(() => undefined) });
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+
+      expect(await pending).toMatchObject({ roster: [
+        { phaseId: 'build', status: 'chosen', executor: { id: 'subagent:implement' } },
+        { phaseId: 'check', status: 'unavailable', exclusionReason: 'reviewer-family',
+          reason: expect.stringMatching(/; route deadline reached$/),
+          explanation: expect.stringMatching(/; route deadline reached$/) },
+      ] });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a known missing-capability row independent of another phase’s model deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({
+        tools: async () => [],
+        seams: { systemOne: () => ({ decide: () => new Promise(() => undefined) }) },
+      });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [...implement().phases, { id: 'look', kind: 'visual-review' }],
+      }, run.source, { deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1200 });
+      await jest.advanceTimersByTimeAsync(1200);
+      const result = await pending;
+      if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+      expect(result.roster[0]).toMatchObject({ phaseId: 'build', fallbackCause: 'deadline' });
+      expect(result.roster[1]).toMatchObject({ phaseId: 'look', exclusionReason: 'missing-capability' });
+      expect(result.roster[1].reason).not.toContain('route deadline reached');
+      expect(result.roster[1].explanation).not.toContain('route deadline reached');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('attributes a role-list timeout to the undiscovered custom role pin', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({ selection: { kind: 'unset' } });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [{ id: 'build', kind: 'implement', role: 'custom-role' }],
+        pins: [{ phaseId: 'build', executor: 'subagent:custom-role' }],
+      }, { ...run.source, roles: () => new Promise(() => undefined) });
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+      expect(await pending).toMatchObject({
+        roster: [{ status: 'unavailable', reason: expect.stringContaining('route deadline reached') }],
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('attributes a phase-definition timeout to the affected capability fallback', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({
+        selection: { kind: 'unset' },
+        tools: async () => [],
+        phaseDefinitionReader: { read: () => new Promise(() => undefined) },
+      });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [{ id: 'draw', kind: 'design' }],
+      }, run.source);
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+      expect(await pending).toMatchObject({
+        roster: [{ status: 'unavailable', reason: expect.stringContaining('route deadline reached') }],
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each(['codex', 'grok'])('attributes tool timeouts only to the pinned candidate (%s timed out)', async (timedOut) => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({
+        selection: { kind: 'unset' },
+        tools: async (candidate) => candidate.id === timedOut
+          ? new Promise(() => undefined)
+          : [],
+      });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [{ id: 'look', kind: 'visual-review' }],
+        pins: [{ phaseId: 'look', executor: 'codex' }],
+      }, run.source);
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+      const result = await pending;
+      if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+      expect(result.roster[0].status).toBe('unavailable');
+      expect(result.roster[0].reason.includes('route deadline reached')).toBe(timedOut === 'codex');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each(['{"models":[]}', '{}'])('skips a local daemon without positive residency (%s)', async (body) => {
+    const run = harness({ seams: { residencyFetch: fakeFetch({ '/api/ps': { status: 200, body } }) } });
+    const result = await run.service.decide(implement(), run.source);
+    expect(run.calls).toHaveLength(0);
+    expect(result).toMatchObject({ roster: [{ status: 'chosen', source: 'ranking', fallbackCause: 'model-cold' }] });
+  });
+
+  it.each([Number.NaN, Infinity])('uses the default gate deadline for %s', async (deadlineAtMs) => {
+    const run = harness({ seams: { monotonicNow: () => 100 } });
+    const result = await run.service.decide(implement(), run.source, { deadlineAtMs });
+    expect(run.calls).toHaveLength(1);
+    expect(result).toMatchObject({ roster: [{ source: 'model', fallbackCause: null }] });
+  });
+
+  it.each(['rejection', 'http error', 'timeout'] as const)('reports a residency probe %s and skips the model', async (failure) => {
+    jest.useFakeTimers();
+    try {
+      const logger = testLogger();
+      const cancel = jest.fn(async () => undefined);
+      const residencyFetch: SystemOneFetch = async () => {
+        if (failure === 'rejection') throw new Error('private endpoint detail');
+        if (failure === 'timeout') return new Promise<never>(() => undefined);
+        return { ok: false, status: 503, body: { cancel }, text: async () => 'private response' };
+      };
+      const run = harness({ logger, seams: { residencyFetch } });
+      const pending = run.service.decide(implement(), run.source);
+      await jest.advanceTimersByTimeAsync(1500);
+      expect(await pending).toMatchObject({ roster: [{ fallbackCause: 'model-cold' }] });
+      expect(run.calls).toHaveLength(0);
+      const messages = {
+        rejection: ['[lane-routing] residency probe failed', { name: 'Error' }],
+        'http error': ['[lane-routing] residency probe returned an HTTP error', { status: 503 }],
+        timeout: ['[lane-routing] residency probe timed out'],
+      };
+      expect(logger.debug).toHaveBeenCalledWith(...messages[failure]);
+      expect(cancel).toHaveBeenCalledTimes(failure === 'http error' ? 1 : 0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  function mockTimeout(offsetMs = 0): void {
+    jest.spyOn(AbortSignal, 'timeout').mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('timed out', 'TimeoutError')), delay + offsetMs);
+      return controller.signal;
+    });
+  }
+
+  it.each([-1, 1])('classifies a real System One client abort as deadline with timer offset %i', async (offset) => {
+    jest.useFakeTimers();
+    mockTimeout(offset);
+    const abort = jest.fn();
+    const post = jest.spyOn(global, 'fetch').mockImplementation(async (_url, init) =>
+      new Promise<never>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          abort();
+          reject(init.signal?.reason);
+        }, { once: true });
+      }),
+    );
+    try {
+      const logger = testLogger();
+      const config = new DecisionModelConfig(
+        createMockWorkspaceProvider({
+          config: { [SELECTION_KEY]: OLLAMA, [`ptah.${DECISION_MODEL_TIMEOUT_SETTING_KEY}`]: 15_000 },
+        }),
+        createMockSecretStorage(), createMockStateStorage(), logger,
+      );
+      const run = harness({ config, logger, realSystemOne: true });
+      const pending = run.service.decide(implement(), run.source, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1200,
+      });
+      await jest.advanceTimersByTimeAsync(1205);
+      expect(await pending).toMatchObject({
+        roster: [{ fallbackCause: 'deadline' }],
+        usage: { requests: 1 },
+      });
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(abort).toHaveBeenCalledTimes(1);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.any(String), expect.objectContaining({ cause: 'unreachable' }),
+      );
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it('classifies a deadline-capped structured abort before the outer timer as deadline', async () => {
+    jest.useFakeTimers();
+    mockTimeout(-1);
+    try {
+      const logger = testLogger();
+      const disconnected = Object.assign(new Error(), { name: 'StructuredDecisionError', kind: 'unreachable' });
+      const complete = jest.fn<ReturnType<StructuredDecisionCompleter['complete']>, Parameters<StructuredDecisionCompleter['complete']>>(
+        async ({ signal }) => new Promise<never>((_, reject) => {
+          signal.addEventListener('abort', () => reject(disconnected), { once: true });
+        }),
+      );
+      const run = harness({
+        logger,
+        selection: { kind: 'structured', providerId: 'anthropic', model: 'claude' },
+        structured: { complete, isReady: async () => true },
+      });
+      const pending = run.service.decide(implement(), run.source, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1200,
+      });
+      await jest.advanceTimersByTimeAsync(1199);
+      expect(await pending).toMatchObject({ roster: [{ fallbackCause: 'deadline' }], usage: { requests: 1 } });
+      expect(AbortSignal.timeout).toHaveBeenCalledWith(1200);
+      expect(complete).toHaveBeenCalledTimes(1);
+      expect(logger.warn).not.toHaveBeenCalledWith(
+        expect.any(String), expect.objectContaining({ kind: 'unreachable' }),
+      );
+    } finally {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    }
+  });
+
+  it('returns ranking with deadline when opening the caller hangs', async () => {
+    jest.useFakeTimers();
+    try {
+      const config = configFor(OLLAMA, warmResidency);
+      jest.spyOn(config, 'resolveSystemOneTarget').mockImplementation(() => new Promise(() => undefined));
+      const run = harness({ config });
+      const pending = run.service.decide(implement(), run.source, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 200,
+      });
+      await jest.advanceTimersByTimeAsync(200);
+      expect(await pending).toMatchObject({ roster: [{ fallbackCause: 'deadline' }], usage: { requests: 0 } });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('dispatches a loopback custom target without checking residency', async () => {
+    const residencyFetch = jest.fn(warmResidency);
+    const run = harness({
+      selection: { kind: 'custom', baseUrl: 'http://127.0.0.1:9911', model: 'custom-model' },
+      seams: { residencyFetch },
+    });
+    const result = await run.service.decide(implement(), run.source);
+    expect(residencyFetch).not.toHaveBeenCalled();
+    expect(run.calls).toHaveLength(1);
+    expect(result).toMatchObject({ roster: [{ source: 'model', fallbackCause: null }] });
+  });
+
+  it('uses the DI prefill setting for a fixed-criteria request and discloses the cost', async () => {
+    const workspace = createMockWorkspaceProvider({
+      config: {
+        [SELECTION_KEY]: { kind: 'custom', baseUrl: 'https://example.test', model: 'nimble' },
+        'ptah.agentOrchestration.decisionModelPrefillTokensPerSecond': 1,
+      },
+    });
+    const child = container.createChildContainer();
+    child.registerInstance(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, createMockFileSystemProvider());
+    child.registerInstance(PLATFORM_TOKENS.STATE_STORAGE, createMockStateStorage());
+    child.registerInstance(PLATFORM_TOKENS.SECRET_STORAGE, createMockSecretStorage());
+    child.registerInstance(PLATFORM_TOKENS.WORKSPACE_PROVIDER, workspace);
+    registerLaneRoutingServices(child, testLogger());
+    const service = child.resolve<RouteDecideService>(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE);
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 500 }));
+    try {
+      const result = await service.decide({ stage: 'pre-flight', request: 'describe the change' }, candidateSource([]));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        taskType: { fallbackCause: 'deadline' },
+        depth: { fallbackCause: 'deadline' },
+        reasons: expect.arrayContaining([expect.stringContaining('estimated decision model cost')]),
+        usage: { requests: 0 },
+      });
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it('reads the DI routing rules once and applies them in both plans', async () => {
+    const workspace = createMockWorkspaceProvider({
+      config: {
+        [`ptah.${ROUTING_RULES_SETTING_KEY}`]: [{
+          id: 'skip-codex', match: { kind: ['implement', 'review'] }, set: { exclude: ['codex'] },
+        }],
+      },
+    });
+    const read = jest.spyOn(workspace, 'getConfiguration');
+    const child = container.createChildContainer();
+    child.registerInstance(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, createMockFileSystemProvider());
+    child.registerInstance(PLATFORM_TOKENS.STATE_STORAGE, createMockStateStorage());
+    child.registerInstance(PLATFORM_TOKENS.SECRET_STORAGE, createMockSecretStorage());
+    child.registerInstance(PLATFORM_TOKENS.WORKSPACE_PROVIDER, workspace);
+    registerLaneRoutingServices(child, testLogger());
+    child.registerInstance(LANE_ROUTING_TOKENS.CAPABILITY_MATRIX_STORE, neutralMatrix());
+    const service = child.resolve<RouteDecideService>(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE);
+    const result = await service.decide({
+      ...implement(),
+      phases: [...implement().phases, { id: 'check', kind: 'review' }],
+    }, candidateSource([...THREE]));
+    expect(read.mock.calls.filter(([, key]) => key === ROUTING_RULES_SETTING_KEY)).toHaveLength(1);
+    if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    for (const row of result.roster) {
+      expect(row.candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ candidate: 'codex', rule: 'user-rule:skip-codex' }),
+      ]));
+    }
+  });
+});
 
 describe('gate phase policy roster', () => {
   it('selects a capable visual review lane when the SDK list is unknown', async () => {
@@ -410,6 +881,21 @@ describe('gate phase policy roster', () => {
     );
   });
 
+  it('produces the documented R2 review ranking and deciding factor', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' } });
+    const result = await run.service.decide({
+      ...implement(),
+      phases: [{ id: 'review', kind: 'review', shape: 'review', role: 'unlisted-role' }],
+    }, run.source);
+    const docs = await readFile(resolve(
+      __dirname, '../../../../../apps/ptah-docs/src/content/docs/agents/agent-orchestration.md',
+    ), 'utf8');
+    const example = /### Explanations and candidate traces[\s\S]*?```json\r?\n([\s\S]*?)\r?\n```/.exec(docs)?.[1];
+    if (example === undefined) throw new Error('expected a documented chosen-row example');
+    if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+    expect(result.roster).toEqual([JSON.parse(example)]);
+  });
+
   it('applies weighted policy without changing executor eligibility or choice', async () => {
     const phases = [
       { id: 'mechanical', kind: 'implement' as const, shape: 'mechanical' as const, weight: 2000 },
@@ -496,18 +982,15 @@ describe('route decide outcome figures', () => {
     await run.service.decide(implement(), run.source);
     expect(run.calls).toHaveLength(1);
     const payload = run.calls[0];
-    const offered = Object.keys(payload.state.availableExecutors).filter(
-      (id) => id !== 'subagent',
-    );
+    const offered = Object.values(payload.state.availableExecutors).map(
+      (executor) => Array.isArray(executor) ? executor[0] : undefined,
+    ).filter((id) => id !== 'subagent' && id !== undefined);
     expect(offered.length).toBeGreaterThan(0);
     expect(Object.keys(payload.state.pastOutcomes).sort()).toEqual(
       offered.map((id) => `${id}/implement`).sort(),
     );
     for (const id of offered) {
-      expect(payload.state.pastOutcomes[`${id}/implement`]).toEqual({
-        delivered: 3,
-        failed: 1,
-      });
+      expect(payload.state.pastOutcomes[`${id}/implement`]).toEqual([75, 4]);
     }
   });
 });
@@ -579,6 +1062,7 @@ describe('route decide gate', () => {
     const success = jest.spyOn(config, 'recordLiveSuccess');
 
     const result = await service.decide(implement(), source);
+    await recheck.mock.results[0]?.value;
     const status = await config.getStatus();
 
     expect(recheck).toHaveBeenCalledTimes(1);
@@ -590,12 +1074,69 @@ describe('route decide gate', () => {
     expect(GateResultSchema.safeParse(result).success).toBe(true);
   });
 
+  it('returns the gate result while live recheck and rotation save are pending', async () => {
+    const { service, source, config, rotation } = probeHarness(READY_ROUTES);
+    const pending = () => new Promise<never>(() => undefined);
+    const recheck = jest.spyOn(config, 'recheckAfterLiveNotFound').mockImplementation(pending);
+    const save = jest.spyOn(rotation, 'save').mockImplementation(pending);
+
+    const result = await service.decide(implement(), source);
+
+    expect(recheck).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ roster: [{ status: 'chosen', source: 'ranking' }] });
+  });
+
+  it('releases the rotation queue on timeout and rejection and skips expired queued writes', async () => {
+    jest.useFakeTimers();
+    try {
+      const logger = testLogger();
+      const rotation = memoryRotation();
+      const saved = Promise.resolve({ persisted: true });
+      let rejectLate!: (error: Error) => void;
+      const save = jest.spyOn(rotation, 'save')
+        .mockImplementationOnce(() => new Promise((_, reject) => { rejectLate = reject; }))
+        .mockRejectedValueOnce(new Error('write failed'))
+        .mockReturnValue(saved);
+      const run = harness({ logger, rotation, selection: { kind: 'unset' } });
+      await run.service.decide(implement('first'), run.source);
+      await run.service.decide(implement('expired'), run.source, { deadlineAtMs: 500 });
+      await run.service.decide(implement('second'), run.source);
+      await run.service.decide(implement('third'), run.source);
+
+      expect(save).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(save.mock.calls.map(([state]) => state.entries[0]?.key)).toEqual([
+        'first|implement', 'second|implement', 'third|implement',
+      ]);
+      rejectLate(new Error('late write failure'));
+      await Promise.resolve();
+      const warnings = jest.mocked(logger.warn).mock.calls.map(([message]) => message);
+      expect(warnings).toEqual([
+        '[lane-routing] rotation state save timed out',
+        '[lane-routing] rotation state could not be saved',
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('logs a live recheck rejection once without rejecting the gate', async () => {
+    const logger = testLogger();
+    const { service, source, config } = probeHarness(READY_ROUTES, logger);
+    jest.spyOn(config, 'recheckAfterLiveNotFound').mockRejectedValue(new Error('recheck failed'));
+    await expect(service.decide(implement(), source)).resolves.toMatchObject({ stage: 'gate-0.1' });
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('[lane-routing] decision model live recheck failed', { name: 'Error' });
+  });
+
   it('shows unsupported-endpoint when the re-check probe agrees', async () => {
     const { service, source, config } = probeHarness(UNSUPPORTED_ROUTES);
     const mark = jest.spyOn(config, 'markUnsupported');
     const recheck = jest.spyOn(config, 'recheckAfterLiveNotFound');
 
     await service.decide(implement(), source);
+    await recheck.mock.results[0]?.value;
     const status: DecisionModelStatusDto = await config.getStatus();
 
     expect(recheck).toHaveBeenCalledTimes(1);
@@ -869,7 +1410,7 @@ describe('route decide gate', () => {
     expect(result.stage === 'gate-0.1' ? result.usage.requests : 1).toBe(0);
   });
 
-  it('caps one request at 32 questions and marks the rest question-limit', async () => {
+  it('caps one System One request at two questions and marks the rest question-cap', async () => {
     const phases = Array.from({ length: 70 }, (_, index) => ({
       id: `p${index}`,
       kind: 'implement' as const,
@@ -878,7 +1419,7 @@ describe('route decide gate', () => {
     const result = await service.decide({ ...implement(), phases }, source);
     expect(calls).toHaveLength(1);
     expect(Object.keys(calls[0]?.questions ?? {})).toHaveLength(
-      QUESTIONS_PER_REQUEST,
+      DECISION_QUESTIONS_PER_CALL,
     );
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster).toHaveLength(70);
@@ -887,16 +1428,16 @@ describe('route decide gate', () => {
       source: 'model',
       fallbackCause: null,
     });
-    expect(result.roster[32]).toMatchObject({
+    expect(result.roster[2]).toMatchObject({
       source: 'ranking',
-      fallbackCause: 'question-limit',
+      fallbackCause: 'question-cap',
     });
     expect(
       result.roster.filter(
         (entry) =>
-          entry.status === 'chosen' && entry.fallbackCause === 'question-limit',
+          entry.status === 'chosen' && entry.fallbackCause === 'question-cap',
       ),
-    ).toHaveLength(38);
+    ).toHaveLength(68);
   });
 
   it('keeps a fast model list when a sibling misses the budget', async () => {
@@ -927,9 +1468,13 @@ describe('route decide gate', () => {
     expect(text).toContain('fast-model');
     expect(text).toContain('lane-default');
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    // The slow lane is named with its cause; the old global line is gone.
     expect(
-      result.reasons.filter((reason) => reason === 'models unknown'),
+      result.reasons.filter((reason) =>
+        /^models unknown for \S.* \(timeout\)$/.test(reason),
+      ),
     ).toHaveLength(1);
+    expect(result.reasons).not.toContain('models unknown');
   });
 
   it('takes the minimum model confidence and ignores unavailable entries', async () => {
@@ -1074,18 +1619,20 @@ describe('route decide gate', () => {
   });
 });
 
-function probeHarness(routes: Record<string, FakeRoute>) {
+function probeHarness(routes: Record<string, FakeRoute>, logger = testLogger()) {
   const calls: DecisionPayload[] = [];
   const fetchImpl = fakeFetch(routes);
   const config = configFor(OLLAMA, fetchImpl);
   const source = candidateSource([...THREE]);
+  const rotation = memoryRotation();
   const service = new RouteDecideService({
     config,
     matrix: neutralMatrix(),
-    rotation: memoryRotation(),
-    logger: testLogger(),
+    rotation,
+    logger,
     listing: listingOf(async () => [{ id: 'listed', provenance: 'reported' }]),
     seams: {
+      residencyFetch: warmResidency,
       systemOne: () => ({
         decide: async (payload) => {
           calls.push(payload);
@@ -1094,7 +1641,7 @@ function probeHarness(routes: Record<string, FakeRoute>) {
       }),
     },
   });
-  return { service, source, config, calls };
+  return { service, source, config, calls, rotation };
 }
 
 describe('route decide gate: selection and target come from one snapshot (R1-3)', () => {

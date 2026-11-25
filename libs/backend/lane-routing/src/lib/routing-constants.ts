@@ -20,6 +20,37 @@ export const SCORE_MAX = 100;
 /** Midpoint. A missing profile neither attracts nor repels. */
 export const NEUTRAL_SCORE = 50;
 
+/** Maximum magnitude of the learned adjustment before exploration. */
+export const LEARNED_DELTA_CAP = 15;
+
+/** Extra points for a cell with too few local runs. */
+export const EXPLORATION_BONUS = 5;
+
+/** Local run count at which the exploration bonus ends. */
+export const EXPLORATION_MIN_SAMPLES = 3;
+
+/** Points for preference ranks 1, 2, 3, and 4 or later. */
+export const PREFERENCE_BOOST = [12, 8, 4, 2] as const;
+
+/** Accepted identifier syntax for routing rules and their exclusion tokens. */
+export const ROUTING_RULE_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** Score adjustments for eligible limit states. */
+export const LIMIT_ADJUST = {
+  'confirmed-room': 0,
+  unknown: -5,
+  'near-limit': -10,
+} as const;
+
+/** End-to-end routing budget in milliseconds for each stage. */
+export const ROUTE_DEADLINE_MS = { 'gate-0.1': 8000, 'pre-flight': 4000 } as const;
+
+/** Milliseconds reserved for assembling and returning the routing result. */
+export const ROUTE_RETURN_RESERVE_MS = 250;
+
+/** Maximum number of questions sent in a single decision-model call. */
+export const DECISION_QUESTIONS_PER_CALL = 2;
+
 /** Seed label map. Gaps are 15 and 30, both larger than `CLOSENESS_BAND`. */
 export const SEED_LABEL_SCORE = {
   strong: 80,
@@ -51,14 +82,14 @@ export type InsideBandLimitState = (typeof INSIDE_BAND_LIMIT_ORDER)[number];
 export const EXCLUDED_LIMIT_STATE = 'at-limit' satisfies LaneLimitState;
 
 /**
- * T. Total tie-break after the band. Earlier steps win.
- * `preferredRank >= PREFERRED_RANK_MIN_RANKED` ranks before
- * `PREFERRED_RANK_UNRANKED` and before an absent rank.
- * Executor kind follows `TIE_BREAK_EXECUTOR_KIND_ORDER`.
+ * T. Ranking order before band rotation, starting with descending additive total.
+ * Equal totals use ascending selected preference rank (unranked last), limit class,
+ * executor kind, and ordinal candidate id.
  */
 export const TIE_BREAK_STEPS = [
-  'prefer',
-  'preferredRank',
+  'total',
+  'preferenceRank',
+  'limitClass',
   'executorKind',
   'candidateId',
 ] as const;
@@ -160,6 +191,21 @@ export const CONFIDENCE_THRESHOLD = 0.5;
 
 /** Request body cap for every decision-model kind. */
 export const REQUEST_SIZE_LIMIT_BYTES = 64 * 1024;
+
+/** Maximum characters kept from one selector string in diagnostic text. */
+export const DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS = 48;
+
+/** Maximum matched candidate IDs shown in an ambiguous-selector diagnostic before "and K more". */
+export const DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP = 3;
+
+/** Maximum characters kept from any single aggregate diagnostic line. */
+export const DIAGNOSTIC_LINE_MAX_CHARS = 240;
+
+/** Maximum aggregate diagnostic characters emitted into top-level `reasons` (including omitted marker). */
+export const AGGREGATE_DIAGNOSTIC_MAX_CHARS = 4000;
+
+/** Maximum preference diagnostics listed in one phase explanation before "and K more". */
+export const EXPLANATION_PREFERENCE_DIAGNOSTICS_CAP = 8;
 
 /** Stale when `now - asOf > STALENESS_AGE_MS`. */
 export const STALENESS_AGE_DAYS = 180;

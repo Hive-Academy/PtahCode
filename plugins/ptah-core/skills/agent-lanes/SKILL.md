@@ -57,6 +57,17 @@ the orchestrator may call `ptah_route_decide` as described at orchestration Gate
 `taskKind` and `routingSource` from its chosen row on `ptah_agent_spawn`; omit them when
 no routed row exists. If `ptah_route_decide` is not listed, skip it silently. `ptah_agent_spawn`
 rejects any key not listed here — pass only the documented parameters.
+Consume the rest of the chosen row too: the one-sentence `explanation`, `candidates[]`
+(every candidate `chosen`, `ranked` or `excluded` with a named rule, `user-rule:<id>`
+for a routing rule), the top-level `excluded` list, and `fallbackCause`
+(`deadline`, `model-cold`, `model-busy`, `question-cap` and others). A `fallbackCause`
+on a chosen row says why deterministic ranking, not the model, decided. Record
+`explanation` and `reason` with the decision.
+When the result exceeds the tool budget, compaction first keeps the chosen candidate and
+best available alternative per row. It can then drop the alternative and the chosen trace
+entry before shortening or dropping explanations. If needed, or if the route deadline
+expires during compaction, the result falls back to the legacy roster without explanations,
+candidate traces, or omission counts.
 When a `Routing:` system reminder is present, reuse its taskType, depth and executor
 suggestions; do not repeat host pre-flight routing. Gate 0.1 still applies.
 

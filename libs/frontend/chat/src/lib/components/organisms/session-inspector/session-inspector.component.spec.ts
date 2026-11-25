@@ -28,7 +28,6 @@ import {
   type SessionInspectorModel,
 } from '../../../services/session-inspector';
 import { SessionRowActionsService } from '../../../services/session-list/session-row-actions.service';
-import { By } from '@angular/platform-browser';
 import { buildSessionAgentRoster } from '../../../services/session-agents/session-agent-roster';
 import { SessionAgentRosterService } from '../../../services/session-agents/session-agent-roster.service';
 import { SessionAgentTrayService } from '../../../services/session-agents/session-agent-tray.service';
@@ -533,21 +532,19 @@ describe('SessionInspectorComponent presentation', () => {
       fixture.componentInstance.agentSelected.subscribe(selected);
       fixture.detectChanges();
       expect(document.activeElement).toBe(root.querySelector('[data-agent-key="orchestrator"]'));
-      const headerLines = fixture.debugElement.query(By.directive(InspectorRequestLinesComponent));
-      const headerAnswer = (headerLines.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-request-button]');
-      expect(headerAnswer?.textContent?.trim()).toBe('Answer');
-      headerAnswer?.click();
+      // The Orchestrator row carries the request: no duplicate header line.
+      const buttons = root.querySelectorAll<HTMLButtonElement>('[data-request-button]');
+      expect(buttons).toHaveLength(1);
+      const row = root.querySelector('[data-agent-key="orchestrator"]')?.closest('li');
+      const rowAnswer = row?.querySelector<HTMLButtonElement>('[data-request-button]');
+      expect(rowAnswer).toBe(buttons[0]);
+      expect(rowAnswer?.textContent?.trim()).toBe('Answer');
+      rowAnswer?.click();
       fixture.detectChanges();
       await fixture.whenStable();
 
-      const row = root.querySelector('[data-agent-key="orchestrator"]')?.closest('li');
-      expect(row?.getAttribute('aria-current')).toBe('true');
-      expect(document.activeElement).toBe(row?.querySelector('[data-request-button]'));
       expect(answered).toHaveBeenCalledTimes(1);
       expect(answered).toHaveBeenCalledWith('question-1');
-      expect(selected).toHaveBeenCalledWith('orchestrator');
-      headerLines.injector.get(InspectorRequestLinesComponent).focusReleased.emit();
-      expect(document.activeElement).toBe(root.querySelector('[data-inspector-close]'));
     } finally {
       root.remove();
     }

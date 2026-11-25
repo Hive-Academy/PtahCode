@@ -14,6 +14,18 @@ import type {
 } from './phase-plan';
 import { laneQuestion } from './phase-plan';
 
+/**
+ * Causes that skipped the model pass before any answer existed. They stay on
+ * an alternates-only row so the user sees why the model did not refine it.
+ */
+const SKIP_CAUSES: ReadonlySet<FallbackCause> = new Set<FallbackCause>([
+  'deadline',
+  'question-limit',
+  'question-cap',
+  'model-cold',
+  'model-busy',
+]);
+
 export function isSendable(plan: PhasePlan): boolean {
   return (
     plan.constraint.status === 'eligible' &&
@@ -36,9 +48,20 @@ export function resolvePhase(
   }
   const pick = rankingPick(plan);
   if (!isSendable(plan)) return rankingResolution(pick, 'ranking', null, null);
-  const alternatesOnly = laneQuestion(plan).primaryCount < MIN_OPTIONS_PER_PHASE;
-  const fallback = (cause: FallbackCause | null, proposal: ChosenResolution['proposal'] = null) =>
-    rankingResolution(pick, 'ranking', alternatesOnly ? null : cause, alternatesOnly ? null : proposal);
+  const alternatesOnly =
+    laneQuestion(plan).primaryCount < MIN_OPTIONS_PER_PHASE;
+  const suppressCause = (cause: FallbackCause | null): boolean =>
+    alternatesOnly && (cause === null || !SKIP_CAUSES.has(cause));
+  const fallback = (
+    cause: FallbackCause | null,
+    proposal: ChosenResolution['proposal'] = null,
+  ) =>
+    rankingResolution(
+      pick,
+      'ranking',
+      suppressCause(cause) ? null : cause,
+      suppressCause(cause) ? null : proposal,
+    );
   if (context.limited.has(plan.phaseId)) {
     return fallback('question-limit');
   }
@@ -49,6 +72,7 @@ export function resolvePhase(
     return fallback(null);
   }
   const outcome = context.outcome;
+  if (outcome.questionCap?.has(plan.phaseId)) return fallback('question-cap');
   if (!outcome.sent || outcome.requestCause !== null) {
     return fallback(outcome.requestCause);
   }
@@ -59,7 +83,10 @@ export function resolvePhase(
     validation.cause !== null ||
     validation.choice === null
   ) {
-    return fallback(validation?.cause ?? 'bad-output', validation?.proposal ?? null);
+    return fallback(
+      validation?.cause ?? 'bad-output',
+      validation?.proposal ?? null,
+    );
   }
   const options = outcome.offered.get(plan.phaseId) ?? [];
   const index = optionIndex(validation.choice);
@@ -71,9 +98,12 @@ export function resolvePhase(
   if (option === undefined || row === undefined) {
     return fallback('bad-output');
   }
-  const alternate = plan.alternates?.find((entry) =>
-    entry.option.laneId === option.laneId && entry.option.model === option.model,
+  const alternate = plan.alternates?.find(
+    (entry) =>
+      entry.option.laneId === option.laneId &&
+      entry.option.model === option.model,
   );
+  const modelRefined = row.candidate.id !== pick.id || alternate !== undefined;
   return {
     kind: 'chosen',
     source: 'model',
@@ -82,6 +112,7 @@ export function resolvePhase(
     cause: null,
     proposal: null,
     reported: validation.confidence,
+    modelRefined,
   };
 }
 

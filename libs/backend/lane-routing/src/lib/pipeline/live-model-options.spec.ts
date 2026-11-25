@@ -148,3 +148,29 @@ it('excludes the implementer lane from review after either model choice', () => 
     expect(review.ranked.map((entry) => entry.candidate.id)).toEqual(['grok']);
   }
 });
+
+it('scores alternate models with the lane preference boost and limit adjustment', () => {
+  const f = fixture(['codex', 'grok'], 68);
+  const preferredArgs: GateArgs = {
+    ...f.args,
+    preferences: { prefer: ['codex'] },
+  };
+  const preferredPlan = planRoutePhases(
+    preferredArgs.phases,
+    preferredArgs,
+    f.gathered,
+    f.gathered.rotation,
+    false,
+    [],
+    () => undefined,
+    false,
+  ).plans[0];
+  // codex lane-default: 70 + 5 (explore) + 12 (pref) = 87; codex-live-a: 68 + 5 + 12 = 85 (within 5 of 87).
+  // grok lane-default: 70 + 5 = 75 (outside 5 of 87).
+  const options = laneQuestion(preferredPlan).options;
+  expect(options.map((o) => `${o.laneId}:${o.model}:${o.score}`)).toEqual([
+    'codex:lane-default:87',
+    'codex:codex-live-b:87',
+    'codex:codex-live-a:85',
+  ]);
+});

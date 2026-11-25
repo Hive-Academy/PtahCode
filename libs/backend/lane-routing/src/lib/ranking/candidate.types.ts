@@ -15,6 +15,7 @@ import {
   type LaneFamilyInput,
   type LaneLimitState,
 } from '@ptah-extension/shared';
+import type { LimitEvidence } from '../contracts/route-decide-result.schema';
 
 export interface LaneCandidate {
   readonly kind: 'lane';
@@ -22,10 +23,12 @@ export interface LaneCandidate {
   readonly id: string;
   readonly cli: CliType;
   readonly ptahCliId?: string;
+  readonly displayName?: string;
   readonly family: string;
   readonly installed: boolean;
   readonly disabled: boolean;
   readonly limitState: LaneLimitState;
+  readonly limitEvidence?: LimitEvidence;
   /** Copied from the row. `0` means unranked and is preserved. */
   readonly preferredRank?: number;
 }
@@ -47,6 +50,18 @@ export interface ChildSessionCandidate {
 }
 
 export type RoutingCandidate = LaneCandidate | SubagentCandidate | ChildSessionCandidate;
+
+/** User-facing label used for preference matching and the candidate trace. */
+export function candidateDisplayName(candidate: RoutingCandidate): string {
+  switch (candidate.kind) {
+    case 'lane':
+      return candidate.displayName?.trim() || candidate.id;
+    case 'subagent':
+      return candidate.role?.trim() || candidate.phaseKind || candidate.id;
+    case 'child-session':
+      return candidate.kind;
+  }
+}
 
 /**
  * A system CLI lane has one default model and takes a per-call model id.
@@ -98,19 +113,23 @@ export function limitStateForCandidate(
 export function toLaneCandidate(
   row: CliDetectionResult,
   limits: ReadonlyMap<string, LaneLimitState> | null,
+  evidence?: ReadonlyMap<string, LimitEvidence> | null,
 ): LaneCandidate {
   const id = laneCandidateId(row);
+  const limitEvidence = evidence?.get(id);
   return {
     kind: 'lane',
     id,
     cli: row.cli,
+    displayName: row.ptahCliName?.trim() || id,
     ...(row.cli === 'ptah-cli' && row.ptahCliId
       ? { ptahCliId: row.ptahCliId }
       : {}),
     family: resolveLaneFamily(row),
     installed: row.installed,
     disabled: row.disabled === true,
-    limitState: limitStateForCandidate(id, limits),
+    limitState: limitEvidence?.state ?? limitStateForCandidate(id, limits),
+    ...(limitEvidence === undefined ? {} : { limitEvidence }),
     ...(typeof row.preferredRank === 'number'
       ? { preferredRank: row.preferredRank }
       : {}),

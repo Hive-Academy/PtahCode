@@ -10,7 +10,10 @@
  * Every other message is redacted before it is logged or returned.
  */
 import {
+  ROUTE_DEADLINE_MS,
   RouteDecideArgsSchema,
+  type CandidateTrace,
+  type GateResult,
   type RouteDecideResult,
 } from '@ptah-extension/lane-routing';
 import { countTokensPiecewise } from '@ptah-extension/tool-output-reducers';
@@ -92,6 +95,123 @@ function returnedWhole(text: string): boolean {
   return text.length <= chars && countTokensPiecewise(text, tokens) <= tokens;
 }
 
+type RosterEntry = GateResult['roster'][number];
+
+function shortlistTrace(row: RosterEntry): RosterEntry {
+  if (row.candidates === undefined) return row;
+  if (row.candidates.length === 0) return { ...row, candidates: undefined };
+  let chosen: CandidateTrace | undefined;
+  let alternative: CandidateTrace | undefined;
+  for (const candidate of row.candidates) {
+    if (candidate.disposition === 'chosen') {
+      chosen = candidate;
+    } else if (
+      (candidate.disposition === 'ranked' || candidate.rule === 'pruned') &&
+      (alternative === undefined || (candidate.total ?? -Infinity) > (alternative.total ?? -Infinity))
+    ) {
+      alternative = candidate;
+    }
+  }
+  const candidates = [chosen, alternative].filter((entry) => entry !== undefined);
+  const omitted = row.candidates.length - candidates.length;
+  return omitted === 0 ? row : {
+    ...row,
+    candidates: candidates.length > 0 ? candidates : undefined,
+    traceOmitted: (row.traceOmitted ?? 0) + omitted,
+  };
+}
+
+function shortenExplanation(text: string | undefined, maxChars: number): string | undefined {
+  if (text === undefined || text.length <= maxChars) return text;
+  const end = maxChars - 1;
+  const last = text.charCodeAt(end - 1);
+  const splitsPair = last >= 0xD800 && last <= 0xDBFF;
+  return `${text.slice(0, splitsPair ? end - 1 : end)}…`;
+}
+
+function tryRoster(result: GateResult, roster: GateResult['roster']): string | null {
+  const text = JSON.stringify({ ...result, roster });
+  return returnedWhole(text) ? text : null;
+}
+
+function compactRouteResult(
+  result: RouteDecideResult,
+  deadlineAtMs: number,
+  now: () => number,
+): string | null {
+  const expired = (): boolean => now() >= deadlineAtMs;
+  if (result.stage !== 'gate-0.1') {
+    const text = JSON.stringify(result);
+    return returnedWhole(text) ? text : null;
+  }
+  const legacy = (): string | null => tryRoster(result, result.roster.map((row) => ({
+    ...row, candidates: undefined, explanation: undefined, traceOmitted: undefined,
+  })));
+
+  const full = JSON.stringify(result);
+  // A full result that already fits costs nothing more to return, even past the deadline.
+  if (returnedWhole(full)) return full;
+  const hasTrace = result.roster.some((row) =>
+    row.candidates !== undefined || row.traceOmitted !== undefined || row.explanation !== undefined,
+  );
+  if (!hasTrace) return null;
+  if (expired()) return legacy();
+
+  const roster = result.roster.map(shortlistTrace);
+  if (expired()) return legacy();
+  const shortlisted = tryRoster(result, roster);
+  if (expired()) return legacy();
+  if (shortlisted !== null) return shortlisted;
+
+  // Visit each row once per round, largest serialized trace first. Check in
+  // batches to bound repeat serialization and tokenization across 100 phases.
+  const maxChecksPerRound = 4;
+  for (let round = 0; round < 2; round++) {
+    const largest: { index: number; size: number }[] = [];
+    for (const [index, row] of roster.entries()) {
+      if (expired()) return legacy();
+      if (row.candidates?.length) {
+        largest.push({ index, size: JSON.stringify(row.candidates).length });
+      }
+    }
+    largest.sort((a, b) => b.size - a.size);
+    const batchSize = Math.ceil(largest.length / maxChecksPerRound);
+    for (const [position, { index }] of largest.entries()) {
+      const row = roster[index];
+      const remaining = row.candidates?.slice(0, -1);
+      roster[index] = {
+        ...row,
+        candidates: remaining?.length ? remaining : undefined,
+        traceOmitted: (row.traceOmitted ?? 0) + 1,
+      };
+      if ((position + 1) % batchSize === 0 || position + 1 === largest.length) {
+        if (expired()) return legacy();
+        const compacted = tryRoster(result, roster);
+        if (expired()) return legacy();
+        if (compacted !== null) return compacted;
+      }
+    }
+  }
+
+  if (expired()) return legacy();
+  const maxExplanationChars = 96;
+  const shortened = tryRoster(result, roster.map((row) => ({
+    ...row,
+    explanation: shortenExplanation(row.explanation, maxExplanationChars),
+  })));
+  if (expired()) return legacy();
+  if (shortened !== null) return shortened;
+
+  const countsOnly = tryRoster(result, roster.map((row) => ({
+    ...row, candidates: undefined, explanation: undefined,
+  })));
+  if (expired()) return legacy();
+  if (countsOnly !== null) return countsOnly;
+
+  // The legacy payload gets the entire budget when even omission counts overflow.
+  return legacy();
+}
+
 function invalidArguments(error: ZodError): RouteToolReply {
   return {
     isError: true,
@@ -110,16 +230,17 @@ export async function handleRouteToolCall(
   route: RouteNamespace,
   logger: RouteToolLogger,
   context?: { readonly sessionKey?: string },
+  now: () => number = () => performance.now(),
 ): Promise<RouteToolReply> {
+  const enteredAt = now();
   const parsed = RouteDecideArgsSchema.safeParse(args);
   if (!parsed.success) return invalidArguments(parsed.error);
 
   try {
-    const result: RouteDecideResult = context
-      ? await route.decide(parsed.data, context)
-      : await route.decide(parsed.data);
-    const text = JSON.stringify(result);
-    if (!returnedWhole(text)) {
+    const deadlineAtMs = enteredAt + ROUTE_DEADLINE_MS[parsed.data.stage];
+    const result = await route.decide(parsed.data, { ...context, deadlineAtMs });
+    const text = compactRouteResult(result, deadlineAtMs, now);
+    if (text === null) {
       const { chars, tokens } = ROUTE_DECIDE_RESULT_BUDGET;
       return {
         isError: true,

@@ -138,11 +138,18 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   // Per-request timeout of a System One decision-model call, in ms
   // (`DECISION_MODEL_TIMEOUT_SETTING_KEY`); clamped by lane-routing on read.
   'agentOrchestration.decisionModelTimeoutMs',
+  // Optional positive prefill rate (tokens/sec) for decision-model cost gating.
+  // No default: absent means measure via EWMA in lane-routing. Joins ROUTING_KEYS.
+  'agentOrchestration.decisionModelPrefillTokensPerSecond',
   'agentOrchestration.windowsJobs',
   'agentOrchestration.hostRouting',
   // Lane rotation inside the closeness band. Default true keeps today's
   // cyclic pick. A flip joins ROUTING_KEYS so a cached routing notice refreshes.
   'agentOrchestration.laneRotation',
+  // Ordered user routing rules (default []). Kept whole in
+  // FILE_BASED_OBJECT_SETTINGS_KEYS so malformed object-shaped values reach the
+  // router intact for diagnosis. Joins ROUTING_KEYS.
+  'agentOrchestration.routingRules',
   // Compaction threshold and budgets are file-based for Electron.
   'compaction.threshold',
   'compaction.toolOutputBudgetTokens',
@@ -326,6 +333,9 @@ export const FILE_BASED_OBJECT_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'agentOrchestration.cliLaneDefaults',
   // `DecisionModelSelection` (TASK_2026_646_136a), e.g. `{ kind, model }`.
   'agentOrchestration.decisionModel',
+  // Expects an array of rule objects; listing it here also keeps an invalid
+  // plain-object value whole so the router can validate and report it.
+  'agentOrchestration.routingRules',
 ]);
 
 /**
@@ -378,10 +388,13 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   'agentOrchestration.decisionModel': null,
   // `null`: the built-in per-locality decision request timeout applies.
   'agentOrchestration.decisionModelTimeoutMs': null,
+  // `agentOrchestration.decisionModelPrefillTokensPerSecond` deliberately has
+  // no default entry: absent (`undefined`) means "measure".
   'agentOrchestration.windowsJobs': false,
   'agentOrchestration.hostRouting': true,
   // Missing or non-boolean reads stay "on" in the routing reader (R1).
   'agentOrchestration.laneRotation': true,
+  'agentOrchestration.routingRules': [],
   // Compaction budgets: see ADVANCED_SETTINGS_DEFAULTS.
   // Preserve old reader defaults until every host has run agentBudgetV1.
   'compaction.subagentHandoffTokens': 150_000,
