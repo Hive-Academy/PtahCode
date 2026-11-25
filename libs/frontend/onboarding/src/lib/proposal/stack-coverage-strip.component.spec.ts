@@ -270,36 +270,36 @@ describe('StackCoverageStripComponent', () => {
       expect(observe).toHaveBeenCalledTimes(1);
       expect(observe).toHaveBeenCalledWith(chipRow);
 
-      // Simulate responsive flex-wrap geometry at the prototype level so newly rendered
-      // chip nodes report exact row/column coordinates during afterNextRender measurement.
+      // Lay out the current buttons in DOM order, including the overflow control.
       let rowWidth = 340;
-      let perLine = 3;
+      const gap = 8;
+      chipRow.style.columnGap = `${gap}px`;
       const rectSpy = jest
         .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
         .mockImplementation(function (this: HTMLElement): DOMRect {
           if (this === chipRow) {
             return makeRect(0, 0, rowWidth, 108);
           }
-          if (this.hasAttribute('data-strip-all')) {
-            return makeRect(0, 0, 80, 28);
-          }
-          if (this.hasAttribute('data-strip-chip')) {
-            const chips = Array.from(
-              chipRow.querySelectorAll<HTMLElement>('[data-strip-chip]'),
-            );
-            const index = chips.indexOf(this);
-            if (index >= 0) {
-              const line = Math.floor((index + 1) / perLine);
-              const col = (index + 1) % perLine;
-              return makeRect(line * 36, col * 100, 90, 28);
+          let top = 0;
+          let left = 0;
+          for (const button of chipRow.querySelectorAll<HTMLElement>('button')) {
+            const width = button.hasAttribute('data-strip-all')
+              ? 80
+              : button.hasAttribute('data-strip-show-more')
+                ? 146
+                : 90;
+            if (left > 0 && left + width > rowWidth) {
+              top += 36;
+              left = 0;
             }
+            if (button === this) return makeRect(top, left, width, 28);
+            left += width + gap;
           }
           return makeRect(0, 0, 0, 0);
         });
 
-      const triggerResize = (width: number, cols: number): void => {
+      const triggerResize = (width: number): void => {
         rowWidth = width;
-        perLine = cols;
         observerCallback?.(
           [
             {
@@ -315,31 +315,33 @@ describe('StackCoverageStripComponent', () => {
       };
 
       try {
-        triggerResize(340, 3);
+        const showMore = () =>
+          root.querySelector<HTMLButtonElement>('[data-strip-show-more]');
 
-        // Line 1: All + Item 0, Item 1; Line 2: Item 2, Item 3 (Item 4 ends at x=290 so
-        // reserving room for "Show N more" (290 + 8 + 112 > 340) trims line 2 to 4 visible chips).
-        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(4);
-        const showMore = root.querySelector<HTMLButtonElement>(
-          '[data-strip-show-more]',
-        );
-        expect(showMore?.textContent).toContain('Show 3 more');
+        triggerResize(340);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(3);
+        expect(showMore()?.textContent).toContain('Show 4 more');
+        expect(showMore()?.getBoundingClientRect().top).toBe(36);
 
-        // Resize wider: 5 per line -> all 7 chips fit on 2 lines
-        triggerResize(900, 5);
+        // All skills takes line one. Show more needs line two to itself.
+        triggerResize(150);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(0);
+        expect(showMore()?.textContent).toContain('Show 7 more');
+        expect(showMore()?.getBoundingClientRect().top).toBe(36);
+
+        triggerResize(900);
         expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(7);
-        expect(root.querySelector('[data-strip-show-more]')).toBeNull();
+        expect(showMore()).toBeNull();
 
-        // Resize narrow again -> back to 4 visible, click "Show 3 more" -> focuses Item 4 (first newly shown!)
-        triggerResize(340, 3);
-        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(4);
-        root.querySelector<HTMLButtonElement>('[data-strip-show-more]')?.click();
+        triggerResize(340);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(3);
+        showMore()?.click();
         fixture.detectChanges();
         TestBed.tick();
 
         expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(7);
         expect(document.activeElement?.getAttribute('aria-label')).toContain(
-          'Item 4',
+          'Item 3',
         );
 
         fixture.destroy();

@@ -188,6 +188,11 @@ export class StackSkillReviewComponent {
     (this.store()?.residualCandidates() ?? []).map((entry) => ({
       ...entry,
       coveredItems: [...entry.itemNames],
+      reason: entry.rejections.length
+        ? entry.rejections
+            .map(({ itemName, reason }) => `Rejected for ${itemName}. ${reason}`)
+            .join(' · ')
+        : 'No verdict',
     })),
   );
   protected readonly judgedUnmatchedItems = computed(() => {

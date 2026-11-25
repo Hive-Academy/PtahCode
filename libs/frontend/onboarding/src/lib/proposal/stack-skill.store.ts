@@ -24,7 +24,6 @@ import {
   cloneSkillJudgeResult,
   computeHiddenPoolCandidateCount,
   computeJudgeResidualCandidates,
-  defaultCreatedSkillPath,
   freezeModelPair,
   itemMatchesVerdictFilter,
   skillSelectionKey,
@@ -33,6 +32,7 @@ import {
   type JudgeItemCandidateView,
   type JudgeItemRowView,
   type OpenSkillDraft,
+  type RecommendationApplyResult,
   type ResidualCandidateView,
   type SkillDraftGenerationError,
   type SkillDraftKind,
@@ -49,7 +49,6 @@ import type { SkillDraftMode } from './skill-draft-preview.component';
 export {
   buildManualDraftEvidenceBody,
   buildProposalFallbackEvidenceBody,
-  defaultCreatedSkillPath,
 };
 export type {
   DraftReplaceTrigger,
@@ -57,6 +56,7 @@ export type {
   JudgeItemCandidateView,
   JudgeItemRowView,
   OpenSkillDraft,
+  RecommendationApplyResult,
   ResidualCandidateView,
   SkillDraftGenerationError,
   SkillDraftKind,
@@ -416,6 +416,7 @@ export class StackSkillStore {
   >(() => {
     const judge = this.judge();
     if (!judge) return new Set();
+    // Deduplicate selectable cards globally. Each item row retains its own assessments.
     const shown = new Set<string>();
     for (const item of judge.items) {
       if (
@@ -567,7 +568,16 @@ export class StackSkillStore {
 
   public applyRecommendationResult(
     result: WizardRecommendAnalysisSkillsResult,
-  ): void {
+    options?: { discardDirtyDraft?: boolean },
+  ): RecommendationApplyResult {
+    const openDraft = this.openDraftState();
+    if (openDraft?.busy || openDraft?.previewLoading) {
+      return { status: 'busy' };
+    }
+    if (openDraft?.dirty && options?.discardDirtyDraft !== true) {
+      return { status: 'confirm-dirty' };
+    }
+
     if (this.analysisPairState() === null && result.analysisPair) {
       this.analysisPairState.set(freezeModelPair(result.analysisPair));
     }
@@ -592,14 +602,13 @@ export class StackSkillStore {
     this.previewState.set([]);
     this.approvedIdsState.set(new Set());
     if (this.stageState() === 'consent') this.stageState.set('review');
-    this.verdictFilterState.set('all');
-    this.activeItemIdState.set(null);
-    const openDraft = this.openDraftState();
-    if (openDraft && !openDraft.busy) {
+    this.resetFilters();
+    if (openDraft) {
       this.draftRevision++;
       this.previewRequestSeq++;
       this.openDraftState.set(null);
     }
+    return { status: 'ok' };
   }
 
   public setVerdictFilter(filter: SkillVerdictFilterValue): void { this.verdictFilterState.set(filter); }
@@ -1008,8 +1017,14 @@ export class StackSkillStore {
     if (!current || current.revision !== revision || !current.submitted) {
       return null;
     }
-    const resolvedPath =
-      skillPath?.trim() || defaultCreatedSkillPath(current.submitted.slug);
+    const resolvedPath = typeof skillPath === 'string' ? skillPath.trim() : '';
+    if (!resolvedPath) {
+      this.failCreateDraft(
+        revision,
+        'The host did not return a path for this skill. Check the destination before trying again.',
+      );
+      return null;
+    }
     const nextPaths = new Map(this.createdPathsByKeyState());
     nextPaths.set(current.key, resolvedPath);
     this.createdPathsByKeyState.set(nextPaths);

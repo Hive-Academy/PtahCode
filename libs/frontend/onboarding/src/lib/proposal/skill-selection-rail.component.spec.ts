@@ -93,7 +93,7 @@ describe('SkillSelectionRailComponent', () => {
       'You approve skills that contain scripts before the install.',
     );
   });
-  it('pins the footer outside the scrolling list and supports bar layout', () => {
+  it('pins the footer outside the scrolling list and lets bar users remove retained selections', () => {
     const { fixture, root } = setup(2);
     expect(
       root
@@ -104,8 +104,34 @@ describe('SkillSelectionRailComponent', () => {
       root.querySelector('footer')?.closest('.overflow-y-auto'),
     ).toBeNull();
     fixture.componentRef.setInput('layout', 'bar');
+    fixture.componentRef.setInput('selected', [
+      { key: 'registry:retained', name: 'Retained registry skill' },
+      { key: 'registry:other', name: 'Other selected skill' },
+    ]);
+    const removed = jest.fn();
+    fixture.componentInstance.removed.subscribe(removed);
     fixture.detectChanges();
-    expect(root.querySelector('ul')).toBeNull();
+    const disclosure = root.querySelector<HTMLButtonElement>(
+      'button[aria-expanded="false"][aria-controls]',
+    );
+    const selectedList = root.querySelector<HTMLElement>('[data-selected-list]');
+    expect(disclosure?.getAttribute('aria-controls')).toBe(selectedList?.id);
+    expect(selectedList?.hidden).toBe(true);
+
+    disclosure?.click();
+    fixture.detectChanges();
+    expect(disclosure?.getAttribute('aria-expanded')).toBe('true');
+    expect(selectedList?.hidden).toBe(false);
+    expect(selectedList?.querySelectorAll('li')).toHaveLength(2);
+    selectedList
+      ?.querySelector<HTMLButtonElement>('[aria-label="Remove Retained registry skill"]')
+      ?.click();
+    expect(removed).toHaveBeenCalledWith('registry:retained');
+
+    disclosure?.click();
+    fixture.detectChanges();
+    expect(disclosure?.getAttribute('aria-expanded')).toBe('false');
+    expect(selectedList?.hidden).toBe(true);
     expect(
       root.querySelector('ptah-form-actions')?.hasAttribute('data-sticky'),
     ).toBe(false);

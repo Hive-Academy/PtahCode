@@ -38,7 +38,7 @@ interface FilterButtonView {
 /**
  * Verdict filter of the judged skills step. Presentational: the store owns the
  * active value; this component renders options with counts and the F28
- * "N more candidates - Show all" line, which resets the filter to All.
+ * "N more candidates - Show all" action for the parent to clear both filters.
  */
 @Component({
   selector: 'ptah-skill-verdict-filter',
@@ -72,7 +72,7 @@ interface FilterButtonView {
         variant="link"
         size="xs"
         class="mt-[var(--ptah-gap-label)]"
-        (click)="select('all')"
+        (click)="showAllRequested.emit()"
       >
         {{ hiddenText }} - Show all
       </button>
@@ -86,6 +86,7 @@ export class SkillVerdictFilterComponent {
   public readonly hiddenCandidateCount = input(0);
 
   public readonly filterChange = output<SkillVerdictFilterValue>();
+  public readonly showAllRequested = output<void>();
 
   protected readonly buttons = computed<readonly FilterButtonView[]>(() =>
     this.options().map((option) => ({

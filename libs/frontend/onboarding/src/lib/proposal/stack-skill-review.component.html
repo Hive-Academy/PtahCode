@@ -71,6 +71,7 @@
             [options]="reviewStore.verdictFilterOptions()"
             [hiddenCandidateCount]="reviewStore.hiddenPoolCandidateCount()"
             (filterChange)="reviewStore.setVerdictFilter($event)"
+            (showAllRequested)="reviewStore.resetFilters()"
           />
         }
       }
@@ -248,6 +249,15 @@
                             </li>
                           }
                         </ul>
+                      }
+                    } @else {
+                      @for (entry of row.candidates; track entry.candidate.candidateId) {
+                        @if (entry.rejection; as rejection) {
+                          <p class="text-sm text-base-content-muted">
+                            {{ entry.candidate.skill.name }} rejected for {{ row.item.name }}.
+                            {{ rejection.reason }}
+                          </p>
+                        }
                       }
                     }
                     @if (row.verdict === 'not-judged' || row.installOutcomes.length) {

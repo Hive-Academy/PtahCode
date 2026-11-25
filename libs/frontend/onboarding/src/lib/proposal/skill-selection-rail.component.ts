@@ -8,6 +8,7 @@ import {
   computed,
   input,
   output,
+  signal,
 } from '@angular/core';
 import {
   PtahButtonDirective,
@@ -98,6 +99,8 @@ export class SkillSelectionRailComponent {
   private readonly instanceId = nextRailId++;
   protected readonly helperId = `skill-selection-helper-${this.instanceId}`;
   protected readonly installBlockedId = `skill-selection-blocked-${this.instanceId}`;
+  protected readonly selectedListId = `skill-selection-list-${this.instanceId}`;
+  protected readonly selectedListOpen = signal(false);
   protected readonly normalizedInstallBlockedReason = computed(() => {
     const reason = this.installBlockedReason()?.trim() ?? '';
     return reason.length > 0 ? reason : null;
@@ -114,6 +117,9 @@ export class SkillSelectionRailComponent {
     }
     return this.loading() ? null : this.helperId;
   });
+  protected toggleSelectedList(): void {
+    this.selectedListOpen.update((open) => !open);
+  }
   protected onPrimaryClick(): void {
     if (this.primaryDisabled()) {
       return;

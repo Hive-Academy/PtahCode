@@ -92,7 +92,7 @@ function setup(result: SkillJudgeResult | null = judge) {
   const fixture = TestBed.createComponent(StackSkillReviewComponent);
   const store = TestBed.inject(StackSkillStore);
   if (result) {
-    store.applyRecommendationResult({
+    const applied = store.applyRecommendationResult({
       judge: result,
       skills: [],
       analysisPair: pair,
@@ -101,6 +101,7 @@ function setup(result: SkillJudgeResult | null = judge) {
       searchFailures: [],
       summarySource: 'structured',
     });
+    if (applied.status !== 'ok') throw new Error('Expected the initial recommendation to apply');
     fixture.componentRef.setInput('store', store);
   }
   fixture.componentRef.setInput('runId', 'analysis-run');
@@ -179,6 +180,94 @@ describe('StackSkillReviewComponent judged review', () => {
     fixture.detectChanges();
     expect(store.verdictFilter()).toBe('all');
     expect(root.querySelector('ul[aria-label="Other candidates"]')).not.toBeNull();
+  });
+
+  it('clears both active filters when showing all counted candidates', () => {
+    const second = candidate('rxjs-patterns');
+    const { fixture, root, store } = setup({
+      ...judge,
+      items: [
+        judge.items[0],
+        item('RxJS', {
+          registry: 'matched',
+          candidateIds: [second.candidateId],
+          outcomes: [{
+            verdict: 'install',
+            candidateId: second.candidateId,
+            reason: 'Covers reactive streams',
+            stage: 'decision',
+          }],
+          judgedBy: 'decision',
+        }),
+      ],
+      candidates: [recommended, rejected, second],
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      proposals: [],
+    });
+    const angularChip = root.querySelector<HTMLButtonElement>(
+      '[data-strip-chip][aria-label^="Angular"]',
+    );
+    if (!angularChip) throw new Error('Expected an Angular stack filter');
+    angularChip.click();
+    button(root, 'Install (').click();
+    fixture.detectChanges();
+    const installCards = () => root.querySelector('[aria-label="Install skills"]');
+    expect(store.activeItemId()).toBe('angular');
+    expect(store.verdictFilter()).toBe('install');
+    expect(installCards()?.textContent).toContain('angular-patterns');
+    expect(installCards()?.textContent).not.toContain('rxjs-patterns');
+    expect(root.querySelector('[aria-label="Other candidates"]')).toBeNull();
+
+    button(root, '2 more candidates - Show all').click();
+    fixture.detectChanges();
+    expect(store.activeItemId()).toBeNull();
+    expect(store.verdictFilter()).toBe('all');
+    expect(installCards()?.textContent).toContain('rxjs-patterns');
+    expect(root.querySelector('[aria-label="Other candidates"]')?.textContent)
+      .toContain('angular-v1');
+    expect(root.textContent).not.toContain('more candidates - Show all');
+  });
+
+  it('keeps Install and rejection reasons per item when candidates are shared', () => {
+    const { fixture, root } = setup({
+      ...judge,
+      items: [
+        judge.items[0],
+        item('Forms', {
+          registry: 'matched',
+          candidateIds: [recommended.candidateId, rejected.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: recommended.candidateId,
+              eligible: false,
+              rejection: { reason: 'Does not cover form validation', stage: 'decision' },
+            },
+            {
+              candidateId: rejected.candidateId,
+              eligible: false,
+              rejection: { reason: 'Requires template-driven forms', stage: 'decision' },
+            },
+          ],
+          outcomes: [{ verdict: 'no-skill', reason: 'No extra guidance needed', stage: 'decision' }],
+          judgedBy: 'decision',
+        }),
+      ],
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      proposals: [],
+    });
+    const install = root.querySelector('[aria-label="Install skills"]');
+    expect(install?.textContent).toContain('Matches the signal-based application');
+    const itemRows = root.querySelector('[aria-labelledby="stack-skill-items-title"]');
+    expect(itemRows?.textContent)
+      .toMatch(/angular-patterns rejected for Forms\.\s+Does not cover form validation/);
+
+    const other = root.querySelector('[aria-label="Other candidates"]');
+    if (!other) throw new Error('Expected residual candidates');
+    other.closest('details')?.setAttribute('open', '');
+    button(other, 'More').click();
+    fixture.detectChanges();
+    expect(other.textContent).toContain('Rejected for Angular. Uses obsolete Angular APIs');
+    expect(other.textContent).toContain('Rejected for Forms. Requires template-driven forms');
   });
 
   it('keeps judge-rejected candidates reachable with a reason and canonical selection', () => {

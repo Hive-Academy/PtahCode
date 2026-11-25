@@ -129,7 +129,7 @@ function makeJudgeFixture(
   const items: SkillJudgeItem[] = [
     {
       itemId: 'framework:angular',
-      item: angular,
+      item: { ...angular },
       registry: 'matched',
       candidateIds: ['acme/repo/one', 'acme/repo/legacy-ng', 'other/org/generic-js'],
       candidateAssessments: [
@@ -491,7 +491,7 @@ describe('StackSkillStore', () => {
     const judge = makeJudgeFixture();
     const first = makeRecommendResult(judge, pair);
 
-    store.applyRecommendationResult(first);
+    expect(store.applyRecommendationResult(first)).toEqual({ status: 'ok' });
 
     // Mutate caller inputs after applying
     pair.model = 'mutated-model';
@@ -515,13 +515,67 @@ describe('StackSkillStore', () => {
       makeJudgeFixture({ method: 'none' }),
       { provider: 'openai', model: 'gpt-4.1' },
     );
-    store.applyRecommendationResult(rerun);
+    expect(store.applyRecommendationResult(rerun)).toEqual({ status: 'ok' });
     expect(store.analysisPair()).toEqual({
       provider: 'anthropic',
       model: 'claude-opus-4',
     });
     // method === 'none' pre-selects nothing (TD 4.2)
     expect(store.selectedCandidateIds().size).toBe(0);
+  });
+
+  it('keeps the current recommendation and dirty draft until discard is confirmed', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+    store.openManualDraft('library:tailwind');
+    store.updateDraftFields({ body: '# Keep these edits' });
+    store.setVerdictFilter('no-skill');
+    store.setActiveItemId('library:tailwind');
+    const draft = store.openDraft();
+    const judge = store.judge();
+    const recommendations = store.recommendations();
+    const selection = store.selectedCandidateIds();
+    const rerun = makeRecommendResult(makeJudgeFixture({ method: 'none' }));
+
+    expect(store.applyRecommendationResult(rerun)).toEqual({ status: 'confirm-dirty' });
+    expect(store.openDraft()).toBe(draft);
+    expect(store.judge()).toBe(judge);
+    expect(store.recommendations()).toBe(recommendations);
+    expect(store.selectedCandidateIds()).toBe(selection);
+    expect(store.verdictFilter()).toBe('no-skill');
+    expect(store.activeItemId()).toBe('library:tailwind');
+
+    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
+      .toEqual({ status: 'ok' });
+    expect(store.openDraft()).toBeNull();
+    expect(store.judge()?.method).toBe('none');
+    expect(store.verdictFilter()).toBe('all');
+    expect(store.activeItemId()).toBeNull();
+  });
+
+  it('rejects recommendation replacement during preview generation or Create', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+    const judge = store.judge();
+    const rerun = makeRecommendResult(makeJudgeFixture({ method: 'none' }));
+    const opened = store.openProposalDraft('prop-angular-app');
+    if (opened.status !== 'ok') throw new Error('Expected an open proposal draft');
+
+    expect(store.openDraft()?.previewLoading).toBe(true);
+    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
+      .toEqual({ status: 'busy' });
+    expect(store.judge()).toBe(judge);
+    expect(store.openDraft()).toBe(opened.draft);
+    expect(store.applyDraftPreviewError(opened.draft, 'Preview failed')).toBe(true);
+
+    store.updateDraftFields({ body: '# Keep these edits' });
+    const submission = store.beginCreateDraft();
+    if (!submission) throw new Error('Expected a draft Create submission');
+    const submittedDraft = store.openDraft();
+    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
+      .toEqual({ status: 'busy' });
+    expect(store.judge()).toBe(judge);
+    expect(store.openDraft()).toBe(submittedDraft);
+    expect(store.completeCreateDraft(submission.revision, '/workspace/SKILL.md'))
+      .toBe('/workspace/SKILL.md');
   });
 
   it('toggles repeated candidates under one canonical ID and drives unified R19 coverage across strip and rail', () => {
@@ -561,8 +615,13 @@ describe('StackSkillStore', () => {
     // Under 'all': acme/repo/one (install), acme/repo/legacy-ng (install outcome),
     // and community/skills/nx-monorepo (not-judged row) are shown; other/org/generic-js is residual.
     expect(store.showOtherCandidatesSection()).toBe(true);
-    expect(store.residualCandidates().map((r) => [r.candidate.candidateId, r.reason])).toEqual([
-      ['other/org/generic-js', 'Too generic for Angular'],
+    expect(store.residualCandidates()).toEqual([
+      expect.objectContaining({
+        candidate: expect.objectContaining({ candidateId: 'other/org/generic-js' }),
+        rejections: [
+          { itemId: 'framework:angular', itemName: 'Angular', reason: 'Too generic for Angular' },
+        ],
+      }),
     ]);
     expect(store.hiddenPoolCandidateCount()).toBe(0);
     expect(store.verdictFilterOptions()).toEqual([
@@ -779,14 +838,16 @@ describe('StackSkillStore', () => {
     expect(store.openDraft()?.submitted).toBeNull();
     expect(store.openDraft()?.createError).toBe('Disk write failed');
 
-    // Retry Create succeeds -> derives path from submitted snapshot, closes draft, blocks duplicate Create (F25), records C5 createdSkillSlugs
+    // A valid receipt closes the draft, blocks duplicate Create (F25), and records C5 createdSkillSlugs
     const secondSubmission = store.beginCreateDraft();
     expect(secondSubmission).not.toBeNull();
     if (!secondSubmission) return;
-    const createdPath = store.completeCreateDraft(secondSubmission.revision);
-    expect(createdPath).toBe(
-      '~/.ptah/plugins/ptah-harness-angular-app-guide/skills/angular-app-guide/SKILL.md',
+    const receiptPath = '/workspace/skills/angular-app-guide/SKILL.md';
+    const createdPath = store.completeCreateDraft(
+      secondSubmission.revision,
+      receiptPath,
     );
+    expect(createdPath).toBe(receiptPath);
     expect(store.openDraft()).toBeNull();
     expect(store.createdPathFor('proposal:prop-angular-app')).toBe(createdPath);
     expect(store.createdSkillSlugs()).toEqual(['angular-app-guide']);
@@ -800,6 +861,29 @@ describe('StackSkillStore', () => {
     expect(store.createdSkillSlugs()).toEqual([]);
     expect(store.judge()).toBeNull();
     expect(store.analysisPair()).toBeNull();
+  });
+
+  it.each([undefined, '   '])('keeps edits when the Create receipt path is %p', (path) => {
+    store.openBlankManualDraft();
+    const fields = {
+      name: 'edited-skill',
+      description: 'Edited description',
+      body: '# Edited skill',
+    };
+    store.updateDraftFields(fields);
+    const submission = store.beginCreateDraft();
+    if (!submission) throw new Error('Expected a draft Create submission');
+
+    expect(store.completeCreateDraft(submission.revision, path)).toBeNull();
+    expect(store.createdPathsByKey().size).toBe(0);
+    expect(store.createdSkillSlugs()).toEqual([]);
+    expect(store.openDraft()).toMatchObject({
+      ...fields,
+      dirty: true,
+      busy: false,
+      submitted: null,
+      createError: expect.stringContaining('did not return a path'),
+    });
   });
 
   it('preserves unjudged team-builder path compatibility', () => {

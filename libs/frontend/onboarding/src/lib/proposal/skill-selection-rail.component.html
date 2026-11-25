@@ -27,40 +27,56 @@
         ></progress>
       }
     </div>
+    @if (layout() === 'bar' && selected().length > 0) {
+      <button
+        ptahButton
+        type="button"
+        variant="ghost"
+        size="xs"
+        [attr.aria-controls]="selectedListId"
+        [attr.aria-expanded]="selectedListOpen()"
+        (click)="toggleSelectedList()"
+      >
+        {{ selectedListOpen() ? 'Hide selected skills' : 'Show selected skills' }}
+      </button>
+    }
   </div>
-  @if (responsive() || layout() === 'rail') {
-    <div data-selected-list class="min-h-0 flex-1 overflow-y-auto">
-      @if (loading()) {
-        <p role="status">Finding skills…</p>
-      } @else if (!selected().length) {
-        <p class="text-sm text-base-content-muted">No skills selected.</p>
+  <div
+    data-selected-list
+    class="min-h-0 flex-1 overflow-y-auto"
+    [id]="selectedListId"
+    [hidden]="layout() === 'bar' && (!selectedListOpen() || !selected().length)"
+  >
+    @if (loading()) {
+      <p role="status">Finding skills…</p>
+    } @else if (!selected().length) {
+      <p class="text-sm text-base-content-muted">No skills selected.</p>
+    }
+    <ul class="space-y-2">
+      @for (item of selected(); track item.key) {
+        <li class="flex min-w-0 items-center gap-2">
+          <span class="min-w-0 flex-1 truncate text-sm" [title]="item.name">{{
+            item.name
+          }}</span
+          ><button
+            ptahButton
+            type="button"
+            variant="ghost"
+            size="xs"
+            [disabled]="blocked()"
+            [attr.aria-label]="'Remove ' + item.name"
+            (click)="removed.emit(item.key)"
+          >
+            <lucide-icon
+              [img]="close"
+              class="size-ptah-icon-xs"
+              aria-hidden="true"
+            />
+          </button>
+        </li>
       }
-      <ul class="space-y-2">
-        @for (item of selected(); track item.key) {
-          <li class="flex min-w-0 items-center gap-2">
-            <span class="min-w-0 flex-1 truncate text-sm" [title]="item.name">{{
-              item.name
-            }}</span
-            ><button
-              ptahButton
-              type="button"
-              variant="ghost"
-              size="xs"
-              [disabled]="blocked()"
-              [attr.aria-label]="'Remove ' + item.name"
-              (click)="removed.emit(item.key)"
-            >
-              <lucide-icon
-                [img]="close"
-                class="size-ptah-icon-xs"
-                aria-hidden="true"
-              />
-            </button>
-          </li>
-        }
-      </ul>
-    </div>
-  }
+    </ul>
+  </div>
   <footer class="mt-auto shrink-0 space-y-2 border-t border-base-300 pt-3">
     <ptah-form-actions
       flush

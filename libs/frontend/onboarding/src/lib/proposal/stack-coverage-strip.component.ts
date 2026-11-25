@@ -28,7 +28,6 @@ import {
 const FALLBACK_MAX_CHIPS = 12;
 const FALLBACK_COLLAPSED_CHIPS = 11;
 const LINE_TOLERANCE_PX = 4;
-const DEFAULT_SHOW_MORE_WIDTH_PX = 112;
 
 @Component({
   selector: 'ptah-stack-coverage-strip',
@@ -145,20 +144,20 @@ export class StackCoverageStripComponent {
     this.observedElement = null;
   }
 
-  private scheduleMeasure(): void {
+  private scheduleMeasure(checkOverflow = false): void {
     const generation = ++this.measureGeneration;
     afterNextRender(
       () => {
         if (this.destroyRef.destroyed || generation !== this.measureGeneration) {
           return;
         }
-        this.measureTwoLines();
+        this.measureTwoLines(checkOverflow);
       },
       { injector: this.injector },
     );
   }
 
-  private measureTwoLines(): void {
+  private measureTwoLines(checkOverflow: boolean): void {
     if (this.expanded() || this.loading()) {
       this.measuringAllState.set(false);
       return;
@@ -225,51 +224,42 @@ export class StackCoverageStripComponent {
       }
     }
 
-    if (
-      fitCount === chipButtons.length &&
-      chipButtons.length < totalItems &&
-      !this.measuringAllState()
-    ) {
-      this.measuringAllState.set(true);
-      this.scheduleMeasure();
-      return;
-    }
-
-    if (fitCount >= totalItems) {
+    if (!checkOverflow) {
+      if (fitCount === chipButtons.length && fitCount < totalItems) {
+        this.measuringAllState.set(true);
+        this.scheduleMeasure();
+        return;
+      }
       this.measuringAllState.set(false);
-      this.measuredLimitState.set(totalItems);
+      this.measuredLimitState.set(fitCount);
+      if (fitCount < totalItems) {
+        // Render the actual overflow label before measuring the room it needs.
+        this.scheduleMeasure(true);
+      }
       return;
     }
 
-    if (rowRect.right > 0) {
-      const showMoreButton = row.querySelector<HTMLElement>(
-        '[data-strip-show-more]',
-      );
-      const measuredButtonWidth =
-        showMoreButton?.getBoundingClientRect().width ?? 0;
-      const showMoreWidth =
-        measuredButtonWidth > 0
-          ? measuredButtonWidth
-          : DEFAULT_SHOW_MORE_WIDTH_PX;
+    const showMoreRect = row
+      .querySelector<HTMLElement>('[data-strip-show-more]')
+      ?.getBoundingClientRect();
+    if (showMoreRect && resolveLineIndex(showMoreRect.top) >= 2) {
       const parsedGap = Number.parseFloat(getComputedStyle(row).columnGap);
-      const gapPx = Number.isFinite(parsedGap) ? parsedGap : 8;
-
-      while (fitCount > 1) {
-        const lastIndex = fitCount - 1;
-        if (chipLineIndices[lastIndex] === 0) break;
-        const lastRect = chipRects[lastIndex];
-        if (
-          lastRect.right <= 0 ||
-          lastRect.right + gapPx + showMoreWidth <= rowRect.right + 1
-        ) {
-          break;
-        }
+      const gapPx = Number.isFinite(parsedGap) ? parsedGap : 0;
+      // The control can always start the second line after a first-line chip.
+      while (
+        fitCount > 0 &&
+        chipLineIndices[fitCount - 1] === 1 &&
+        chipRects[fitCount - 1].right + gapPx + showMoreRect.width > rowRect.right
+      ) {
         fitCount--;
       }
     }
 
-    this.measuringAllState.set(false);
-    this.measuredLimitState.set(Math.max(1, fitCount));
+    if (fitCount < chipButtons.length) {
+      this.measuredLimitState.set(fitCount);
+      // Trimming changes the number in the label and can widen the control.
+      this.scheduleMeasure(true);
+    }
   }
 
   protected expand(): void {

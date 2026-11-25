@@ -69,6 +69,11 @@ export type DraftTransitionResult =
   | { readonly status: 'confirm-dirty'; readonly trigger: DraftReplaceTrigger }
   | { readonly status: 'already-created'; readonly path: string };
 
+export type RecommendationApplyResult =
+  | { readonly status: 'ok' }
+  | { readonly status: 'busy' }
+  | { readonly status: 'confirm-dirty' };
+
 export interface SkillVerdictCounts {
   readonly all: number;
   readonly install: number;
@@ -143,7 +148,11 @@ export interface JudgeItemRowView {
 
 export interface ResidualCandidateView {
   readonly candidate: SkillJudgeCandidate;
-  readonly reason: string;
+  readonly rejections: readonly {
+    readonly itemId: string;
+    readonly itemName: string;
+    readonly reason: string;
+  }[];
   readonly itemIds: readonly string[];
   readonly itemNames: readonly string[];
 }
@@ -456,10 +465,6 @@ export function buildProposalFallbackEvidenceBody(
   return `## Project evidence\n\n${lines.join('\n')}\n\n`;
 }
 
-export function defaultCreatedSkillPath(slug: string): string {
-  return `~/.ptah/plugins/ptah-harness-${slug}/skills/${slug}/SKILL.md`;
-}
-
 export function buildJudgeItemRows(
   judge: SkillJudgeResult,
   candidatesById: ReadonlyMap<string, SkillJudgeCandidate>,
@@ -570,7 +575,7 @@ export function computeJudgeResidualCandidates(
     if (normalizedDisplayed.has(cid)) continue;
     const itemIds: string[] = [];
     const itemNames: string[] = [];
-    let rejectionReason: string | null = null;
+    const rejections: ResidualCandidateView['rejections'][number][] = [];
     for (const item of judge.items) {
       const hasInPool = item.candidateIds.some(
         (id) => canonicalCandidateId(id) === cid,
@@ -582,13 +587,17 @@ export function computeJudgeResidualCandidates(
         itemIds.push(item.itemId);
         itemNames.push(item.item.name);
       }
-      if (!rejectionReason && assessment?.rejection?.reason) {
-        rejectionReason = assessment.rejection.reason;
+      if (assessment?.rejection) {
+        rejections.push({
+          itemId: item.itemId,
+          itemName: item.item.name,
+          reason: assessment.rejection.reason,
+        });
       }
     }
     residual.push({
       candidate,
-      reason: rejectionReason ?? 'No verdict',
+      rejections,
       itemIds,
       itemNames,
     });

@@ -64,17 +64,20 @@ describe('SkillVerdictFilterComponent', () => {
     expect(filterChange).toHaveBeenCalledWith('install');
   });
 
-  it('shows the F28 hidden-candidate count that resets the filter to All', () => {
+  it('requests all candidates through an action distinct from setting a verdict', () => {
     const { fixture, root } = setup('install', allOptions, 5);
     const filterChange = jest.fn();
+    const showAllRequested = jest.fn();
     fixture.componentInstance.filterChange.subscribe(filterChange);
+    fixture.componentInstance.showAllRequested.subscribe(showAllRequested);
     expect(root.textContent).toContain('5 more candidates - Show all');
 
     const showAll = Array.from(
       root.querySelectorAll<HTMLButtonElement>('button'),
     ).find((button) => button.textContent?.includes('Show all'));
     showAll?.click();
-    expect(filterChange).toHaveBeenCalledWith('all');
+    expect(showAllRequested).toHaveBeenCalledTimes(1);
+    expect(filterChange).not.toHaveBeenCalled();
   });
 
   it('pluralizes one hidden candidate and hides the F28 line under All or zero', () => {
