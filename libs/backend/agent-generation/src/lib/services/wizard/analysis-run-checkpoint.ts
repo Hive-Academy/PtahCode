@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { ulid } from 'ulid';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
+import type { ModelPair } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   AnalysisStorageService,
@@ -34,6 +35,15 @@ const pendingVerification = (): PhaseResultV4['verification'] => ({
   checkedAt: null,
 });
 
+const isResumableForPair = (
+  manifest: MultiPhaseManifestV4,
+  pair: ModelPair,
+): boolean =>
+  manifest.lifecycle !== 'completed' &&
+  manifest.analysisPair?.provider === pair.provider &&
+  manifest.analysisPair?.model === pair.model &&
+  manifest.model === pair.model;
+
 export class AnalysisRunCheckpoint {
   private readonly sessionStart = Date.now();
   private readonly baseDurationMs: number;
@@ -48,16 +58,24 @@ export class AnalysisRunCheckpoint {
     this.baseDurationMs = manifest.totalDurationMs;
   }
 
-  /** Open a run, pinning resume to the requested model because SDK sessions are model-specific. */
+  /**
+   * Open a run, pinning resume to the exact `(provider, model)` pair because
+   * SDK sessions and outputs are provider- and model-specific. Legacy
+   * pair-less unfinished checkpoints are incompatible and start fresh.
+   */
   static async open(
     storage: AnalysisStorageService,
     fs: IFileSystemProvider,
     logger: Logger,
     workspacePath: string,
     projectDescription: string,
-    model: string,
+    pair: ModelPair,
     resume: boolean,
   ): Promise<AnalysisRunCheckpoint> {
+    const analysisPair: ModelPair = {
+      provider: pair.provider,
+      model: pair.model,
+    };
     let fingerprint: MultiPhaseManifestV4['workspaceFingerprint'];
     try {
       fingerprint = await computeWorkspaceFingerprint(workspacePath, fs);
@@ -100,20 +118,17 @@ export class AnalysisRunCheckpoint {
     const fallback = resume ? await storage.readManifest(fallbackDir) : null;
     const primaryResumable =
       existing?.kind === 'current' &&
-      existing.manifest.lifecycle !== 'completed' &&
-      existing.manifest.model === model;
+      isResumableForPair(existing.manifest, analysisPair);
     const fallbackResumable =
       fallback?.kind === 'current' &&
-      fallback.manifest.lifecycle !== 'completed' &&
-      fallback.manifest.model === model;
+      isResumableForPair(fallback.manifest, analysisPair);
     const resumeDir =
       variant === 'primary' && primaryResumable ? slugDir : fallbackDir;
     const resumable = resumeDir === slugDir ? existing : fallback;
     if (
       resume &&
       resumable?.kind === 'current' &&
-      resumable.manifest.lifecycle !== 'completed' &&
-      resumable.manifest.model === model
+      isResumableForPair(resumable.manifest, analysisPair)
     ) {
       variant = resumeDir === slugDir ? 'primary' : 'legacy-fallback';
       const manifest = resumable.manifest;
@@ -162,7 +177,8 @@ export class AnalysisRunCheckpoint {
       analyzedAt: now,
       updatedAt: now,
       lifecycle: 'running',
-      model,
+      model: analysisPair.model,
+      analysisPair,
       totalDurationMs: 0,
       workspaceFingerprint: fingerprint,
       phases,
@@ -178,13 +194,15 @@ export class AnalysisRunCheckpoint {
     return checkpoint;
   }
 
-  /** Capture the inputs whose bytes must match before a completed phase is reused. */
+  /** Capture the inputs whose bytes and pair must match before a completed phase is reused. */
   input(promptSha256: string, priorPhaseSha256: string | null): PhaseInput {
+    const provider = this.manifest.analysisPair?.provider;
     return {
       workspaceSha256: this.manifest.workspaceFingerprint.digest,
       promptSha256,
       priorPhaseSha256,
       model: this.manifest.model,
+      ...(provider ? { provider } : {}),
     };
   }
 
@@ -205,6 +223,9 @@ export class AnalysisRunCheckpoint {
       phase.input?.workspaceSha256 === input.workspaceSha256 &&
       phase.input.promptSha256 === input.promptSha256 &&
       phase.input.priorPhaseSha256 === input.priorPhaseSha256 &&
+      typeof phase.input.provider === 'string' &&
+      phase.input.provider.length > 0 &&
+      phase.input.provider === input.provider &&
       phase.input.model === input.model &&
       phase.verification.status === 'verified' &&
       outputSha256 !== null &&

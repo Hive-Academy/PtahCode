@@ -453,6 +453,60 @@ describe('AnalysisStorageService', () => {
         false,
       );
     });
+
+    it('round-trips analysisPair and phase.input.provider and rejects secret/extra fields', async () => {
+      const manifest = manifestV4({
+        model: 'kimi-k2',
+        analysisPair: { provider: 'kimi-code', model: 'kimi-k2' },
+      });
+      for (const phase of Object.values(manifest.phases)) {
+        if (phase.input) {
+          phase.input = {
+            ...phase.input,
+            model: 'kimi-k2',
+            provider: 'kimi-code',
+          };
+        }
+      }
+
+      await service.writeManifest(slugDir, manifest);
+      const read = await service.readManifest(slugDir);
+      expect(read).toEqual({ kind: 'current', manifest });
+      expect(
+        read?.kind === 'current' ? read.manifest.analysisPair : undefined,
+      ).toEqual({ provider: 'kimi-code', model: 'kimi-k2' });
+
+      expect(
+        MultiPhaseManifestV4Schema.safeParse({
+          ...manifest,
+          auth: { env: { ANTHROPIC_API_KEY: 'secret' } },
+        }).success,
+      ).toBe(false);
+      expect(
+        MultiPhaseManifestV4Schema.safeParse({
+          ...manifest,
+          setupSnapshot: { providerId: 'kimi-code', model: 'kimi-k2' },
+        }).success,
+      ).toBe(false);
+      expect(
+        MultiPhaseManifestV4Schema.safeParse({
+          ...manifest,
+          analysisPair: { provider: '   ', model: 'kimi-k2' },
+        }).success,
+      ).toBe(false);
+    });
+
+    it('accepts legacy pair-less v4 manifests without mutating disk bytes', async () => {
+      const legacyV4 = manifestV4();
+      expect(legacyV4.analysisPair).toBeUndefined();
+      expect(legacyV4.phases['project-profile'].input?.provider).toBeUndefined();
+      const raw = JSON.stringify(legacyV4, null, 2);
+      await fs.writeFile(join(slugDir, 'manifest.json'), raw);
+
+      const read = await service.readManifest(slugDir);
+      expect(read).toEqual({ kind: 'current', manifest: legacyV4 });
+      expect(await fs.readFile(join(slugDir, 'manifest.json'))).toBe(raw);
+    });
   });
 
   describe('legacy archive', () => {
@@ -1041,6 +1095,84 @@ describe('AnalysisStorageService', () => {
     it('throws for a missing manifest', async () => {
       await expect(service.loadMultiPhase(WORKSPACE, 'nope')).rejects.toThrow(
         'Invalid or missing analysis manifest',
+      );
+    });
+
+    it('exposes analysisPair on toResponse, loadMultiPhase, and loadByRunId for v4 manifests with a recorded pair', async () => {
+      const slugDir = join(ANALYSIS_ROOT, 'with-pair');
+      const manifest = manifestV4({
+        runId: 'RUN-PAIR',
+        slug: 'with-pair',
+        model: 'claude-sonnet-4-5',
+        analysisPair: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+      });
+      await service.writeManifest(slugDir, manifest);
+      await service.writePhaseFile(slugDir, '01-project-profile.md', 'P1');
+
+      const loadedBySlug = await service.loadMultiPhase(WORKSPACE, 'with-pair');
+      const loadedById = await service.loadByRunId(WORKSPACE, 'RUN-PAIR');
+      const direct = service.toResponse(slugDir, manifest, {
+        'project-profile': 'P1',
+      });
+
+      expect(loadedBySlug.analysisPair).toEqual({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      });
+      expect(loadedById?.analysisPair).toEqual({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      });
+      expect(direct.analysisPair).toEqual({
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      });
+      // Returned pair is an isolated copy, not a mutable reference to manifest.
+      expect(direct.analysisPair).not.toBe(manifest.analysisPair);
+    });
+
+    it('exposes analysisPair: null for legacy pair-less v4 and v3 manifests without mutating completed records', async () => {
+      const legacyV4Dir = join(ANALYSIS_ROOT, 'legacy-v4');
+      const legacyV3Dir = join(ANALYSIS_ROOT, 'legacy-v3');
+      const v4 = manifestV4({
+        runId: 'RUN-LEGACY-V4',
+        slug: 'legacy-v4',
+        lifecycle: 'completed',
+      });
+      const v3 = manifestV3({
+        runId: 'RUN-LEGACY-V3',
+        slug: 'legacy-v3',
+        lifecycle: 'completed',
+      });
+      await service.writeManifest(legacyV4Dir, v4);
+      await service.writeManifest(legacyV3Dir, v3);
+      const v4BytesBefore = await fs.readFile(
+        join(legacyV4Dir, 'manifest.json'),
+      );
+      const v3BytesBefore = await fs.readFile(
+        join(legacyV3Dir, 'manifest.json'),
+      );
+
+      const loadedV4 = await service.loadMultiPhase(WORKSPACE, 'legacy-v4');
+      const loadedV4ById = await service.loadByRunId(
+        WORKSPACE,
+        'RUN-LEGACY-V4',
+      );
+      const loadedV3 = await service.loadMultiPhase(WORKSPACE, 'legacy-v3');
+      const loadedV3ById = await service.loadByRunId(
+        WORKSPACE,
+        'RUN-LEGACY-V3',
+      );
+
+      expect(loadedV4.analysisPair).toBeNull();
+      expect(loadedV4ById?.analysisPair).toBeNull();
+      expect(loadedV3.analysisPair).toBeNull();
+      expect(loadedV3ById?.analysisPair).toBeNull();
+      expect(await fs.readFile(join(legacyV4Dir, 'manifest.json'))).toBe(
+        v4BytesBefore,
+      );
+      expect(await fs.readFile(join(legacyV3Dir, 'manifest.json'))).toBe(
+        v3BytesBefore,
       );
     });
   });
