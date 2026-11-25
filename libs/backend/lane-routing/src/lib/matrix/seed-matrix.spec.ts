@@ -4,7 +4,7 @@ import {
   SUBAGENT_FAMILY,
   SYSTEM_CLI_TYPES,
 } from '@ptah-extension/shared';
-import { SEED_LABEL_SCORE, STALENESS_AGE_MS } from '../routing-constants';
+import { STALENESS_AGE_MS } from '../routing-constants';
 import {
   CapabilityMatrixSchema,
   MatrixCellSchema,
@@ -12,12 +12,14 @@ import {
 } from './matrix.schema';
 import { FAMILY_PROFILE_MODEL } from './matrix.types';
 import {
-  SEED_MATRIX_ROWS,
   SEED_NOTE,
   SEED_SOURCE_REF,
+  SEED_SOURCE_ROWS,
   buildSeedMatrix,
   isStale,
 } from './seed-matrix';
+import { SEED_ALIASES } from './seed-aliases';
+import { compileSeed } from './seed-source';
 
 const NOW = Date.parse('2026-10-15T00:00:00Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -43,6 +45,10 @@ const seedCell = {
   asOf: '2026-02-17',
   stale: true,
   note: SEED_NOTE,
+  sourceId: 'swe-bench-verified',
+  licenseId: 'NOASSERTION',
+  fetchedAt: '2026-10-14',
+  sourceRow: 'GLM-5 high',
 };
 
 function matrixWith(...profiles: unknown[]) {
@@ -72,36 +78,18 @@ describe('seed matrix', () => {
     }
   });
 
-  it('records source, asOf, note and a seed score on every implement value (Req 6.2)', () => {
-    const labelScores: number[] = Object.values(SEED_LABEL_SCORE);
-    const profiles = buildSeedMatrix(NOW).profiles;
-    profiles.forEach((profile, index) => {
-      const row = SEED_MATRIX_ROWS[index];
-      const cell = profile.cells.implement;
-      expect(cell.kind).toBe('value');
-      if (cell.kind !== 'value') return;
-      expect(cell.source).toBe('seed');
-      expect(cell.sourceRef).toBe(SEED_SOURCE_REF);
-      expect(cell.note).toBe(SEED_NOTE);
-      expect(cell.asOf).toBe(row.asOf);
-      expect(cell.score).toBe(SEED_LABEL_SCORE[row.label]);
-      expect(labelScores).toContain(cell.score);
-      expect(cell.sampleCount).toBeUndefined();
-    });
-  });
-
   // Model lists are live-only, so a row's model id is not checked against a
   // shipped list; only its lane family must exist.
   it('keys every profile by a lane family and a model id', () => {
     const systemClis: readonly string[] = SYSTEM_CLI_TYPES;
-    for (const row of SEED_MATRIX_ROWS) {
-      expect(row.model).not.toBe(FAMILY_PROFILE_MODEL);
+    for (const profile of buildSeedMatrix(NOW).profiles) {
+      expect(profile.model).not.toBe(FAMILY_PROFILE_MODEL);
       const knownFamily =
-        isProviderFamily(row.family) ||
-        systemClis.includes(row.family) ||
-        row.family === SUBAGENT_FAMILY;
-      expect({ family: row.family, knownFamily }).toEqual({
-        family: row.family,
+        isProviderFamily(profile.family) ||
+        systemClis.includes(profile.family) ||
+        profile.family === SUBAGENT_FAMILY;
+      expect({ family: profile.family, knownFamily }).toEqual({
+        family: profile.family,
         knownFamily: true,
       });
     }
@@ -113,7 +101,7 @@ describe('seed matrix', () => {
       if (cell.kind !== 'value') throw new Error('implement must be seeded');
       expect(cell.stale).toBe(true);
     }
-    const freshNow = Date.parse(SEED_MATRIX_ROWS[0].asOf) + DAY_MS;
+    const freshNow = Date.parse(SEED_SOURCE_ROWS[0].asOf) + DAY_MS;
     for (const profile of buildSeedMatrix(freshNow).profiles) {
       expect(profile.cells.implement).toMatchObject({ stale: false });
     }
@@ -124,6 +112,88 @@ describe('seed matrix', () => {
     const second = buildSeedMatrix(NOW);
     expect(second).toEqual(first);
     expect(second.profiles[0]).not.toBe(first.profiles[0]);
+  });
+});
+
+describe('shipped seed', () => {
+  it("keeps today's GLM-5 value with zero dropped rows", () => {
+    const result = compileSeed(SEED_SOURCE_ROWS, SEED_ALIASES, NOW);
+    expect(result.dropped).toEqual({ noAlias: 0, duplicate: 0, invalid: 0 });
+    expect(buildSeedMatrix(NOW)).toEqual(result.matrix);
+    expect(result.matrix.profiles).toContainEqual({
+      family: 'z-ai',
+      model: 'glm-5',
+      cells: { ...unknownCells, implement: seedCell },
+    });
+  });
+
+  it('exports aliases as data only', () => {
+    expect(Array.isArray(SEED_ALIASES)).toBe(true);
+  });
+});
+
+describe('compileSeed', () => {
+  const row = SEED_SOURCE_ROWS[0];
+  const alias = SEED_ALIASES[0];
+
+  it('drops a row with no exact alias match', () => {
+    const result = compileSeed(
+      [{ ...row, benchmarkModel: 'glm-5 high' }],
+      SEED_ALIASES,
+      NOW,
+    );
+    expect(result.dropped.noAlias).toBe(1);
+    expect(result.matrix.profiles).toHaveLength(0);
+  });
+
+  it('drops an invalid row', () => {
+    const result = compileSeed([{ ...row, licenseId: ' ' }], SEED_ALIASES, NOW);
+    expect(result.dropped.invalid).toBe(1);
+  });
+
+  it('keeps the first of two rows for the same key', () => {
+    const second = { ...row, value: { score: 10 } };
+    const result = compileSeed([row, second], SEED_ALIASES, NOW);
+    expect(result.dropped.duplicate).toBe(1);
+    expect(result.matrix.profiles[0].cells.implement).toMatchObject({
+      score: 80,
+    });
+  });
+
+  it('counts an occupied target while filling a new target from the same row', () => {
+    const second = { ...row, benchmarkModel: 'another model', value: { score: 55 } };
+    const targets = [alias.targets[0], { ...alias.targets[0], effort: 'high' }];
+    const result = compileSeed(
+      [row, second],
+      [alias, { ...alias, benchmarkModel: second.benchmarkModel, targets }],
+      NOW,
+    );
+    expect(result.dropped).toEqual({ noAlias: 0, duplicate: 1, invalid: 0 });
+    expect(result.matrix.profiles).toMatchObject([
+      { cells: { implement: { score: 80 } } },
+      { effort: 'high', cells: { implement: { score: 55 } } },
+    ]);
+  });
+
+  it('fills one kind per row and keeps effort buckets apart', () => {
+    const aliases = [
+      {
+        ...alias,
+        targets: [{ ...alias.targets[0], effort: 'high' }, ...alias.targets],
+      },
+    ];
+    const result = compileSeed(
+      [row, { ...row, taskKind: 'review', value: { score: 55 } }],
+      aliases,
+      NOW,
+    );
+    expect(result.dropped).toEqual({ noAlias: 0, duplicate: 0, invalid: 0 });
+    expect(result.matrix.profiles).toHaveLength(2);
+    expect(CapabilityMatrixSchema.safeParse(result.matrix).success).toBe(true);
+    for (const profile of result.matrix.profiles) {
+      expect(profile.cells.review).toMatchObject({ score: 55 });
+      expect(profile.cells.plan).toEqual({ kind: 'unknown' });
+    }
   });
 });
 
@@ -233,6 +303,16 @@ describe('matrix schema', () => {
     expect(result.success).toBe(true);
   });
 
+  it('keeps profiles with different effort apart', () => {
+    const base = { family: 'z-ai', model: 'glm-5', cells: unknownCells };
+    const result = CapabilityMatrixSchema.safeParse(
+      matrixWith(base, { ...base, effort: 'high' }, { ...base, effort: 'high' }),
+    );
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toHaveLength(1);
+    expect(result.error?.issues[0]?.path).toEqual(['profiles', 2, 'model']);
+  });
+
   it('rejects a blank family or model', () => {
     expect(
       CapabilityMatrixSchema.safeParse(
@@ -258,6 +338,14 @@ describe('matrix schema', () => {
     ['a negative score', { ...seedCell, score: -1 }],
     ['a seed value without a source', { ...seedCell, sourceRef: undefined }],
     ['a seed value without a note', { ...seedCell, note: undefined }],
+    ['a seed value without a source id', { ...seedCell, sourceId: undefined }],
+    ['a seed value without a license', { ...seedCell, licenseId: undefined }],
+    ['a seed value without fetchedAt', { ...seedCell, fetchedAt: undefined }],
+    ['a seed value without a source row', { ...seedCell, sourceRow: undefined }],
+    [
+      'a user value with a seed-only field',
+      { ...seedCell, source: 'user' },
+    ],
     ['a seed value with a sample count', { ...seedCell, sampleCount: 9 }],
     [
       'a user value with a sample count',

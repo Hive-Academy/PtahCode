@@ -1,9 +1,10 @@
 import type { OutcomeTaskKind } from '@ptah-extension/shared';
+import type { ModelEffort } from '../contracts/route-decide-result.schema';
 
 /**
  * Capability matrix (part A §3, Requirement 6).
  *
- * One profile per lane family and model. A profile whose model is
+ * One profile per lane family, model and effort bucket. A profile whose model is
  * `FAMILY_PROFILE_MODEL` is the family-level profile, used when the chosen
  * model is `lane-default`, an automatic entry, or a model with no profile of
  * its own (Requirement 11.3). Every profile holds one cell per task kind.
@@ -50,6 +51,14 @@ export interface ValueMatrixCell {
   readonly note?: string;
   /** Verified runs behind a `local` value; only `local` cells carry it. */
   readonly sampleCount?: number;
+  /** Stable id of the benchmark source, e.g. `swe-bench-verified`. Seed only. */
+  readonly sourceId?: string;
+  /** SPDX id of the source data license, or `NOASSERTION` when not verified. Seed only. */
+  readonly licenseId?: string;
+  /** When the row was read from the source (ISO date or date-time). Seed only. */
+  readonly fetchedAt?: string;
+  /** Row reference inside the source, as the board names it. Seed only. */
+  readonly sourceRow?: string;
 }
 
 export type MatrixCell = UnknownMatrixCell | ValueMatrixCell;
@@ -65,6 +74,8 @@ export interface MatrixProfileKey {
 }
 
 export interface MatrixProfile extends MatrixProfileKey {
+  /** Absent means the effort bucket `*`. */
+  readonly effort?: ModelEffort;
   readonly cells: MatrixCells;
 }
 
