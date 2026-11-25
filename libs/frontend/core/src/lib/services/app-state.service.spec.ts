@@ -553,6 +553,32 @@ describe('AppStateManager', () => {
       expect(service.currentView()).toBe('chat');
       expect(service.consumePendingSettingsTab()).toBeNull();
     });
+
+    it('keeps a setup deep link as a pending Settings request', () => {
+      // The analyze page's Setup recovery actions (plan 3.7, R13/F27)
+      // deep-link the Setup row of "Background models" through the same
+      // pending-tab request as every other section.
+      const service = createService();
+
+      service.requestSettingsTab({ tab: 'providers', section: 'setup' });
+
+      expect(service.consumePendingSettingsTab()).toEqual({
+        tab: 'providers',
+        section: 'setup',
+      });
+      expect(service.consumePendingSettingsTab()).toBeNull();
+    });
+
+    it('keeps an existing section deep link unchanged', () => {
+      const service = createService();
+
+      service.requestSettingsTab({ tab: 'providers', section: 'enhancement' });
+
+      expect(service.consumePendingSettingsTab()).toEqual({
+        tab: 'providers',
+        section: 'enhancement',
+      });
+    });
   });
 
   describe('handleMessage (SWITCH_VIEW)', () => {

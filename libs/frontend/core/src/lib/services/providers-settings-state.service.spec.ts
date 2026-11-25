@@ -9,6 +9,7 @@ import type {
   ConfigGetScopesResult,
   RpcMethodName,
   ScopedSettingEntry,
+  SetupPairState,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService, RpcResult } from './claude-rpc.service';
 import { ModelStateService } from './model-state.service';
@@ -167,6 +168,12 @@ describe('ProvidersSettingsStateService', () => {
       ['auth:getEffectiveRoute', async () => success(route())],
       ['config:getScopes', async () => success(scopeResponse)],
       ['config:model-get', async () => success({ model: 'pinned-model' })],
+      [
+        'wizard:get-setup-model',
+        async () => success({
+          state: { kind: 'unset', effective: { provider: 'first', model: 'pinned-model' } },
+        }),
+      ],
       ['config:effort-get', async () => success({ effort: undefined })],
       ['memory:getTriggers', async () => success({ triggers: memoryResponse })],
       ['ptahCli:list', async () => success({ agents: [] })],
@@ -232,6 +239,71 @@ describe('ProvidersSettingsStateService', () => {
     service = TestBed.inject(ProvidersSettingsStateService);
   });
   afterEach(() => TestBed.resetTestingModule());
+
+  it('loads the Setup row on open and keeps the workspace fallback separate from the committed pair', async () => {
+    expect(service.setupModel().status).toBe('unloaded');
+    await service.open();
+
+    expect(call).toHaveBeenCalledWith('wizard:get-setup-model', {}, undefined);
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: {
+        state: { kind: 'unset', effective: { provider: 'first', model: 'pinned-model' } },
+        committed: null,
+        commitSeq: 0,
+      },
+      error: null,
+    });
+  });
+
+  it('applies the Setup receipt and ignores a superseded load', async () => {
+    const pending = deferred<RpcResult<unknown>>();
+    handlers.set('wizard:get-setup-model', () => pending.promise);
+    const read = service.refreshSetupModel();
+    const pair = { provider: 'openrouter', model: 'setup-model' };
+    const state: SetupPairState = { kind: 'set', pair };
+    const receipt = { state, committed: pair, commitSeq: 7 };
+    handlers.set('wizard:set-setup-model', async () => success(receipt));
+
+    await expect(service.commitSetupPair(pair)).resolves.toBe(true);
+    pending.resolve(success({ state: { kind: 'unset', effective: pair } }));
+    await read;
+
+    expect(service.setupModel()).toEqual({ status: 'ready', data: receipt, error: null });
+    expect(service.setupUndoEntry()).toEqual({
+      targetPair: null,
+      committedReceipt: pair,
+      commitSeq: 7,
+    });
+  });
+
+  it('loads typed invalid Setup state and maps a rejected pair to safe commit feedback', async () => {
+    const state: SetupPairState = {
+      kind: 'invalid',
+      source: 'setup',
+      provider: 'openrouter',
+      model: 'stale-model',
+      cause: 'model-stale',
+    };
+    handlers.set('wizard:get-setup-model', async () => success({ state }));
+    handlers.set('wizard:set-setup-model', async () =>
+      new RpcResult(false, undefined, 'private provider detail', 'SETUP_MODEL_INVALID'),
+    );
+    await service.refreshSetupModel();
+    const loaded = service.setupModel();
+    expect(loaded).toMatchObject({ status: 'ready', data: { state } });
+
+    await expect(
+      service.commitSetupPair({ provider: 'openrouter', model: 'another-stale-model' }),
+    ).resolves.toBe(false);
+
+    expect(service.setupCommit()).toEqual({
+      status: 'invalid',
+      message: 'Choose an available provider and model for Setup.',
+    });
+    expect(service.setupModel()).toEqual(loaded);
+    expect(service.setupUndoEntry()).toBeNull();
+  });
 
   it('loads enhancement file settings into its own section', async () => {
     enhancementResponse['skills.enhancement.provider'] = 'openrouter';

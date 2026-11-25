@@ -1,11 +1,12 @@
 import { Injectable, Injector, inject, signal } from '@angular/core';
 import type {
   ConfigGetScopesResult,
+  ModelPair,
   RpcMethodName,
   RpcMethodParams,
   RpcMethodResult,
 } from '@ptah-extension/shared';
-import { ClaudeRpcService } from './claude-rpc.service';
+import { ClaudeRpcService, type RpcResult } from './claude-rpc.service';
 import { EffortStateService } from './effort-state.service';
 import { ModelStateService } from './model-state.service';
 import { requireRpcData } from './providers-settings-sections';
@@ -14,6 +15,8 @@ import type {
   ProvidersSettingsCommit,
   ProvidersSettingsPatch,
   ProvidersSettingsSection,
+  ProvidersSetupRowState,
+  ProvidersSetupUndoEntry,
   SaveOperation,
   SaveOutcome,
 } from './providers-settings.types';
@@ -56,6 +59,13 @@ export interface ProvidersCommitHooks {
   sectionsReady(): boolean;
 }
 
+export interface ProvidersSetupCommitState {
+  readonly status: 'idle' | 'saving' | 'saved' | 'invalid' | 'failed';
+  readonly message: string | null;
+}
+
+type ApplySetupReceipt = (receipt: ProvidersSetupRowState) => void;
+
 /**
  * Owns the Providers settings commit pipeline and its feedback (`commit()`): one save at a time,
  * staged writes (552), read-back that can never promote a failed write (D15), and refusal of a
@@ -70,6 +80,105 @@ export class ProvidersCommitService {
   private readonly injector = inject(Injector);
   private readonly commitState = signal<ProvidersSettingsCommit>(EMPTY_COMMIT);
   readonly commit = this.commitState.asReadonly();
+  private readonly setupReceiptState = signal<ProvidersSetupRowState | null>(null);
+  private readonly setupUndoState = signal<ProvidersSetupUndoEntry | null>(null);
+  private readonly setupCommitState = signal<ProvidersSetupCommitState>({
+    status: 'idle',
+    message: null,
+  });
+  private setupRequest = 0;
+  readonly setupReceipt = this.setupReceiptState.asReadonly();
+  readonly setupUndoEntry = this.setupUndoState.asReadonly();
+  readonly setupCommit = this.setupCommitState.asReadonly();
+
+  commitSetupPair(
+    pair: ModelPair | null,
+    loadedPair: ModelPair | null,
+    applyReceipt: ApplySetupReceipt,
+  ): Promise<boolean> {
+    const previousReceipt = this.setupReceipt();
+    const priorPair = previousReceipt ? previousReceipt.committed : loadedPair;
+    return this.writeSetupPair(pair, priorPair, applyReceipt, false);
+  }
+
+  undoSetupPair(applyReceipt: ApplySetupReceipt): Promise<boolean> {
+    const undo = this.setupUndoEntry();
+    if (!undo) return Promise.resolve(false);
+    return this.writeSetupPair(
+      undo.targetPair,
+      undo.committedReceipt,
+      applyReceipt,
+      true,
+    );
+  }
+
+  private async writeSetupPair(
+    pair: ModelPair | null,
+    priorPair: ModelPair | null,
+    applyReceipt: ApplySetupReceipt,
+    undo: boolean,
+  ): Promise<boolean> {
+    const request = ++this.setupRequest;
+    const startSeq = this.setupReceipt()?.commitSeq ?? 0;
+    this.setupCommitState.set({ status: 'saving', message: null });
+    const reportFailure = (state: ProvidersSetupCommitState): false => {
+      if (
+        request === this.setupRequest &&
+        (this.setupReceipt()?.commitSeq ?? 0) === startSeq
+      ) {
+        this.setupCommitState.set(state);
+      }
+      return false;
+    };
+    const failed: ProvidersSetupCommitState = {
+      status: 'failed',
+      message: undo
+        ? 'Could not confirm Undo for the Setup model.'
+        : 'Could not confirm the Setup model save.',
+    };
+
+    let result: RpcResult<RpcMethodResult<'wizard:set-setup-model'>>;
+    try {
+      result = await this.rpc.call(
+        'wizard:set-setup-model',
+        pair ?? { provider: '', model: '' },
+      );
+    } catch {
+      return reportFailure(failed);
+    }
+    if (!result.isSuccess()) {
+      return reportFailure(
+        result.errorCode === 'SETUP_MODEL_INVALID'
+          ? { status: 'invalid', message: 'Choose an available provider and model for Setup.' }
+          : failed,
+      );
+    }
+
+    const receipt = result.data;
+    if (receipt.commitSeq < (this.setupReceipt()?.commitSeq ?? 0)) return false;
+    const { committed, commitSeq } = receipt;
+    this.setupReceiptState.set(receipt);
+    this.setupUndoState.set(
+      undo ? null : { targetPair: priorPair, committedReceipt: committed, commitSeq },
+    );
+    applyReceipt(receipt);
+
+    const undoMatches =
+      pair === null
+        ? committed === null
+        : committed?.provider === pair.provider && committed.model === pair.model;
+    if (undo && !undoMatches) {
+      this.setupCommitState.set(failed);
+      return false;
+    }
+    this.setupCommitState.set({
+      status: 'saved',
+      message: committed
+        ? `Saved ${committed.model} from ${committed.provider} for Setup.`
+        : 'Setup now uses the workspace model.',
+    });
+    return true;
+  }
 
   /** Reports a save refused before any write, naming the fields that were not saved. */
   block(unsaved: readonly string[], message: string): void {

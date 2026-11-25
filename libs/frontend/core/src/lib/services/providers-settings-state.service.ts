@@ -22,6 +22,7 @@ import {
   type AuthVerifyDraftConnectionParams,
   type ConfigGetScopesResult,
   type ConfigClearScopeOverrideResult,
+  type ModelPair,
   type RpcMethodName,
   type RpcMethodParams,
   type RpcMethodResult,
@@ -68,6 +69,7 @@ import type {
   ProvidersDetectedClis,
   ProvidersOrchestration,
   ProvidersSettingsPatch,
+  ProvidersSetupRowState,
   SaveOperation,
 } from './providers-settings.types';
 import { PROVIDERS_ENHANCEMENT_KEYS } from './providers-settings.types';
@@ -92,7 +94,10 @@ export type {
   ProvidersCliTest,
   ProvidersCustomEntry,
   ProvidersDetectedClis,
+  ProvidersSetupRowState,
+  ProvidersSetupUndoEntry,
 } from './providers-settings.types';
+export type { ProvidersSetupCommitState } from './providers-commit.service';
 // Account state is part of the Providers settings surface; this file is its public entry
 // point (re-exported by the package barrel), as for the types above.
 export {
@@ -141,6 +146,7 @@ export class ProvidersSettingsStateService {
     createSectionStore<RpcMethodResult<'memory:getTriggers'>['triggers']>();
   private readonly enhancementStore =
     createSectionStore<ProvidersEnhancementSettings>();
+  private readonly setupModelStore = createSectionStore<ProvidersSetupRowState>();
   private readonly cliStore = createSectionStore<ProvidersCliAgents>();
   private readonly orchestrationStore =
     createSectionStore<ProvidersOrchestration>();
@@ -165,6 +171,9 @@ export class ProvidersSettingsStateService {
   readonly effort = this.freshEffortView(this.effortStore, this.effortRevision);
   readonly memory = this.view(this.memoryStore);
   readonly enhancement = this.view(this.enhancementStore);
+  readonly setupModel = this.view(this.setupModelStore);
+  readonly setupCommit = this.commits.setupCommit;
+  readonly setupUndoEntry = this.commits.setupUndoEntry;
   readonly cliAgents = this.view(this.cliStore);
   readonly orchestration = this.view(this.orchestrationStore);
   /** Last explicit CLI re-detection (`redetectClis`); `loading` while it runs. */
@@ -243,12 +252,59 @@ export class ProvidersSettingsStateService {
       this.refreshEffort(),
       this.refreshMemory(),
       this.refreshEnhancement(),
+      this.refreshSetupModel(),
       this.refreshCliAgents(),
       this.refreshCliModels(),
       this.refreshOrchestration(),
       this.refreshConnections(),
       ...(this.tierRequest ? [this.refreshTiers(this.tierRequest)] : []),
     ]);
+  }
+
+  refreshSetupModel(): Promise<void> {
+    return readSection(this.setupModelStore, this.workspace, async () => {
+      const { state } = await this.require('wizard:get-setup-model', {});
+      const receipt = this.commits.setupReceipt();
+      if (receipt) return { ...receipt, state };
+
+      // Seed Undo from the stored Setup pair before the first local receipt.
+      let committed: ModelPair | null = null;
+      if (state.kind === 'set') {
+        committed = state.pair;
+      } else if (
+        (state.kind === 'invalid' || state.kind === 'unavailable') &&
+        state.source === 'setup'
+      ) {
+        committed = { provider: state.provider ?? '', model: state.model ?? '' };
+      }
+      return { state, committed, commitSeq: 0 };
+    });
+  }
+
+  commitSetupPair(pair: ModelPair | null): Promise<boolean> {
+    return this.commits.commitSetupPair(
+      pair,
+      this.setupModel().data?.committed ?? null,
+      this.setupReceiptHandler(),
+    );
+  }
+
+  undoSetupPair(): Promise<boolean> {
+    return this.commits.undoSetupPair(this.setupReceiptHandler());
+  }
+
+  private setupReceiptHandler(): (receipt: ProvidersSetupRowState) => void {
+    const scopeKey = this.workspace.scopeKey();
+    return (receipt) => {
+      if (this.workspace.scopeKey() !== scopeKey) {
+        void this.refreshSetupModel();
+        return;
+      }
+      const store = this.setupModelStore;
+      store.generation++;
+      store.scopeKey = scopeKey;
+      store.value.set({ status: 'ready', data: receipt, error: null });
+    };
   }
 
   async refreshRoute(): Promise<void> {

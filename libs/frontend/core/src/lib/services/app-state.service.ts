@@ -132,6 +132,7 @@ export interface PendingSettingsTab {
     | 'main-effort'
     | 'connections'
     | 'background-models'
+    | 'setup'
     | 'cli-agents'
     | 'more-providers'
     | 'memory-curator'
