@@ -1,7 +1,11 @@
 import {
+  afterRenderEffect,
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   computed,
+  inject,
+  Injector,
   input,
   output,
   signal,
@@ -12,9 +16,12 @@ import { FormsModule } from '@angular/forms';
 import { NgTemplateOutlet } from '@angular/common';
 import type {
   ProjectGuidance,
+  SkillJudgeCandidate,
+  SkillJudgeItem,
   SkillRecommendation,
   SkillShEntry,
   StackSummaryItem,
+  WizardGenerateSkillDraftParams,
 } from '@ptah-extension/shared';
 import {
   PtahAlertComponent,
@@ -30,8 +37,46 @@ import {
 import { SkillPickCardComponent } from './skill-pick-card.component';
 import { StackCoverageStripComponent } from './stack-coverage-strip.component';
 import { SkillSelectionRailComponent } from './skill-selection-rail.component';
-import { UnmatchedStackListComponent } from './unmatched-stack-list.component';
-import { buildStackCoverage, splitStackEvidence } from './stack-coverage';
+import {
+  type ManualDraftRequest,
+  UnmatchedStackListComponent,
+} from './unmatched-stack-list.component';
+import {
+  buildStackCoverage,
+  canonicalCandidateId,
+  splitStackEvidence,
+} from './stack-coverage';
+import {
+  type SkillBuildPreviewRequest,
+  SkillBuildRowComponent,
+} from './skill-build-row.component';
+import { SkillDraftPreviewComponent } from './skill-draft-preview.component';
+import { SkillMethodBannerComponent } from './skill-method-banner.component';
+import { SkillNotJudgedRowComponent } from './skill-not-judged-row.component';
+import { SkillVerdictFilterComponent } from './skill-verdict-filter.component';
+import type {
+  DraftTransitionResult,
+  OpenSkillDraft,
+  SkillDraftSubmittedSnapshot,
+  StackSkillStore,
+} from './stack-skill.store';
+
+export interface SkillDraftPreviewAction {
+  readonly params: WizardGenerateSkillDraftParams;
+  readonly revision: number;
+  readonly previewRequestSeq: number;
+}
+
+export interface SkillDraftCreateAction {
+  readonly revision: number;
+  readonly submitted: SkillDraftSubmittedSnapshot;
+}
+
+interface InstallCard {
+  candidate: SkillJudgeCandidate;
+  coveredItems: string[];
+  reasons: Set<string>;
+}
 
 @Component({
   selector: 'ptah-stack-skill-review',
@@ -43,6 +88,11 @@ import { buildStackCoverage, splitStackEvidence } from './stack-coverage';
     StackCoverageStripComponent,
     SkillSelectionRailComponent,
     UnmatchedStackListComponent,
+    SkillBuildRowComponent,
+    SkillDraftPreviewComponent,
+    SkillMethodBannerComponent,
+    SkillNotJudgedRowComponent,
+    SkillVerdictFilterComponent,
     PtahAlertComponent,
     PtahBadgeDirective,
     PtahSkeletonComponent,
@@ -57,6 +107,11 @@ import { buildStackCoverage, splitStackEvidence } from './stack-coverage';
   styleUrl: './stack-skill-review.component.css',
 })
 export class StackSkillReviewComponent {
+  public readonly store = input<StackSkillStore | null>(null);
+  public readonly runId = input('');
+  public readonly draftPreviewRequested = output<SkillDraftPreviewAction>();
+  public readonly draftCreateRequested = output<SkillDraftCreateAction>();
+  public readonly itemSearchRequested = output<{ itemId: string; query: string }>();
   public readonly recommendations = input.required<SkillRecommendation[]>();
   public readonly searchResults = input.required<SkillShEntry[]>();
   public readonly retainedSearchResults = input<SkillShEntry[]>([]);
@@ -103,6 +158,66 @@ export class StackSkillReviewComponent {
   public readonly previewScriptCount = input<number | null>(null);
   public readonly headingLevel = input<1 | 2>(2);
   public readonly retryRequested = output<void>();
+  protected readonly judgedMode = computed(() => this.store()?.judgedMode() ?? false);
+  protected readonly judgeItemsById = computed(
+    () => new Map(this.store()?.judge()?.items.map((item) => [item.itemId, item])),
+  );
+  protected readonly installCards = computed(() => {
+    const store = this.store();
+    const cards = new Map<string, InstallCard>();
+    if (!store || !['all', 'install'].includes(store.verdictFilter())) return [];
+    for (const row of store.visibleItemRows()) {
+      for (const outcome of row.installOutcomes) {
+        const id = canonicalCandidateId(outcome.candidateId);
+        const candidate = store.candidateById().get(id);
+        if (!candidate) continue;
+        const card = cards.get(id) ?? { candidate, coveredItems: [], reasons: new Set<string>() };
+        card.coveredItems.push(row.item.name);
+        const model = outcome.stage === 'decision' ? 'Decision model' : 'Normal model';
+        card.reasons.add(`${model}: ${outcome.reason}`);
+        cards.set(id, card);
+      }
+    }
+    return [...cards.values()].map(({ candidate, coveredItems, reasons }) => ({
+      candidate,
+      coveredItems: [...new Set(coveredItems)],
+      reason: [...reasons].join(' · '),
+    }));
+  });
+  protected readonly residualCards = computed(() =>
+    (this.store()?.residualCandidates() ?? []).map((entry) => ({
+      ...entry,
+      coveredItems: [...entry.itemNames],
+    })),
+  );
+  protected readonly judgedUnmatchedItems = computed(() => {
+    const items = this.judgeItemsById();
+    return (this.store()?.visibleItemRows() ?? []).flatMap((row) => {
+      const item = items.get(row.itemId);
+      return item && row.verdict !== 'not-judged' && !row.installOutcomes.length
+        ? [item]
+        : [];
+    });
+  });
+  protected readonly draftDisabledReason = computed(() =>
+    this.store()?.draftBlockedReason() ??
+    (this.store()?.openDraft()?.busy ? 'Wait for skill creation to finish.' : null),
+  );
+  protected readonly lastBlankCreatedPath = computed(() => {
+    let path: string | null = null;
+    for (const [key, value] of this.store()?.createdPathsByKey() ?? []) {
+      if (key.startsWith('manual-blank:')) path = value;
+    }
+    return path;
+  });
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly injector = inject(Injector);
+  private readonly discardDialog = viewChild<ElementRef<HTMLDialogElement>>('discardDialog');
+  private readonly title = viewChild<ElementRef<HTMLElement>>('reviewTitle');
+  private draftOpener: HTMLButtonElement | null = null;
+  private previewParams: WizardGenerateSkillDraftParams | null = null;
+  private discardAction: (() => void) | null = null;
+  private focusedDraft: Pick<OpenSkillDraft, 'key' | 'mode'> | null = null;
   private readonly activeItemState = signal<string | null>(null);
   protected readonly activeItem = computed(() =>
     this.detectedItems().some(
@@ -126,17 +241,19 @@ export class StackSkillReviewComponent {
     () => this.busy() || this.previewing() || this.loading(),
   );
   protected readonly initialLoading = computed(
-    () => this.loading() && !this.recommendations().length,
+    () => this.loading() && !this.judgedMode() && !this.recommendations().length,
   );
-  protected readonly coverage = computed(() =>
-    buildStackCoverage(
+  protected readonly coverage = computed(() => {
+    const store = this.store();
+    if (store?.judgedMode()) return [...store.stackCoverage()];
+    return buildStackCoverage(
       this.detectedItems(),
       this.unmatchedItems(),
       this.searchFailures(),
       this.recommendations(),
       this.selectedIds(),
-    ),
-  );
+    );
+  });
   protected readonly coveredCount = computed(
     () => this.coverage().filter((item) => item.state === 'covered').length,
   );
@@ -157,26 +274,202 @@ export class StackSkillReviewComponent {
     ),
   );
   protected readonly selectedSkills = computed(() => {
+    const store = this.store();
     const skills = new Map(
       [
         ...this.recommendations().map((row) => row.skill),
         ...this.retainedSearchResults(),
         ...this.searchResults(),
+        ...(store?.judge()?.candidates.map(({ skill }) => skill) ?? []),
+        ...[...(store?.itemSearchResultsByItemId().values() ?? [])].flat(),
+        ...[...(store?.retainedItemSearchResultsByItemId().values() ?? [])].flat(),
       ].map((skill) => [this.key(skill), skill]),
     );
-    return [...this.selectedIds()].map((key) => ({
+    const selected = store?.judgedMode() ? store.selectedSelectionKeys() : this.selectedIds();
+    return [...selected].map((key) => ({
       key,
       name: skills.get(key)?.name ?? key,
     }));
   });
-  protected readonly totalSkills = computed(
-    () =>
-      new Set([
+  protected readonly totalSkills = computed(() => {
+    const store = this.store();
+    if (store?.judgedMode()) return store.selectionKeyByCandidateId().size;
+    return new Set([
         ...this.recommendations().map((row) => this.key(row.skill)),
         ...this.searchResults().map((skill) => this.key(skill)),
         ...this.selectedIds(),
-      ]).size,
-  );
+    ]).size;
+  });
+
+  public constructor() {
+    afterRenderEffect(() => {
+      const draft = this.store()?.openDraft();
+      const previous = this.focusedDraft;
+      if (draft && (draft.key !== previous?.key || draft.mode !== previous.mode)) {
+        this.focusOpenDraft(draft);
+      } else if (!draft) {
+        this.focusedDraft = null;
+        const opener = this.draftOpener;
+        this.draftOpener = null;
+        this.previewParams = null;
+        if (!opener) return;
+        if (opener.isConnected) opener.focus();
+        else this.title()?.nativeElement.focus();
+      }
+    });
+  }
+
+  private focusOpenDraft(draft: OpenSkillDraft): void {
+    const selector = draft.mode === 'edit' ? 'input' : 'h4';
+    const target = this.host.querySelector<HTMLElement>(`ptah-skill-draft-preview ${selector}`);
+    if (!target) return;
+    this.focusedDraft = { key: draft.key, mode: draft.mode };
+    if (draft.mode === 'preview') target.tabIndex = -1;
+    target.focus();
+  }
+
+  private rememberDraftOpener(opener: HTMLButtonElement, draft: OpenSkillDraft): void {
+    this.draftOpener = opener;
+    afterNextRender(() => {
+      if (this.store()?.openDraft()?.revision === draft.revision &&
+          this.focusedDraft?.key !== draft.key) this.focusOpenDraft(draft);
+    }, { injector: this.injector });
+  }
+
+  protected openProposalDraft(store: StackSkillStore, request: SkillBuildPreviewRequest): void {
+    const proposalId = request.params.proposalId;
+    if (this.draftDisabledReason() || !request.params.runId ||
+        store.openDraft()?.key === `proposal:${proposalId}`) return;
+    this.transitionDraft(
+      store,
+      (forceDiscardDirty) => store.openProposalDraft(proposalId, { forceDiscardDirty }),
+      (result) => {
+        if (result.status !== 'ok') return;
+        this.rememberDraftOpener(request.opener, result.draft);
+        this.previewParams = request.params;
+        this.emitDraftPreview(result.draft, request.params);
+      },
+    );
+  }
+
+  protected openManualDraft(store: StackSkillStore, request: ManualDraftRequest): void {
+    const { item, opener } = request;
+    const itemId = request.itemId ?? `${item.kind}:${item.name}`;
+    if (this.draftDisabledReason() || store.openDraft()?.key === `manual:${itemId}`) return;
+    this.transitionDraft(
+      store,
+      (forceDiscardDirty) => store.openManualDraft(itemId, { item, forceDiscardDirty }),
+      (result) => {
+        if (result.status === 'ok') this.rememberDraftOpener(opener, result.draft);
+      },
+    );
+  }
+
+  protected openNotJudgedDraft(
+    store: StackSkillStore,
+    item: SkillJudgeItem,
+    row: HTMLFieldSetElement,
+  ): void {
+    const opener = row.querySelector<HTMLButtonElement>('button');
+    if (opener) this.openManualDraft(store, { itemId: item.itemId, item: item.item, opener });
+  }
+
+  protected openBlankDraft(store: StackSkillStore, opener: HTMLButtonElement): void {
+    const draft = store.openDraft();
+    if (this.draftDisabledReason() || (draft?.kind === 'manual' && draft.itemId === null)) return;
+    this.transitionDraft(
+      store,
+      (forceDiscardDirty) => store.openBlankManualDraft({ forceDiscardDirty }),
+      (result) => {
+        if (result.status === 'ok') this.rememberDraftOpener(opener, result.draft);
+      },
+    );
+  }
+
+  protected closeDraft(store: StackSkillStore): void {
+    this.transitionDraft(store, (forceDiscardDirty) => store.closeDraft({ forceDiscardDirty }));
+  }
+
+  protected retryDraft(store: StackSkillStore): void {
+    const params = this.previewParams;
+    if (!params || this.draftDisabledReason()) return;
+    this.transitionDraft(
+      store,
+      (forceDiscardDirty) => store.beginRetryDraftGeneration({ forceDiscardDirty }),
+      (result) => {
+        if (result.status === 'ok') this.emitDraftPreview(result.draft, params);
+      },
+    );
+  }
+
+  protected createDraft(store: StackSkillStore): void {
+    if (this.draftDisabledReason()) return;
+    const action = store.beginCreateDraft();
+    if (action) this.draftCreateRequested.emit(action);
+  }
+
+  protected searchJudgedItem(store: StackSkillStore, itemId: string, query: string): void {
+    if (this.searching()) return;
+    this.transitionDraft(
+      store,
+      (forceDiscardDirty) => store.requestCloseDraftForItemSearch({ forceDiscardDirty }),
+      (result) => {
+        if (result.status === 'closed') this.itemSearchRequested.emit({ itemId, query });
+      },
+    );
+  }
+
+  protected searchUnmatchedItem(store: StackSkillStore, name: string): void {
+    const matches = this.judgedUnmatchedItems().filter((item) => item.item.name === name);
+    if (matches.length === 1 && matches[0]) {
+      this.searchJudgedItem(store, matches[0].itemId, name);
+    } else {
+      this.transitionDraft(
+        store,
+        (forceDiscardDirty) => store.requestCloseDraftForItemSearch({ forceDiscardDirty }),
+        (result) => {
+          if (result.status === 'closed') this.searchItem(name);
+        },
+      );
+    }
+  }
+
+  protected settleDiscard(confirmed: boolean): void {
+    const action = this.discardAction;
+    this.discardAction = null;
+    this.discardDialog()?.nativeElement.close();
+    if (confirmed) action?.();
+  }
+
+  private emitDraftPreview(draft: OpenSkillDraft, params: WizardGenerateSkillDraftParams): void {
+    this.draftPreviewRequested.emit({
+      params,
+      revision: draft.revision,
+      previewRequestSeq: draft.previewRequestSeq,
+    });
+  }
+
+  private transitionDraft(
+    store: StackSkillStore,
+    transition: (forceDiscardDirty: boolean) => DraftTransitionResult,
+    complete?: (result: DraftTransitionResult) => void,
+  ): void {
+    const result = transition(false);
+    if (result.status !== 'confirm-dirty') {
+      complete?.(result);
+      return;
+    }
+    const dialog = this.discardDialog()?.nativeElement;
+    if (!dialog || dialog.open) return;
+    const revision = store.openDraft()?.revision;
+    this.discardAction = () => {
+      if (this.store() === store && store.openDraft()?.revision === revision) {
+        const confirmed = transition(true);
+        complete?.(confirmed);
+      }
+    };
+    dialog.showModal();
+  }
   protected evidence(value: string): {
     coveredItems: string[];
     rawEvidence: string | null;
@@ -199,7 +492,10 @@ export class StackSkillReviewComponent {
     return `${skill.source}/${skill.skillId}`;
   }
   public selected(skill: SkillShEntry): boolean {
-    return this.selectedIds().has(this.key(skill));
+    const store = this.store();
+    return store?.judgedMode()
+      ? store.isCandidateSelected(skill)
+      : this.selectedIds().has(this.key(skill));
   }
   public label(value: ProjectGuidance['label']): string {
     return value === 'do_not_copy'

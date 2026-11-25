@@ -1,5 +1,5 @@
 <section class="skills-container" aria-labelledby="skill-review-title">
-  <div class="skills-layout">
+  <div class="skills-layout" [class.skills-layout--judged]="judgedMode()">
     <header
       class="skills-header flex flex-wrap items-start justify-between gap-[var(--ptah-gap-heading)]"
     >
@@ -16,6 +16,7 @@
         <div>
           @if (headingLevel() === 1) {
             <h1
+              #reviewTitle
               id="skill-review-title"
               tabindex="-1"
               class="text-xl font-semibold"
@@ -24,6 +25,7 @@
             </h1>
           } @else {
             <h2
+              #reviewTitle
               id="skill-review-title"
               tabindex="-1"
               class="text-xl font-semibold"
@@ -40,7 +42,39 @@
       <ng-content select="[reviewActions]" />
     </header>
     <div class="skills-coverage space-y-3">
-      @if (detectedItems().length || stackLoading()) {
+      @if (store(); as reviewStore) {
+        @if (reviewStore.judge(); as judge) {
+          <ng-container [ngTemplateOutlet]="coverageMessages" />
+          @if (error() && !loadError()) {
+            <ptah-alert tone="error" live="assertive">{{ error() }}</ptah-alert>
+          }
+          @if (summarySource() === 'none') {
+            <p class="text-sm text-base-content-muted">
+              No stack summary was found for this analysis.
+            </p>
+          }
+          <ptah-skill-method-banner
+            [method]="judge.method"
+            [counts]="judge.counts"
+            [stages]="judge.stages"
+          />
+          @if (coverage().length) {
+            <ptah-stack-coverage-strip
+              data-testid="stack-coverage-strip"
+              [items]="coverage()"
+              [activeItem]="reviewStore.activeItemId()"
+              (filterChanged)="reviewStore.setActiveItemId($event)"
+            />
+          }
+          <ptah-skill-verdict-filter
+            [active]="reviewStore.verdictFilter()"
+            [options]="reviewStore.verdictFilterOptions()"
+            [hiddenCandidateCount]="reviewStore.hiddenPoolCandidateCount()"
+            (filterChange)="reviewStore.setVerdictFilter($event)"
+          />
+        }
+      }
+      @if (!judgedMode() && (detectedItems().length || stackLoading())) {
         <ptah-stack-coverage-strip
           data-testid="stack-coverage-strip"
           [items]="coverage()"
@@ -50,12 +84,12 @@
         >
           <ng-container [ngTemplateOutlet]="coverageMessages" />
         </ptah-stack-coverage-strip>
-      } @else if (summarySource() === 'none') {
+      } @else if (!judgedMode() && summarySource() === 'none') {
         <p class="text-sm text-base-content-muted">
           No stack summary was found for this analysis.
         </p>
       }
-      @if (!detectedItems().length && !stackLoading()) {
+      @if (!judgedMode() && !detectedItems().length && !stackLoading()) {
         <ng-container [ngTemplateOutlet]="coverageMessages" />
       }
       <ng-template #coverageMessages>
@@ -98,9 +132,233 @@
       </ng-template>
     </div>
     <div class="skills-main min-w-0 space-y-[var(--ptah-gap-group)]">
-      @if (error() && !loadError()) {
+      @if (!judgedMode() && error() && !loadError()) {
         <ptah-alert tone="error" live="assertive">{{ error() }}</ptah-alert>
       }
+      <!-- Judged results precede the shared search controls. -->
+      @if (store(); as reviewStore) {
+        @if (reviewStore.judge(); as judge) {
+          <div class="space-y-3" [attr.aria-busy]="loading() ? 'true' : null">
+            @if (loadError() && error()) {
+              <ptah-state-panel
+                state="error"
+                [title]="error()"
+                actionLabel="Try again"
+                (action)="retryRequested.emit()"
+              />
+            }
+            @if (draftDisabledReason(); as reason) {
+              <p role="status" class="text-sm text-base-content-muted">{{ reason }}</p>
+            }
+            @if (installCards().length) {
+              <section aria-labelledby="install-skills-title" class="space-y-2">
+                <h3 id="install-skills-title" class="flex items-center gap-2 font-semibold">
+                  Install <span ptahBadge count>{{ installCards().length }}</span>
+                </h3>
+                <ul class="skill-grid" aria-label="Install skills">
+                  @for (card of installCards(); track card.candidate.candidateId) {
+                    <li>
+                      <ptah-skill-pick-card
+                        data-testid="skill-pick-card"
+                        [skill]="card.candidate.skill"
+                        [compact]="true"
+                        [coveredItems]="card.coveredItems"
+                        [reason]="card.reason"
+                        [selected]="selected(card.candidate.skill)"
+                        [disabled]="blocked()"
+                        (toggled)="selectionToggled.emit(card.candidate.selectionKey)"
+                      />
+                    </li>
+                  }
+                </ul>
+              </section>
+            }
+            @if (reviewStore.visibleProposals().length) {
+              <section aria-labelledby="build-skills-title" class="space-y-2">
+                <h3 id="build-skills-title" class="flex items-center gap-2 font-semibold">
+                  Build for this project <span ptahBadge count>{{ reviewStore.visibleProposals().length }}</span>
+                </h3>
+                <div class="build-grid">
+                  @for (proposal of reviewStore.visibleProposals(); track proposal.proposalId) {
+                    <ptah-skill-build-row
+                      [class.build-proposal--open]="reviewStore.pinnedDraftProposalId() === proposal.proposalId"
+                      [proposal]="proposal"
+                      [items]="judge.items"
+                      [runId]="runId()"
+                      [disabledReason]="draftDisabledReason()"
+                      [createdPath]="reviewStore.createdPathFor('proposal:' + proposal.proposalId)"
+                      (previewRequested)="openProposalDraft(reviewStore, $event)"
+                    >
+                      @if (reviewStore.pinnedDraftProposalId() === proposal.proposalId) {
+                        <ng-container [ngTemplateOutlet]="draftView" />
+                      }
+                    </ptah-skill-build-row>
+                  }
+                </div>
+              </section>
+            }
+            <ptah-unmatched-stack-list
+              [judgedItems]="judgedUnmatchedItems()"
+              [searching]="searching() || !!reviewStore.openDraft()?.busy"
+              [draftBlockedReason]="draftDisabledReason()"
+              (searchRequested)="searchUnmatchedItem(reviewStore, $event)"
+              (manualDraftRequested)="openManualDraft(reviewStore, $event)"
+            />
+            @if (reviewStore.visibleItemRows().length) {
+              <section aria-labelledby="stack-skill-items-title" class="space-y-2">
+                <h3 id="stack-skill-items-title" class="font-semibold">Stack items</h3>
+                @for (row of reviewStore.visibleItemRows(); track row.itemId) {
+                  @if (judgeItemsById().get(row.itemId); as item) {
+                    @let manualPath = reviewStore.createdPathFor('manual:' + row.itemId);
+                    @if (row.verdict !== 'not-judged' && row.installOutcomes.length) {
+                      <div class="skill-item-actions">
+                        <strong>{{ row.item.name }}</strong>
+                        <button
+                          #manualOpener
+                          ptahButton variant="ghost" size="xs" type="button"
+                          [attr.aria-label]="'Write a skill by hand for ' + row.item.name"
+                          [attr.aria-disabled]="manualPath ? 'true' : null"
+                          [disabled]="!!draftDisabledReason()"
+                          (click)="openManualDraft(reviewStore, { itemId: row.itemId, item: row.item, opener: manualOpener })"
+                        >Write a skill by hand</button>
+                      </div>
+                    }
+                    @if (row.verdict === 'not-judged') {
+                      <fieldset #notJudgedRow [disabled]="!!draftDisabledReason()" class="min-w-0">
+                        <ptah-skill-not-judged-row
+                          [item]="item"
+                          (manualDraftRequested)="openNotJudgedDraft(reviewStore, item, notJudgedRow)"
+                        />
+                      </fieldset>
+                      @if (row.candidates.length &&
+                           (reviewStore.verdictFilter() === 'all' || reviewStore.verdictFilter() === 'not-judged')) {
+                        <ul class="skill-grid" [attr.aria-label]="'Registry candidates for ' + row.item.name">
+                          @for (entry of row.candidates; track entry.candidate.candidateId) {
+                            <li>
+                              <ptah-skill-pick-card
+                                data-testid="skill-pick-card"
+                                [skill]="entry.candidate.skill"
+                                [compact]="true"
+                                [coveredItems]="[row.item.name]"
+                                [reason]="entry.rejection?.reason ?? null"
+                                [selected]="selected(entry.candidate.skill)"
+                                [disabled]="blocked()"
+                                (toggled)="selectionToggled.emit(entry.candidate.selectionKey)"
+                              />
+                            </li>
+                          }
+                        </ul>
+                      }
+                    }
+                    @if (row.verdict === 'not-judged' || row.installOutcomes.length) {
+                      <button
+                        ptahButton variant="secondary" size="xs" type="button"
+                        [disabled]="searching() || !!reviewStore.openDraft()?.busy"
+                        (click)="searchJudgedItem(reviewStore, row.itemId, row.item.name)"
+                      >Search for {{ row.item.name }}</button>
+                    }
+                    @if (row.manualCandidates.length) {
+                      <ul class="skill-grid" [attr.aria-label]="'Search results for ' + row.item.name">
+                        @for (skill of row.manualCandidates; track key(skill)) {
+                          <li>
+                            <ptah-skill-pick-card
+                              data-testid="skill-pick-card"
+                              [skill]="skill"
+                              [compact]="true"
+                              [coveredItems]="[row.item.name]"
+                              [selected]="selected(skill)"
+                              [disabled]="blocked()"
+                              (toggled)="selectionToggled.emit(key(skill))"
+                            />
+                          </li>
+                        }
+                      </ul>
+                    }
+                    @if (manualPath) {
+                      <p role="status" class="text-sm">{{ row.item.name }} · Created: {{ manualPath }}</p>
+                    }
+                    @if (reviewStore.openDraft()?.kind === 'manual' &&
+                         reviewStore.pinnedDraftItemId() === row.itemId) {
+                      <ng-container [ngTemplateOutlet]="draftView" />
+                    }
+                  }
+                }
+              </section>
+            }
+            @if (reviewStore.showOtherCandidatesSection()) {
+              <details class="space-y-2">
+                <summary class="font-semibold">
+                  Other candidates <span ptahBadge count>{{ residualCards().length }}</span>
+                </summary>
+                <ul class="skill-grid" aria-label="Other candidates">
+                  @for (entry of residualCards(); track entry.candidate.candidateId) {
+                    <li>
+                      <ptah-skill-pick-card
+                        data-testid="skill-pick-card"
+                        [skill]="entry.candidate.skill"
+                        [compact]="true"
+                        [coveredItems]="entry.coveredItems"
+                        [reason]="entry.reason"
+                        [selected]="selected(entry.candidate.skill)"
+                        [disabled]="blocked()"
+                        (toggled)="selectionToggled.emit(entry.candidate.selectionKey)"
+                      />
+                    </li>
+                  }
+                </ul>
+              </details>
+            }
+            @if (!judge.items.length && !judge.candidates.length && !judge.proposals.length && !loadError()) {
+              <ptah-state-panel
+                state="empty"
+                title="No skills match your stack yet"
+                body="Search the registry, or continue without skills."
+                actionLabel="Search the registry"
+                (action)="focusSearch()"
+              />
+            }
+          </div>
+          <dialog
+            #discardDialog
+            aria-label="Discard edits to this skill draft?"
+            class="discard-draft-dialog space-y-3 rounded-[var(--ptah-radius-surface)] bg-base-100 p-[var(--ptah-surface-pad)] text-base-content"
+            (cancel)="$event.preventDefault(); settleDiscard(false)"
+          >
+            <p>Discard edits to this skill draft?</p>
+            <div class="flex flex-wrap justify-end gap-2">
+              <button ptahButton variant="ghost" type="button" autofocus (click)="settleDiscard(false)">
+                Keep editing
+              </button>
+              <button ptahButton variant="danger" type="button" (click)="settleDiscard(true)">
+                Discard edits
+              </button>
+            </div>
+          </dialog>
+        }
+      }
+      <ng-template #draftView>
+        @if (store(); as draftStore) {
+          @if (draftStore.openDraft(); as draft) {
+            @for (view of [draft]; track view.revision) {
+              <ptah-skill-draft-preview
+                [draft]="view"
+                [mode]="view.mode"
+                [busy]="view.busy"
+                [generating]="view.previewLoading"
+                [generationError]="view.generationError?.message ?? null"
+                [canRetryGeneration]="view.generationError?.retryable ?? false"
+                [createError]="view.createError"
+                [usedSlugs]="draftStore.createdSkillSlugs()"
+                (draftChange)="draftStore.updateDraftFields($event)"
+                (modeChange)="draftStore.setDraftMode($event)"
+                (cancelRequested)="closeDraft(draftStore)"
+                (retryRequested)="retryDraft(draftStore)"
+                (createRequested)="createDraft(draftStore)"
+              />
+            }
+          }
+        }
+      </ng-template>
       <section aria-labelledby="search-title" class="space-y-2">
         <h2 id="search-title" class="font-semibold">Find more skills</h2>
         <form
@@ -128,6 +386,23 @@
             Search
           </button>
         </form>
+        @if (store(); as reviewStore) {
+          @if (judgedMode()) {
+            <button
+              #blankDraftOpener
+              ptahButton variant="outline" size="sm" type="button"
+              [disabled]="!!draftDisabledReason()"
+              (click)="openBlankDraft(reviewStore, blankDraftOpener)"
+            >Write a skill by hand</button>
+            @if (lastBlankCreatedPath(); as path) {
+              <p role="status" class="text-sm">Created: {{ path }}</p>
+            }
+            @if (reviewStore.openDraft()?.kind === 'manual' &&
+                 reviewStore.openDraft()?.itemId === null) {
+              <ng-container [ngTemplateOutlet]="draftView" />
+            }
+          }
+        }
         @if (searchError()) {
           <p role="alert" class="text-sm text-state-err">{{ searchError() }}</p>
         }
@@ -177,6 +452,7 @@
                 <ptah-skill-pick-card
                   data-testid="skill-pick-card"
                   [skill]="skill"
+                  [compact]="judgedMode()"
                   [selected]="selected(skill)"
                   [disabled]="blocked()"
                   (toggled)="selectionToggled.emit(key(skill))"
@@ -196,6 +472,7 @@
           No other skills found for "{{ submittedQuery() }}".
         }
       </p>
+      @if (!judgedMode()) {
       <section
         aria-labelledby="recommended-title"
         class="space-y-3"
@@ -236,8 +513,8 @@
             <ptah-state-panel
               state="error"
               [title]="error()"
-              [actionLabel]="backOnLoadError() ? 'Back' : 'Re-run skill search'"
-              (action)="backOnLoadError() ? back.emit() : retryRequested.emit()"
+              [actionLabel]="backOnLoadError() && store() ? 'Try again' : backOnLoadError() ? 'Back' : 'Re-run skill search'"
+              (action)="backOnLoadError() && !store() ? back.emit() : retryRequested.emit()"
             />
           }
           @if (activeItem() && !filteredRecommendations().length) {
@@ -268,6 +545,7 @@
         [searching]="searching()"
         (searchRequested)="searchItem($event)"
       />
+      }
       @if (guidanceFacts().length) {
         <section aria-labelledby="guidance-title" class="space-y-2">
           <h3 id="guidance-title" class="font-semibold">Project guidance</h3>
@@ -338,7 +616,9 @@
     <ptah-skill-selection-rail
       class="skills-selection"
       data-testid="skill-selection-rail"
-      [responsive]="true"
+      [layout]="judgedMode() ? 'bar' : 'rail'"
+      [responsive]="!judgedMode()"
+      [installBlockedReason]="store()?.installBlockedReason() ?? null"
       [selected]="selectedSkills()"
       [total]="totalSkills()"
       [coveredCount]="coveredCount()"

@@ -741,10 +741,28 @@ export class StackSkillStore {
       readonly forceDiscardDirty?: boolean;
     },
   ): DraftTransitionResult {
+    return this.openManualDraftFor(itemId, options);
+  }
+
+  public openBlankManualDraft(options?: {
+    readonly forceDiscardDirty?: boolean;
+  }): DraftTransitionResult {
+    return this.openManualDraftFor(null, options);
+  }
+
+  private openManualDraftFor(
+    itemId: string | null,
+    options?: {
+      readonly item?: StackSummaryItem;
+      readonly forceDiscardDirty?: boolean;
+    },
+  ): DraftTransitionResult {
     if (!this.canOpenDraft()) {
       return { status: 'blocked', reason: DRAFT_BLOCKED_BY_CONSENT_REASON };
     }
-    const key = `manual:${itemId}`;
+    const key = itemId === null
+      ? `manual-blank:${this.draftRevision + 1}`
+      : `manual:${itemId}`;
     const existingPath = this.createdPathsByKeyState().get(key);
     if (existingPath) return { status: 'already-created', path: existingPath };
     const guard = this.checkDraftGuard(
@@ -755,17 +773,19 @@ export class StackSkillStore {
     const item =
       options?.item ??
       this.judge()?.items.find((entry) => entry.itemId === itemId)?.item;
-    if (!item) return { status: 'blocked', reason: 'Stack item not found.' };
+    if (itemId !== null && !item) {
+      return { status: 'blocked', reason: 'Stack item not found.' };
+    }
     const draft: OpenSkillDraft = {
       key,
       kind: 'manual',
       itemId,
       proposalId: null,
-      coveredItemIds: [itemId],
+      coveredItemIds: itemId === null ? [] : [itemId],
       mode: 'edit',
-      name: skillDocumentSlug(item.name),
+      name: item ? skillDocumentSlug(item.name) : '',
       description: '',
-      body: buildManualDraftEvidenceBody(item),
+      body: item ? buildManualDraftEvidenceBody(item) : '',
       dirty: false,
       busy: false,
       previewLoading: false,
