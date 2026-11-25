@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_2326_5d16
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Make lane routing decisions correct and predictable
 depends_on: []
 created: '2026-11-24T15:32:25.843Z'
-updated: '2026-11-24T16:03:05.096Z'
+updated: '2026-11-25T11:00:00.000Z'
 description: >-
   Fix ptah_route_decide: timeouts, silent drops, inert preferences, unexplained
   prunes, stale limit state
