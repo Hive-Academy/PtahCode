@@ -16,10 +16,10 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B25 COMPLETE. B26-B28 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B25, B27 COMPLETE. B26, B28 IN_PROGRESS. All others PENDING. Manifest red fixed by B27 |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
-| Status | B1 IN_PROGRESS. All others PENDING |
+| Status | See the Status row above |
 
 ### Token method
 
@@ -293,7 +293,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B8 - WU15a ACP reported state
 - **Status**: COMPLETE (12cebc8e6; codex e373f408 + round 2 891407c1: native default null)
-- **Status**: IN_PROGRESS (codex e373f408 delivered; gate passed; NOT ACCEPTED round 1: getReportedState sets native default = currentValue, which can be Ptah's own hint. Fix: default null (ACP reports no vendor default))
+- **Status**: COMPLETE (codex e373f408; round 1 fix: native default null; commit 12cebc8e6)
 - **Shape / weight**: logic / est. 11,000. **Actual tokens**: unavailable
 - **Projects**: acp-runtime (1)
 - **Read set**: `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.ts:1060-1120` + the session-reply handling range (find `currentModelId`, `configOptions`); `W/libs/backend/acp-runtime/src/lib/acp-session-helpers.ts` (whole, 234 lines); `W/libs/backend/acp-runtime/src/lib/acp-vendor-profile.ts:180-230`; `W/libs/backend/acp-runtime/src/lib/profiles/grok-acp-profile.ts:195-225`; `W/libs/backend/acp-runtime/src/lib/profiles/antigravity-acp-profile.ts` (effort option range, find `thought_level`); `W/libs/backend/acp-runtime/src/lib/acp-session-runtime.spec.ts:1-120`; PLAN:638,655
@@ -614,7 +614,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B26 - WU9c service-level route cases
 
-- **Status**: IN_PROGRESS (antigravity 88d5a24c)
+- **Status**: IN_PROGRESS (antigravity 8e7036b8, resumed after host restart)
 - **Shape / weight**: test / est. 6,900. **Actual tokens**: pending
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/route-decide.gate.spec.ts:1-300` + the last 60 lines; `.../route-decide.service.ts` deps (after B25); PLAN:886-901
@@ -631,8 +631,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B27 - WU10b evidence RPC
 
-- **Status**: IN_PROGRESS (codex 154005ae)
-- **Shape / weight**: contract / est. 10,100. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 154005ae, resumed 5fff14b4)
+- **Shape / weight**: contract / est. 10,100. **Actual tokens**: unavailable
 - **Projects**: rpc-handlers (1)
 - **Read set**: `W/libs/backend/rpc-handlers/src/lib/handlers/capability-matrix-rpc.handlers.ts` (whole); `.../handlers/capability-matrix-rpc.handlers.spec.ts` (whole); `.../handlers/index.ts` (whole); `W/libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts:130-165`; `W/libs/backend/rpc-handlers/src/lib/host-profile/manifest.ts:165-195`; `W/libs/backend/rpc-handlers/src/index.ts` (check for handler class names); `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts`; PLAN:597-603
 - **Write set**: `W/libs/backend/rpc-handlers/src/lib/handlers/routing-evidence-rpc.handlers.ts` (new); `.../handlers/routing-evidence-rpc.handlers.spec.ts` (new); `.../handlers/index.ts`; `W/libs/backend/rpc-handlers/src/lib/register-shared-rpc-handlers.ts`; `W/libs/backend/rpc-handlers/src/lib/host-profile/manifest.ts`; `W/libs/backend/rpc-handlers/src/index.ts` (only if it lists handler classes)
@@ -649,7 +649,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B28 - WU4b route fact lookup at spawn
 
-- **Status**: IN_PROGRESS (codex 28562547)
+- **Status**: IN_PROGRESS (codex 2add6d45, resumed after host restart)
 - **Shape / weight**: logic / est. 10,700. **Actual tokens**: pending
 - **Projects**: vscode-lm-tools (1)
 - **Read set** (prefix `W/libs/backend/vscode-lm-tools/src/lib/code-execution/`): `namespace-builders/agent-namespace.builder.ts:1-60,700-830` (spawn path; find `markSpawnReplied` at `:796`); `namespace-builders/agent-namespace.builder.spec.ts:1-150` + one spawn describe; `ptah-api-builder.service.ts` (range that builds the agent namespace, find by `rg -n "buildAgentNamespace\|AgentNamespace"`); `W/libs/backend/lane-routing/src/index.ts` (after B25); PLAN:718-721, PLAN:898-901
