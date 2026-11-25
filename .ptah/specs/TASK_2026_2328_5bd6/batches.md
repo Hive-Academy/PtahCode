@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B10, B12, B13 COMPLETE. B11, B14 IN_PROGRESS. All others PENDING |
+| Status | B1-B13 COMPLETE. B14, B15 IN_PROGRESS. All others PENDING |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -344,8 +344,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B11 - WU2b key-value guard test + WU12b e2e harness fixture
 
-- **Status**: IN_PROGRESS (antigravity c9dba3c0)
-- **Shape / weight**: test / est. 6,600. **Actual tokens**: pending
+- **Status**: COMPLETE (antigravity c9dba3c0)
+- **Shape / weight**: test / est. 6,600. **Actual tokens**: unavailable
 - **Projects**: lane-outcomes, webview-e2e-harness (2)
 - **Read set**: `W/libs/backend/lane-outcomes/src/lib/store/key-value-lane-outcome.store.spec.ts` (whole); `W/libs/backend/lane-outcomes/src/lib/store/key-value-lane-outcome.store.ts:60-80`; `W/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings.fixtures.ts:800-840`; `W/libs/shared/src/lib/types/rpc/rpc-routing-evidence.types.ts` (after B2)
 - **Write set**: `W/libs/backend/lane-outcomes/src/lib/store/key-value-lane-outcome.store.spec.ts`; `W/libs/frontend/webview-e2e-harness/src/lib/scenarios/settings/settings.fixtures.ts`
@@ -415,7 +415,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B15 - WU6 evidence index and funnel
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 41abf2d9)
 - **Shape / weight**: logic / est. 12,800. **Actual tokens**: pending
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/matrix/local-derivation.ts` (whole, 504 lines); `.../matrix/outcome-figures.ts` (whole); `.../decision-model/decision-payload.ts:30-60`; `.../catalog/lane-catalog.types.ts` (after B10); `.../routing-constants.ts:15-40,210-225`; failure-class constants (`rg -n CAPACITY_FAILURE_CLASSES libs/backend/lane-routing/src`); PLAN:392-460, PLAN:1035-1039
