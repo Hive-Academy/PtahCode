@@ -1431,7 +1431,7 @@ describe('IGlobalBatchSettingsStore and ReactiveSettingsStore batch operations',
     ).rejects.toThrow(/does not support atomic batch writes/);
   });
 
-  it('readGlobalMany serves cached entries and falls back cleanly on non-batch backends', () => {
+  it('readGlobalMany falls back to single-key reads on non-batch backends', () => {
     const plain = makeMockStore({
       'setup.provider': 'apiKey',
       'setup.model': 'claude-sonnet-4-5',
@@ -1441,21 +1441,50 @@ describe('IGlobalBatchSettingsStore and ReactiveSettingsStore batch operations',
       'setup.provider': 'apiKey',
       'setup.model': 'claude-sonnet-4-5',
     });
+  });
 
-    const batch = makeBatchMockStore({
+  it('refreshes the full cached slice after one key is invalidated', async () => {
+    const original = {
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-sonnet-4-5',
+    };
+    const updated = {
       'setup.provider': 'openrouter',
-      'setup.model': 'model-x',
-    });
-    const batchReactive = new ReactiveSettingsStore(batch);
-    expect(batchReactive.readGlobal('setup.provider')).toBe('openrouter');
-    expect(
-      batchReactive.readGlobalMany(['setup.provider', 'setup.model']),
-    ).toEqual({
+      'setup.model': 'openai/gpt-5',
+    };
+    const keys = Object.keys(original);
+    const backend = makeBatchMockStore(original);
+    const store = new ReactiveSettingsStore(backend);
+    expect(store.readGlobalMany(keys)).toEqual(original);
+
+    await backend.writeGlobalBatch(updated);
+    store.invalidateCache('setup.model');
+
+    expect(store.readGlobalMany(keys)).toEqual(updated);
+    expect(store.readGlobal('setup.provider')).toBe(updated['setup.provider']);
+    expect(store.readGlobalMany(keys)).toEqual(updated);
+    expect(backend._readManyCalls).toEqual([keys, keys]);
+  });
+
+  it('refreshes the full cached slice after partial invalidation on a non-batch backend', async () => {
+    const original = {
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-sonnet-4-5',
+    };
+    const backend = makeMockStore(original);
+    const store = new ReactiveSettingsStore(backend);
+    const keys = Object.keys(original);
+    expect(store.readGlobalMany(keys)).toEqual(original);
+
+    await backend.writeGlobal('setup.provider', 'openrouter');
+    await backend.writeGlobal('setup.model', 'openai/gpt-5');
+    store.invalidateCache('setup.model');
+
+    expect(store.readGlobalMany(keys)).toEqual({
       'setup.provider': 'openrouter',
-      'setup.model': 'model-x',
+      'setup.model': 'openai/gpt-5',
     });
-    // Only the uncached key was fetched via readGlobalMany.
-    expect(batch._readManyCalls).toEqual([['setup.model']]);
+    expect(store.readGlobal('setup.provider')).toBe('openrouter');
   });
 
   it('round-trips setup pair atomically with a file-backed PtahFileSettingsManager adapter across Undo and restart', async () => {

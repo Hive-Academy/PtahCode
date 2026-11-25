@@ -37,11 +37,7 @@ import {
   AnalysisClaudeMdLinker,
 } from '@ptah-extension/agent-generation';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
-import type {
-  IWorkspaceLlmResolver,
-  SetupResolution,
-} from '@ptah-extension/agent-sdk';
-import type { WorkspaceLlmResolver } from '@ptah-extension/auth-providers';
+import type { IWorkspaceLlmResolver, SetupResolution } from '@ptah-extension/agent-sdk';
 import {
   SETTINGS_TOKENS,
   type WorkspaceScopeResolver,
@@ -380,13 +376,12 @@ export class SetupRpcHandlers {
       return await beforeDeadline(
         deadline,
         () => {
-          const resolver = this.container.resolve<
-            IWorkspaceLlmResolver &
-              Pick<WorkspaceLlmResolver, 'validateSetupPair'>
-          >(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER);
-          return pair
-            ? resolver.validateSetupPair(workspaceRoot, pair)
-            : resolver.resolveSetup(workspaceRoot);
+          const resolver = this.container.resolve<IWorkspaceLlmResolver>(
+            SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER,
+          );
+          if (!pair) return resolver.resolveSetup(workspaceRoot);
+          if (!resolver.validateSetupPair) throw failure;
+          return resolver.validateSetupPair(workspaceRoot, pair);
         },
         failure,
       );
@@ -404,7 +399,10 @@ export class SetupRpcHandlers {
       const resolution = await this.resolveSetup(
         this.workspaceProvider.getWorkspaceRoot(),
       );
-      return { state: setupPairState(resolution) };
+      const state = setupPairState(resolution);
+      return resolution.kind === 'set'
+        ? { state, committed: resolution.storedPair }
+        : { state };
     });
 
     this.rpcHandler.registerMethod<

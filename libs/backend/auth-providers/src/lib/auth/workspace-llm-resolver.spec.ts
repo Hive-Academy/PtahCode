@@ -456,6 +456,10 @@ describe('WorkspaceLlmResolver.resolveSetup', () => {
       const setRes = await setH.resolver.resolveSetup(WS_A);
       expect(setRes.kind).toBe('set');
       if (setRes.kind === 'set') {
+        expect(setRes.storedPair).toEqual({
+          provider: 'apiKey',
+          model: 'claude-sonnet-4-6',
+        });
         expect(setRes.snapshot.providerId).toBe('anthropic');
         expect(setRes.snapshot.model).toBe('claude-sonnet-4-6');
         expect(setRes.snapshot.auth.env.ANTHROPIC_API_KEY).toBe(
@@ -642,37 +646,24 @@ describe('WorkspaceLlmResolver.resolveSetup', () => {
       }
     });
 
-    it('resolves unset workspace alias ("default", "opus", "haiku", or empty) via resolveEffectiveTiers', async () => {
-      // Empty / default -> sonnet -> opus -> haiku (z-ai defaultTiers.sonnet = 'glm-5.2').
-      const defaultH = await setupHarness({
+    it.each([
+      ['default', 'glm-5.3'],
+      ['', 'glm-5.3'],
+      ['opus', 'glm-5.3'],
+      ['sonnet', 'glm-5.2'],
+    ])('resolves unset workspace model %j to %s', async (alias, model) => {
+      const h = await setupHarness({
         workspaceA: {
           authMethod: 'thirdParty',
           anthropicProviderId: 'z-ai',
-          'provider.thirdParty.z-ai.selectedModel': 'default',
+          'provider.thirdParty.z-ai.selectedModel': alias,
         },
         providerKeys: { 'z-ai': 'zai-key' },
       });
-      const defaultRes = await defaultH.resolver.resolveSetup(WS_A);
-      expect(defaultRes.kind).toBe('unset');
-      if (defaultRes.kind === 'unset') {
-        expect(defaultRes.snapshot.providerId).toBe('z-ai');
-        expect(defaultRes.snapshot.model).toBe('glm-5.2');
-      }
-
-      // Explicit tier alias 'opus' -> matches opus tier ('glm-5.3').
-      const opusH = await setupHarness({
-        workspaceA: {
-          authMethod: 'thirdParty',
-          anthropicProviderId: 'z-ai',
-          'provider.thirdParty.z-ai.selectedModel': 'opus',
-        },
-        providerKeys: { 'z-ai': 'zai-key' },
+      await expect(h.resolver.resolveSetup(WS_A)).resolves.toMatchObject({
+        kind: 'unset',
+        snapshot: { providerId: 'z-ai', model },
       });
-      const opusRes = await opusH.resolver.resolveSetup(WS_A);
-      expect(opusRes.kind).toBe('unset');
-      if (opusRes.kind === 'unset') {
-        expect(opusRes.snapshot.model).toBe('glm-5.3');
-      }
     });
 
     it('returns invalid/model-missing with source="workspace" when unset workspace has no concrete tier', async () => {

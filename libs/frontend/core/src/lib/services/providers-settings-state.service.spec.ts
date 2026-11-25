@@ -250,6 +250,7 @@ describe('ProvidersSettingsStateService', () => {
       data: {
         state: { kind: 'unset', effective: { provider: 'first', model: 'pinned-model' } },
         committed: null,
+        undoBaseline: null,
         commitSeq: 0,
       },
       error: null,
@@ -269,13 +270,70 @@ describe('ProvidersSettingsStateService', () => {
     pending.resolve(success({ state: { kind: 'unset', effective: pair } }));
     await read;
 
-    expect(service.setupModel()).toEqual({ status: 'ready', data: receipt, error: null });
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: { ...receipt, undoBaseline: pair },
+      error: null,
+    });
     expect(service.setupUndoEntry()).toEqual({
       targetPair: null,
       committedReceipt: pair,
       commitSeq: 7,
     });
   });
+
+  it.each(['apiKey', 'claudeCli'])(
+    'seeds the Setup picker row with the canonical pair after reloading %s',
+    async (provider) => {
+      const committed = { provider, model: 'sonnet' };
+      const pair = { provider: 'anthropic', model: 'claude-sonnet-4-5' };
+      handlers.set('wizard:get-setup-model', async () =>
+        success({ state: { kind: 'set', pair }, committed }),
+      );
+
+      await service.refreshSetupModel();
+
+      expect(service.setupModel().data?.committed).toEqual(pair);
+    },
+  );
+
+  it.each(['apiKey', 'claudeCli'])(
+    'restores the stored %s Setup selector on Undo after a reload',
+    async (provider) => {
+      const original = { provider, model: 'claude-sonnet-4-5' };
+      const state: SetupPairState = {
+        kind: 'set',
+        pair: { ...original, provider: 'anthropic' },
+      };
+      const replacement = { provider: 'openrouter', model: 'setup-model' };
+      handlers.set('wizard:get-setup-model', async () =>
+        success({ state, committed: original }),
+      );
+      await service.refreshSetupModel();
+
+      handlers.set('wizard:set-setup-model', async () =>
+        success({
+          state: { kind: 'set', pair: replacement },
+          committed: replacement,
+          commitSeq: 1,
+        }),
+      );
+      await expect(service.commitSetupPair(replacement)).resolves.toBe(true);
+
+      handlers.set('wizard:set-setup-model', async () =>
+        success({ state, committed: original, commitSeq: 2 }),
+      );
+      await expect(service.undoSetupPair()).resolves.toBe(true);
+      expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', original);
+      expect(service.setupModel().data).toMatchObject({
+        committed: state.pair,
+        undoBaseline: original,
+      });
+      expect(service.setupCommit().message).toBe(
+        'Saved claude-sonnet-4-5 from anthropic for Setup.',
+      );
+    },
+  );
 
   it('uses an external Setup clear as the baseline for the next save and Undo', async () => {
     const first = { provider: 'openrouter', model: 'first-model' };
@@ -300,7 +358,7 @@ describe('ProvidersSettingsStateService', () => {
     await service.refreshSetupModel();
     expect(service.setupModel()).toEqual({
       status: 'ready',
-      data: { state: unset, committed: null, commitSeq: 7 },
+      data: { state: unset, committed: null, undoBaseline: null, commitSeq: 7 },
       error: null,
     });
     expect(service.setupCommit().status).toBe('idle');

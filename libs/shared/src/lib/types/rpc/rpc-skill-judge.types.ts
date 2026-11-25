@@ -120,6 +120,8 @@ export type WizardGetSetupModelParams = Record<string, never>;
 
 export interface WizardGetSetupModelResult {
   state: SetupPairState;
+  /** Stored selector and model for Undo, when supplied by the host. */
+  committed?: ModelPair;
 }
 
 export interface WizardSetSetupModelParams {

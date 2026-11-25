@@ -1542,6 +1542,119 @@ describe('PtahFileSettingsManager', () => {
       expect(restarted.get<boolean>('display.autoOpenArtifacts')).toBe(false);
     });
 
+    it('keeps a later rejected single-key write out of the committed batch image', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      await mgr.set('authMethod', 'claudeCli');
+
+      const realRename =
+        jest.requireActual<typeof import('fs/promises')>('fs/promises').rename;
+      renameOverride = async (from, to) => {
+        await realRename(from, to);
+        renameOverride = async () => {
+          throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+        };
+      };
+      const pair = {
+        'setup.provider': 'openrouter',
+        'setup.model': 'openai/gpt-5',
+      };
+
+      try {
+        const batchWrite = mgr.setMany(pair);
+        const failedWrite = expect(mgr.set('authMethod', 'apiKey')).rejects.toThrow(
+          SettingsPersistError,
+        );
+        expect(mgr.get('authMethod')).toBe('apiKey');
+        await expect(batchWrite).resolves.toEqual(pair);
+        await failedWrite;
+        expect(mgr.get('authMethod')).toBe('claudeCli');
+
+        const restarted = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+        expect(restarted.getMany(Object.keys(pair))).toEqual(pair);
+        expect(restarted.get('authMethod')).toBe('claudeCli');
+      } finally {
+        renameOverride = null;
+      }
+    });
+
+    it.each([false, true])(
+      'preserves a later same-key optimistic write when setMany commits (single write fails: %s)',
+      async (singleFails) => {
+        const mgr = new PtahFileSettingsManager({});
+        await mgr.set('authMethod', 'claudeCli');
+
+        if (singleFails) {
+          const realRename =
+            jest.requireActual<typeof import('fs/promises')>('fs/promises').rename;
+          renameOverride = async (from, to) => {
+            await realRename(from, to);
+            renameOverride = async () => {
+              throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+            };
+          };
+        }
+        const observed: unknown[] = [];
+        mgr.watch('authMethod', () => observed.push(mgr.get('authMethod')));
+
+        const batchWrite = mgr.setMany({ authMethod: 'thirdParty' });
+        const singleWrite = mgr.set('authMethod', 'apiKey');
+        const singleSettles = singleFails
+          ? expect(singleWrite).rejects.toThrow(SettingsPersistError)
+          : expect(singleWrite).resolves.toBeUndefined();
+        expect(mgr.get('authMethod')).toBe('apiKey');
+
+        await expect(batchWrite).resolves.toEqual({ authMethod: 'thirdParty' });
+        await singleSettles;
+        expect(observed).toEqual(singleFails ? ['apiKey'] : ['apiKey', 'apiKey']);
+        const expected = singleFails ? 'thirdParty' : 'apiKey';
+        expect(mgr.get('authMethod')).toBe(expected);
+        expect(new PtahFileSettingsManager({}).get('authMethod')).toBe(expected);
+      },
+    );
+
+    it('keeps the latest optimistic value visible when two same-key sets follow a batch', async () => {
+      const mgr = new PtahFileSettingsManager({});
+      const seen: Array<{ published: unknown; visible: unknown }> = [];
+      mgr.watch('authMethod', (published) => {
+        seen.push({ published, visible: mgr.get('authMethod') });
+      });
+
+      await Promise.all([
+        mgr.setMany({ authMethod: 'thirdParty' }),
+        mgr.set('authMethod', 'apiKey'),
+        mgr.set('authMethod', 'claudeCli'),
+      ]);
+
+      expect(seen).toEqual([
+        { published: 'thirdParty', visible: 'claudeCli' },
+        { published: 'apiKey', visible: 'claudeCli' },
+        { published: 'claudeCli', visible: 'claudeCli' },
+      ]);
+      expect(new PtahFileSettingsManager({}).get('authMethod')).toBe('claudeCli');
+    });
+
+    it('ignores a self-write echo while a later optimistic set is queued', async () => {
+      const mgr = new PtahFileSettingsManager({});
+      const received: unknown[] = [];
+      mgr.watch('authMethod', (value) => received.push(value));
+
+      let visibleAfterEcho: unknown;
+      mgr.watch('setup.provider', () => {
+        // Handle the file event while the batch is on disk and set() is queued.
+        mgr['processCrossProcessChange']();
+        visibleAfterEcho = mgr.get('authMethod');
+      });
+      const batchWrite = mgr.setMany({
+        'setup.provider': 'openrouter',
+        authMethod: 'thirdParty',
+      });
+      const singleWrite = mgr.set('authMethod', 'apiKey');
+      await Promise.all([batchWrite, singleWrite]);
+
+      expect(visibleAfterEcho).toBe('apiKey');
+      expect(received).toEqual(['thirdParty', 'apiKey']);
+    });
+
     it('setMany() advances routingConfigurationGeneration only after rename succeeds', async () => {
       const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
       expect(mgr.getRoutingConfigurationGeneration()).toBe(0);

@@ -48,20 +48,14 @@ export class ReactiveSettingsStore implements IGlobalBatchSettingsStore {
   }
 
   readGlobalMany(keys: readonly string[]): Record<string, unknown> {
-    const missingKeys: string[] = [];
-    for (const key of keys) {
-      if (!this.globalCache.has(key)) {
-        missingKeys.push(key);
-      }
-    }
-    if (missingKeys.length > 0) {
+    if (keys.some((key) => !this.globalCache.has(key))) {
       if (isGlobalBatchSettingsStore(this.backend)) {
-        const fetched = this.backend.readGlobalMany(missingKeys);
-        for (const key of missingKeys) {
+        const fetched = this.backend.readGlobalMany(keys);
+        for (const key of keys) {
           this.globalCache.set(key, fetched[key]);
         }
       } else {
-        for (const key of missingKeys) {
+        for (const key of keys) {
           const value = this.backend.readGlobal(key);
           this.globalCache.set(key, value);
         }

@@ -35,6 +35,7 @@ import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   getAnthropicProvider,
   isProviderSessionProviderId,
+  type ModelPair,
   type ProviderProfile,
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
@@ -55,6 +56,14 @@ const TIER_ALIASES: ReadonlySet<string> = new Set([
   'sonnet',
   'haiku',
 ]);
+
+type ResolvedSetup = Extract<SetupResolution, { kind: 'set' | 'unset' }>;
+type UnsetSetupResolution =
+  | Exclude<SetupResolution, ResolvedSetup>
+  | (ResolvedSetup & { kind: 'unset' });
+type WorkspaceSetupResolution =
+  | UnsetSetupResolution
+  | (ResolvedSetup & { kind: 'set'; storedPair: ModelPair });
 
 @injectable()
 export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
@@ -152,7 +161,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
 
   async resolveSetup(
     workspaceRoot: string | undefined,
-  ): Promise<SetupResolution> {
+  ): Promise<WorkspaceSetupResolution> {
     const path = workspaceRoot?.trim() ?? '';
     const stored = this.scope.readSetupPair();
     if (stored.provider === null && stored.model === null) {
@@ -169,7 +178,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
   async validateSetupPair(
     workspaceRoot: string | undefined,
     pair: { provider: string; model: string },
-  ): Promise<SetupResolution> {
+  ): Promise<WorkspaceSetupResolution> {
     const path = workspaceRoot?.trim() ?? '';
     const provider =
       typeof pair.provider === 'string' && pair.provider.trim().length > 0
@@ -187,7 +196,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
 
   private async resolveUnsetSetup(
     workspacePath: string,
-  ): Promise<SetupResolution> {
+  ): Promise<UnsetSetupResolution> {
     const activeAuth =
       await this.profileResolver.resolveSetupWorkspaceAuth(workspacePath);
     const authKey = resolveAuthProviderKey(
@@ -252,7 +261,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
         lowerAlias === 'sonnet' ||
         lowerAlias === 'haiku'
           ? [tiers[lowerAlias], tiers.sonnet, tiers.opus, tiers.haiku]
-          : [tiers.sonnet, tiers.opus, tiers.haiku];
+          : [tiers.opus, tiers.sonnet, tiers.haiku];
       concreteModel = candidates.find(
         (candidate): candidate is string =>
           typeof candidate === 'string' && isConcreteModelId(candidate),
@@ -313,7 +322,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
     workspacePath: string,
     provider: string | null,
     model: string | null,
-  ): Promise<SetupResolution> {
+  ): Promise<Exclude<WorkspaceSetupResolution, { kind: 'unset' }>> {
     if (provider === null) {
       return {
         kind: 'invalid',
@@ -463,6 +472,7 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
 
     return {
       kind: 'set',
+      storedPair: { provider, model },
       snapshot: this.toSetupSnapshot(built.profile),
     };
   }

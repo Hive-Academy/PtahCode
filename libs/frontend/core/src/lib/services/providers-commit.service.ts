@@ -6,6 +6,7 @@ import type {
   RpcMethodParams,
   RpcMethodResult,
   SetupPairState,
+  WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService, type RpcResult } from './claude-rpc.service';
 import { EffortStateService } from './effort-state.service';
@@ -16,7 +17,6 @@ import type {
   ProvidersSettingsCommit,
   ProvidersSettingsPatch,
   ProvidersSettingsSection,
-  ProvidersSetupRowState,
   ProvidersSetupUndoEntry,
   SaveOperation,
   SaveOutcome,
@@ -82,7 +82,7 @@ export interface ProvidersSetupCommitState {
   readonly message: string | null;
 }
 
-type ApplySetupReceipt = (receipt: ProvidersSetupRowState) => void;
+type ApplySetupReceipt = (receipt: WizardSetSetupModelResult) => void;
 
 /**
  * Owns the Providers settings commit pipeline and its feedback (`commit()`): one save at a time,
@@ -98,7 +98,7 @@ export class ProvidersCommitService {
   private readonly injector = inject(Injector);
   private readonly commitState = signal<ProvidersSettingsCommit>(EMPTY_COMMIT);
   readonly commit = this.commitState.asReadonly();
-  private readonly setupReceiptState = signal<ProvidersSetupRowState | null>(null);
+  private readonly setupReceiptState = signal<WizardSetSetupModelResult | null>(null);
   private readonly setupUndoState = signal<ProvidersSetupUndoEntry | null>(null);
   private readonly setupCommitState = signal<ProvidersSetupCommitState>({
     status: 'idle',
@@ -117,12 +117,12 @@ export class ProvidersCommitService {
     return this.latestSetupCommitSeq;
   }
 
-  syncSetupBaseline(read: ProvidersSetupRowState): void {
+  syncSetupBaseline(state: SetupPairState, undoBaseline: ModelPair | null): void {
     const receipt = this.setupReceipt();
     if (
       this.setupWrites() > 0 ||
       !receipt ||
-      (sameSetupPair(receipt.committed, read.committed) && sameSetupState(receipt.state, read.state))
+      (sameSetupPair(receipt.committed, undoBaseline) && sameSetupState(receipt.state, state))
     ) return;
 
     // The next save takes its prior pair from the loaded row after an external change.
@@ -213,11 +213,14 @@ export class ProvidersCommitService {
       this.setupCommitState.set(failed);
       return false;
     }
+    const effectivePair = receipt.state.kind === 'set' ? receipt.state.pair : null;
     this.setupCommitState.set({
       status: 'saved',
-      message: committed
-        ? `Saved ${committed.model} from ${committed.provider} for Setup.`
-        : 'Setup now uses the workspace model.',
+      message: effectivePair
+        ? `Saved ${effectivePair.model} from ${effectivePair.provider} for Setup.`
+        : committed
+          ? 'Saved the Setup model selection.'
+          : 'Setup now uses the workspace model.',
     });
     return true;
   }

@@ -1,4 +1,4 @@
-import type { SetupPairState } from '@ptah-extension/shared';
+import type { ModelPair, SetupPairState } from '@ptah-extension/shared';
 import type { OneShotAuthOverride } from '../helpers/sdk-query-runner.service';
 
 /**
@@ -61,7 +61,8 @@ export type ResolvedSetupSnapshot = WorkspaceLlmSnapshot & {
  * `SetupPairState` without re-mapping.
  */
 export type SetupResolution =
-  | { kind: 'set' | 'unset'; snapshot: ResolvedSetupSnapshot }
+  | { kind: 'set'; snapshot: ResolvedSetupSnapshot; storedPair?: ModelPair }
+  | { kind: 'unset'; snapshot: ResolvedSetupSnapshot }
   | Extract<SetupPairState, { kind: 'invalid' | 'unavailable' }>;
 
 /**
@@ -92,4 +93,10 @@ export interface IWorkspaceLlmResolver {
    * resolution fails with the reason instead of falling back.
    */
   resolveSetup(workspaceRoot: string | undefined): Promise<SetupResolution>;
+
+  /** Validates a proposed Setup pair without changing stored settings. */
+  validateSetupPair?(
+    workspaceRoot: string | undefined,
+    pair: ModelPair,
+  ): Promise<SetupResolution>;
 }

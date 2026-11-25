@@ -1010,6 +1010,48 @@ describe('SetupRpcHandlers', () => {
       expect(h.resolveSetup).toHaveBeenCalledWith(WORKSPACE);
     });
 
+    it.each(['apiKey', 'claudeCli'])(
+      'returns the stored %s selector alongside the effective Setup pair',
+      async (provider) => {
+        const h = makeHarness();
+        const committed = { provider, model: SNAPSHOT.model };
+        h.resolveSetup.mockResolvedValue({
+          kind: 'set',
+          snapshot: SNAPSHOT,
+          storedPair: committed,
+        } satisfies SetupResolution);
+        h.handlers.register();
+
+        expect(await call(h, 'wizard:get-setup-model')).toEqual({
+          state: {
+            kind: 'set',
+            pair: { provider: SNAPSHOT.providerId, model: SNAPSHOT.model },
+          },
+          committed,
+        });
+      },
+    );
+
+    it('rejects a Setup write when the resolver cannot validate the candidate', async () => {
+      const h = makeHarness();
+      h.container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+        resolveSetup: h.resolveSetup,
+      });
+      const commitSetupPair = jest.fn();
+      h.container.__register(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, {
+        commitSetupPair,
+      });
+      h.handlers.register();
+
+      expect(
+        await callRaw(h, 'wizard:set-setup-model', {
+          provider: 'anthropic',
+          model: 'sonnet',
+        }),
+      ).toMatchObject({ success: false, errorCode: 'SETUP_MODEL_INVALID' });
+      expect(commitSetupPair).not.toHaveBeenCalled();
+    });
+
     it('returns the strict blocked state and rejects invalid saves before writing', async () => {
       const h = makeHarness();
       h.resolveSetup.mockResolvedValue(INVALID_SETUP);

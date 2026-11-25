@@ -14,6 +14,7 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  ANTHROPIC_DIRECT_PROVIDER_ID,
   SCOPED_SETTING_KEYS,
   getAllAnthropicProviders,
   setCustomProviderEntries,
@@ -28,8 +29,10 @@ import {
   type RpcMethodResult,
   type ScopedSettingEntry,
   type SettingScope,
+  type SetupPairState,
   type PtahCliConfig,
   type SystemCliType,
+  type WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from './provider-accounts-state.service';
 import { VSCodeService } from './vscode.service';
@@ -113,6 +116,42 @@ export {
   type ClaudeAmbientStatusView,
 } from './claude-ambient-status.service';
 
+interface SetupModelData extends ProvidersSetupRowState {
+  readonly undoBaseline: ModelPair | null;
+}
+
+function setupModelData(
+  state: SetupPairState,
+  commitSeq: number,
+  storedPair: ModelPair | null | undefined,
+): SetupModelData {
+  let committed: ModelPair | null = null;
+  let fallbackBaseline: ModelPair | null = null;
+  if (state.kind === 'set') {
+    committed = state.pair;
+    fallbackBaseline = state.pair;
+  } else if (
+    (state.kind === 'invalid' || state.kind === 'unavailable') &&
+    state.source === 'setup'
+  ) {
+    const provider = state.provider ?? '';
+    const model = state.model ?? '';
+    fallbackBaseline = { provider, model };
+    committed = {
+      provider: provider === 'apiKey' || provider === 'claudeCli'
+        ? ANTHROPIC_DIRECT_PROVIDER_ID
+        : provider,
+      model,
+    };
+  }
+  return {
+    state,
+    committed,
+    undoBaseline: storedPair === undefined ? fallbackBaseline : storedPair,
+    commitSeq,
+  };
+}
+
 /** Route statuses that do not block a driver. `unknown`/`skipped` mean "not checkable", not "failed". */
 const ACTIVATABLE_STATUSES: ReadonlySet<string> = new Set([
   'connected',
@@ -146,7 +185,7 @@ export class ProvidersSettingsStateService {
     createSectionStore<RpcMethodResult<'memory:getTriggers'>['triggers']>();
   private readonly enhancementStore =
     createSectionStore<ProvidersEnhancementSettings>();
-  private readonly setupModelStore = createSectionStore<ProvidersSetupRowState>();
+  private readonly setupModelStore = createSectionStore<SetupModelData>();
   private readonly cliStore = createSectionStore<ProvidersCliAgents>();
   private readonly orchestrationStore =
     createSectionStore<ProvidersOrchestration>();
@@ -266,22 +305,18 @@ export class ProvidersSettingsStateService {
     const generation = store.generation + 1;
     const scopeKey = this.workspace.scopeKey();
     await readSection(store, this.workspace, async () => {
-      const { state } = await this.require('wizard:get-setup-model', {});
+      const { state, committed: storedPair } = await this.require(
+        'wizard:get-setup-model',
+        {},
+      );
 
-      let committed: ModelPair | null = null;
-      if (state.kind === 'set') {
-        committed = state.pair;
-      } else if (
-        (state.kind === 'invalid' || state.kind === 'unavailable') &&
-        state.source === 'setup'
-      ) {
-        committed = { provider: state.provider ?? '', model: state.model ?? '' };
-      }
-      return { state, committed, commitSeq: this.commits.setupCommitSeq };
+      return setupModelData(state, this.commits.setupCommitSeq, storedPair);
     });
     if (store.generation === generation && this.workspace.scopeKey() === scopeKey) {
       const loaded = store.value();
-      if (loaded.status === 'ready' && loaded.data) this.commits.syncSetupBaseline(loaded.data);
+      if (loaded.status === 'ready' && loaded.data) {
+        this.commits.syncSetupBaseline(loaded.data.state, loaded.data.undoBaseline);
+      }
     }
   }
 
@@ -292,7 +327,7 @@ export class ProvidersSettingsStateService {
   commitSetupPair(pair: ModelPair | null): Promise<boolean> {
     return this.commits.commitSetupPair(
       pair,
-      this.setupModel().data?.committed ?? null,
+      this.setupModel().data?.undoBaseline ?? null,
       this.setupReceiptHandler(),
     );
   }
@@ -301,9 +336,9 @@ export class ProvidersSettingsStateService {
     return this.commits.undoSetupPair(this.setupReceiptHandler());
   }
 
-  private setupReceiptHandler(): (receipt: ProvidersSetupRowState) => void {
+  private setupReceiptHandler(): (receipt: WizardSetSetupModelResult) => void {
     const scopeKey = this.workspace.scopeKey();
-    return (receipt) => {
+    return ({ state, committed, commitSeq }) => {
       if (this.workspace.scopeKey() !== scopeKey) {
         void this.refreshSetupModel();
         return;
@@ -311,7 +346,11 @@ export class ProvidersSettingsStateService {
       const store = this.setupModelStore;
       store.generation++;
       store.scopeKey = scopeKey;
-      store.value.set({ status: 'ready', data: receipt, error: null });
+      store.value.set({
+        status: 'ready',
+        data: setupModelData(state, commitSeq, committed),
+        error: null,
+      });
     };
   }
 
