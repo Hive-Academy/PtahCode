@@ -24,6 +24,15 @@ describe('parentLanePermission', () => {
     expect(parentLanePermission('unknown', lifecycle, codex)).toBe('plan');
   });
 
+  it('leaves an unknown bound id uncapped on resume', () => {
+    expect(parentLanePermission('unknown', lifecycle, codex, { unknownParent: 'uncapped' })).toBeUndefined();
+  });
+
+  it('still caps a live plan parent on resume', () => {
+    expect(parentLanePermission('other', { find: () => ({ permissionLevel: 'plan' }) }, codex,
+      { unknownParent: 'uncapped' })).toBe('plan');
+  });
+
   it.each([undefined, '', '  '])('leaves absent or blank caller %p parentless', (id) => {
     expect(parentLanePermission(id, lifecycle, codex)).toBeUndefined();
     expect(codex.getPermissionLevel).not.toHaveBeenCalled();
