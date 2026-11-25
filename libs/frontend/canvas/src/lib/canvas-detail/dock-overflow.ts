@@ -39,6 +39,7 @@ const STATUS_INK: Readonly<Record<AgentStatusWord, string>> = {
   waiting: 'text-state-need',
   failed: 'text-state-err',
   done: 'text-state-done',
+  stopping: 'text-state-idle',
   stopped: 'text-state-idle',
   queued: 'text-state-idle',
 };

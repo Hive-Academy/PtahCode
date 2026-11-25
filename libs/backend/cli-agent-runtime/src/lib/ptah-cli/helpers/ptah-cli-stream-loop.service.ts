@@ -218,8 +218,11 @@ export interface PtahCliStreamLoopConfig {
   readonly emitSegment: (segment: CliOutputSegment) => void;
   readonly emitStreamEvent: (event: FlatStreamEventUnion) => void;
   readonly agentName: string;
-  /** Called when the real SDK session ID is resolved from the system init message. */
-  readonly onSessionResolved?: (sessionId: string) => void;
+  /**
+   * Called when the real SDK session ID is resolved from the system init
+   * message, with the model that init reports (absent when it reports none).
+   */
+  readonly onSessionResolved?: (sessionId: string, model?: string) => void;
   readonly onTurnComplete?: (exitCode: number) => void;
   /**
    * Called on every result frame, before its exit code is chosen. Returns
@@ -522,7 +525,7 @@ export class PtahCliStreamLoop {
               content: `Session started: ${msg.session_id} (model: ${model})`,
             });
             if (this.effectiveSessionId && this.config.onSessionResolved) {
-              this.config.onSessionResolved(this.effectiveSessionId);
+              this.config.onSessionResolved(this.effectiveSessionId, msg.model || undefined);
             }
             continue;
           }

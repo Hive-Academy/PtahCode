@@ -2,7 +2,7 @@ import {
   createExecutionNode,
   type FlatStreamEventUnion,
 } from '@ptah-extension/shared';
-import { laneTranscriptMessages } from './lane-transcript-messages';
+import { isLaneNoticeMessage, laneTranscriptMessages } from './lane-transcript-messages';
 
 describe('lane transcript message adaptation', () => {
   it('keeps SDK message trees intact for the main chat bubble', () => {
@@ -171,5 +171,18 @@ describe('lane transcript user echo (L2/M5)', () => {
     ] as unknown as FlatStreamEventUnion[];
     const messages = laneTranscriptMessages('lane', [echo(0, 'continue', 6), echo(1, 'continue', 7)], events);
     expect(messages.filter((m) => m.role === 'user')).toHaveLength(2);
+  });
+
+  it('turns a host notice node into a status message at its send time, between the bubbles (round 7)', () => {
+    const before = createExecutionNode({ id: 'm1', type: 'message', startTime: 100 });
+    const notice = createExecutionNode({ id: 'seg-notice-3', type: 'text', content: 'Grok ran /context and returned no output.', startTime: 200 });
+    const after = createExecutionNode({ id: 'm2', type: 'message', startTime: 300 });
+    const messages = laneTranscriptMessages('lane', [before, notice, after]);
+    expect(messages.map((message) => message.role)).toEqual(['assistant', 'system', 'assistant']);
+    expect(messages[1]).toMatchObject({
+      id: 'lane:notice:seg-notice-3', timestamp: 200, rawContent: 'Grok ran /context and returned no output.',
+    });
+    expect(isLaneNoticeMessage(messages[1])).toBe(true);
+    expect(isLaneNoticeMessage(messages[0])).toBe(false);
   });
 });

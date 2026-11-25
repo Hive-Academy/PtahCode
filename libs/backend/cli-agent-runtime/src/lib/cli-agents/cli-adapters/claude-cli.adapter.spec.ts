@@ -24,9 +24,9 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   ClaudeCliAdapter,
-  CLAUDE_NAMED_RESUME_IMAGES_TEXT,
   type ClaudeCliAdapterDependencies,
 } from './claude-cli.adapter';
+import { LANE_IMAGES_NAMED_RESUME_TEXT } from '../messaging/agent-effective-capabilities';
 import type { ClaudeCliCommandOptions } from './cli-adapter.interface';
 import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
@@ -241,11 +241,8 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       undefined,
     );
     const context = f.run.mock.calls[0][0];
-    // The manifest's steer reaches the runner; it stays unsupported (dormant).
-    expect(context.manifestSteer).toEqual({
-      state: 'unsupported',
-      reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.',
-    });
+    // The manifest's steer reaches the runner (supported since live L4).
+    expect(context.manifestSteer).toEqual({ state: 'supported' });
     expect(f.query).toHaveBeenCalledWith({
       prompt: context.mailbox.prompt,
       options: context.options,
@@ -299,7 +296,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     expect(f.adapter.supportsMcp).toBe(true);
     expect(f.adapter.roleChannel).toBe('system-prompt');
     expect(handle.supportsContinuation?.()).toBe(true);
-    expect(handle.steer).toBeUndefined();
+    // Steer is exposed, but offered only from a proved turn with a tool running.
+    expect(typeof handle.steer).toBe('function');
+    expect(handle.supportsSteer?.()).toBe(false);
     expect(typeof handle.interrupt).toBe('function');
     handle.setAgentId?.('tracked-id');
     expect(f.limits.attach).toHaveBeenCalledWith('tracked-id');
@@ -333,7 +332,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       ...f.input, resumeSessionId: 'resume-1',
       accountAdmission: { kind: 'omitted' } as unknown as ClaudeCliCommandOptions['accountAdmission'],
       turnImages: [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }],
-    })).rejects.toThrow(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
+    })).rejects.toThrow(LANE_IMAGES_NAMED_RESUME_TEXT);
     expect(f.run).not.toHaveBeenCalled();
   });
 
@@ -350,8 +349,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       .toBe(reported.messaging.continuation.state === 'supported');
     expect(typeof handle.interrupt === 'function')
       .toBe(reported.messaging.interrupt.state === 'supported');
-    expect(handle.steer).toBeUndefined();
-    expect(reported.messaging.steer.state).toBe('unsupported');
+    expect(typeof handle.steer === 'function')
+      .toBe(reported.messaging.steer.state === 'supported');
+    expect(reported.messaging.steer.state).toBe('supported');
     // Req 4.3: every claimed turn input item has its handle operation.
     expect(laneTurnInputContractViolations(handle, reported)).toEqual([]);
     expect(reported.turnInput).toMatchObject({

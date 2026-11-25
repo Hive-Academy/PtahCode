@@ -25,6 +25,11 @@ export interface SessionStatsInputs {
   readonly snapshot: SessionStatsEntry | null;
   readonly cache?: NonNullable<SessionStatsEntry['cache']> | null;
   readonly liveModelStats: LiveModelStats | null;
+  /**
+   * The model the session runs now, as its model pill shows it (tab override,
+   * then the session's model, then the global pick). Absent: unknown.
+   */
+  readonly currentModel?: string | null;
   readonly compactionCount: number;
   readonly limits: StatsLimitViewModel | null;
   readonly budget: SessionBudgetState | null;

@@ -84,6 +84,11 @@ export const AgentMessageEnvelopeSchema = z.object({
   partialTurnLost: z.boolean().optional(),
   turnOutcome: z.enum(['completed', 'failed', 'stopped']).optional(),
   bodyBytes: z.number().int().nonnegative().optional(),
+  /**
+   * A body record is stored although `bodyBytes` is 0: an image-only message
+   * has empty text. Read through `hasStoredBody`; cleared with the body.
+   */
+  bodyStored: z.literal(true).optional(),
   ackState: z.enum(['pending', 'read', 'acted', 'rejected', 'unavailable']).optional(),
   ackAt: timestamp.optional(),
   ackNote: z.string().max(500).optional(),
@@ -133,3 +138,14 @@ export type EnvelopePatch =Partial<Omit<AgentMessageEnvelope,
   'id' | 'targetAgentId' | 'laneLineageId' | 'sender' | 'senderKey' |
   'idempotencyKey' | 'createdAt' | 'turn'
 >>;
+
+/**
+ * True when the envelope has a stored body record: text (`bodyBytes` > 0), or
+ * the empty text of an image-only message (`bodyStored`).
+ */
+export function hasStoredBody(envelope: {
+  readonly bodyBytes?: number;
+  readonly bodyStored?: true;
+}): boolean {
+  return (envelope.bodyBytes ?? 0) > 0 || envelope.bodyStored === true;
+}

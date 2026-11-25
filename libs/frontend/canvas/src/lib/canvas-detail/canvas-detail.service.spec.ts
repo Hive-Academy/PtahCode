@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { CanvasStore } from '../canvas.store';
 import { TabManagerService } from '@ptah-extension/chat';
-import { AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
+import { AgentDeliveryStore, AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
 import { CanvasDetailService } from './canvas-detail.service';
 import { CanvasAttentionLaneOpener } from './canvas-attention-lane-opener.service';
 
@@ -17,6 +17,9 @@ describe('CanvasDetailService', () => {
     ['agent', { parentSessionId: 'session', parentToolUseId: 'agent', status: 'running' }],
   ]));
   const agents = signal([{ parentSessionId: 'session', agentId: 'agent-1' }]);
+  const successors = signal(new Map<string, string>());
+  const receipts = signal(new Map<string, readonly object[]>());
+  const agentsById = signal(new Map<string, object>());
   const onTabClosed = jest.fn((_listener: (event: { tabId: string; kind: string }) => void) => jest.fn());
   let detail: CanvasDetailService;
 
@@ -28,6 +31,9 @@ describe('CanvasDetailService', () => {
     ]);
     focusTile.mockClear();
     onTabClosed.mockClear();
+    successors.set(new Map());
+    receipts.set(new Map());
+    agentsById.set(new Map());
     TestBed.configureTestingModule({
       providers: [
         CanvasDetailService,
@@ -37,11 +43,79 @@ describe('CanvasDetailService', () => {
           findTabByIdAcrossWorkspaces: (id: string) =>
             tiles().some((tile) => tile.tabId === id) ? { tab: { claudeSessionId: 'session' } } : null,
         } },
-        { provide: AgentMonitorStore, useValue: { subagents, agents } },
+        { provide: AgentMonitorStore, useValue: { subagents, agents,
+          currentAgentId: (id: string) => successors().get(id) ?? id, agentsById } },
+        { provide: AgentDeliveryStore, useValue: { receipts } },
         { provide: BackgroundAgentStore, useValue: { agents: signal([]) } },
       ],
     });
     detail = TestBed.inject(CanvasDetailService);
+  });
+
+  it('keeps the user on a resumed lane whose agent id changed (D3)', () => {
+    detail.open('a', 'cli:agent-1');
+    successors.set(new Map([['agent-1', 'agent-2']]));
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-2');
+    expect(detail.laneKey()).toBe('orchestrator');
+    detail.selectLaneFor('a', 'orchestrator');
+    expect(detail.laneKeyFor('a')).toBe('orchestrator');
+  });
+
+  it('never redirects an explicit pick of a lane whose card still exists (round 6)', () => {
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    successors.set(new Map([['agent-1', 'agent-9']]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    detail.open('a', 'cli:agent-1');
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+  });
+
+  it('follows a send from the lane view once, through the receipt of that send (F2, round 6)', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
+    detail.open('a', 'cli:agent-1');
+    const receipt = (actualAgentId: string, createdAt: number, sender = 'user') =>
+      ({ id: `r${createdAt}`, agentId: 'agent-1', actualAgentId, sender, createdAt });
+    // An old receipt from before this send never moves the view.
+    agentsById.set(new Map([['agent-1', {}], ['agent-old', {}]]));
+    receipts.set(new Map([['agent-1', [receipt('agent-old', 1)]]]));
+    detail.followAfterSend('a', 'agent-1');
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+    // This send resolved to a new lane, not on screen yet: stay, then follow once it is.
+    const now = Date.now();
+    receipts.set(new Map([['agent-1', [receipt('agent-old', 1), receipt('agent-9', now), receipt('agent-7', now + 1, 'parent')]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+    agentsById.set(new Map([['agent-1', {}], ['agent-old', {}], ['agent-9', {}], ['agent-7', {}]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-9');
+    // Once: going back to the old lane by hand stays there.
+    detail.selectLaneFor('a', 'cli:agent-1');
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+  });
+
+  it('drops a follow when the user picked another lane before the resume appeared', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
+    detail.open('a', 'cli:agent-1');
+    detail.followAfterSend('a', 'agent-1');
+    detail.selectLaneFor('a', 'orchestrator');
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('orchestrator');
+  });
+
+  it('clears a pending follow at once when the user picks another lane, even if they come back (PR 1512 review)', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
+    detail.open('a', 'cli:agent-1');
+    detail.followAfterSend('a', 'agent-1');
+    detail.selectLaneFor('a', 'orchestrator');
+    detail.selectLaneFor('a', 'cli:agent-1');
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
   });
 
   it('focuses a known tab and accepts chat lane keys', () => {

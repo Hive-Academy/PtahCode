@@ -1,3 +1,4 @@
+import { sessionModelDisplayName } from './session-model-name';
 import {
   Component,
   ChangeDetectionStrategy,
@@ -7,7 +8,6 @@ import {
   inject,
 } from '@angular/core';
 import {
-  resolveModelDisplayName,
   type SessionBudgetState,
   type SessionStatsEntry,
   type ContextCapacity,
@@ -300,6 +300,6 @@ export class SessionStatsSummaryComponent {
   protected readonly formatDuration = formatDuration;
 
   protected formatModelName(modelId: string): string {
-    return resolveModelDisplayName(modelId, this.modelState.availableModels());
+    return sessionModelDisplayName(modelId, this.modelState.availableModels());
   }
 }

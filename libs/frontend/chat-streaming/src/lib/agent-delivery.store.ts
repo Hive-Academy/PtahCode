@@ -250,34 +250,6 @@ export interface RecoveredLaneMessage {
   readonly turn?: LaneTurnRequest;
 }
 
-/**
- * Fold a later recovery into one already waiting: texts join on a new line,
- * files and images are kept from both without duplicates, and the later
- * message's model and effort win. `turn` stays absent when neither had one.
- */
-function mergeRecovered(prior: RecoveredLaneMessage, next: RecoveredLaneMessage): RecoveredLaneMessage {
-  const text = `${prior.text}\n${next.text}`;
-  if (!prior.turn) return next.turn ? { text, turn: next.turn } : { text };
-  if (!next.turn) return { text, turn: prior.turn };
-  const files = [...new Set([...(prior.turn.files ?? []), ...(next.turn.files ?? [])])];
-  const seenImages = new Set<string>();
-  const images = [...(prior.turn.images ?? []), ...(next.turn.images ?? [])].filter((image) => {
-    const key = `${image.mediaType}:${image.data}`;
-    if (seenImages.has(key)) return false;
-    seenImages.add(key);
-    return true;
-  });
-  const model = next.turn.model ?? prior.turn.model;
-  const reasoningEffort = next.turn.reasoningEffort ?? prior.turn.reasoningEffort;
-  const turn: LaneTurnRequest = {
-    ...(model !== undefined ? { model } : {}),
-    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-    ...(files.length > 0 ? { files } : {}),
-    ...(images.length > 0 ? { images } : {}),
-  };
-  return { text, turn };
-}
-
 @Injectable({ providedIn: 'root' })
 export class AgentDeliveryStore {
   private readonly rpc = inject(ClaudeRpcService);
@@ -289,10 +261,19 @@ export class AgentDeliveryStore {
   /** Parent deliveries by delivery id; insertion order is update order. */
   private readonly _parentDeliveries = signal<ReadonlyMap<string, ParentDeliveryItem>>(new Map());
   private readonly _previews = signal<PreviewMap>(new Map());
-  /** Messages recovered from the backend body store, waiting for the lane composer. */
-  private readonly _recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
+  /** Messages waiting for a lane's composer, oldest first; each stays its own message. */
+  private readonly _recovered = signal<ReadonlyMap<string, readonly RecoveredLaneMessage[]>>(new Map());
   /** Receipt ids whose message a composer already restored; their row offers no Recover text. */
   private readonly _restored = signal<ReadonlySet<string>>(new Set());
+  /**
+   * The latest preview request per lane and delivery (`agentId:delivery`).
+   * A response that is no longer the latest is dropped, so an older answer
+   * that arrives late never overwrites a newer one.
+   */
+  private readonly previewRequests = new Map<string, number>();
+  private previewSeq = 0;
+  /** Per lane, how many steer-availability changes the host reported (`AgentOutputDelta.steerAvailable`). */
+  private readonly _steerChanges = signal<ReadonlyMap<string, number>>(new Map());
 
   /** Receipts grouped by lane: the resolved lane after a cold resume, and the lane addressed. */
   readonly receipts = computed<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(() => {
@@ -321,6 +302,25 @@ export class AgentDeliveryStore {
   });
 
   readonly recovered = this._recovered.asReadonly();
+
+  /**
+   * A counter that moves each time the host reports that a lane's steer
+   * availability changed. The composer refetches its previews when it moves;
+   * the previews stay the one source of the mode.
+   */
+  steerChange(agentId: string): number {
+    return this._steerChanges().get(agentId) ?? 0;
+  }
+
+  /** The host reported a steer-availability change for a lane (an output delta with `steerAvailable`). */
+  onSteerAvailability(agentId: string): void {
+    const live = this.monitor.agentsById();
+    this._steerChanges.update((current) => {
+      // Lanes the monitor no longer knows drop out, as their previews do.
+      const next = new Map([...current].filter(([id]) => id === agentId || live.has(id)));
+      return next.set(agentId, (next.get(agentId) ?? 0) + 1);
+    });
+  }
 
   private readonly hasAgedItems = computed(() => {
     for (const receipt of this._receipts().values()) {
@@ -563,9 +563,16 @@ export class AgentDeliveryStore {
   }
 
   async previewMessage(agentId: string, delivery: AgentMessageDelivery): Promise<AgentMessagePreview> {
+    const requestKey = `${agentId}:${delivery}`;
+    const seq = ++this.previewSeq;
+    this.previewRequests.set(requestKey, seq);
     const result = await this.rpc.call('agent:previewMessage', { agentId: AgentId.from(agentId), delivery });
+    const latest = this.previewRequests.get(requestKey) === seq;
+    if (latest) this.previewRequests.delete(requestKey);
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message preview failed');
     const preview = result.data;
+    // A newer request for this lane and delivery is in flight or answered: it owns the slot.
+    if (!latest) return preview;
     const live = this.monitor.agentsById();
     this._previews.update((current) => {
       const next = new Map([...current].filter(([id]) => id === agentId || live.has(id)));
@@ -676,24 +683,25 @@ export class AgentDeliveryStore {
    * Keep a message for a lane's composer until one shows that lane (see
    * `takeRecoveredMessage`). A composer hands over a message that came back
    * after it switched to another lane, so the message is never lost. A
-   * message already waiting is merged with this one.
+   * message already waiting stays separate: each keeps its own text and turn,
+   * as each queued message keeps its own card and echo (T2).
    */
   holdForComposer(composerAgentId: string, message: RecoveredLaneMessage): void {
     this._recovered.update((current) => {
       const next = new Map(current);
-      const prior = next.get(composerAgentId);
-      next.set(composerAgentId, prior ? mergeRecovered(prior, message) : message);
+      next.set(composerAgentId, [...(next.get(composerAgentId) ?? []), message]);
       return next;
     });
   }
 
-  /** Take the recovered message for a lane's composer; returns null when none waits. */
+  /** Take the oldest recovered message for a lane's composer; returns null when none waits. */
   takeRecoveredMessage(agentId: string): RecoveredLaneMessage | null {
-    const message = this._recovered().get(agentId);
+    const [message, ...rest] = this._recovered().get(agentId) ?? [];
     if (message === undefined) return null;
     this._recovered.update((current) => {
       const next = new Map(current);
-      next.delete(agentId);
+      if (rest.length > 0) next.set(agentId, rest);
+      else next.delete(agentId);
       return next;
     });
     return message;

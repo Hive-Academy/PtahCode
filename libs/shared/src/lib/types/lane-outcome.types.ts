@@ -16,6 +16,13 @@
 import type { AgentStatus, LaneCompletionVerdict } from './agent-process.types';
 import type { PhaseKind } from './phase-contract.types';
 
+/**
+ * The verdict an outcome row stores. A caller stop (`stopped` completion
+ * verdict) is recorded as `failed` with status `stopped`, as rows always
+ * were, so the routing statistics keep their meaning.
+ */
+export type LaneOutcomeVerdict = Exclude<LaneCompletionVerdict, 'stopped'>;
+
 export const OUTCOME_TASK_KINDS = [
   'plan',
   'implement',
@@ -32,6 +39,7 @@ export const OUTCOME_TASK_KIND_SOURCES = [
   'unclassified',
 ] as const;
 export type OutcomeTaskKindSource = (typeof OUTCOME_TASK_KIND_SOURCES)[number];
+/** Provider failure classes: the choices a failure classifier may answer. */
 export const LANE_FAILURE_CLASSES = [
   'usage-limit',
   'auth',
@@ -39,7 +47,16 @@ export const LANE_FAILURE_CLASSES = [
   'timeout',
   'bad-output',
 ] as const;
-export type LaneFailureClass = (typeof LANE_FAILURE_CLASSES)[number];
+/**
+ * A caller stop (the user's Stop or `ptah_agent_stop`). Not a provider
+ * failure: the row is kept (verdict `failed`, as rows always were), never
+ * offered to a classifier, and left out of every delivery rate and failure
+ * tally.
+ */
+export const LANE_USER_STOP_CLASS = 'user-stop';
+/** Every class an outcome row may store. */
+export const STORED_LANE_FAILURE_CLASSES = [...LANE_FAILURE_CLASSES, LANE_USER_STOP_CLASS] as const;
+export type LaneFailureClass = (typeof STORED_LANE_FAILURE_CLASSES)[number];
 export const OUTCOME_ROUTING_SOURCES = [
   'model',
   'ranking',
@@ -96,7 +113,7 @@ export interface LaneOutcomeRecord {
    */
   readonly phaseKind?: PhaseKind | null;
   readonly taskId: string | null;
-  readonly verdict: LaneCompletionVerdict;
+  readonly verdict: LaneOutcomeVerdict;
   readonly failureClass: LaneFailureClass | null;
   readonly startedAt: number | null;
   /** Epoch ms. */

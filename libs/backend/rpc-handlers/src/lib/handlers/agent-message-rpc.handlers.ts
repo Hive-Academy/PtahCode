@@ -55,12 +55,14 @@ const turnSchema = z.object({
 }).strict();
 const sendSchema = z.object({
   agentId,
-  message: z.string().min(1).max(AGENT_MESSAGE_MAX_CHARS).refine((value) => value.trim().length > 0),
+  message: z.string().max(AGENT_MESSAGE_MAX_CHARS),
   delivery: z.enum(['queue', 'now', 'steer']).optional(),
   allowPartialTurnLoss: z.boolean().optional(),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional(),
   turn: turnSchema.optional(),
-}).strict();
+}).strict()
+  // Text, or images alone (an image-only message); never neither.
+  .refine((value) => value.message.trim().length > 0 || (value.turn?.images?.length ?? 0) > 0);
 const composerOptionsSchema = z.object({ agentId }).strict();
 const receiptSchema = z.object({ agentId, messageId }).strict();
 const listReceiptsSchema = z.object({ agentId: agentId.optional(), parentSessionId: parentSessionId.optional() }).strict();

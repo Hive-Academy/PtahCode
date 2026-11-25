@@ -213,6 +213,21 @@ describe('CanvasLaneViewComponent', () => {
     expect(fixture.nativeElement.querySelectorAll('ptah-question-card')).toHaveLength(0);
   });
 
+  it('keeps pending questions in a capped area of their own that scrolls (PR 1512 review)', () => {
+    subagents.set(new Map([['sub', { parentToolUseId: 'sub', parentSessionId: 'owner' }]]));
+    questionRequests.set([{ id: 'owned', sessionId: 'owner', questions: [] }]);
+    const fixture = TestBed.createComponent(CanvasLaneViewComponent);
+    fixture.componentRef.setInput('tabId', 'tab');
+    fixture.componentRef.setInput('sessionId', 'owner');
+    fixture.componentRef.setInput('laneKey', 'sub:sub');
+    fixture.detectChanges();
+    const area = fixture.nativeElement.querySelector('[data-testid="lane-pending-questions"]') as HTMLElement;
+    expect(area.classList).toContain('overflow-y-auto');
+    expect(area.classList).toContain('max-h-[45%]');
+    expect(area.classList).toContain('shrink-0');
+    expect(area.querySelectorAll('ptah-question-card')).toHaveLength(1);
+  });
+
   it('uses late router targets and excludes workflow claims in a subagent lane', () => {
     subagents.set(new Map([['sub', { parentToolUseId: 'sub', parentSessionId: 'owner' }]]));
     questionRequests.set([{ id: 'routed', sessionId: 'stale', questions: [] }]);
@@ -311,6 +326,10 @@ describe('CanvasLaneViewComponent', () => {
     // The panel does not scroll; the transcript region does, and the composer
     // sits below it, so transcript rows never pass under the composer (B1).
     expect(cliPanel?.classList.contains('overflow-y-auto')).toBe(false);
+    // The panel fills the lane block (flex-1, not h-full plus padding) and clips.
+    expect(cliPanel?.classList.contains('flex-1')).toBe(true);
+    expect(cliPanel?.classList.contains('h-full')).toBe(false);
+    expect(cliPanel?.classList.contains('overflow-hidden')).toBe(true);
     const layout = cliPanel?.firstElementChild;
     expect(layout?.tagName).toBe('PTAH-CHAT-SESSION-LAYOUT');
     const scroller = card?.parentElement;
@@ -412,9 +431,15 @@ describe('CanvasLaneViewComponent', () => {
     for (const key of ['cli:a', 'sub:task-tool', 'bg:task-tool']) {
       fixture.componentRef.setInput('laneKey', key);
       fixture.detectChanges();
-      expect(host.classList).toContain('overflow-auto');
-      expect(host.classList).not.toContain('overflow-hidden');
-      expect(panel.classList).not.toContain('flex');
+      // One scroll container: the host never scrolls for a lane either, so
+      // the panel cannot grow a second, outer scrollbar.
+      expect(host.classList).toContain('overflow-hidden');
+      expect(host.classList).not.toContain('overflow-auto');
+      expect(panel.classList).toContain('flex');
+      const block = panel.querySelector('.rail-lane-enter') as HTMLElement;
+      expect(block.classList).toContain('flex-1');
+      expect(block.classList).toContain('min-h-0');
+      expect(block.classList).not.toContain('h-full');
       expect(transcript.classList).toContain('hidden');
       expect(panel.querySelector('.rail-lane-enter')?.classList).not.toContain(
         'hidden',

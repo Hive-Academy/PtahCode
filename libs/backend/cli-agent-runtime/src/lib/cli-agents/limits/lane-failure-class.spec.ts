@@ -23,6 +23,8 @@ describe('classifyLaneFailureClass', () => {
     [{}, 'crash'],
     [{ status: 'completed', verdict: 'no-deliverable' }, 'bad-output'],
     [{ status: 'stopped' }, null],
+    // A caller stop: its own class, ahead of every provider class.
+    [{ status: 'stopped', verdict: 'stopped', rateLimited: true }, 'user-stop'],
     [{ rateLimited: true }, 'usage-limit'],
     [
       { status: 'completed', verdict: 'no-deliverable', rateLimited: true },

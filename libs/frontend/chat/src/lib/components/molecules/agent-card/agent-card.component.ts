@@ -17,7 +17,7 @@ import {
 import { SlicePipe } from '@angular/common';
 import { Check, LucideAngularModule } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
-import { type MonitoredAgent } from '@ptah-extension/chat-streaming';
+import { AgentMonitorStore, type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { CliAgentOutputComponent } from './cli-agent-output.component';
 import { AgentContinueInputComponent } from '../agent-continue-input/agent-continue-input.component';
 import {
@@ -139,6 +139,7 @@ import {
             [isStreaming]="
               agent().status === 'running' || agent().status === 'starting'
             "
+            [endedAt]="agent().completedAt"
             [scrollTrigger]="scrollTrigger()"
             [presentation]="presentation()"
           />
@@ -214,6 +215,8 @@ export class AgentCardComponent {
   }
 
   private readonly rpcService = inject(ClaudeRpcService);
+  /** Records a user Stop so the lane reads "Stopping…", then stopped (never failed). */
+  private readonly monitor = inject(AgentMonitorStore, { optional: true });
   /** This lane's approval and question prompts (Req 5), card presentation only. */
   protected readonly prompts = inject(LanePermissionView);
   protected readonly waitingLabel = LANE_WAITING_LABEL;
@@ -263,10 +266,22 @@ export class AgentCardComponent {
     event.stopPropagation();
     const agentId = this.agent().agentId;
     this.isStopping.set(true);
+    this.monitor?.markStopRequested(agentId);
+    // `result.success` is only the transport: the host reports a refused or
+    // failed stop as `{ success: false, error }` inside a successful call.
+    let error: string | undefined = 'The lane could not be stopped.';
     try {
-      await this.rpcService.call('agent:stop', { agentId });
+      const result = await this.rpcService.call('agent:stop', { agentId });
+      if (result.isSuccess() && result.data.success) error = undefined;
+      else error = (result.isSuccess() ? result.data.error : result.error) ?? error;
+    } catch (caught: unknown) {
+      // degradation-audit: reported - the reason is shown in the lane footer.
+      error = caught instanceof Error ? caught.message : error;
     } finally {
       this.isStopping.set(false);
+      // A refused or failed stop leaves the lane as it was: no "Stopping…".
+      if (error === undefined) this.monitor?.confirmStopRequest(agentId);
+      else this.monitor?.cancelStopRequest(agentId, error);
     }
   }
 

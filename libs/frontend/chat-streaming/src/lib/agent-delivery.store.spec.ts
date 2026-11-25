@@ -171,13 +171,29 @@ describe('AgentDeliveryStore', () => {
     expect(store.takeRecoveredMessage(resumed)).toBeNull();
   });
 
-  it('holds a message for a lane composer without a backend read and merges it with one waiting', async () => {
+  it('counts steer-availability changes per lane and drops lanes the monitor no longer knows', () => {
+    agentsById.set(new Map([[lane, {}], [resumed, {}]]));
+    expect(store.steerChange(lane)).toBe(0);
+    store.onSteerAvailability(lane);
+    store.onSteerAvailability(lane);
+    store.onSteerAvailability(resumed);
+    expect(store.steerChange(lane)).toBe(2);
+    expect(store.steerChange(resumed)).toBe(1);
+    agentsById.set(new Map([[lane, {}]]));
+    store.onSteerAvailability(lane);
+    expect(store.steerChange(lane)).toBe(3);
+    expect(store.steerChange(resumed)).toBe(0);
+  });
+
+  it('holds a message for a lane composer without a backend read, apart from one waiting', async () => {
     rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'recovered' }));
     await store.recoverIntoComposer(resumed, lane, 'message-1');
     rpc.call.mockClear();
     store.holdForComposer(resumed, { text: 'came back', turn: { files: ['a.ts'] } });
     expect(rpc.call).not.toHaveBeenCalled();
-    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'recovered\ncame back', turn: { files: ['a.ts'] } });
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'recovered' });
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'came back', turn: { files: ['a.ts'] } });
+    expect(store.takeRecoveredMessage(resumed)).toBeNull();
   });
 
   describe('turn snapshot', () => {
@@ -220,7 +236,7 @@ describe('AgentDeliveryStore', () => {
       expect(message && 'turn' in message).toBe(false);
     });
 
-    it('merges two recoveries: texts joined, attachments deduplicated, later model and effort win', async () => {
+    it('keeps two recoveries as two messages, each with its own turn (T2)', async () => {
       const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
       rpc.call
         .mockResolvedValueOnce(rpcSuccess({ text: 'first', turn: { model: 'a', reasoningEffort: 'low', files: ['x.ts'], images: [image] } }))
@@ -228,12 +244,15 @@ describe('AgentDeliveryStore', () => {
       await store.recoverIntoComposer(resumed, lane, 'message-1');
       await store.recoverIntoComposer(resumed, lane, 'message-2');
       expect(store.takeRecoveredMessage(resumed)).toEqual({
-        text: 'first\nsecond',
-        turn: { model: 'b', reasoningEffort: 'low', files: ['x.ts', 'y.ts'], images: [image] },
+        text: 'first', turn: { model: 'a', reasoningEffort: 'low', files: ['x.ts'], images: [image] },
       });
+      expect(store.takeRecoveredMessage(resumed)).toEqual({
+        text: 'second', turn: { model: 'b', files: ['x.ts', 'y.ts'], images: [image] },
+      });
+      expect(store.recovered().has(resumed)).toBe(false);
     });
 
-    it('merges a turn after a text-only recovery and keeps it after a later text-only one', async () => {
+    it('returns text-only and turn recoveries in order, each as sent', async () => {
       rpc.call
         .mockResolvedValueOnce(rpcSuccess({ text: 'one' }))
         .mockResolvedValueOnce(rpcSuccess({ text: 'two', turn }))
@@ -241,7 +260,9 @@ describe('AgentDeliveryStore', () => {
       await store.recoverIntoComposer(resumed, lane, 'message-1');
       await store.recoverIntoComposer(resumed, lane, 'message-2');
       await store.recoverIntoComposer(resumed, lane, 'message-3');
-      expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'one\ntwo\nthree', turn });
+      expect([1, 2, 3].map(() => store.takeRecoveredMessage(resumed))).toEqual([
+        { text: 'one' }, { text: 'two', turn }, { text: 'three' },
+      ]);
     });
 
     it('sends the turn with the message only when one is given', async () => {
@@ -509,6 +530,32 @@ describe('AgentDeliveryStore', () => {
     store.onMessageReceipt(receipt({ state: 'cancelled', updatedAt: NOW }));
     TestBed.tick();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a preview response that arrives after a newer one for the same lane and delivery (M2)', async () => {
+    agentsById.set(new Map([[lane, {}]]));
+    const preview = (mode: string) => rpcSuccess({ agentId: lane, delivery: 'now', mode, supported: true, usesResume: false });
+    let answerOlder: (value: unknown) => void = () => undefined;
+    rpc.call
+      .mockImplementationOnce(() => new Promise((resolve) => { answerOlder = resolve; }))
+      .mockResolvedValueOnce(preview('steer'));
+    const older = store.previewMessage(lane, 'now');
+    await store.previewMessage(lane, 'now');
+    expect(store.composerState(lane).now?.mode).toBe('steer');
+    answerOlder(preview('interrupt-resume'));
+    await expect(older).resolves.toMatchObject({ mode: 'interrupt-resume' });
+    // The late, older answer is not stored over the newer one.
+    expect(store.composerState(lane).now?.mode).toBe('steer');
+  });
+
+  it('keeps previews of the other delivery independent of the sequence', async () => {
+    agentsById.set(new Map([[lane, {}]]));
+    rpc.call
+      .mockResolvedValueOnce(rpcSuccess({ agentId: lane, delivery: 'queue', mode: 'queue-next-turn', supported: true, usesResume: false }))
+      .mockResolvedValueOnce(rpcSuccess({ agentId: lane, delivery: 'now', mode: 'steer', supported: true, usesResume: false }));
+    await Promise.all([store.previewMessage(lane, 'queue'), store.previewMessage(lane, 'now')]);
+    expect(store.composerState(lane).queue?.mode).toBe('queue-next-turn');
+    expect(store.composerState(lane).now?.mode).toBe('steer');
   });
 
   it('prunes composer previews of agents the monitor no longer holds', async () => {

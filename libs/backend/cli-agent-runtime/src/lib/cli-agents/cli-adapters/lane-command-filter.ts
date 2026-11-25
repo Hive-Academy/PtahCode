@@ -64,6 +64,15 @@ export function matchesLaneCommand(
   return names.some((name) => commandKey(name) === key);
 }
 
+/**
+ * True when a turn's text is a raw `/command` delivery. The dispatcher sends a
+ * raw command as the user typed it (trimmed) with no Ptah header; every other
+ * message carries the header, so its text never equals its raw body.
+ */
+export function isRawCommandDelivery(text: string, rawBody: string | undefined): boolean {
+  return rawBody !== undefined && text === rawBody.trimStart() && leadingLaneCommand(text) !== undefined;
+}
+
 /** The refusal text for a hidden command typed by hand (D18). */
 export function blockedLaneCommandReason(name: string): string {
   return `Ptah does not allow /${commandKey(name)} in a lane: its approval mode is set at spawn.`;

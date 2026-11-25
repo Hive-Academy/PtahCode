@@ -1,5 +1,6 @@
 import { AgentId, type AgentProcessInfo, type EffectiveLaneCapabilities } from '@ptah-extension/shared';
 import { planAgentDelivery, TURN_INPUT_NOT_REPORTED, turnInputRefusal } from './agent-delivery-planner';
+import { LANE_IMAGES_NAMED_RESUME_TEXT } from './agent-effective-capabilities';
 
 const agentId = AgentId.create();
 const yes = { state: 'supported' } as const;
@@ -88,6 +89,22 @@ describe('planAgentDelivery', () => {
       expect(turnInputRefusal(plan('queue', true), 'x', { images: [image] })?.reason).toBe('Images need a running lane.');
       expect(turnInputRefusal(plan('steer'), 'x', { images: [image] })?.code).toBe('turn-input-unsupported');
       expect(turnInputRefusal(plan('queue'), 'x', { images: [image] })).toBeUndefined();
+    });
+
+    it('admits images on a resume plan whose manifest carries them on resume (D4)', () => {
+      const resumable = (images: NonNullable<EffectiveLaneCapabilities['turnInput']>['images']) => ({
+        ...planAgentDelivery({
+          agentId, info, delivery: 'queue', hasLiveHandle: false,
+          effectiveCapabilities: { ...caps, turnInput: { ...turnInput, images } },
+        }),
+        usesResume: true,
+      });
+      expect(turnInputRefusal(resumable({ state: 'supported', onSteer: false, onResume: true }), 'x', { images: [image] }))
+        .toBeUndefined();
+      // A named-account lane resolves the item unsupported with its own reason.
+      expect(turnInputRefusal(
+        resumable({ state: 'unsupported', onResume: true, reason: LANE_IMAGES_NAMED_RESUME_TEXT }), 'x', { images: [image] },
+      )).toEqual({ code: 'turn-input-unsupported', reason: LANE_IMAGES_NAMED_RESUME_TEXT });
     });
 
     it('uses the item reason for unsupported files and effort', () => {

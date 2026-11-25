@@ -214,7 +214,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     callerSender: AgentMessageSender,
     laneSender?: VerifiedLaneSender,
   ): Promise<AgentMessageOutcome> {
-    if (!request.message.trim()) throw new Error('Message must not be empty.');
+    // An image-only message has no text; a message with neither is refused.
+    if (!request.message.trim() && !(request.turn?.images?.length))
+      throw new Error('Message must not be empty.');
     const delivery = request.delivery === 'steer' ? 'now' : request.delivery ?? 'queue';
     if (callerSender.kind === 'parent' && request.idempotencyKey && !callerSender.sessionId) {
       return this.refuse({

@@ -27,6 +27,7 @@ import {
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  type MonitoredAgent,
   LANE_OPTIONS_CHECKING_TEXT,
   LANE_OPTIONS_ERROR_TEXT,
   LANE_OPTIONS_STALE_TEXT,
@@ -45,12 +46,11 @@ import {
   COMPOSER_CARD_BORDER_CLASS,
   COMPOSER_CARD_CLASS,
   COMPOSER_SEND_BUTTON_CLASS,
-  COMPOSER_STATUS_LINE_CLASS,
   COMPOSER_STOP_BUTTON_CLASS,
   COMPOSER_TEXTAREA_CLASS,
   ComposerCompactBarComponent,
 } from '@ptah-extension/chat-ui';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahTooltipDirective } from '@ptah-extension/ui';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { ComposerCompactStore } from '../../../services/composer-compact.store';
 import {
@@ -87,6 +87,17 @@ import {
   type QueuedSendNowAction,
 } from '../queued-follow-ups/queued-message-list.component';
 import { LaneDeliveryController } from './lane-delivery.controller';
+import {
+  RESUME_BUTTON_CLASS,
+  laneEffortOption,
+  laneLimitations,
+  lanePlaceholder,
+  laneSendLabel,
+  limitedLabel,
+  limitedTooltip,
+  type LaneLimitation,
+  type LaneStateChip,
+} from './lane-composer-labels';
 
 /** Per-instance suffix for element ids (several lane composers can mount). */
 let nextLaneComposerId = 0;
@@ -94,6 +105,8 @@ let nextLaneComposerId = 0;
 const NEXT_TURN_FOOTER = 'Applies from your next message. The lane keeps running.';
 const STOPPED_FOOTER = 'Applies from your next message, which resumes the lane.';
 const MODELS_LOADING_LABEL = 'Loading models…';
+/** The lane state chip's label while a stop waits for the process exit (see `laneStateChip`). */
+const STOPPING_LABEL = 'Stopping…';
 /**
  * The id the host reports when one turn used several models
  * (`ptah-cli-stream-loop.service.ts` MULTI_MODEL_ID). It names no model, so
@@ -113,20 +126,6 @@ const APPROVAL_LABELS: Readonly<Record<LanePermissionMode, string>> = {
 
 /** What the loss dialog sends once confirmed. */
 type LossTarget = { readonly kind: 'draft' } | { readonly kind: 'queued'; readonly id: string };
-
-/** A lane effort id as an effort option; main chat's levels keep their look. */
-function effortOption(id: string): ComposerEffortOption {
-  const known = COMPOSER_EFFORT_OPTIONS.find((option) => option.value === id);
-  if (known) return known;
-  return {
-    value: id as EffortLevel,
-    label: id.charAt(0).toUpperCase() + id.slice(1),
-    description: '',
-    dotColor: 'bg-base-content/40',
-    textColor: 'text-base-content-muted',
-    bars: 3,
-  };
-}
 
 /** A provider date suffix: `-20261001` or `-2026-10-01`. */
 const DATE_SUFFIX = /^-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
@@ -155,6 +154,28 @@ export function findLaneModelOption(
   // A dated catalog id: only when exactly one row is the recorded id plus a date.
   const rows = options.filter((option) => dated(option.id.toLowerCase(), wanted));
   return rows.length === 1 ? rows[0] : undefined;
+}
+
+/**
+ * The model the lane's last run used, as the frontend saw it: the provider's
+ * reported model, else the model of its folded usage, else the newest usage
+ * segment's model. A lane restored after a host restart has no stored model,
+ * but its output can still name the model it ran (round 6: an orphan whose
+ * last turn ran Opus read "claude default"). The multi-model id names none.
+ */
+export function laneLastRunModel(
+  record: Pick<MonitoredAgent, 'observedModel' | 'usageTotals' | 'segments'> | undefined,
+): string | undefined {
+  if (!record) return undefined;
+  const usable = (model: string | undefined) => (model && model !== MULTI_MODEL_ID ? model : undefined);
+  const known = usable(record.observedModel) ?? usable(record.usageTotals?.model ?? undefined);
+  if (known) return known;
+  const segments = record.segments ?? [];
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const model = usable(segments[i].usage?.model);
+    if (model) return model;
+  }
+  return undefined;
 }
 
 function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion {
@@ -197,6 +218,7 @@ function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion
     ComposerEffortPickerComponent,
     LaneApprovalChipComponent,
     QueuedMessageListComponent,
+    PtahTooltipDirective,
   ],
   providers: [
     VoiceInputService,
@@ -230,13 +252,17 @@ export class LaneComposerComponent {
   readonly laneLabel = input('lane');
   readonly cli = input('CLI');
   readonly stopped = input(false);
-  readonly resumePath = input<string | null>(null);
   /** Stop (running) or Resume session (stopped) in the toolbar and on the compact bar. */
   readonly showLaneControls = input(false);
   /** A stopped lane has a saved session to resume. */
   readonly resumable = input(false);
   readonly stopPending = input(false);
   readonly resumePending = input(false);
+  /**
+   * The lane's state as a toolbar chip (Stopped, Interrupted, Stop failed …),
+   * the detail in its tooltip. The host derives it from the lane record.
+   */
+  readonly laneState = input<LaneStateChip | null>(null);
 
   /** One message the lane accepted. */
   readonly accepted = output<void>();
@@ -258,6 +284,7 @@ export class LaneComposerComponent {
   protected readonly fullId = `lane-composer-full-${this.instance}`;
   protected readonly lossTitleId = `lane-loss-title-${this.instance}`;
   protected readonly lossTextId = `lane-loss-text-${this.instance}`;
+  protected readonly sendHintId = `lane-send-hint-${this.instance}`;
 
   // `chat-composer-card` / `chat-composer-column`: main chat's focus frame on
   // the card (the textarea draws no ring) and its denser glass fill (S2).
@@ -265,9 +292,13 @@ export class LaneComposerComponent {
   protected readonly textareaClass = `ptah-fold-fade ${COMPOSER_TEXTAREA_CLASS}`;
   protected readonly sendButtonClass = COMPOSER_SEND_BUTTON_CLASS;
   protected readonly stopButtonClass = COMPOSER_STOP_BUTTON_CLASS;
-  protected readonly statusLineClass = `${COMPOSER_STATUS_LINE_CLASS} mt-1.5 py-0.5`;
-  protected readonly optionsErrorText = LANE_OPTIONS_ERROR_TEXT;
-  protected readonly optionsStaleText = LANE_OPTIONS_STALE_TEXT;
+  /** Resume session keeps the error tint only on a lane that failed (a user stop is no failure). */
+  protected readonly resumeButtonClass = computed(() => {
+    const record = this.record();
+    const failed = (record?.status === 'failed' && record.stoppedByUser !== true) || record?.status === 'timeout';
+    return failed ? COMPOSER_STOP_BUTTON_CLASS : RESUME_BUTTON_CLASS;
+  });
+
   protected readonly ArrowUpIcon = ArrowUp;
   protected readonly SquareIcon = Square;
   protected readonly PlayIcon = Play;
@@ -278,8 +309,6 @@ export class LaneComposerComponent {
   protected readonly draft = signal('');
   protected readonly confirmLoss = signal(false);
   private lossTarget: LossTarget = { kind: 'draft' };
-  /** Reason of the hovered or focused gated control, for the status line. */
-  protected readonly revealedReason = signal<string | null>(null);
   /** The last action's note (a pick, a chosen file, a sent message). */
   private readonly actionNote = signal<string | null>(null);
   protected readonly foldAnnouncement = signal('');
@@ -335,7 +364,7 @@ export class LaneComposerComponent {
    */
   protected readonly selectedModel = computed(() => {
     const record = this.record();
-    const id = [this.pending().model, record?.model, this.catalog().options?.currentModel, record?.observedModel]
+    const id = [this.pending().model, record?.model, this.catalog().options?.currentModel, laneLastRunModel(record)]
       .find((candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID);
     if (!id) return null;
     return findLaneModelOption(this.modelOptions(), id)?.id ?? id;
@@ -348,7 +377,8 @@ export class LaneComposerComponent {
   });
   protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => [
     COMPOSER_EFFORT_OPTIONS[0],
-    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '').map(effortOption),
+    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '')
+      .map((id) => laneEffortOption(id, this.record()?.cli === 'claude')),
   ]);
   protected readonly selectedEffort = computed(
     () => (this.pending().reasoningEffort ?? this.record()?.reasoningEffort ?? this.catalog().options?.currentEffort ?? '') as EffortLevel | '',
@@ -364,7 +394,7 @@ export class LaneComposerComponent {
   /** The model the provider confirmed (compact bar chip), never the pending pick. */
   protected readonly confirmedModelLabel = computed(() => {
     const record = this.record();
-    const id = [record?.model, record?.observedModel].find(
+    const id = [record?.model, laneLastRunModel(record)].find(
       (candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID,
     );
     if (!id) return '';
@@ -494,41 +524,72 @@ export class LaneComposerComponent {
     () => this.delivery.queueDisabled() || this.imagesBlocked() || this.attachmentLimitText() !== null
       || this.attachments.pendingReads() > 0,
   );
+  /** Send's tooltip and description: why it cannot send, else what a send does (resume, queue, steer). */
   protected readonly sendTitle = computed(() => {
     if (this.imagesBlocked()) return this.imagesBlockedText();
     const overLimit = this.attachmentLimitText();
     if (overLimit) return overLimit;
     if (this.stopped()) return this.delivery.hint();
-    return this.delivery.state().queueDisabledReason ?? 'Send message';
+    return this.delivery.state().queueDisabledReason ?? this.delivery.hint();
   });
   /** The lane's own reason (e.g. "Images need a running lane."), then what to do. */
   private readonly imagesBlockedText = computed(() => {
     const reason = this.imagesUnsupportedReason() ?? `${this.cli()} lanes cannot take images.`;
     return `${reason} Remove the image to send.`;
   });
-  /** Priority: a revealed reason, the image block, checking, the last action, the mode hint. */
-  protected readonly statusText = computed(() => {
-    const revealed = this.revealedReason();
-    if (revealed) return revealed;
+  /**
+   * The in-card note: what to fix before sending (the image block, the
+   * attachment limit), else the last action's note. Empty most of the time;
+   * the mode hint lives on Send and the lane state on its chip.
+   */
+  protected readonly noticeText = computed(() => {
     if (this.imagesBlocked()) return this.imagesBlockedText();
     const overLimit = this.attachmentLimitText();
     if (overLimit) return overLimit;
-    if (this.checking()) return LANE_OPTIONS_CHECKING_TEXT;
-    return this.composerInput.statusNote() ?? this.actionNote() ?? this.delivery.hint();
+    return this.composerInput.statusNote() ?? this.actionNote() ?? this.recoveredNote();
   });
-  protected readonly statusNeedsAction = computed(
-    () => !this.revealedReason() && (this.imagesBlocked() || this.attachmentLimitText() !== null),
+  /** Recovered messages still queued: they load into the draft one at a time. */
+  private readonly recoveredNote = computed(() => {
+    const waiting = this.deliveryStore.recovered().get(this.agentId());
+    const count = Array.isArray(waiting) ? waiting.length : waiting ? 1 : 0;
+    if (count === 0) return '';
+    return count === 1
+      ? '1 recovered message waits. It loads here when the draft is empty.'
+      : `${count} recovered messages wait. Each loads here, one at a time, when the draft is empty.`;
+  });
+  protected readonly noticeNeedsAction = computed(
+    () => this.imagesBlocked() || this.attachmentLimitText() !== null,
   );
-  /** What this lane cannot do here; the "N limited" badge (hint only). */
-  protected readonly limitedReasons = computed((): readonly string[] => {
-    if (this.checking() || this.optionsFailed()) return [];
-    const reasons = [this.modelReason(), this.effortReason(), this.approvalReason(), this.imagesUnsupportedReason()];
-    const action = this.sendNowAction();
-    if (action.state === 'unavailable') reasons.push(action.reason ?? 'Send now is unavailable.');
-    return reasons.filter((reason): reason is string => !!reason);
+  /** An error the user must see (announced), or stale lists with Retry. */
+  protected readonly cardAlert = computed((): { text: string; tone: 'err' | 'need'; retry: boolean } | null => {
+    if (this.optionsFailed()) return { text: LANE_OPTIONS_ERROR_TEXT, tone: 'err', retry: true };
+    const error = this.delivery.error();
+    if (error) return { text: error, tone: 'err', retry: false };
+    if (this.optionsStale()) return { text: LANE_OPTIONS_STALE_TEXT, tone: 'need', retry: true };
+    return null;
   });
+  /** The composer controls this lane cannot use here, with reasons: the "N limited" badge. */
+  protected readonly limitations = computed((): readonly LaneLimitation[] => {
+    if (this.checking() || this.optionsFailed()) return [];
+    const action = this.sendNowAction();
+    return laneLimitations({
+      model: this.modelReason(),
+      effort: this.effortReason(),
+      images: this.imagesUnsupportedReason(),
+      approval: this.capabilities()?.effectiveApproval,
+      sendNow: action.state === 'unavailable' ? (action.reason ?? 'Send now is unavailable.') : null,
+    });
+  });
+  protected readonly limitedTooltip = computed(() => limitedTooltip(this.limitations()));
+  protected readonly limitedLabel = computed(() => limitedLabel(this.limitations()));
   protected readonly placeholder = computed(() =>
-    this.stopped() ? `Resume ${this.laneLabel()} with a message…` : `Message ${this.laneLabel()}...`,
+    lanePlaceholder(this.laneLabel(), this.stopped(), this.delivery.restart()),
+  );
+  protected readonly sendLabel = computed(() => laneSendLabel(this.stopped(), this.delivery.restart()));
+
+  /** The folded bar's line: "Stopping…" once Stop was pressed, else the lane at work. */
+  protected readonly compactStatus = computed(() =>
+    this.laneState()?.label === STOPPING_LABEL ? STOPPING_LABEL : `${this.cli()} is working…`,
   );
 
   /** The composer is folded into its one-row bar. */
@@ -540,7 +601,6 @@ export class LaneComposerComponent {
       draft: this.draft,
       stopped: this.stopped,
       cli: this.cli,
-      resumePath: this.resumePath,
       accepted: () => this.accepted.emit(),
     });
     this.composerInput.connect({
@@ -555,7 +615,7 @@ export class LaneComposerComponent {
         if (!this.confirmLoss()) void this.send();
       },
       submitNow: () => {
-        if (!this.confirmLoss()) this.requestNow();
+        if (!this.confirmLoss()) void this.requestNow();
       },
     });
     this.compactStore.connect({
@@ -583,10 +643,26 @@ export class LaneComposerComponent {
       const agentId = this.agentId();
       untracked(() => {
         this.confirmLoss.set(false);
-        this.revealedReason.set(null);
         this.actionNote.set(null);
         const status = this.settings.catalog(agentId).status;
         if (status === 'idle' || status === 'error') void this.settings.loadCatalog(agentId);
+      });
+    });
+    // The host learns a resumed lane's model from the SDK's system init, after
+    // the catalog was read at mount (D8: the pill said "claude default"). A
+    // turn that settles while no model is known re-reads the catalog once, so
+    // the pill names the model the lane really runs.
+    let previousStatus: string | undefined;
+    effect(() => {
+      const record = this.record();
+      const status = record?.status;
+      const settled = previousStatus !== undefined && previousStatus !== status &&
+        (previousStatus === 'running' || previousStatus === 'starting');
+      previousStatus = status;
+      if (!settled || !record || record.model || laneLastRunModel(record)) return;
+      untracked(() => {
+        const catalog = this.settings.catalog(this.agentId());
+        if (catalog.status === 'ready' && !catalog.options?.currentModel) void this.loadCatalog();
       });
     });
     let wasStopped: boolean | undefined;
@@ -681,18 +757,42 @@ export class LaneComposerComponent {
     } else if (this.stopped()) {
       // Until the record reports the resumed run, the stopped-lane hint
       // ("Resume with message: …") would still describe the old state (M3).
-      this.actionNote.set(`Sent. ${this.cli()} resumes with your message.`);
+      const verb = this.delivery.restart() === 'warm' ? 'continues' : 'resumes';
+      this.actionNote.set(`Sent. ${this.cli()} ${verb} with your message.`);
     }
   }
 
   /** Ctrl/Cmd+Enter: Send now for the draft, after the loss confirmation when the turn would lose work. */
-  protected requestNow(): void {
-    if (this.confirmLoss()) return;
+  protected async requestNow(): Promise<void> {
+    if (this.confirmLoss() || this.preparingNow) return;
     if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked() || this.attachmentLimitText()) return;
     if (this.waitForReads()) return;
+    // The lane can change while the refresh runs (a dock click); the draft
+    // then belongs to another lane and must not be sent (PR 1512 review).
+    const lane = this.agentId();
+    // Steer or interrupt is the running turn's state now, not at the last refresh.
+    if (!(await this.prepareNow())) return;
+    if (this.agentId() !== lane) return;
+    if (this.confirmLoss() || this.stopped() || this.delivery.nowDisabled()) return;
+    // The tray can change during the refresh. A block shows its reason on
+    // the status line (imagesBlockedText / attachmentLimitText); a read waits.
+    if (this.imagesBlocked() || this.attachmentLimitText() || this.waitForReads()) return;
     this.lossTarget = { kind: 'draft' };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);
+  }
+
+  /** A Send now decision waits for fresh previews; a second request meanwhile is ignored. */
+  private preparingNow = false;
+
+  /** Refresh the previews before a Send now decision. False when the refresh failed (its error shows). */
+  private async prepareNow(): Promise<boolean> {
+    this.preparingNow = true;
+    try {
+      return await this.delivery.refreshBeforeSend();
+    } finally {
+      this.preparingNow = false;
+    }
   }
 
   /**
@@ -706,9 +806,14 @@ export class LaneComposerComponent {
   }
 
   /** The queued card's Send now / Interrupt & send. */
-  protected requestQueuedNow(id: string): void {
+  protected async requestQueuedNow(id: string): Promise<void> {
     // An open dialog keeps its target: confirming sends what it was opened for.
-    if (this.confirmLoss()) return;
+    if (this.confirmLoss() || this.preparingNow) return;
+    const lane = this.agentId();
+    if (!(await this.prepareNow())) return;
+    // The queued card belongs to the lane it was shown for (PR 1512 review).
+    if (this.agentId() !== lane) return;
+    if (this.confirmLoss() || this.stopped() || !this.delivery.state().now || this.delivery.state().nowDisabledReason) return;
     this.lossTarget = { kind: 'queued', id };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);
@@ -777,6 +882,13 @@ export class LaneComposerComponent {
   /** Paste on the folded bar: expand, then take the clipboard text and images. */
   protected onRootPaste(event: ClipboardEvent): void {
     if (!this.isCompact()) return;
+    // The textarea takes its own paste (its handler ran first). A paste that
+    // reaches it while the composer is folded (it is inert then, so only a
+    // scripted event or a fold racing the paste) must not be taken twice.
+    if (event.target === this.textareaRef()?.nativeElement) {
+      this.expandComposer();
+      return;
+    }
     const text = event.clipboardData?.getData('text/plain') ?? '';
     event.preventDefault();
     this.expandComposer();

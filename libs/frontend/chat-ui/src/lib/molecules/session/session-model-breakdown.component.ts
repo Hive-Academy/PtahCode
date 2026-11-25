@@ -1,3 +1,4 @@
+import { sessionModelDisplayName } from './session-model-name';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -6,7 +7,6 @@ import {
   input,
 } from '@angular/core';
 import {
-  resolveModelDisplayName,
   type SessionStatsEntry,
 } from '@ptah-extension/shared';
 import { ModelStateService } from '@ptah-extension/core';
@@ -51,7 +51,9 @@ interface ModelUsageSource {
             @for (usage of modelRows(); track usage.model) {
               <li class="model-item" data-testid="model-usage-row">
                 <div class="flex min-w-0 items-baseline justify-between gap-2">
-                  <span class="min-w-0 truncate text-xs font-semibold text-base-content" [title]="usage.model">{{ formatModelName(usage.model) }}</span>
+                  <span class="min-w-0 truncate text-xs font-semibold text-base-content" [title]="usage.model">{{ formatModelName(usage.model) }}
+                    <!-- Which row runs now: a model used only in earlier turns must not look current. -->
+                    @if (currentModel(); as current) {<span class="block truncate text-[10.5px] font-normal text-base-content-muted" data-testid="model-usage-when">{{ usage.model === current ? 'current' : 'earlier in this session' }}</span>}</span>
                   <span
                     class="shrink-0 text-xs font-semibold tabular-nums"
                     [class.text-success]="isKnownCost(usage.costUSD)"
@@ -127,7 +129,7 @@ interface ModelUsageSource {
           </div>
           @for (usage of modelRows(); track usage.model) {
             <div class="model-usage-row px-2 py-1.5 border-b border-base-content/5 last:border-b-0" role="row" data-testid="model-usage-row">
-              <div class="text-xs font-semibold text-base-content truncate" role="cell" [title]="usage.model">{{ formatModelName(usage.model) }}</div>
+              <div class="text-xs font-semibold text-base-content truncate" role="cell" [title]="usage.model">{{ formatModelName(usage.model) }}@if (currentModel(); as current) {<span class="block truncate text-[10.5px] font-normal text-base-content-muted" data-testid="model-usage-when">{{ usage.model === current ? 'current' : 'earlier in this session' }}</span>}</div>
               <div class="text-xs text-right tabular-nums text-base-content-muted" role="cell">{{ formatTokens(usage.inputTokens) }}</div>
               <div class="text-xs text-right tabular-nums text-base-content-muted" role="cell">{{ formatTokens(usage.outputTokens) }}</div>
               <div class="text-xs text-right tabular-nums text-base-content-muted" role="cell">{{ formatOptionalTokens(usage.cacheRead) }}</div>
@@ -201,6 +203,8 @@ export class SessionModelBreakdownComponent {
 
   readonly snapshot = input<SessionStatsEntry | null>(null);
   readonly sources = input<readonly [ModelUsageSource, ModelUsageSource] | readonly []>([]);
+  /** The session's current model id; each row then says "current" or "earlier in this session". */
+  readonly currentModel = input<string | null>(null);
 
   protected readonly costBasis = computed(() => {
     const snapshot = this.snapshot();
@@ -231,6 +235,6 @@ export class SessionModelBreakdownComponent {
   protected readonly formatOptionalTokens = formatOptionalTokens;
 
   protected formatModelName(modelId: string): string {
-    return resolveModelDisplayName(modelId, this.modelState.availableModels());
+    return sessionModelDisplayName(modelId, this.modelState.availableModels());
   }
 }

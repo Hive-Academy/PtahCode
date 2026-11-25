@@ -119,6 +119,21 @@ describe('AgentMessageRpcHandlers', () => {
     expect(coordinator.send).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts an image-only message and rejects one with neither text nor images', async () => {
+    const { coordinator, call } = setup();
+    const images = [{ data: 'aGk=', mediaType: 'image/png' }];
+    const imageOnly = await call('agent:sendMessage', { agentId: AGENT_ID, message: '', turn: { images } });
+    expect(imageOnly.success).toBe(true);
+    expect(coordinator.send).toHaveBeenCalledWith({ agentId: AGENT_ID, message: '', turn: { images } }, USER);
+    const results = await Promise.all([
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '' }),
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '   ', turn: { images: [] } }),
+      call('agent:sendMessage', { agentId: AGENT_ID, message: '', turn: { files: ['a.ts'] } }),
+    ]);
+    for (const result of results) expect(result).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+    expect(coordinator.send).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves message whitespace', async () => {
     const { coordinator, call } = setup();
     await call('agent:sendMessage', { agentId: AGENT_ID, message: '  hello  ' });

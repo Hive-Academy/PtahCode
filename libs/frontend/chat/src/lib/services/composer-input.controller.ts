@@ -565,14 +565,7 @@ export class ComposerInputController {
     commands: readonly CommandSuggestionItem[],
     query: string,
   ): CommandSuggestionItem[] {
-    if (!query) return [...commands];
-    const needle = query.toLowerCase();
-    return commands.filter(
-      (command) =>
-        command.name.toLowerCase().includes(needle) ||
-        (command.description &&
-          command.description.toLowerCase().includes(needle)),
-    );
+    return rankCommandMatches(commands, query);
   }
 
   private toCommandItem(command: CommandSuggestion): CommandSuggestionItem {
@@ -734,4 +727,40 @@ export class ComposerInputController {
     textarea.value = newValue;
     textarea.setSelectionRange(triggerStart, triggerStart);
   }
+}
+
+/** Match tier of a command for a `/` query; lower ranks first, `null` is no match. */
+function commandMatchTier(
+  command: { readonly name: string; readonly description?: string },
+  needle: string,
+): number | null {
+  const name = command.name.toLowerCase();
+  if (name === needle) return 0;
+  if (name.startsWith(needle)) return 1;
+  if (name.includes(needle)) return 2;
+  if (command.description?.toLowerCase().includes(needle)) return 3;
+  // Fuzzy: the query's characters appear in the name in order.
+  let at = 0;
+  for (const char of name) if (char === needle[at]) at++;
+  return at === needle.length ? 4 : null;
+}
+
+/**
+ * The commands that match a `/` query, best first: the exact name, then names
+ * that start with the query, names that contain it, descriptions that contain
+ * it, and last a fuzzy (in-order) match. Ties keep the source order, so
+ * `/context` + Enter picks `context`, never an earlier `compact` whose
+ * description mentions context (F4). An empty query keeps every command.
+ */
+export function rankCommandMatches<T extends { readonly name: string; readonly description?: string }>(
+  commands: readonly T[],
+  query: string,
+): T[] {
+  const needle = query.trim().replace(/^\//, '').toLowerCase();
+  if (!needle) return [...commands];
+  return commands
+    .map((command, index) => ({ command, index, tier: commandMatchTier(command, needle) }))
+    .filter((entry): entry is { command: T; index: number; tier: number } => entry.tier !== null)
+    .sort((a, b) => a.tier - b.tier || a.index - b.index)
+    .map((entry) => entry.command);
 }

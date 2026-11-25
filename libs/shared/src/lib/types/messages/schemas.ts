@@ -133,7 +133,7 @@ export const AgentMonitorParentDeliveryPayloadSchema = z.object({
   everDispatched: z.boolean().optional(),
   removed: z.literal(true).optional(),
   preview: z.string().max(160).optional(),
-  verdict: z.enum(['delivered', 'no-deliverable', 'failed', 'unverified']).optional(),
+  verdict: z.enum(['delivered', 'no-deliverable', 'failed', 'unverified', 'stopped']).optional(),
   stopReason: z.enum(LANE_STOP_REASONS).optional(),
 }).strict();
 

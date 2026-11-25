@@ -18,6 +18,7 @@ import {
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import type { TabState } from '@ptah-extension/chat-types';
+import { TabManagerService, resolveTabModel } from '@ptah-extension/chat-state';
 import { PlanLimitsStore } from '@ptah-extension/core';
 import type {
   CliType,
@@ -294,6 +295,17 @@ export function injectSessionStatsSource(
     equal: sameSessionStatsCache,
   });
 
+  /**
+   * The session's own model, by the pill's rule (`resolveTabModel`): the tab
+   * override, then the session's model. The global pick is left out on
+   * purpose: reading it would construct `ModelStateService` here, whose
+   * model-list RPC on construction kept hosts without it (the rail board)
+   * unstable. Without an own model the inspector falls back to the latest
+   * turn's model, which is what such a session last ran.
+   */
+  const tabManager = inject(TabManagerService);
+  const currentModel = computed(() => resolveTabModel(host.tab() ?? tabManager.activeTab(), null).model);
+
   const inputs = computed<SessionStatsInputs | null>(() => {
     if (!host.available()) return null;
     const live = liveModelStats();
@@ -303,6 +315,7 @@ export function injectSessionStatsSource(
       snapshot: snapshot(),
       cache: cache(),
       liveModelStats: live,
+      currentModel: currentModel(),
       compactionCount: compactionCount(),
       limits: limitView,
       budget: host.budget(),

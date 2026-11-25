@@ -388,10 +388,7 @@ export class PtahCliRegistry {
   ): CliAdapterManifest {
     return {
       messaging: {
-        steer: {
-          state: 'unsupported',
-          reason: 'The SDK prompt mailbox starts a new turn.',
-        },
+        steer: { state: 'supported' },
         interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },

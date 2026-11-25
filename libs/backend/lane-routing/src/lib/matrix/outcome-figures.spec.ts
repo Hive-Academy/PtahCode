@@ -77,6 +77,18 @@ describe('outcomeFiguresFrom', () => {
     });
   });
 
+  it('leaves a caller stop (user-stop) out of the figures', () => {
+    const lookup = outcomeFiguresFrom([
+      summary('delivered', 'delivered'),
+      summary('stopped', 'failed', { failureClass: 'user-stop' }),
+    ]);
+    expect(lookup('codex', 'implement')).toEqual({
+      laneId: 'codex', taskKind: 'implement', delivered: 1, failed: 0,
+    });
+    expect(outcomeFiguresFrom([summary('only', 'failed', { failureClass: 'user-stop' })])('codex', 'implement'))
+      .toBeNull();
+  });
+
   it('keeps lane and task-kind pairs separate', () => {
     const lookup = outcomeFiguresFrom([
       summary('a', 'delivered'),

@@ -17,6 +17,10 @@ import type {
 import { resolveEffectiveLaneCapabilities } from '../cli-agents/messaging/agent-effective-capabilities';
 import { LaneTurnSettingRefusal } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
+  ClaudeCliAdapter,
+  type ClaudeCliAdapterDependencies,
+} from '../cli-agents/cli-adapters/claude-cli.adapter';
+import {
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
   buildFlagSettingsArg,
@@ -1486,6 +1490,12 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     f.finish(0);
   });
 
+  it('sends an image-only turn as image blocks with no empty text block', () => {
+    expect(claudeLaneTurnContent('', { images: [{ data: PNG, mediaType: 'image/png' }] })).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+  });
+
   it('rejects an unresolvable image and queues nothing', async () => {
     expect(() => claudeLaneTurnContent('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] }))
       .toThrow('An attached image is not a PNG, JPEG, GIF or WebP image.');
@@ -1507,6 +1517,32 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     expect(JSON.stringify(refusal)).not.toContain('secret');
     // Rolled back to the spawn's model.
     expect(query.setModel.mock.calls).toEqual([['claude-opus-x'], ['sonnet']]);
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'sonnet');
+    f.finish(0);
+  });
+
+  it('names the model the init reports when the lane started on the CLI default (D8)', async () => {
+    const query = fakeQuery();
+    const options = { ...buildClaudeSdkLaneOptions(optionsInput()), abortController: new AbortController() };
+    delete options.model;
+    const f = { ...runnerFixture(Promise.resolve(), undefined, query, { options }), query };
+    f.config.onSessionResolved?.('session-1', 'claude-haiku-4-5-20251001');
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'claude-haiku-4-5-20251001');
+    f.finish(0);
+  });
+
+  it("treats an empty configured model ('') as unresolved and names the init model (CR)", async () => {
+    const query = fakeQuery();
+    const options = { ...buildClaudeSdkLaneOptions(optionsInput()), model: '', abortController: new AbortController() };
+    const f = { ...runnerFixture(Promise.resolve(), undefined, query, { options }), query };
+    f.config.onSessionResolved?.('session-1', 'claude-haiku-4-5-20251001');
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'claude-haiku-4-5-20251001');
+    f.finish(0);
+  });
+
+  it('keeps the chosen model when the init reports another id (D8)', async () => {
+    const f = fixture();
+    f.config.onSessionResolved?.('session-1', 'claude-sonnet-4-5-20250929');
     expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'sonnet');
     f.finish(0);
   });
@@ -1589,7 +1625,7 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
   });
 });
 
-describe('Claude lane steer fold-in (B6, dormant until the manifest flip)', () => {
+describe('Claude lane steer fold-in (B6, manifest supported since live L4)', () => {
   function manifest(steer: CliAdapterManifest['messaging']['steer']): CliAdapterManifest {
     return {
       messaging: {
@@ -1609,7 +1645,7 @@ describe('Claude lane steer fold-in (B6, dormant until the manifest flip)', () =
   const info = { agentId: 'lane-1', cli: 'claude' } as unknown as AgentProcessInfo;
   const unsupportedSteer = { state: 'unsupported' as const, reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' };
 
-  it('keeps effective steer unsupported with the current manifest, even while a tool runs', () => {
+  it('keeps effective steer unsupported when a manifest refuses steer, even while a tool runs', () => {
     const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: unsupportedSteer });
     f.config.onToolInFlightChange?.(true);
     expect(f.handle.steer).toBeUndefined();
@@ -1639,6 +1675,54 @@ describe('Claude lane steer fold-in (B6, dormant until the manifest flip)', () =
     if (!turn) throw new Error('continue missing');
     return { turn, prompt };
   }
+
+  it('gives effective steer to a Claude lane on the shipped manifest once a proved turn runs a tool', async () => {
+    const shipped = new ClaudeCliAdapter(logger, {} as ClaudeCliAdapterDependencies).capabilities().messaging.steer;
+    expect(shipped).toEqual({ state: 'supported' });
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: shipped });
+    await provedTurn(f);
+    f.config.onToolInFlightChange?.(true);
+    expect(resolveEffectiveLaneCapabilities(info, manifest(shipped), f.handle).messaging.steer.state)
+      .toBe('supported');
+    f.finish(0);
+  });
+
+  it('logs the result frame uuid count and steer match at debug, once per result (D2)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const { turn, prompt } = await provedTurn(f);
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    jest.mocked(logger.debug).mockClear();
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [prompt.uuid, steered.uuid] });
+    const calls = jest.mocked(logger.debug).mock.calls
+      .filter(([text]) => text === '[ClaudeLane] result frame user_message_uuids');
+    expect(calls).toEqual([[
+      '[ClaudeLane] result frame user_message_uuids',
+      {
+        agentName: 'Reviewer',
+        uuidCount: 2,
+        uuids: [prompt.uuid, steered.uuid],
+        pendingSteers: 1,
+        matchedSteers: 1,
+      },
+    ]]);
+    f.config.onTurnComplete?.(0);
+    await expect(turn.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('logs a result frame without user_message_uuids as reporting none (D2)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    await f.context.mailbox.prompt.next();
+    jest.mocked(logger.debug).mockClear();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    expect(logger.debug).toHaveBeenCalledWith('[ClaudeLane] result frame user_message_uuids', {
+      agentName: 'Reviewer', uuidCount: null, pendingSteers: 0, matchedSteers: 0,
+    });
+    f.config.onTurnComplete?.(0);
+    f.finish(0);
+  });
 
   it('offers steer only while a main-thread tool call is in flight', async () => {
     const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });

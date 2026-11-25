@@ -1,5 +1,5 @@
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
-import type { AgentMessageEnvelope } from './agent-message-envelope.schema';
+import { hasStoredBody, type AgentMessageEnvelope } from './agent-message-envelope.schema';
 
 export function projectAgentMessageEnvelope(
   envelope: AgentMessageEnvelope,
@@ -39,7 +39,7 @@ export function projectAgentMessageEnvelope(
     ...(envelope.lastError ? { lastError: envelope.lastError } : {}),
     ...(envelope.nextRetryAt !== undefined ? { nextRetryAt: envelope.nextRetryAt } : {}),
     ...(envelope.limit ? { limit: envelope.limit } : {}),
-    hasRecoverableBody: (envelope.bodyBytes ?? 0) > 0,
+    hasRecoverableBody: hasStoredBody(envelope),
     ...(envelope.ackState ? { ackState: envelope.ackState } : {}),
     ...(envelope.ackAt !== undefined ? { ackAt: envelope.ackAt } : {}),
     ...(envelope.ackNote ? { ackNote: envelope.ackNote } : {}),

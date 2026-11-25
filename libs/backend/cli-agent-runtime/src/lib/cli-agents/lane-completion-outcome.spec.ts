@@ -1,7 +1,8 @@
 import { AgentId, type AgentProcessInfo } from '@ptah-extension/shared';
 import { Logger } from '@ptah-extension/vscode-core';
 import type { SessionUsageSink, SessionUsageContribution } from '@ptah-extension/platform-core';
-import { recordLaneUsageOutcome } from './lane-completion-outcome';
+import type { LaneCompletionSignal } from '@ptah-extension/shared';
+import { enqueueLaneCompletionOutcome, recordLaneUsageOutcome } from './lane-completion-outcome';
 
 describe('recordLaneUsageOutcome model attribution', () => {
   const info: AgentProcessInfo = {
@@ -56,5 +57,24 @@ describe('recordLaneUsageOutcome model attribution', () => {
     });
     expect(records).toHaveLength(1);
     expect(records[0].workspaceKey).toBe('C:/workspace');
+  });
+});
+
+describe('enqueueLaneCompletionOutcome verdict', () => {
+  it('records a caller stop as a failed row with status stopped', () => {
+    const logger = Object.create(Logger.prototype) as Logger;
+    jest.spyOn(logger, 'warn').mockImplementation();
+    const recordLaneCompletion = jest.fn();
+    const info: AgentProcessInfo = {
+      agentId: AgentId.create(), cli: 'claude', task: 'test',
+      workingDirectory: 'C:/workspace', status: 'stopped',
+      startedAt: '2026-11-08T00:00:00.000Z',
+    };
+    const signal = { verdict: 'stopped', completedAt: '2026-11-08T00:01:00.000Z', durationMs: 60_000 } as LaneCompletionSignal;
+    enqueueLaneCompletionOutcome(() => ({ recordLaneCompletion }), logger, info, 'run-1', signal, false, false, null);
+    expect(recordLaneCompletion).toHaveBeenCalledWith(
+      expect.objectContaining({ verdict: 'failed', status: 'stopped', failureClass: 'user-stop' }),
+      expect.anything(),
+    );
   });
 });

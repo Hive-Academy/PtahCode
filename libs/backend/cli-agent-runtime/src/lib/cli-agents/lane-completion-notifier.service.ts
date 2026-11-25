@@ -1327,7 +1327,9 @@ export class LaneCompletionNotifier {
    *
    * A lane the HOST stopped (`stopReason`, a repeat-call loop) may already
    * have written its deliverables, so it is judged by them like a completed
-   * lane. `failed` stays for a crash, a timeout or a caller stop.
+   * lane. A caller stop (the user's Stop or `ptah_agent_stop`: status
+   * `stopped`, no `stopReason`) is `stopped`, not a failure. `failed` stays
+   * for a crash or a timeout.
    */
   private static verdictOf(
     status: AgentProcessInfo['status'],
@@ -1337,6 +1339,7 @@ export class LaneCompletionNotifier {
     _reportsDelivered = 0,
   ): LaneCompletionVerdict {
     if (stopReason === 'usage-limit' || stopReason === 'auth') return 'failed';
+    if (status === 'stopped' && stopReason === undefined) return 'stopped';
     const hostStopped = status === 'stopped' && stopReason !== undefined;
     if (status !== 'completed' && !hostStopped) return 'failed';
     const allFresh =
@@ -1395,7 +1398,9 @@ export class LaneCompletionNotifier {
         phaseKindFromAgentInfo(info),
         info.role ?? null,
       ).taskKind === 'review' &&
+      // A stopped review is unfinished: its file can be partial.
       signal.verdict !== 'failed' &&
+      signal.verdict !== 'stopped' &&
       signal.verdict !== 'no-deliverable' &&
       signal.deliverables.length > 0
     );
