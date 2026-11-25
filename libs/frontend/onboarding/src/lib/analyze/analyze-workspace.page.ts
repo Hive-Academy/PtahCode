@@ -74,6 +74,7 @@ function resolveOptionalAppState(injector: Injector): AppStateManager | null {
   try {
     return injector.get(AppStateManager, null);
   } catch {
+    // degradation-audit: optional-capability - Analysis works without host Settings navigation.
     return null;
   }
 }
@@ -757,6 +758,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         }
       });
     } catch {
+      // degradation-audit: reported - setupReadFailed shows the Setup model retry alert.
       if (this.destroyed || seq !== this.setupRequestSeq) return;
       this.ngZone.run(() => this.setupReadFailed.set(true));
     } finally {
@@ -839,6 +841,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     try {
       await this.store.listAnalyses();
     } catch {
+      // degradation-audit: reported - savedError shows the saved analyses retry alert.
       if (!this.destroyed) this.savedError.set(true);
       return;
     }

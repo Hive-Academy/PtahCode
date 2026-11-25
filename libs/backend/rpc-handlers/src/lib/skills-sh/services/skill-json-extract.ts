@@ -37,6 +37,7 @@ function parseObject(text: string): object | null {
     const value: unknown = JSON.parse(text);
     return typeof value === 'object' && !Array.isArray(value) ? value : null;
   } catch {
+    // degradation-audit: optional-capability - Invalid JSON candidates can be skipped during text extraction.
     return null;
   }
 }

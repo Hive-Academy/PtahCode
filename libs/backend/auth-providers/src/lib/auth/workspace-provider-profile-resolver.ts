@@ -770,7 +770,15 @@ export class WorkspaceProviderProfileResolver {
           (await this.copilotAuth.isAuthenticated()) ||
           (await this.copilotAuth.tryRestoreAuth())
         );
-      } catch {
+      } catch (error: unknown) {
+        // degradation-audit: reported - logged here; Setup resolution then reports not signed in.
+        this.logger.warn(
+          '[WorkspaceProviderProfileResolver] Sign-in check failed; Setup treats the provider as not signed in',
+          {
+            providerId: 'github-copilot',
+            error: error instanceof Error ? error.name : 'unknown',
+          },
+        );
         return false;
       }
     }
@@ -783,7 +791,15 @@ export class WorkspaceProviderProfileResolver {
         }
         try {
           return await this.kimiCodeAuth.isAuthenticated();
-        } catch {
+        } catch (error: unknown) {
+          // degradation-audit: reported - logged here; Setup resolution then reports not signed in.
+          this.logger.warn(
+            '[WorkspaceProviderProfileResolver] Sign-in check failed; Setup treats the provider as not signed in',
+            {
+              providerId: providerId,
+              error: error instanceof Error ? error.name : 'unknown',
+            },
+          );
           return false;
         }
       }
@@ -795,7 +811,15 @@ export class WorkspaceProviderProfileResolver {
       if (this.openRouterAuth) {
         try {
           return await this.openRouterAuth.isAuthenticated();
-        } catch {
+        } catch (error: unknown) {
+          // degradation-audit: reported - logged here; Setup resolution then reports not signed in.
+          this.logger.warn(
+            '[WorkspaceProviderProfileResolver] Sign-in check failed; Setup treats the provider as not signed in',
+            {
+              providerId: providerId,
+              error: error instanceof Error ? error.name : 'unknown',
+            },
+          );
           return false;
         }
       }

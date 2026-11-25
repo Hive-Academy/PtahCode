@@ -505,6 +505,7 @@ export class SkillRecommendationService {
           bucket.entries = entries;
           bucket.failure = undefined;
         } catch (error: unknown) {
+          // degradation-audit: reported - Late rejections are covered by the bucket timeout in registryFailure.
           if (searchSettled) return;
           const timedOut =
             error instanceof Error && error.message === 'Search timed out';

@@ -631,6 +631,7 @@ export class AnalyzeSkillsPage implements OnInit {
         }
       }
     } catch {
+      // degradation-audit: reported - The fallback Setup block shows model guidance for the active request.
       if (version !== this.version || this.destroyRef.destroyed) return;
     }
     this.applySetupBlock(fallbackSetupBlock(hasPriorResult));

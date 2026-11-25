@@ -100,12 +100,14 @@ export class ReactiveSettingsStore implements IGlobalBatchSettingsStore {
     const backendPromise = this.backend.writeGlobalBatch(snapshot);
     // Attach a no-op catch synchronously so an out-of-order backend rejection
     // does not trigger UnhandledPromiseRejection while awaiting prevPublication.
+    // degradation-audit: reported - Awaiting backendPromise later rejects the originating batch call.
     backendPromise.catch(() => undefined);
 
     const prevPublication = this.batchPublicationQueue;
     let committedSlice: Readonly<Record<string, unknown>> = Object.freeze({});
 
     const publish = async (): Promise<void> => {
+      // degradation-audit: reported - The previous batch caller receives its own publication rejection.
       await prevPublication.catch(() => undefined);
       const committed = await backendPromise;
       const committedEntries = Object.entries(committed);
