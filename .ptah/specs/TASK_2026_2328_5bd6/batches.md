@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B17, B19, B21 COMPLETE. B18 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B19, B21 COMPLETE. B23 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -470,8 +470,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B18 - WU14b Codex lane native values + WU15b ACP lane handle
 
-- **Status**: IN_PROGRESS (codex 49729dd5, one lane for A+B)
-- **Shape / weight**: logic / lane A (WU14b) est. 10,500; lane B (WU15b) est. 10,200. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 49729dd5, one lane for A+B; decision 33. Review note: ACP handle reports ptah-fallback with an empty list when the profile has no efforts)
+- **Shape / weight**: logic / lane A (WU14b) est. 10,500; lane B (WU15b) est. 10,200. **Actual tokens**: unavailable
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/`):
   - A: `codex/codex-app-server-lane-models.ts` (whole); `codex/codex-app-server-lane.adapter.ts:280-345,860-935` + handle return range; `codex/codex-app-server-lane.adapter.spec.ts:1-120` + a handle describe; `W/libs/backend/codex-runtime/src/lib/codex-context.ts` `reportedSettings` (after B7); PLAN:637, PLAN:654
@@ -560,7 +560,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B23 - WU8c gather on-mode catalog read + setting reader
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 0ae58424)
 - **Shape / weight**: logic / est. 10,900. **Actual tokens**: pending
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/pipeline/gather.ts` (whole, 6,383 tokens counted); `.../pipeline/gather.spec.ts:1-100`; `.../catalog/lane-catalog.types.ts`; `.../scope/lane-rotation-setting.ts` (whole); PLAN:848-865, PLAN:886-892, PLAN:903-907, PLAN:533-534

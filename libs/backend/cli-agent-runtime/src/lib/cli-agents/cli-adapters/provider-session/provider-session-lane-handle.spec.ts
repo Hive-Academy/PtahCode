@@ -2110,3 +2110,79 @@ describe('acpProfileEfforts (stopped-lane efforts)', () => {
     expect(live?.efforts).toEqual([]);
   });
 });
+
+describe('createProviderSessionLaneHandle — reported session settings', () => {
+  const effortOption = {
+    id: 'reasoning_effort',
+    name: 'Effort',
+    type: 'select',
+    currentValue: 'high',
+    options: [{ value: 'future-effort', name: 'Future' }, { value: 'high', name: 'High' }],
+  };
+  const profile: Partial<AcpVendorProfile> = {
+    effortConfigId: 'reasoning_effort',
+    sessionConfig: ({ reasoningEffort }) => reasoningEffort
+      ? [{ configId: 'reasoning_effort', value: reasoningEffort }]
+      : [],
+  };
+
+  it('mirrors the native settings and prefers advertised effort values in the composer', async () => {
+    const h = start({
+      profile,
+      options: { model: 'requested-model' },
+      agent: {
+        configOptions: [{
+          id: 'model',
+          name: 'Model',
+          type: 'select',
+          currentValue: 'native-model',
+          options: [{ value: 'native-model', name: 'Native model' }],
+        }, effortOption],
+      },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.reportedSession?.()).toEqual({
+      model: 'native-model',
+      effort: 'high',
+      efforts: { provenance: 'native', supported: ['future-effort', 'high'], default: null },
+    });
+    await expect(h.handle.listTurnOptions?.()).resolves.toMatchObject({
+      currentModel: 'native-model',
+      currentEffort: 'high',
+      efforts: ['future-effort', 'high'],
+    });
+  });
+
+  it('labels profile efforts as fallback when the agent has no list', async () => {
+    const h = start({ profile, options: { model: 'requested-model' } });
+    await expect(h.handle.done).resolves.toBe(0);
+    const supported = acpProfileEfforts(createProfile(profile), 'requested-model');
+    expect(supported).toHaveLength(5);
+    expect(h.handle.reportedSession?.()).toEqual({
+      model: null,
+      effort: null,
+      efforts: { provenance: 'ptah-fallback', supported, default: null },
+    });
+    await expect(h.handle.listTurnOptions?.()).resolves.toEqual({
+      models: [],
+      efforts: supported,
+      commands: [],
+    });
+  });
+
+  it('reports the session effort after a refused setup hint without overriding spawn delivery', async () => {
+    const h = start({
+      profile,
+      options: { reasoningEffort: 'high' },
+      agent: { configOptions: [effortOption] },
+      script: (agent) => agent.handle('session/set_config_option', () => ({
+        error: { code: -32602, message: 'Effort refused' },
+      })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/set_config_option')).toHaveLength(1);
+    expect(h.infos().join(' ')).toContain('continuing without the "reasoning_effort" setting');
+    expect(h.handle.reportedSession?.()?.effort).toBe('high');
+    expect(h.handle.effortDelivery).toBeUndefined();
+  });
+});

@@ -9,8 +9,9 @@
  * - `continue(message, content?)` is a further prompt on the same session;
  *   images and files become ACP content blocks (`toAcpPromptContent`).
  * - Per-turn model and effort go through `session/set_config_option`
- *   (`applyTurnSettings`); the composer catalog is the session's models, the
- *   profile's effort entries and its `available_commands_update` (B8).
+ *   (`applyTurnSettings`); the composer catalog uses the session's models,
+ *   advertised efforts and `available_commands_update` (B8). The profile
+ *   supplies fallback efforts when the session has no native list.
  * - There is no `steer`: an ACP agent queues a mid-turn prompt instead of
  *   injecting it. `interrupt` is offered when the profile's cancel behaviour
  *   keeps the process (`await-reply`): `session/cancel` ends the turn and the
@@ -63,6 +64,7 @@ import {
   type CliOutputSegment,
   type FlatStreamEventUnion,
   type LaneComposerCommandOption,
+  type LaneReportedSession,
   type LaneTurnContent,
   type LaneTurnInputCapabilities,
   type LaneTurnSettings,
@@ -577,6 +579,19 @@ export function createProviderSessionLaneHandle(
   /** Effort values the profile maps for the lane's model. */
   const profileEfforts = (): string[] => acpProfileEfforts(profile, options.model);
 
+  const reportedSession = (): LaneReportedSession => {
+    const reported = session.getReportedState();
+    if (reported.efforts.provenance === 'native') return reported;
+    return {
+      ...reported,
+      efforts: {
+        provenance: 'ptah-fallback',
+        supported: profileEfforts(),
+        default: null,
+      },
+    };
+  };
+
   const laneCommands = (): LaneComposerCommandOption[] =>
     filterLaneCommands(
       session.getAvailableCommands().map(acpLaneCommandOption),
@@ -585,11 +600,12 @@ export function createProviderSessionLaneHandle(
 
   const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
     const models = session.getModels();
-    const current = models.find((model) => model.isDefault)?.id;
+    const { model, effort, efforts } = reportedSession();
     return {
       models: models.map((model) => ({ id: model.id, name: model.name ?? model.id })),
-      efforts: profileEfforts(),
-      ...(current ? { currentModel: current } : {}),
+      efforts: efforts.provenance === 'unknown' ? [] : efforts.supported,
+      ...(model === null ? {} : { currentModel: model }),
+      ...(effort === null ? {} : { currentEffort: effort }),
       commands: laneCommands(),
     };
   };
@@ -639,6 +655,7 @@ export function createProviderSessionLaneHandle(
       if (mcpTimedOut) callback();
     },
     getSessionId: () => session.getSessionId() ?? options.resumeSessionId,
+    reportedSession,
     onSessionResolved: sessionResolved.subscribe,
     supportsContinuation,
     continue: continueTurn,

@@ -93,6 +93,10 @@ class FakeContext implements CodexContext {
   readonly identity: CodexThreadIdentity;
   readonly inputs: CodexTurnInput[] = [];
   readonly close = jest.fn(async () => undefined);
+  readonly reportedSettings = jest.fn((): { model: string | null; effort: string | null } => ({
+    model: null,
+    effort: null,
+  }));
   models: CodexModelInfo[] = [];
   private readonly queue: CodexRuntimeEvent[] = [];
   private wake: () => void = () => undefined;
@@ -1741,7 +1745,7 @@ describe('CodexAppServerLaneAdapter', () => {
     const first = await h.adapter.listModels();
     expect(first).toEqual([
       { id: 'gpt-6-sol', name: 'GPT-6-Sol' },
-      { id: 'gpt-6-astra', name: 'GPT-6-Astra (Codex default)' },
+      { id: 'gpt-6-astra', name: 'GPT-6-Astra (Codex default)', isDefault: true },
     ]);
     await h.adapter.listModels();
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(2);
@@ -1770,8 +1774,17 @@ describe('CodexAppServerLaneAdapter', () => {
     const opened = jest.mocked(h.runtime.openCatalog).mock.calls.length;
     await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
       models: [
-        { id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)' },
-        { id: 'gpt-6-astra', name: 'GPT-6-Astra' },
+        {
+          id: 'gpt-6-sol',
+          name: 'GPT-6-Sol (Codex default)',
+          isDefault: true,
+          efforts: { provenance: 'native', supported: ['low', 'high'], default: null },
+        },
+        {
+          id: 'gpt-6-astra',
+          name: 'GPT-6-Astra',
+          efforts: { provenance: 'native', supported: ['high', 'xhigh', 'bogus'], default: null },
+        },
       ],
       efforts: ['low', 'high', 'xhigh'],
     });
@@ -1786,7 +1799,7 @@ describe('CodexAppServerLaneAdapter', () => {
     await terminal(h.context);
     await handle.done;
     await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
-      models: [{ id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)' }],
+      models: [{ id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)', isDefault: true }],
       efforts: [],
     });
     jest.mocked(h.runtime.openCatalog).mockRejectedValueOnce(new Error('catalog failed'));
@@ -1918,6 +1931,42 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     });
     await terminal(h.context);
     await handle.done;
+    handle.abort.abort();
+  });
+
+  it('reports native settings and the reported model’s efforts without opening the composer', async () => {
+    const h = harness();
+    const handle = await started(h);
+    expect(handle.reportedSession?.()).toEqual({
+      model: null,
+      effort: null,
+      efforts: { provenance: 'unknown' },
+    });
+    h.context.models = [
+      { id: 'default', model: 'gpt-default', displayName: 'Default', isDefault: true, supportedEfforts: ['low'] },
+      {
+        id: 'reported',
+        model: 'gpt-reported',
+        displayName: 'Reported',
+        isDefault: false,
+        supportedEfforts: ['future-effort', 'high'],
+        defaultEffort: 'high',
+      },
+    ];
+    h.context.reportedSettings.mockReturnValue({ model: 'gpt-reported', effort: 'future-effort' });
+    await terminal(h.context);
+    await expect(handle.done).resolves.toBe(0);
+    expect(handle.reportedSession?.()).toEqual({
+      model: 'gpt-reported',
+      effort: 'future-effort',
+      efforts: { provenance: 'native', supported: ['future-effort', 'high'], default: 'high' },
+    });
+    h.context.reportedSettings.mockReturnValue({ model: 'gpt-default', effort: null });
+    expect(handle.reportedSession?.()).toEqual({
+      model: 'gpt-default',
+      effort: null,
+      efforts: { provenance: 'native', supported: ['low'], default: null },
+    });
     handle.abort.abort();
   });
 });

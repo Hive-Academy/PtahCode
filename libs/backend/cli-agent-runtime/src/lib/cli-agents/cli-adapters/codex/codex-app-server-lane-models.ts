@@ -15,6 +15,7 @@ const modelListSchema = z.array(z.object({
   isDefault: z.boolean().optional(),
   description: z.string().optional(),
   supportedEfforts: z.array(z.string()).optional(),
+  defaultEffort: z.string().optional(),
 }));
 
 /**
@@ -28,11 +29,22 @@ export function codexLaneModels(input: readonly CodexModelInfo[]): CliModelInfo[
   const parsed = modelListSchema.parse(input);
   return parsed.map((model) => {
     const name = model.displayName?.trim() || model.model;
-    return model.isDefault === true
-      ? { id: model.model, name: `${name} (Codex default)` }
-      : { id: model.model, name };
+    return {
+      id: model.model,
+      ...(model.isDefault === true
+        ? { name: `${name} (Codex default)`, isDefault: true }
+        : { name }),
+      ...(model.supportedEfforts?.length ? {
+        efforts: {
+          provenance: 'native',
+          supported: model.supportedEfforts,
+          default: model.defaultEffort ?? null,
+        },
+      } : {}),
+    };
   });
 }
+
 /**
  * The effort levels the live catalog advertises: the union of every model's
  * `supportedEfforts` that a lane can send, in catalog order. Empty when the
