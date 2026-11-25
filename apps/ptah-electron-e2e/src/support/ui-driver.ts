@@ -145,20 +145,56 @@ export class UiDriver {
           return trimmed.length > 0 ? trimmed : null;
         };
 
-        const resolveEffectiveSetupPair = (): ModelPair => {
+        const resolveMockValue = (
+          method: string,
+          params: unknown,
+        ): { found: true; data: unknown } | { found: false } => {
+          const fns = g.__uiMockFns ?? {};
           const statics = g.__uiMockStatics ?? {};
+          if (Object.prototype.hasOwnProperty.call(fns, method)) {
+            const source = fns[method];
+            const compiled = g.__uiCompiledFns ?? new Map();
+            let resolver = compiled.get(source);
+            if (!resolver) {
+              // `source` is the string form of a resolver function literal
+              // authored in a spec file (e.g. fixtures.ts, a *.spec.ts) and
+              // handed to page.evaluate/addInitScript, which serializes it to
+              // text to cross the Playwright -> Electron main-process boundary.
+              // There is no other channel to reconstitute a function from that
+              // boundary, and nothing here is user- or network-supplied: only
+              // e2e specs in this repo populate __uiMockFns, and only e2e runs
+              // this file.
+              const body = `return (${source})(params);`;
+              resolver = new Function('params', body) as typeof resolver; // NOSONAR typescript:S1523 — test-authored source, see above
+              compiled.set(source, resolver);
+              g.__uiCompiledFns = compiled;
+            }
+            return { found: true, data: resolver(params) };
+          }
+          if (Object.prototype.hasOwnProperty.call(statics, method)) {
+            return { found: true, data: statics[method] };
+          }
+          return { found: false };
+        };
+
+        const readMockedReply = (method: string): unknown => {
+          const resolved = resolveMockValue(method, {});
+          return resolved.found ? resolved.data : undefined;
+        };
+
+        const resolveEffectiveSetupPair = (): ModelPair => {
           const provider =
             readNonEmptyString(
-              statics['auth:getAuthStatus'],
+              readMockedReply('auth:getAuthStatus'),
               'anthropicProviderId',
             ) ??
             readNonEmptyString(
-              statics['auth:getEffectiveRoute'],
+              readMockedReply('auth:getEffectiveRoute'),
               'driverProviderId',
             ) ??
             seed.defaultSetupEffective.provider;
           const model =
-            readNonEmptyString(statics['config:model-get'], 'model') ??
+            readNonEmptyString(readMockedReply('config:model-get'), 'model') ??
             seed.defaultSetupEffective.model;
           return { provider, model };
         };
@@ -257,29 +293,9 @@ export class UiDriver {
           let data: unknown;
           // Only the built-in Setup setter can fail; spec mocks never do.
           let setupFailure: string | undefined;
-          const fns = g.__uiMockFns ?? {};
-          const statics = g.__uiMockStatics ?? {};
-          if (Object.prototype.hasOwnProperty.call(fns, method)) {
-            const source = fns[method];
-            const compiled = g.__uiCompiledFns ?? new Map();
-            let resolver = compiled.get(source);
-            if (!resolver) {
-              // `source` is the string form of a resolver function literal
-              // authored in a spec file (e.g. fixtures.ts, a *.spec.ts) and
-              // handed to page.evaluate/addInitScript, which serializes it to
-              // text to cross the Playwright -> Electron main-process boundary.
-              // There is no other channel to reconstitute a function from that
-              // boundary, and nothing here is user- or network-supplied: only
-              // e2e specs in this repo populate __uiMockFns, and only e2e runs
-              // this file.
-              const body = `return (${source})(params);`;
-              resolver = new Function('params', body) as typeof resolver; // NOSONAR typescript:S1523 — test-authored source, see above
-              compiled.set(source, resolver);
-              g.__uiCompiledFns = compiled;
-            }
-            data = resolver(params);
-          } else if (Object.prototype.hasOwnProperty.call(statics, method)) {
-            data = statics[method];
+          const mocked = resolveMockValue(method, params);
+          if (mocked.found) {
+            data = mocked.data;
           } else if (method === 'wizard:get-setup-model') {
             data = handleDefaultGetSetupModel();
           } else if (method === 'wizard:set-setup-model') {

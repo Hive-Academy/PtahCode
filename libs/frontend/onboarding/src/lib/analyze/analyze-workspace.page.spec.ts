@@ -58,6 +58,7 @@ describe('AnalyzeWorkspacePage', () => {
     reset: jest.fn(),
     startFreshAnalysis: jest.fn().mockResolvedValue(undefined),
     resumeAnalysis: jest.fn().mockResolvedValue(undefined),
+    cancel: jest.fn().mockResolvedValue(undefined),
   };
   const wizard = { reset: jest.fn() };
   const navigate = jest.fn();
@@ -67,6 +68,8 @@ describe('AnalyzeWorkspacePage', () => {
     jest.clearAllMocks();
     selected.set(null);
     loaded.set(null);
+    runner.isRunning.set(false);
+    runner.isCanceling.set(false);
     currentView.set('onboarding');
     setupStateResponse = {
       kind: 'unset',
@@ -223,6 +226,172 @@ describe('AnalyzeWorkspacePage', () => {
         [],
         expect.objectContaining({ queryParams: { rerun: null } }),
       );
+      fixture.destroy();
+    });
+
+    it('loads saved analyses on rerun=1 without waiting for Setup readiness', async () => {
+      let settleSetup!: (value: unknown) => void;
+      claudeRpcCall.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settleSetup = resolve;
+          }),
+      );
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      const init = fixture.componentInstance.ngOnInit();
+
+      expect(store.listAnalyses).toHaveBeenCalledTimes(1);
+      settleSetup({
+        isSuccess: () => true,
+        data: {
+          state: {
+            kind: 'invalid',
+            source: 'setup',
+            provider: 'claude',
+            model: 'claude-retired',
+            cause: 'model-stale',
+          } satisfies SetupPairState,
+        },
+      });
+      await init;
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(store.selectAnalysis).not.toHaveBeenCalled();
+      expect(rpc.getResumableRun).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('keeps the post-rerun saved list when the initial rerun=1 list reply arrives late', async () => {
+      let settleInitial!: (
+        value: {
+          filename: string;
+          projectType: string;
+          savedAt: string;
+          durationMs: number;
+        }[],
+      ) => void;
+      let markSecondStarted!: () => void;
+      const secondStarted = new Promise<void>((resolve) => {
+        markSecondStarted = resolve;
+      });
+      const secondReply = Promise.resolve([
+        {
+          filename: 'post-rerun',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 2000,
+        },
+      ]);
+      const rpcListAnalyses = jest
+        .fn()
+        .mockReturnValueOnce(
+          new Promise((resolve) => {
+            settleInitial = resolve;
+          }),
+        )
+        .mockImplementationOnce(() => {
+          markSecondStarted();
+          return secondReply;
+        });
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          AnalysisStepStore,
+          {
+            provide: ClockService,
+            useValue: { now: signal(Date.now()), acquire: () => () => undefined },
+          },
+          {
+            provide: WizardRpcService,
+            useValue: { ...rpc, listAnalyses: rpcListAnalyses },
+          },
+          { provide: ClaudeRpcService, useValue: { call: claudeRpcCall } },
+          {
+            provide: AppStateManager,
+            useValue: { currentView, requestSettingsTab, setCurrentView },
+          },
+          { provide: WizardAnalysisRunner, useValue: runner },
+          {
+            provide: SetupWizardStateService,
+            useValue: {
+              reset: wizard.reset,
+              multiPhaseResult: signal(null),
+              phaseStatuses: signal([]),
+              currentPhaseNumber: signal(null),
+              totalPhaseCount: signal(null),
+              analysisStream: signal([]),
+            },
+          },
+          { provide: Router, useValue: { navigate } },
+        ],
+      });
+      TestBed.overrideComponent(AnalyzeWorkspacePage, {
+        set: { template: '' },
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      const realStore = TestBed.inject(AnalysisStepStore);
+      fixture.componentRef.setInput('rerun', '1');
+      const init = fixture.componentInstance.ngOnInit();
+
+      await secondStarted;
+      await secondReply;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(rpcListAnalyses).toHaveBeenCalledTimes(2);
+      expect(realStore.saved().map((entry) => entry.filename)).toEqual([
+        'post-rerun',
+      ]);
+      expect(fixture.componentInstance['savedError']()).toBe(false);
+
+      settleInitial([
+        {
+          filename: 'stale-initial',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 1000,
+        },
+      ]);
+      await init;
+      expect(realStore.saved().map((entry) => entry.filename)).toEqual([
+        'post-rerun',
+      ]);
+      expect(fixture.componentInstance['savedError']()).toBe(false);
+      fixture.destroy();
+    });
+
+    it('ignores a late initial saved-list failure on rerun=1 after the post-rerun list succeeds', async () => {
+      let rejectInitial!: (reason: Error) => void;
+      let markSecondStarted!: () => void;
+      const secondStarted = new Promise<void>((resolve) => {
+        markSecondStarted = resolve;
+      });
+      const secondReply = Promise.resolve(undefined);
+      store.listAnalyses
+        .mockReturnValueOnce(
+          new Promise<void>((_, reject) => {
+            rejectInitial = reject;
+          }),
+        )
+        .mockImplementationOnce(() => {
+          markSecondStarted();
+          return secondReply;
+        });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      const init = fixture.componentInstance.ngOnInit();
+
+      await secondStarted;
+      await secondReply;
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(store.listAnalyses).toHaveBeenCalledTimes(2);
+      expect(fixture.componentInstance['savedError']()).toBe(false);
+
+      rejectInitial(new Error('late initial failure'));
+      await init;
+      expect(fixture.componentInstance['savedError']()).toBe(false);
       fixture.destroy();
     });
   });
@@ -704,6 +873,92 @@ describe('AnalyzeWorkspacePage', () => {
       window.dispatchEvent(new Event('focus'));
       await Promise.resolve();
       expect(claudeRpcCall).toHaveBeenCalledTimes(3);
+    });
+
+    it('keeps Setup repair actions visible during stop recovery and allows retry after repair', async () => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      runner.cancel.mockRejectedValueOnce(new Error('cancel failed'));
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      runner.isRunning.set(true);
+      await fixture.componentInstance['stop']();
+      fixture.detectChanges();
+
+      const element = fixture.nativeElement as HTMLElement;
+      expect(element.textContent).toContain('The stop could not be confirmed');
+      expect(
+        element.querySelector('[data-testid="setup-model-card"]'),
+      ).not.toBeNull();
+      const useWorkspace = element.querySelector<HTMLButtonElement>(
+        '[data-testid="setup-model-use-workspace"]',
+      );
+      expect(useWorkspace).not.toBeNull();
+
+      const retryButton = () =>
+        Array.from(element.querySelectorAll('ptah-run-panel button')).find(
+          (button) => button.textContent?.trim() === 'Retry',
+        );
+      retryButton()?.click();
+      await fixture.whenStable();
+      expect(runner.resumeAnalysis).not.toHaveBeenCalled();
+
+      claudeRpcCall.mockResolvedValueOnce({
+        isSuccess: () => true,
+        data: {
+          committed: null,
+          commitSeq: 2,
+          state: {
+            kind: 'unset',
+            effective: { provider: 'claude', model: 'claude-sonnet-4' },
+          },
+        },
+      });
+      useWorkspace?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      runner.isRunning.set(false);
+      retryButton()?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(runner.resumeAnalysis).toHaveBeenCalledTimes(1);
+      expect(element.textContent).not.toContain(
+        'The stop could not be confirmed',
+      );
+      fixture.destroy();
+    });
+
+    it('keeps the Setup read-error alert visible during stop recovery', async () => {
+      claudeRpcCall.mockRejectedValueOnce(new Error('setup read failed'));
+      runner.cancel.mockRejectedValueOnce(new Error('cancel failed'));
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      runner.isRunning.set(true);
+      await fixture.componentInstance['stop']();
+      fixture.detectChanges();
+
+      const element = fixture.nativeElement as HTMLElement;
+      const readAlert = element.querySelector(
+        '[data-testid="setup-model-read-error"]',
+      );
+      expect(readAlert).not.toBeNull();
+      readAlert?.querySelector('button')?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(
+        element.querySelector('[data-testid="setup-model-read-error"]'),
+      ).toBeNull();
+      expect(fixture.componentInstance['setupReady']()).toBe(true);
+      runner.isRunning.set(false);
+      fixture.destroy();
     });
   });
 });

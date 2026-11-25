@@ -251,6 +251,9 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
                 {{ block.actionLabel }}
               </button>
             </ptah-alert>
+            @if (state.error(); as error) {
+              <ptah-alert tone="error" live="assertive">{{ error }}</ptah-alert>
+            }
             <div class="flex flex-wrap gap-2">
               <button
                 ptahButton

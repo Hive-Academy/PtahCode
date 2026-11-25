@@ -205,7 +205,7 @@
               [createdManualItemIds]="createdManualItemIds()"
               [searching]="searching() || !!reviewStore.openDraft()?.busy"
               [draftBlockedReason]="draftDisabledReason()"
-              (searchRequested)="searchUnmatchedItem(reviewStore, $event)"
+              (itemSearchRequested)="searchJudgedItem(reviewStore, $event.itemId, $event.query)"
               (manualDraftRequested)="openManualDraft(reviewStore, $event)"
             />
             @if (reviewStore.visibleItemRows().length) {

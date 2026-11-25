@@ -1503,6 +1503,41 @@ describe('AnalyzeSkillsPage', () => {
     expect(element.querySelector('[data-testid="setup-model-blocked"]')).toBeNull();
   });
 
+  it('shows the navigation error when Skip skills fails on the Setup-blocked screen', async () => {
+    setupStateResponse = {
+      kind: 'invalid',
+      source: 'setup',
+      provider: 'claude',
+      model: 'claude-old',
+      cause: 'model-stale',
+    };
+    const router = TestBed.inject(Router);
+    jest.mocked(router.navigate).mockResolvedValueOnce(false);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    const skip = Array.from(element.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Skip skills',
+    );
+    expect(skip).toBeDefined();
+    skip?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const alerts = Array.from(element.querySelectorAll('ptah-alert')).map((a) =>
+      a.textContent?.trim(),
+    );
+    expect(alerts).toContain('Could not open Project guidance. Try again.');
+    expect(
+      element.querySelector('[data-testid="setup-model-blocked"]'),
+    ).not.toBeNull();
+    expect(
+      element.querySelector('[data-testid="setup-model-recovery-action"]'),
+    ).not.toBeNull();
+    expect(skip?.disabled).toBe(false);
+  });
+
   it('maps SETUP_MODEL_INVALID race from recommend RPC into R13 Setup-error banner retaining prior result', async () => {
     recommendResponse = () =>
       Promise.resolve({

@@ -33,7 +33,7 @@ interface StageDetail {
   readonly status: SkillJudgeStageRecord['status'];
   readonly statusTone: 'ok' | 'err' | 'neutral';
   readonly category: string | null;
-  /** `used <pair>` or `attempted <pair>`; null when the record carries no pair. */
+  /** `used <pair>`, `attempted <pair>`, or `configured <pair>`; null when the record carries no pair. */
   readonly pairText: string | null;
   readonly itemsText: string | null;
 }
@@ -121,15 +121,16 @@ export class SkillMethodBannerComponent {
 
   protected readonly stageDetails = computed<readonly StageDetail[]>(() =>
     this.stages().map((stage) => {
-      const attempted = stage.pairAttempted ?? stage.pairConfigured ?? null;
       const pairText =
         stage.status === 'used'
           ? stage.pairUsed
             ? `used ${stage.pairUsed.provider} / ${stage.pairUsed.model}`
             : null
-          : attempted
-            ? `attempted ${attempted.provider} / ${attempted.model}`
-            : null;
+          : stage.pairAttempted
+            ? `attempted ${stage.pairAttempted.provider} / ${stage.pairAttempted.model}`
+            : stage.pairConfigured
+              ? `configured ${stage.pairConfigured.provider} / ${stage.pairConfigured.model}`
+              : null;
       return {
         label: stage.stage === 'decision' ? 'Decision stage' : 'Normal stage',
         status: stage.status,

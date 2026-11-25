@@ -80,13 +80,21 @@ describe('SkillVerdictFilterComponent', () => {
     expect(filterChange).not.toHaveBeenCalled();
   });
 
-  it('pluralizes one hidden candidate and hides the F28 line under All or zero', () => {
+  it('pluralizes one hidden candidate, shows Show-all under All when hidden count is positive, and hides at zero', () => {
     const { root: singleRoot } = setup('build', allOptions, 1);
     expect(singleRoot.textContent).toContain('1 more candidate - Show all');
 
-    const { root: allRoot } = setup('all', allOptions, 7);
-    expect(allRoot.textContent).not.toContain('more candidates');
-    expect(allRoot.textContent).not.toContain('Show all');
+    const { fixture: allFixture, root: allRoot } = setup('all', allOptions, 7);
+    const showAllRequested = jest.fn();
+    allFixture.componentInstance.showAllRequested.subscribe(showAllRequested);
+    expect(allRoot.textContent).toContain('7 more candidates - Show all');
+    Array.from(allRoot.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.includes('Show all'))
+      ?.click();
+    expect(showAllRequested).toHaveBeenCalledTimes(1);
+
+    const { root: allZeroRoot } = setup('all', allOptions, 0);
+    expect(allZeroRoot.textContent).not.toContain('Show all');
 
     const { root: zeroRoot } = setup('not-judged', allOptions, 0);
     expect(zeroRoot.textContent).not.toContain('Show all');

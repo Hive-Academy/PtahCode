@@ -49,22 +49,24 @@
                 variant="secondary"
                 size="sm"
                 [attr.aria-disabled]="searching()"
-                (click)="!searching() && searchRequested.emit(row.item.name)"
+                (click)="requestSearch(row)"
               >
                 Search for {{ row.item.name }}
               </button>
-              <button
-                #opener
-                ptahButton
-                type="button"
-                variant="ghost"
-                size="sm"
-                [attr.aria-label]="'Write a skill by hand for ' + row.item.name"
-                [attr.aria-disabled]="isManualDraftDisabled(row) ? 'true' : null"
-                (click)="requestManualDraft(row, opener)"
-              >
-                Write a skill by hand
-              </button>
+              @if (row.itemId !== null) {
+                <button
+                  #opener
+                  ptahButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  [attr.aria-label]="'Write a skill by hand for ' + row.item.name"
+                  [attr.aria-disabled]="isManualDraftDisabled(row) ? 'true' : null"
+                  (click)="requestManualDraft(row, opener)"
+                >
+                  Write a skill by hand
+                </button>
+              }
             </span>
           </div>
           @for (reason of row.reasons; track $index) {

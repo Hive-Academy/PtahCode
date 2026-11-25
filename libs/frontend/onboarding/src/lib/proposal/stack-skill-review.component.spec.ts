@@ -512,4 +512,235 @@ describe('StackSkillReviewComponent judged review', () => {
     expect(store.openDraft()?.body).toBe('');
     expect(renderDraft(fixture).usedSlugs()).toEqual(['first-skill']);
   });
+
+  it('shows Show-all under All verdict when an item filter hides candidates and clears the item filter', () => {
+    const second = candidate('rxjs-patterns');
+    const { fixture, root, store } = setup({
+      ...judge,
+      items: [
+        judge.items[0],
+        item('RxJS', {
+          registry: 'matched',
+          candidateIds: [second.candidateId],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: second.candidateId,
+              reason: 'Covers reactive streams',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        }),
+      ],
+      candidates: [recommended, rejected, second],
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      proposals: [],
+    });
+    const angularChip = root.querySelector<HTMLButtonElement>(
+      '[data-strip-chip][aria-label^="Angular"]',
+    );
+    angularChip?.click();
+    fixture.detectChanges();
+    expect(store.verdictFilter()).toBe('all');
+    expect(store.activeItemId()).toBe('angular');
+    button(root, '1 more candidate - Show all').click();
+    fixture.detectChanges();
+    expect(store.activeItemId()).toBeNull();
+    expect(root.textContent).not.toContain('Show all');
+  });
+
+  it('does not show Show-all while a pinned draft row keeps the sole Install card visible', () => {
+    const shared = candidate('shared-skill');
+    const { fixture, root, store } = setup({
+      method: 'decision',
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      items: [
+        item('Angular', {
+          registry: 'matched',
+          candidateIds: [shared.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: shared.candidateId,
+              eligible: true,
+              rejection: { reason: 'Not needed for Angular', stage: 'decision' },
+            },
+          ],
+          outcomes: [
+            { verdict: 'no-skill', reason: 'Not needed for Angular', stage: 'decision' },
+          ],
+          judgedBy: 'decision',
+        }),
+        item('RxJS', {
+          registry: 'matched',
+          candidateIds: [shared.candidateId],
+          candidateAssessments: [
+            { candidateId: shared.candidateId, eligible: true },
+          ],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: shared.candidateId,
+              reason: 'Covers RxJS streams',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        }),
+      ],
+      candidates: [shared],
+      proposals: [],
+      stages: [],
+    });
+
+    const draftOpener = root.querySelector<HTMLButtonElement>(
+      'button[aria-label="Write a skill by hand for RxJS"]',
+    );
+    if (!draftOpener) throw new Error('Missing RxJS manual draft opener');
+    draftOpener.click();
+    fixture.detectChanges();
+
+    const angularChip = root.querySelector<HTMLButtonElement>(
+      '[data-strip-chip][aria-label^="Angular"]',
+    );
+    angularChip?.click();
+    fixture.detectChanges();
+
+    expect(store.verdictFilter()).toBe('all');
+    expect(store.activeItemId()).toBe('angular');
+    expect(root.querySelectorAll('[data-testid="skill-pick-card"]')).toHaveLength(1);
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+    expect(root.textContent).not.toContain('Show all');
+
+    store.closeDraft();
+    fixture.detectChanges();
+
+    expect(root.querySelectorAll('[data-testid="skill-pick-card"]')).toHaveLength(0);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+    expect(button(root, '1 more candidate - Show all')).toBeTruthy();
+  });
+
+  it('updates Show-all when per-item manual search renders or clears a pool candidate', () => {
+    const shared = candidate('shared-skill');
+    const outsidePool = candidate('outside-pool').skill;
+    const { fixture, root, store } = setup({
+      method: 'decision',
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      items: [
+        item('Angular', {
+          registry: 'matched',
+          candidateIds: [shared.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: shared.candidateId,
+              eligible: true,
+              rejection: { reason: 'Not needed for Angular', stage: 'decision' },
+            },
+          ],
+          outcomes: [
+            { verdict: 'no-skill', reason: 'Not needed for Angular', stage: 'decision' },
+          ],
+          judgedBy: 'decision',
+        }),
+        item('RxJS', {
+          registry: 'matched',
+          candidateIds: [shared.candidateId],
+          candidateAssessments: [
+            { candidateId: shared.candidateId, eligible: true },
+          ],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: shared.candidateId,
+              reason: 'Covers RxJS streams',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        }),
+      ],
+      candidates: [shared],
+      proposals: [],
+      stages: [],
+    });
+
+    const angularChip = root.querySelector<HTMLButtonElement>(
+      '[data-strip-chip][aria-label^="Angular"]',
+    );
+    angularChip?.click();
+    fixture.detectChanges();
+    expect(store.verdictFilter()).toBe('all');
+    expect(store.activeItemId()).toBe('angular');
+    expect(button(root, '1 more candidate - Show all')).toBeTruthy();
+
+    // Non-pool search result renders on Angular's row without changing hidden pool count.
+    store.setItemSearchResults('angular', [outsidePool]);
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-testid="skill-pick-card"]')).toHaveLength(1);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+    expect(button(root, '1 more candidate - Show all')).toBeTruthy();
+
+    // Pool candidate returned for Angular renders a selectable card and drops hidden count to 0.
+    store.setItemSearchResults('angular', [shared.skill]);
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-testid="skill-pick-card"]')).toHaveLength(1);
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+    expect(root.textContent).not.toContain('Show all');
+
+    // Clearing Angular's search results removes the card and restores the hidden count to 1.
+    store.clearItemSearchResults('angular');
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-testid="skill-pick-card"]')).toHaveLength(0);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+    expect(button(root, '1 more candidate - Show all')).toBeTruthy();
+  });
+
+  it('preserves itemId when searching from a duplicate-named judged unmatched row', () => {
+    const { fixture, root } = setup({
+      ...judge,
+      items: [
+        {
+          ...item('Shared', {
+            outcomes: [
+              { verdict: 'no-skill', reason: 'First shared', stage: 'decision' },
+            ],
+            judgedBy: 'decision',
+          }),
+          itemId: 'framework:shared',
+        },
+        {
+          ...item('Shared', {
+            outcomes: [
+              { verdict: 'no-skill', reason: 'Second shared', stage: 'decision' },
+            ],
+            judgedBy: 'decision',
+          }),
+          itemId: 'pattern:shared',
+          item: {
+            name: 'Shared',
+            kind: 'pattern',
+            evidence: 'pattern evidence',
+            sourcePhase: 'test',
+          },
+        },
+      ],
+      candidates: [],
+      proposals: [],
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+    });
+    const itemSearched = jest.fn();
+    const generalSearched = jest.fn();
+    fixture.componentInstance.itemSearchRequested.subscribe(itemSearched);
+    fixture.componentInstance.searchRequested.subscribe(generalSearched);
+    const searchButtons = [
+      ...root.querySelectorAll('ptah-unmatched-stack-list button'),
+    ].filter((btn) => btn.textContent?.includes('Search for Shared'));
+    expect(searchButtons).toHaveLength(2);
+    searchButtons[1]?.click();
+    expect(itemSearched).toHaveBeenCalledWith({
+      itemId: 'pattern:shared',
+      query: 'Shared',
+    });
+    expect(generalSearched).not.toHaveBeenCalled();
+  });
 });

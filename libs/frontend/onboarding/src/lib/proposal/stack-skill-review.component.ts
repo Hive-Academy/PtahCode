@@ -432,21 +432,6 @@ export class StackSkillReviewComponent {
     );
   }
 
-  protected searchUnmatchedItem(store: StackSkillStore, name: string): void {
-    const matches = this.judgedUnmatchedItems().filter((item) => item.item.name === name);
-    if (matches.length === 1 && matches[0]) {
-      this.searchJudgedItem(store, matches[0].itemId, name);
-    } else {
-      this.transitionDraft(
-        store,
-        (forceDiscardDirty) => store.requestCloseDraftForItemSearch({ forceDiscardDirty }),
-        (result) => {
-          if (result.status === 'closed') this.searchItem(name);
-        },
-      );
-    }
-  }
-
   protected settleDiscard(confirmed: boolean): void {
     const action = this.discardAction;
     this.discardAction = null;

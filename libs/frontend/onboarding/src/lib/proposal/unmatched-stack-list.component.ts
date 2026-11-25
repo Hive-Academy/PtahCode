@@ -28,7 +28,7 @@ export interface ManualDraftRequest {
 /**
  * Items the registry did not match. In judged mode (`judgedItems` set) it lists
  * every judged item that has no Install verdict (Build, No-skill or no verdict),
- * with the judge reasons. Every row offers "Write a skill by hand" as an output;
+ * with the judge reasons. Judged rows offer "Write a skill by hand" as an output;
  * a draft form is never rendered here (D5).
  */
 @Component({
@@ -47,6 +47,10 @@ export class UnmatchedStackListComponent {
   /** Disables the manual draft openers, with the reason shown to the user. */
   public readonly draftBlockedReason = input<string | null>(null);
   public readonly searchRequested = output<string>();
+  public readonly itemSearchRequested = output<{
+    itemId: string;
+    query: string;
+  }>();
   public readonly manualDraftRequested = output<ManualDraftRequest>();
 
   protected readonly rows = computed<UnmatchedRow[]>(() => {
@@ -80,6 +84,18 @@ export class UnmatchedStackListComponent {
         };
       });
   });
+
+  protected requestSearch(row: UnmatchedRow): void {
+    if (this.searching()) return;
+    if (row.itemId !== null) {
+      this.itemSearchRequested.emit({
+        itemId: row.itemId,
+        query: row.item.name,
+      });
+      return;
+    }
+    this.searchRequested.emit(row.item.name);
+  }
 
   protected isManualDraftDisabled(row: UnmatchedRow): boolean {
     return !!this.draftBlockedReason() ||

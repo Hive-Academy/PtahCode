@@ -44,11 +44,11 @@ function copyStage(record: SkillJudgeStageRecord): SkillJudgeStageRecord {
  *
  * A page with recorded pair snapshots (`recordRun`) gets one badge per
  * recorded pair: the analysis pair plus one badge per judging stage, where
- * the Decision and Normal stages collapse into one badge when their pairs are
- * equal. A stage that returned shows its used pair; a failed stage shows its
- * attempted pair. A page without pairs keeps the plain `show` label. The
- * recorded snapshots are copies: a later Setup change or caller mutation
- * never rewrites them.
+ * the Decision and Normal stages collapse into one badge when both their
+ * pairs and statuses match. A stage that returned shows its used pair; a
+ * failed stage shows its attempted pair. A page without pairs keeps the plain
+ * `show` label. The recorded snapshots are copies: a later Setup change or
+ * caller mutation never rewrites them.
  */
 @Injectable({ providedIn: 'root' })
 export class OnboardingRunPillService {
@@ -120,7 +120,7 @@ export class OnboardingRunPillService {
     return badges;
   }
 
-  /** Collapse the Decision and Normal badges into one when they are equal. */
+  /** Collapse the Decision and Normal badges into one when both their pairs and statuses match. */
   private deduplicateStages(badges: OnboardingRunBadge[]): OnboardingRunBadge[] {
     const decisionIndex = badges.findIndex((badge) => badge.key === 'decision');
     const normalIndex = badges.findIndex((badge) => badge.key === 'normal');

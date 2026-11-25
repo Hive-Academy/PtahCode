@@ -99,7 +99,7 @@ export class SkillVerdictFilterComponent {
 
   /** F28 line text; rendered only when a filter hides candidates. */
   protected readonly hiddenCountText = computed<string | null>(() => {
-    if (this.active() === 'all' || this.hiddenCandidateCount() <= 0) {
+    if (this.hiddenCandidateCount() <= 0) {
       return null;
     }
     const count = this.hiddenCandidateCount();

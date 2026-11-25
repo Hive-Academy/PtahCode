@@ -271,20 +271,28 @@ export function buildStackCoverage(
     if (!items.has(key)) items.set(key, item);
   }
   const allItems = [...items.values()];
+  const candidateIdsByItemName = new Map<string, Set<string>>();
+  for (const row of recommendations) {
+    const candidateId = canonicalCandidateId(row.skill);
+    for (const coveredName of splitStackEvidence(row.evidence, allItems)
+      .coveredItems) {
+      let bucket = candidateIdsByItemName.get(coveredName);
+      if (!bucket) {
+        bucket = new Set<string>();
+        candidateIdsByItemName.set(coveredName, bucket);
+      }
+      bucket.add(candidateId);
+    }
+  }
   return allItems.map((item) => {
-    const matches = new Map(
-      recommendations
-        .filter((row) =>
-          splitStackEvidence(row.evidence, allItems).coveredItems.includes(
-            item.name,
-          ),
-        )
-        .map((row) => [canonicalCandidateId(row.skill), row]),
-    );
-    const selectedCount = [...matches.keys()].filter((key) =>
-      canonicalSelected.has(key),
-    ).length;
-    const totalCount = matches.size;
+    const matchIds = candidateIdsByItemName.get(item.name);
+    let selectedCount = 0;
+    if (matchIds) {
+      for (const key of matchIds) {
+        if (canonicalSelected.has(key)) selectedCount++;
+      }
+    }
+    const totalCount = matchIds?.size ?? 0;
     const failed = failures.some(
       (failure) =>
         failure.item.trim().toLowerCase() === item.name.toLowerCase(),
@@ -609,6 +617,11 @@ export function computeHiddenPoolCandidateCount(
   judge: SkillJudgeResult,
   filter: SkillVerdictFilterValue,
   activeItemId: string | null,
+  visibleRows: readonly Pick<
+    JudgeItemRowView,
+    'verdict' | 'installOutcomes' | 'candidates' | 'manualCandidates'
+  >[],
+  residualCandidates: readonly Pick<ResidualCandidateView, 'candidate'>[] = [],
 ): number {
   if (judge.candidates.length === 0) return 0;
   if (filter === 'all' && !activeItemId) return 0;
@@ -617,46 +630,42 @@ export function computeHiddenPoolCandidateCount(
     judge.candidates.map((c) => canonicalCandidateId(c.candidateId)),
   );
   const visiblePoolIds = new Set<string>();
-  const scopedItems = activeItemId
-    ? judge.items.filter((item) => item.itemId === activeItemId)
-    : judge.items;
-
-  const addIfInPool = (rawId: string): void => {
+  const addIfInPool = (
+    rawId: string | Pick<SkillShEntry, 'source' | 'skillId'>,
+  ): void => {
     const cid = canonicalCandidateId(rawId);
     if (poolIds.has(cid)) visiblePoolIds.add(cid);
   };
 
-  if (judge.method === 'none') {
-    if (filter === 'all' || filter === 'not-judged') {
-      for (const item of scopedItems) {
-        item.candidateIds.forEach(addIfInPool);
+  if (filter === 'all' || filter === 'install') {
+    for (const row of visibleRows) {
+      for (const outcome of row.installOutcomes) {
+        addIfInPool(outcome.candidateId);
       }
     }
-    return Math.max(0, poolIds.size - visiblePoolIds.size);
   }
 
-  if (filter === 'all') {
-    for (const item of scopedItems) {
-      for (const outcome of item.outcomes) {
-        if (outcome.verdict === 'install') addIfInPool(outcome.candidateId);
+  if (filter === 'all' || filter === 'not-judged') {
+    for (const row of visibleRows) {
+      if (row.verdict === 'not-judged') {
+        for (const entry of row.candidates) {
+          addIfInPool(entry.candidate.candidateId);
+        }
       }
-      item.candidateIds.forEach(addIfInPool);
     }
-    return Math.max(0, poolIds.size - visiblePoolIds.size);
   }
 
-  if (filter === 'install') {
-    for (const item of scopedItems) {
-      for (const outcome of item.outcomes) {
-        if (outcome.verdict === 'install') addIfInPool(outcome.candidateId);
-      }
-    }
-  } else if (filter === 'not-judged') {
-    for (const item of scopedItems) {
-      if (item.judgedBy === 'none' || item.outcomes.length === 0) {
-        item.candidateIds.forEach(addIfInPool);
-      }
+  for (const row of visibleRows) {
+    for (const skill of row.manualCandidates) {
+      addIfInPool(skill);
     }
   }
+
+  if (judge.method !== 'none' && filter === 'all') {
+    for (const entry of residualCandidates) {
+      addIfInPool(entry.candidate.candidateId);
+    }
+  }
+
   return Math.max(0, poolIds.size - visiblePoolIds.size);
 }

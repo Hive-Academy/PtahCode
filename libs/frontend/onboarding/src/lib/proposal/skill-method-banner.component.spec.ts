@@ -164,8 +164,31 @@ describe('SkillMethodBannerComponent', () => {
 
     expect(rows[2]?.textContent).toContain('skipped');
     expect(rows[2]?.textContent).toContain(
-      'attempted Anthropic / claude-haiku-4-5',
+      'configured Anthropic / claude-haiku-4-5',
     );
+    expect(rows[2]?.textContent).not.toContain('attempted');
+  });
+
+  it('labels a failed stage with only pairConfigured as configured, not attempted', () => {
+    const stage: SkillJudgeStageRecord = {
+      stage: 'decision',
+      status: 'failed',
+      category: 'pre-dispatch-error',
+      pairConfigured: { provider: 'OpenAI', model: 'gpt-4.1-mini' },
+      itemsJudged: 0,
+      invalidItemIds: [],
+    };
+    const { root, fixture } = setup(
+      'none',
+      { decision: 0, normal: 0, notJudged: 2 },
+      [stage],
+    );
+    (root.querySelector('button') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    const row = root.querySelector('ul > li');
+    expect(row?.textContent).toContain('pre-dispatch error');
+    expect(row?.textContent).toContain('configured OpenAI / gpt-4.1-mini');
+    expect(row?.textContent).not.toContain('attempted');
   });
 
   it('omits the pair when a failed stage record carries no pair', () => {

@@ -457,6 +457,8 @@ export class StackSkillStore {
           judge,
           this.verdictFilter(),
           this.activeItemId(),
+          this.visibleItemRows(),
+          this.showOtherCandidatesSection() ? this.residualCandidates() : [],
         )
       : 0;
   });

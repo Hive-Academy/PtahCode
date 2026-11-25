@@ -50,4 +50,45 @@ describe('AnalysisStepStore', () => {
     expect(await pending).toBe('superseded');
     expect(store.loaded()).toBeNull();
   });
+
+  it('keeps the newer saved list when an older listAnalyses reply settles late', async () => {
+    let settleOlder!: (value: { filename: string }[]) => void;
+    let settleNewer!: (value: { filename: string }[]) => void;
+    rpc.listAnalyses
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          settleOlder = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          settleNewer = resolve;
+        }),
+      );
+
+    const older = store.listAnalyses();
+    const newer = store.listAnalyses();
+    settleNewer([{ filename: 'post-rerun' }]);
+    await newer;
+    expect(store.saved()).toEqual([{ filename: 'post-rerun' }]);
+
+    settleOlder([{ filename: 'stale-initial' }]);
+    await older;
+    expect(store.saved()).toEqual([{ filename: 'post-rerun' }]);
+  });
+
+  it('drops a late saved-list reply after workspace reset', async () => {
+    let settleOlder!: (value: { filename: string }[]) => void;
+    rpc.listAnalyses.mockReturnValueOnce(
+      new Promise((resolve) => {
+        settleOlder = resolve;
+      }),
+    );
+
+    const pending = store.listAnalyses();
+    store.resetForWorkspace();
+    settleOlder([{ filename: 'stale-workspace' }]);
+    await pending;
+    expect(store.saved()).toEqual([]);
+  });
 });

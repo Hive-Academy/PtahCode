@@ -22,6 +22,9 @@ describe('UnmatchedStackListComponent', () => {
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('ptah-project-skill-draft')).toHaveLength(0);
+    expect(
+      root.querySelectorAll('button[aria-label^="Write a skill by hand"]'),
+    ).toHaveLength(0);
     const search = [...root.querySelectorAll('button')].filter((button) =>
       button.textContent?.includes('Search for'),
     );
@@ -134,6 +137,39 @@ describe('UnmatchedStackListComponent', () => {
       expect(emitted).not.toHaveBeenCalled();
       expect(root.textContent).toContain('Close the install consent dialog');
       expect(button.getAttribute('aria-disabled')).toBe('true');
+    });
+
+    it('emits itemSearchRequested with the selected row itemId even when two rows share a name', () => {
+      const fixture = TestBed.createComponent(UnmatchedStackListComponent);
+      fixture.componentRef.setInput('judgedItems', [
+        {
+          ...judgeItem('framework:shared', [
+            { verdict: 'no-skill', reason: 'First row', stage: 'decision' },
+          ]),
+          item: stack('Shared'),
+        },
+        {
+          ...judgeItem('pattern:shared', [
+            { verdict: 'no-skill', reason: 'Second row', stage: 'decision' },
+          ]),
+          item: { ...stack('Shared'), kind: 'pattern' },
+        },
+      ]);
+      fixture.detectChanges();
+      const itemSearched = jest.fn();
+      const legacySearched = jest.fn();
+      fixture.componentInstance.itemSearchRequested.subscribe(itemSearched);
+      fixture.componentInstance.searchRequested.subscribe(legacySearched);
+      const searchButtons = [
+        ...(fixture.nativeElement as HTMLElement).querySelectorAll('button'),
+      ].filter((btn) => btn.textContent?.includes('Search for Shared'));
+      expect(searchButtons).toHaveLength(2);
+      searchButtons[1]?.click();
+      expect(itemSearched).toHaveBeenCalledWith({
+        itemId: 'pattern:shared',
+        query: 'Shared',
+      });
+      expect(legacySearched).not.toHaveBeenCalled();
     });
   });
 });

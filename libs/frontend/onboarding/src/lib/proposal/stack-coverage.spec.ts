@@ -319,6 +319,34 @@ describe('stack coverage', () => {
     ]);
   });
 
+  it('deduplicates candidates case-insensitively and preserves failure precedence across multiple items', () => {
+    const upperVariant: SkillRecommendation = {
+      ...row,
+      skill: { ...row.skill, source: 'ACME/REPO', skillId: 'ONE' },
+      evidence: 'Angular, Jest',
+    };
+    const items = buildStackCoverage(
+      [angular, jestItem, rxjsItem],
+      [],
+      [{ item: 'Jest', reason: 'timeout' }],
+      [row, upperVariant],
+      new Set(['acme/repo/one']),
+    );
+    expect(
+      items.map((item) => [
+        item.name,
+        item.state,
+        item.selectedCount,
+        item.totalCount,
+        Boolean(item.originalSearchFailed),
+      ]),
+    ).toEqual([
+      ['Angular', 'covered', 1, 1, false],
+      ['Jest', 'covered', 1, 1, true],
+      ['RxJS', 'none', 0, 0, false],
+    ]);
+  });
+
   it('distinguishes available, unmatched and failed items and keeps stack evidence', () => {
     expect(
       buildStackCoverage([angular], [], [], [row], new Set())[0],
@@ -687,6 +715,207 @@ describe('StackSkillStore', () => {
     );
     expect(store.showOtherCandidatesSection()).toBe(false);
     expect(store.residualCandidates()).toEqual([]);
+  });
+
+  it('counts a candidate hidden when the selected item rejected it and another item installs it', () => {
+    const sharedInstall = makeCandidate(skillOne, false);
+    const residualOnly = makeCandidate(skillRejected, false);
+    const sharedOnlyJudge: SkillJudgeResult = {
+      method: 'decision',
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      items: [
+        {
+          itemId: 'item-a',
+          item: { ...angular },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: sharedInstall.candidateId,
+              eligible: true,
+              rejection: { reason: 'Not for item A', stage: 'decision' },
+            },
+          ],
+          outcomes: [
+            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+          ],
+          judgedBy: 'decision',
+        },
+        {
+          itemId: 'item-b',
+          item: { ...rxjsItem },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            { candidateId: sharedInstall.candidateId, eligible: true },
+          ],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: sharedInstall.candidateId,
+              reason: 'Install for B',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        },
+      ],
+      candidates: [sharedInstall],
+      proposals: [],
+      stages: [],
+    };
+    store.applyRecommendationResult(makeRecommendResult(sharedOnlyJudge));
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+
+    // Selecting item A hides item B's Install card and residualCandidates excludes sharedInstall.
+    store.setActiveItemId('item-a');
+    expect(store.residualCandidates()).toEqual([]);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+
+    // When a second residual-only candidate is also in the pool, it stays visible in Other candidates,
+    // so only sharedInstall is hidden.
+    store.applyRecommendationResult(
+      makeRecommendResult({
+        ...sharedOnlyJudge,
+        candidates: [sharedInstall, residualOnly],
+      }),
+    );
+    store.setActiveItemId('item-a');
+    expect(store.showOtherCandidatesSection()).toBe(true);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+  });
+
+  it('excludes candidates already rendered through a pinned draft row from the hidden count', () => {
+    const sharedInstall = makeCandidate(skillOne, false);
+    const sharedOnlyJudge: SkillJudgeResult = {
+      method: 'decision',
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      items: [
+        {
+          itemId: 'item-a',
+          item: { ...angular },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: sharedInstall.candidateId,
+              eligible: true,
+              rejection: { reason: 'Not for item A', stage: 'decision' },
+            },
+          ],
+          outcomes: [
+            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+          ],
+          judgedBy: 'decision',
+        },
+        {
+          itemId: 'item-b',
+          item: { ...rxjsItem },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            { candidateId: sharedInstall.candidateId, eligible: true },
+          ],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: sharedInstall.candidateId,
+              reason: 'Install for B',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        },
+      ],
+      candidates: [sharedInstall],
+      proposals: [],
+      stages: [],
+    };
+    store.applyRecommendationResult(makeRecommendResult(sharedOnlyJudge));
+
+    // Open B's manual draft so B stays pinned when filtering to A under All.
+    expect(store.openManualDraft('item-b').status).toBe('ok');
+    store.setActiveItemId('item-a');
+    expect(store.visibleItemRows().map((entry) => entry.itemId)).toEqual([
+      'item-a',
+      'item-b',
+    ]);
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+
+    // Switching to Build hides the Install section even though B remains pinned.
+    store.setVerdictFilter('build');
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+
+    // Returning to All and closing B's draft unpins B, so the sole Install card is now hidden.
+    store.setVerdictFilter('all');
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+    expect(store.closeDraft().status).toBe('closed');
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+  });
+
+  it('tracks visible row manualCandidates against the pool in hiddenPoolCandidateCount', () => {
+    const sharedInstall = makeCandidate(skillOne, false);
+    const sharedOnlyJudge: SkillJudgeResult = {
+      method: 'decision',
+      counts: { decision: 2, normal: 0, notJudged: 0 },
+      items: [
+        {
+          itemId: 'item-a',
+          item: { ...angular },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            {
+              candidateId: sharedInstall.candidateId,
+              eligible: true,
+              rejection: { reason: 'Not for item A', stage: 'decision' },
+            },
+          ],
+          outcomes: [
+            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+          ],
+          judgedBy: 'decision',
+        },
+        {
+          itemId: 'item-b',
+          item: { ...rxjsItem },
+          registry: 'matched',
+          candidateIds: [sharedInstall.candidateId],
+          candidateAssessments: [
+            { candidateId: sharedInstall.candidateId, eligible: true },
+          ],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: sharedInstall.candidateId,
+              reason: 'Install for B',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        },
+      ],
+      candidates: [sharedInstall],
+      proposals: [],
+      stages: [],
+    };
+    store.applyRecommendationResult(makeRecommendResult(sharedOnlyJudge));
+    store.setActiveItemId('item-a');
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+
+    // (b) A manual search result outside the pool does not change the hidden count.
+    store.setItemSearchResults('item-a', [manualSkill]);
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
+
+    // (a) A manual search result matching the pool candidate (canonical ID) makes it visible -> count 0.
+    store.setItemSearchResults('item-a', [
+      { ...skillOne, source: 'ACME/REPO', skillId: 'ONE' },
+    ]);
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+
+    // (c) Clearing the per-item search result hides the pool candidate again -> count 1.
+    store.clearItemSearchResults('item-a');
+    expect(store.hiddenPoolCandidateCount()).toBe(1);
   });
 
   it('enforces F29/R17 mutual exclusion in both orders and clears consent on selection toggle', () => {

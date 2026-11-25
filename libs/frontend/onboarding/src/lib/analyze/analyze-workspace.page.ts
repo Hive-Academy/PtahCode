@@ -154,15 +154,9 @@ function describeSetupIssue(
   template: `
     <section
       class="mx-auto space-y-5"
-      [class.max-w-[1120px]]="
-        (runner.isRunning() || runner.isCanceling()) && !stopRecovery()
-      "
-      [class.max-w-[760px]]="
-        (!runner.isRunning() && !runner.isCanceling()) || stopRecovery()
-      "
-      [class.p-4]="
-        (!runner.isRunning() && !runner.isCanceling()) || stopRecovery()
-      "
+      [class.max-w-[1120px]]="!showSetupSection()"
+      [class.max-w-[760px]]="showSetupSection()"
+      [class.p-4]="showSetupSection()"
       aria-labelledby="analyze-workspace-title"
       data-testid="analyze-workspace"
     >
@@ -187,12 +181,7 @@ function describeSetupIssue(
       </header>
       <ptah-onboarding-stepper [steps]="steps" />
 
-      @if (
-        setupState() &&
-        !runner.isRunning() &&
-        !runner.isCanceling() &&
-        !stopRecovery()
-      ) {
+      @if (setupState() && showSetupSection()) {
         <section
           class="space-y-3 rounded-[22px] border border-base-300 p-4"
           data-glass-surface="tile"
@@ -276,12 +265,7 @@ function describeSetupIssue(
         </section>
       }
 
-      @if (
-        setupReadFailed() &&
-        !runner.isRunning() &&
-        !runner.isCanceling() &&
-        !stopRecovery()
-      ) {
+      @if (setupReadFailed() && showSetupSection()) {
         <ptah-alert
           tone="error"
           live="assertive"
@@ -549,6 +533,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   private pendingRerun = false;
   private setupAbort: AbortController | null = null;
   private setupRequestSeq = 0;
+  private savedRequestSeq = 0;
   private setupRefreshQueued = false;
   private lastView: ViewType | null = null;
   protected readonly stopModal =
@@ -631,6 +616,11 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   );
   protected readonly selectError = signal<string | null>(null);
   protected readonly stopRecovery = signal(false);
+  protected readonly showSetupSection = computed(
+    () =>
+      (!this.runner.isRunning() && !this.runner.isCanceling()) ||
+      this.stopRecovery(),
+  );
   // Analysis has no workflow view state; map its runner status for RunPanel recovery.
   protected readonly viewState = computed<GenerationViewState>(() =>
     this.stopRecovery()
@@ -700,7 +690,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.pendingRerun = this.rerun() === '1';
     const setup = this.refreshSetupModel();
     if (this.pendingRerun) {
-      await setup;
+      await Promise.all([setup, this.loadSaved()]);
       return;
     }
     this.pendingAnalysis = this.analysis() ?? null;
@@ -837,14 +827,17 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     return `${Math.round(ms / 1000)}s`;
   }
   protected async loadSaved(): Promise<void> {
+    const seq = ++this.savedRequestSeq;
     try {
       await this.store.listAnalyses();
     } catch {
       // degradation-audit: reported - savedError shows the saved analyses retry alert.
-      if (!this.destroyed) this.savedError.set(true);
+      if (!this.destroyed && seq === this.savedRequestSeq) {
+        this.savedError.set(true);
+      }
       return;
     }
-    if (this.destroyed) return;
+    if (this.destroyed || seq !== this.savedRequestSeq) return;
     this.savedError.set(false);
     const filename = this.pendingAnalysis;
     this.pendingAnalysis = null;

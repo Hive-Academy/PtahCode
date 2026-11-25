@@ -52,6 +52,7 @@ export class AnalysisStepStore {
   );
   private readonly attachedValue = signal(false);
   private workspaceRevision = 0;
+  private listRevision = 0;
   private selectionRevision = 0;
   readonly saved = this.savedValue.asReadonly();
   readonly hidden = this.hiddenValue.asReadonly();
@@ -118,8 +119,14 @@ export class AnalysisStepStore {
 
   async listAnalyses(): Promise<void> {
     const revision = this.workspaceRevision;
+    const listRevision = ++this.listRevision;
     const saved = await this.rpc.listAnalyses({ throwOnError: true });
-    if (revision === this.workspaceRevision) this.savedValue.set(saved);
+    if (
+      revision === this.workspaceRevision &&
+      listRevision === this.listRevision
+    ) {
+      this.savedValue.set(saved);
+    }
   }
   attachStream(): void {
     this.attachedValue.set(true);
@@ -167,6 +174,7 @@ export class AnalysisStepStore {
   }
   resetForWorkspace(): void {
     this.workspaceRevision++;
+    this.listRevision++;
     this.selectionRevision++;
     this.savedValue.set([]);
     this.hiddenValue.set(new Set());
