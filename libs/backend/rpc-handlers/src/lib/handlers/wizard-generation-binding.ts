@@ -1,6 +1,6 @@
 import { promises as fsPromises } from 'fs';
 import { basename } from 'path';
-import { RpcUserError, type Logger } from '@ptah-extension/vscode-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   AnalysisFreshnessService,
   AnalysisStorageService,
@@ -381,37 +381,3 @@ export function previewRequiredSubmit(): WizardSubmitSelectionResponse {
   };
 }
 
-export interface GenerationProviderModels {
-  resolveActiveProviderId(): string;
-  getModelTiers(
-    providerId: string,
-    scope: 'mainAgent',
-  ): { sonnet: string | null; opus: string | null; haiku: string | null };
-}
-
-export function resolveProviderRoute(
-  models: GenerationProviderModels,
-  requestedModel?: string,
-): { provider: string; model: string } {
-  const provider = models.resolveActiveProviderId();
-  const tiers = models.getModelTiers(provider, 'mainAgent');
-  const supported = [
-    'sonnet',
-    'opus',
-    'haiku',
-    ...Object.values(tiers).filter((v): v is string => !!v),
-  ];
-  if (
-    requestedModel &&
-    !supported.includes(requestedModel) &&
-    !(
-      provider === 'anthropic' &&
-      /^claude-(sonnet|opus|haiku)-[\w-]+$/.test(requestedModel)
-    )
-  )
-    throw new RpcUserError(
-      'The selected model is unavailable for this provider.',
-      'INVALID_PARAMS',
-    );
-  return { provider, model: requestedModel ?? tiers.sonnet ?? 'sonnet' };
-}

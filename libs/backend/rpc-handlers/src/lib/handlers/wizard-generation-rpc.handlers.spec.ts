@@ -27,8 +27,8 @@
  *     stale `running` record, carries `written | unchanged` files forward as
  *     `unchanged` in the payload, and refuses a checkpoint whose paths leave
  *     the workspace without deleting it.
- *   - Retry reuses the last run's options, updates the same checkpoint
- *     record, and propagates only after a real write.
+ *   - Retry reuses only non-secret inputs, resolves fresh Setup auth, updates
+ *     the same checkpoint record, and propagates only after a real write.
  *
  * Source-under-test:
  *   `libs/backend/rpc-handlers/src/lib/handlers/wizard-generation-rpc.handlers.ts`
@@ -145,7 +145,11 @@ import type {
   GenerationSummary,
   OrchestratorGenerationOptions,
 } from '@ptah-extension/agent-generation';
-import type { PluginLoaderService } from '@ptah-extension/agent-sdk';
+import type {
+  IWorkspaceLlmResolver,
+  PluginLoaderService,
+  ResolvedSetupSnapshot,
+} from '@ptah-extension/agent-sdk';
 import {
   Result,
   type GenerationAgentOutcome,
@@ -182,6 +186,8 @@ const AGENT_GENERATION_TOKENS = {
   ANALYSIS_FRESHNESS_SERVICE: Symbol.for('AnalysisFreshnessService'),
 } as const;
 
+const SDK_WORKSPACE_LLM_RESOLVER = Symbol.for('SdkWorkspaceLlmResolver');
+
 const HARNESS_SYNC_TOKENS = {
   PROPAGATION: Symbol.for('HarnessSyncPropagation'),
   AGENT_SYNC_GATE: Symbol.for('HarnessSyncAgentSyncGate'),
@@ -214,6 +220,27 @@ const WORKSPACE = '/fake/workspace';
 const ANALYSIS_DIR = `${WORKSPACE}/.ptah/analysis/acme`;
 /** Same computation the checkpoint service and the orchestrator use. */
 const OUTPUT_DIR = path.join(WORKSPACE, '.claude', 'agents');
+
+function makeSetupSnapshot(
+  providerId: string,
+  model: string,
+  secret: string,
+): ResolvedSetupSnapshot {
+  return { providerId, model, auth: { env: { ANTHROPIC_API_KEY: secret } } };
+}
+
+const DEFAULT_SETUP_SNAPSHOT = makeSetupSnapshot(
+  'anthropic',
+  'sonnet',
+  'default-setup-secret',
+);
+
+function expectNoSetupSecrets(h: Harness): void {
+  const persisted = JSON.stringify([...h.storage.manifests.values()]);
+  expect(persisted).not.toContain('setupSnapshot');
+  expect(persisted).not.toContain('ANTHROPIC_API_KEY');
+  expect(persisted).not.toContain('setup-secret');
+}
 
 it('denies unresolved workspace paths', async () => {
   const missing = path.join(os.tmpdir(), 'ptah-missing-generation-workspace');
@@ -702,16 +729,42 @@ describe('wizard generation tab ownership and recovery', () => {
     await settle();
   });
 
-  it('reports an unavailable bound model through the RPC error', async () => {
+  it('ignores a legacy bound model and launches with the Setup snapshot', async () => {
     const h = makeHarness();
-    h.handlers.register();
-    const result = await callRaw(h, 'wizard:submit-selection', {
-      selectedAgentIds: ['agent-a'],
-      tabBinding: tab,
-      model: 'unavailable-model',
+    const result = await previewAndSubmit(h, { model: 'unavailable-model' });
+    expect(result.success).toBe(true);
+    expect(firstOptions(h).model).toBeUndefined();
+    expect(firstOptions(h).setupSnapshot).toBe(DEFAULT_SETUP_SNAPSHOT);
+  });
+
+  it('uses an unset workspace pair and ignores conflicting picker and tab models', async () => {
+    const h = makeHarness();
+    const workspaceSnapshot = makeSetupSnapshot(
+      'workspace-provider',
+      'workspace-model',
+      'workspace-setup-secret',
+    );
+    h.workspaceLlm.resolveSetup.mockResolvedValue({
+      kind: 'unset',
+      snapshot: workspaceSnapshot,
     });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('selected model is unavailable');
+    const providerModels = {
+      resolveActiveProviderId: jest.fn().mockReturnValue('picker-provider'),
+      getModelTiers: jest.fn().mockReturnValue({ sonnet: 'tab-override-model' }),
+    };
+    h.registry.set(Symbol.for('SdkProviderModels'), providerModels);
+
+    const result = await previewAndSubmit(h, { model: 'picker-model' });
+
+    expect(result.success).toBe(true);
+    expect(firstOptions(h).setupSnapshot).toBe(workspaceSnapshot);
+    expect(providerModels.resolveActiveProviderId).not.toHaveBeenCalled();
+    expect(providerModels.getModelTiers).not.toHaveBeenCalled();
+    expect(manifestAt(h)).toMatchObject({
+      effectiveProvider: 'workspace-provider',
+      effectiveModel: 'workspace-model',
+    });
+    expectNoSetupSecrets(h);
   });
 
   it('returns the prepared run id before work settles and recovers a lost start response', async () => {
@@ -853,7 +906,7 @@ describe('wizard generation tab ownership and recovery', () => {
     expect(unbound.runs.binding).toBeNull();
   });
 
-  it('binds an old checkpoint only on an authorized resume and retains its outcomes and model', async () => {
+  it('binds an old checkpoint only on an authorized resume and retains outcomes with a fresh launch pair', async () => {
     const h = makeHarness();
     seedCheckpoint(h, { 'agent-a': 'written', 'agent-b': 'failed' });
     h.storage.resumable = {
@@ -876,8 +929,13 @@ describe('wizard generation tab ownership and recovery', () => {
     const accepted = await previewAndSubmit(h, { resume: true });
     expect(accepted.accepted?.runId).toBe('run-prev');
     expect(manifestAt(h, ANALYSIS_DIR).tabBinding).toEqual(tab);
-    expect(manifestAt(h, ANALYSIS_DIR).input.model).toBe('sonnet');
+    expect(manifestAt(h, ANALYSIS_DIR).input.model).toBe(
+      'model-from-checkpoint',
+    );
+    expect(manifestAt(h, ANALYSIS_DIR).effectiveProvider).toBe('anthropic');
     expect(manifestAt(h, ANALYSIS_DIR).effectiveModel).toBe('sonnet');
+    expect(firstOptions(h).model).toBeUndefined();
+    expect(firstOptions(h).setupSnapshot).toBe(DEFAULT_SETUP_SNAPSHOT);
     expect(manifestAt(h, ANALYSIS_DIR).agents['agent-a'].status).toBe(
       'written',
     );
@@ -953,7 +1011,7 @@ describe('wizard generation tab ownership and recovery', () => {
     expect(state.run?.status).toBe('completed');
   });
 
-  it('rejects bound retry without its run and reuses the matching checkpoint model', async () => {
+  it('rejects bound retry without its run and ignores the checkpoint model on retry', async () => {
     const h = makeHarness();
     const runId = '11111111-1111-4111-8111-111111111111';
     seedCheckpoint(h, { 'agent-a': 'failed' }, { tabBinding: tab, runId });
@@ -973,7 +1031,54 @@ describe('wizard generation tab ownership and recovery', () => {
       tabBinding: { ...tab, runId },
     });
     expect(retried.success).toBe(true);
-    expect(firstOptions(h).model).toBe('model-from-checkpoint');
+    expect(firstOptions(h).model).toBeUndefined();
+    expect(firstOptions(h).setupSnapshot).toBe(DEFAULT_SETUP_SNAPSHOT);
+    expect(manifestAt(h, ANALYSIS_DIR)).toMatchObject({
+      effectiveProvider: 'anthropic',
+      effectiveModel: 'sonnet',
+    });
+  });
+
+  it('resolves fresh Setup auth for a bound retry and persists only the new pair', async () => {
+    const h = makeHarness();
+    const first = makeSetupSnapshot(
+      'first-provider',
+      'first-model',
+      'first-setup-secret',
+    );
+    const second = makeSetupSnapshot(
+      'second-provider',
+      'second-model',
+      'second-setup-secret',
+    );
+    h.workspaceLlm.resolveSetup
+      .mockResolvedValueOnce({ kind: 'set', snapshot: first })
+      .mockResolvedValueOnce({ kind: 'set', snapshot: second });
+    recordingOrchestrator(h, [
+      outcome('agent-a', 'failed', { error: 'first failure' }),
+    ]);
+    const accepted = await previewAndSubmit(h, { model: 'legacy-model' });
+    await settle();
+    const launchOptions = firstOptions(h);
+
+    recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+    const retried = await call<{ success: boolean }>(h, 'wizard:retry-item', {
+      itemId: 'agent-a',
+      tabBinding: { ...tab, runId: accepted.accepted?.runId },
+    });
+
+    expect(retried.success).toBe(true);
+    const retryOptions = h.orchestrator.generateAgents.mock.calls[1][0] as OrchestratorGenerationOptions;
+    expect(launchOptions.setupSnapshot).toBe(first);
+    expect(retryOptions.setupSnapshot).toBe(second);
+    expect(retryOptions.setupSnapshot).not.toBe(launchOptions.setupSnapshot);
+    expect(retryOptions.model).toBeUndefined();
+    expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(2);
+    expect(manifestAt(h)).toMatchObject({
+      effectiveProvider: 'second-provider',
+      effectiveModel: 'second-model',
+    });
+    expectNoSetupSecrets(h);
   });
 
   it('finds a bound retry checkpoint through a differently spelled host root', async () => {
@@ -1281,6 +1386,10 @@ interface OriginReaderFake {
   recordWritten: jest.Mock;
 }
 
+type WorkspaceLlmFake = jest.Mocked<
+  Pick<IWorkspaceLlmResolver, 'resolveSetup'>
+>;
+
 interface Harness {
   handlers: WizardGenerationRpcHandlers;
   runs: GenerationRunSupervisor;
@@ -1292,6 +1401,7 @@ interface Harness {
   container: jest.Mocked<Pick<DependencyContainer, 'resolve' | 'isRegistered'>>;
   registry: Map<symbol | string, unknown>;
   orchestrator: OrchestratorFake;
+  workspaceLlm: WorkspaceLlmFake;
   setupWizard: SetupWizardFake;
   webviewManager: WebviewManagerFake;
   storage: StorageFake;
@@ -1316,6 +1426,12 @@ function makeHarness(
   const sentry = createMockSentryService();
 
   const orchestrator = createMockOrchestrator();
+  const workspaceLlm: WorkspaceLlmFake = {
+    resolveSetup: jest.fn().mockResolvedValue({
+      kind: 'set',
+      snapshot: DEFAULT_SETUP_SNAPSHOT,
+    }),
+  };
   const setupWizard = createMockSetupWizard();
   const webviewManager = createMockWebviewManager();
   const storage = createStorageFake();
@@ -1355,10 +1471,7 @@ function makeHarness(
   maybeSet(AGENT_GENERATION_TOKENS.SETUP_WIZARD_SERVICE, setupWizard);
   maybeSet(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, storage);
   maybeSet(AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE, freshness);
-  maybeSet(Symbol.for('SdkProviderModels'), {
-    resolveActiveProviderId: jest.fn().mockReturnValue('anthropic'),
-    getModelTiers: jest.fn().mockReturnValue({ sonnet: 'sonnet' }),
-  });
+  maybeSet(SDK_WORKSPACE_LLM_RESOLVER, workspaceLlm);
   maybeSet(TOKENS.WEBVIEW_MANAGER, webviewManager);
   maybeSet(HARNESS_SYNC_TOKENS.PROPAGATION, propagation);
   maybeSet(HARNESS_SYNC_TOKENS.AGENT_SYNC_GATE, {
@@ -1438,6 +1551,7 @@ function makeHarness(
     container,
     registry,
     orchestrator,
+    workspaceLlm,
     setupWizard,
     webviewManager,
     storage,
@@ -1641,6 +1755,68 @@ describe('WizardGenerationRpcHandlers', () => {
       expect([...WizardGenerationRpcHandlers.METHODS].sort()).toEqual(
         h.rpcHandler.getRegisteredMethods().sort(),
       );
+    });
+  });
+
+  describe('Setup launch failures', () => {
+    beforeEach(() => {
+      jest
+        .spyOn(fs.promises, 'realpath')
+        .mockImplementation(async (value) => String(value));
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each([
+      {
+        name: 'fresh submit',
+        method: 'wizard:submit-selection',
+        params: BASE_SUBMIT_PARAMS,
+      },
+      {
+        name: 'resume',
+        method: 'wizard:submit-selection',
+        params: { resume: true },
+      },
+      {
+        name: 'unbound retry',
+        method: 'wizard:retry-item',
+        params: { itemId: 'agent-a' },
+      },
+      {
+        name: 'bound retry',
+        method: 'wizard:retry-item',
+        params: {
+          itemId: 'agent-a',
+          tabBinding: {
+            tabId: 'tab-one',
+            workflow: 'setup-agent-generation',
+            workspacePath: WORKSPACE,
+            runId: '11111111-1111-4111-8111-111111111111',
+          },
+        },
+      },
+    ])('returns SETUP_MODEL_INVALID before agent work for $name', async ({ method, params }) => {
+      const h = makeHarness();
+      h.workspaceLlm.resolveSetup.mockResolvedValue({
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'openrouter',
+        model: 'stale-model',
+        cause: 'not-signed-in',
+      });
+      h.handlers.register();
+
+      const response = await callRaw(h, method, params);
+
+      expect(response).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(response.error).toContain('Update Background models and retry');
+      expect(h.orchestrator.generateAgents).not.toHaveBeenCalled();
+      expect(h.storage.writeGenerationManifest).not.toHaveBeenCalled();
+      expect(h.sentry.captureException).not.toHaveBeenCalled();
     });
   });
 
@@ -1995,7 +2171,14 @@ describe('WizardGenerationRpcHandlers', () => {
       expect(manifest.lifecycle).toBe('running');
       expect(manifest.outputDirectory).toBe(OUTPUT_DIR);
       expect(manifest.selectedAgentIds).toEqual(['agent-a', 'agent-b']);
-      expect(manifest.input).toEqual({ threshold: 65, model: 'model-x' });
+      expect(manifest.input).toEqual({ threshold: 65 });
+      expect(manifest).toMatchObject({
+        effectiveProvider: 'anthropic',
+        effectiveModel: 'sonnet',
+      });
+      expect(firstOptions(h).model).toBeUndefined();
+      expect(firstOptions(h).setupSnapshot).toBe(DEFAULT_SETUP_SNAPSHOT);
+      expectNoSetupSecrets(h);
       expect(Object.values(manifest.agents).map((a) => a.status)).toEqual([
         'pending',
         'pending',
@@ -2359,6 +2542,15 @@ describe('WizardGenerationRpcHandlers', () => {
   describe('wizard:submit-selection — resume', () => {
     it('re-runs only pending/running/failed agents, normalizes a stale running record and carries written files forward as unchanged', async () => {
       const h = makeHarness();
+      const resumedSnapshot = makeSetupSnapshot(
+        'resume-provider',
+        'resume-model',
+        'resume-setup-secret',
+      );
+      h.workspaceLlm.resolveSetup.mockResolvedValue({
+        kind: 'unset',
+        snapshot: resumedSnapshot,
+      });
       seedCheckpoint(h, {
         'agent-a': 'written',
         'agent-b': 'running',
@@ -2380,8 +2572,9 @@ describe('WizardGenerationRpcHandlers', () => {
 
       const options = firstOptions(h);
       expect(options.userOverrides).toEqual(['agent-b', 'agent-c']);
-      // Inputs come from the checkpoint, not the request.
-      expect(options.model).toBe('model-from-checkpoint');
+      // Non-secret inputs come from the checkpoint. Execution uses fresh Setup.
+      expect(options.model).toBeUndefined();
+      expect(options.setupSnapshot).toBe(resumedSnapshot);
       expect(options.threshold).toBe(70);
       expect(options.analysisDir).toBe(ANALYSIS_DIR);
 
@@ -2389,6 +2582,10 @@ describe('WizardGenerationRpcHandlers', () => {
       const preLaunch = h.storage.writeGenerationManifest.mock
         .calls[0][2] as GenerationCheckpointManifest;
       expect(preLaunch.lifecycle).toBe('running');
+      expect(preLaunch).toMatchObject({
+        effectiveProvider: 'resume-provider',
+        effectiveModel: 'resume-model',
+      });
       expect(preLaunch.agents['agent-b'].status).toBe('pending');
       expect(preLaunch.agents['agent-a'].status).toBe('written');
 
@@ -2417,6 +2614,7 @@ describe('WizardGenerationRpcHandlers', () => {
         'agent-d:unchanged',
       ]);
       expect(h.propagation.propagateWithReport).toHaveBeenCalledTimes(1);
+      expectNoSetupSecrets(h);
     });
 
     it('refuses a tab-bound checkpoint on an unbound resume and still resumes an unbound one', async () => {
@@ -2823,8 +3021,21 @@ describe('WizardGenerationRpcHandlers', () => {
       expect(h.sentry.captureException).toHaveBeenCalled();
     });
 
-    it('reuses the last run options and updates the same checkpoint record', async () => {
+    it('reuses non-secret inputs, resolves fresh Setup auth and updates the same checkpoint', async () => {
       const h = makeHarness();
+      const first = makeSetupSnapshot(
+        'first-provider',
+        'first-model',
+        'first-setup-secret',
+      );
+      const second = makeSetupSnapshot(
+        'second-provider',
+        'second-model',
+        'second-setup-secret',
+      );
+      h.workspaceLlm.resolveSetup
+        .mockResolvedValueOnce({ kind: 'set', snapshot: first })
+        .mockResolvedValueOnce({ kind: 'unset', snapshot: second });
       recordingOrchestrator(h, [
         outcome('agent-a', 'written'),
         outcome('agent-b', 'failed', { error: 'template missing' }),
@@ -2837,6 +3048,7 @@ describe('WizardGenerationRpcHandlers', () => {
         analysisDir: ANALYSIS_DIR,
       });
       await settle();
+      const launchOptions = firstOptions(h);
       expect(manifestAt(h, ANALYSIS_DIR).agents['agent-b'].status).toBe(
         'failed',
       );
@@ -2851,14 +3063,23 @@ describe('WizardGenerationRpcHandlers', () => {
         unknown,
         [OrchestratorGenerationOptions],
       ];
-      expect(retryCall[0].model).toBe('model-x');
+      expect(launchOptions.setupSnapshot).toBe(first);
+      expect(retryCall[0].model).toBeUndefined();
+      expect(retryCall[0].setupSnapshot).toBe(second);
+      expect(retryCall[0].setupSnapshot).not.toBe(launchOptions.setupSnapshot);
       expect(retryCall[0].analysisDir).toBe(ANALYSIS_DIR);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(2);
       expect(retryCall[0].userOverrides).toEqual(['agent-b']);
 
       const manifest = manifestAt(h, ANALYSIS_DIR);
       expect(manifest.agents['agent-b'].status).toBe('written');
       expect(manifest.agents['agent-b']).not.toHaveProperty('error');
       expect(manifest.lifecycle).toBe('completed');
+      expect(manifest).toMatchObject({
+        effectiveProvider: 'second-provider',
+        effectiveModel: 'second-model',
+      });
+      expectNoSetupSecrets(h);
       expect(h.propagation.propagateWithReport).toHaveBeenCalledTimes(2);
       expect(completeBroadcasts(h)).toHaveLength(2);
     });

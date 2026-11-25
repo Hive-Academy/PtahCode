@@ -40,7 +40,6 @@ import {
   TOKENS,
 } from '@ptah-extension/vscode-core';
 import type { SentryService } from '@ptah-extension/vscode-core';
-import * as path from 'path';
 import { AGENT_GENERATION_TOKENS } from '@ptah-extension/agent-generation';
 import type {
   AnalysisFreshnessService,
@@ -51,6 +50,11 @@ import type {
   WrittenAgentFile,
 } from '@ptah-extension/agent-generation';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
+import type {
+  IWorkspaceLlmResolver,
+  ResolvedSetupSnapshot,
+  SetupResolution,
+} from '@ptah-extension/agent-sdk';
 import { CodeExecutionMCP } from '@ptah-extension/vscode-lm-tools';
 import type {
   WizardPreviewGenerationParams,
@@ -67,7 +71,6 @@ import type {
   RpcMethodName,
   SetupGenerationTabBinding,
   SetupGenerationRunBinding,
-  SetupGenerationResultFacts,
   GenerationContextSource,
   WizardGetGenerationRunStateParams,
   WizardGetGenerationRunStateResponse,
@@ -111,10 +114,8 @@ import {
   resolveGenerationContext,
   generationRunState,
   rejectSubmit,
-  resolveProviderRoute,
   sameWorkspacePath,
   resultDetailsFromManifest,
-  type GenerationProviderModels,
 } from './wizard-generation-binding';
 import {
   GenerationPreviewService,
@@ -161,8 +162,11 @@ type AgentOriginRecorder = Pick<
 const CHANGED_SINCE_PREVIEW_RETRY_ERROR =
   'The file changed after the preview, so it was kept. Preview again to replace it.';
 
-/** Exact DI identity from auth-providers-tokens, without pulling its package into this project. */
-const SDK_PROVIDER_MODELS_TOKEN = Symbol.for('SdkProviderModels');
+/** Non-secret inputs of the last unbound run, reused by a later retry. */
+type LastGenerationInputs = Omit<
+  OrchestratorGenerationOptions,
+  'model' | 'setupSnapshot'
+>;
 
 /**
  * RPC handlers for setup wizard generation operations.
@@ -182,10 +186,10 @@ export class WizardGenerationRpcHandlers {
   ] as const satisfies readonly RpcMethodName[];
 
   /**
-   * Options of the last launched run (without abort signal), reused by
-   * `wizard:retry-item` to preserve analysis, SDK config and enhanced prompt.
+   * Non-secret inputs of the last unbound run. Every retry adds a fresh Setup
+   * snapshot and never reuses its model or authentication.
    */
-  private lastGenerationOptions: OrchestratorGenerationOptions | null = null;
+  private lastGenerationInputs: LastGenerationInputs | null = null;
 
   /** Library scope of the last launched untabbed run, reused by its retry. */
   private lastRunScope: RunLibraryScope | null = null;
@@ -421,6 +425,11 @@ export class WizardGenerationRpcHandlers {
       resume,
       selectedAgentIds,
     } = args;
+    const setupSnapshot = await this.resolveSetupSnapshot(effectiveWorkspace);
+    const route = {
+      provider: setupSnapshot.providerId,
+      model: setupSnapshot.model,
+    };
     const freshness = this.resolveService<AnalysisFreshnessService>(
       AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
       'AnalysisFreshnessService',
@@ -439,15 +448,6 @@ export class WizardGenerationRpcHandlers {
         this.logger,
       );
     const runtime = await this.resolveRuntime(effectiveWorkspace);
-    const route = tabBinding
-      ? resolveProviderRoute(
-          this.resolveService<GenerationProviderModels>(
-            SDK_PROVIDER_MODELS_TOKEN,
-            'ProviderModelsService',
-          ),
-          parsed.model,
-        )
-      : null;
     if (resume && tabBinding) {
       const owner = await this.checkpoints.locateResumable(
         effectiveWorkspace,
@@ -538,6 +538,7 @@ export class WizardGenerationRpcHandlers {
       trustedDir,
       source,
       route,
+      setupSnapshot,
       runtime,
       prepared,
       tabBinding,
@@ -552,7 +553,7 @@ export class WizardGenerationRpcHandlers {
     analysisDir: string | null;
     tabBinding: SetupGenerationTabBinding | undefined;
     source: GenerationContextSource;
-    route: { provider: string; model: string } | null;
+    route: { provider: string; model: string };
     runtime: GenerationRuntime;
     selectedAgentIds: string[];
     parsed: z.infer<typeof WizardSubmitSelectionParamsSchema>;
@@ -577,15 +578,17 @@ export class WizardGenerationRpcHandlers {
         ? await this.prepareResumedRun(
             effectiveWorkspace,
             tabBinding ? null : analysisDir,
-            tabBinding
-              ? {
-                  tabBinding,
-                  source,
-                  effectiveProvider: route?.provider,
-                  effectiveModel: route?.model,
-                  enhancedPromptsUsed: !!runtime.enhancedPromptContent,
-                }
-              : undefined,
+            {
+              ...(tabBinding
+                ? {
+                    tabBinding,
+                    source,
+                    enhancedPromptsUsed: !!runtime.enhancedPromptContent,
+                  }
+                : {}),
+              effectiveProvider: route.provider,
+              effectiveModel: route.model,
+            },
           )
         : await this.checkpoints.createFresh({
             workspaceRoot: effectiveWorkspace,
@@ -599,15 +602,14 @@ export class WizardGenerationRpcHandlers {
               ? {
                   tabBinding,
                   source,
-                  effectiveProvider: route?.provider,
-                  effectiveModel: route?.model,
                   enhancedPromptsUsed: !!runtime.enhancedPromptContent,
                 }
               : {}),
+            effectiveProvider: route.provider,
+            effectiveModel: route.model,
             input: {
               threshold: parsed.threshold,
               variableOverrides: parsed.variableOverrides,
-              model: route?.model ?? parsed.model,
               analysisData: tabBinding ? undefined : parsed.analysisData,
             },
             target: decisions.target,
@@ -624,7 +626,8 @@ export class WizardGenerationRpcHandlers {
     freshDir: string | null;
     trustedDir: string | null;
     source: GenerationContextSource;
-    route: { provider: string; model: string } | null;
+    route: { provider: string; model: string };
+    setupSnapshot: ResolvedSetupSnapshot;
     runtime: GenerationRuntime;
     prepared: PreparedGenerationRun;
     tabBinding: SetupGenerationTabBinding | undefined;
@@ -639,6 +642,7 @@ export class WizardGenerationRpcHandlers {
       trustedDir,
       source,
       route,
+      setupSnapshot,
       runtime,
       prepared,
       tabBinding,
@@ -668,6 +672,7 @@ export class WizardGenerationRpcHandlers {
           : null
         : selectedTrustedDir,
       scope,
+      setupSnapshot,
     );
     if (this.runs.isActive) {
       await this.checkpoints.finalize(prepared.location, 'failed');
@@ -678,7 +683,10 @@ export class WizardGenerationRpcHandlers {
       };
     }
     if (!tabBinding) {
-      this.lastGenerationOptions = options;
+      const retryInputs = { ...options };
+      delete retryInputs.model;
+      delete retryInputs.setupSnapshot;
+      this.lastGenerationInputs = retryInputs;
       this.lastCheckpoint = prepared.location;
       this.lastRunScope = scope;
     }
@@ -1282,6 +1290,9 @@ export class WizardGenerationRpcHandlers {
         parsed.tabBinding && canonicalWorkspace
           ? { ...parsed.tabBinding, workspacePath: canonicalWorkspace }
           : undefined;
+      const setupSnapshot = await this.resolveSetupSnapshot(
+        canonicalWorkspace ?? workspaceRoot,
+      );
 
       try {
         this.logger.info('RPC: wizard:retry-item started', {
@@ -1329,9 +1340,6 @@ export class WizardGenerationRpcHandlers {
                 threshold: boundCheckpoint?.manifest.input.threshold,
                 variableOverrides:
                   boundCheckpoint?.manifest.input.variableOverrides,
-                model:
-                  boundCheckpoint?.manifest.effectiveModel ??
-                  boundCheckpoint?.manifest.input.model,
                 enhancedPromptContent: boundCheckpoint?.manifest
                   .enhancedPromptsUsed
                   ? boundRuntime?.enhancedPromptContent
@@ -1345,8 +1353,9 @@ export class WizardGenerationRpcHandlers {
                   scope,
                 ),
               }
-            : (this.lastGenerationOptions ?? {})),
+            : (this.lastGenerationInputs ?? {})),
           workspacePath: workspaceRoot,
+          setupSnapshot,
           userOverrides: [parsed.itemId],
           onStreamEvent: this.createStreamBroadcaster(
             webviewManager,
@@ -1357,14 +1366,20 @@ export class WizardGenerationRpcHandlers {
             : undefined,
         };
 
+        if (checkpoint) {
+          await this.checkpoints.recordEffectivePair(checkpoint, {
+            effectiveProvider: setupSnapshot.providerId,
+            effectiveModel: setupSnapshot.model,
+          });
+        }
         const settled = await this.runs.run({
           orchestrator,
+          effectiveProvider: setupSnapshot.providerId,
+          effectiveModel: setupSnapshot.model,
           ...(retryBinding
             ? {
                 tabBinding: retryBinding,
                 source: boundCheckpoint?.manifest.source,
-                effectiveProvider: boundCheckpoint?.manifest.effectiveProvider,
-                effectiveModel: boundCheckpoint?.manifest.effectiveModel,
                 enhancedPromptsUsed:
                   boundCheckpoint?.manifest.enhancedPromptsUsed,
               }
@@ -1473,6 +1488,33 @@ export class WizardGenerationRpcHandlers {
   // Run assembly
   // ---------------------------------------------------------------------------
 
+  /** Resolve one strict Setup snapshot for a single launch attempt. */
+  private async resolveSetupSnapshot(
+    workspaceRoot: string,
+  ): Promise<ResolvedSetupSnapshot> {
+    let resolution: SetupResolution;
+    try {
+      const workspaceLlm = this.resolveService<IWorkspaceLlmResolver>(
+        SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER,
+        'WorkspaceLlmResolver',
+      );
+      resolution = await workspaceLlm.resolveSetup(workspaceRoot);
+    } catch {
+      throw new RpcUserError(
+        'The Setup model could not be resolved. Update Background models and retry.',
+        'SETUP_MODEL_INVALID',
+      );
+    }
+    if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+      const source = resolution.source === 'setup' ? 'Setup' : 'Workspace';
+      throw new RpcUserError(
+        `${source} model cannot run agent generation (${resolution.cause}). Update Background models and retry.`,
+        'SETUP_MODEL_INVALID',
+      );
+    }
+    return resolution.snapshot;
+  }
+
   /**
    * Resolve the services a launch needs. The orchestrator is required; the
    * webview, enhanced prompt, MCP port and plugin paths are best-effort.
@@ -1577,6 +1619,7 @@ export class WizardGenerationRpcHandlers {
     runtime: GenerationRuntime,
     trustedDir: string | null,
     scope: RunLibraryScope,
+    setupSnapshot: ResolvedSetupSnapshot,
   ): OrchestratorGenerationOptions {
     const { input } = prepared.manifest;
     return {
@@ -1598,7 +1641,7 @@ export class WizardGenerationRpcHandlers {
           ? { ...prepared.manifest.tabBinding, runId: prepared.manifest.runId }
           : undefined,
       ),
-      model: input.model,
+      setupSnapshot,
       analysisDir: trustedDir ?? undefined,
       pluginPaths: runtime.pluginPaths,
       onAgentOutcome: (outcome) =>
