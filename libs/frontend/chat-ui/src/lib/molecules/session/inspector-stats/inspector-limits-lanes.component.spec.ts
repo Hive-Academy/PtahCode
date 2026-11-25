@@ -173,7 +173,7 @@ describe('Plan Limits provider states', () => {
     for (const provider of root.querySelectorAll('ptah-provider-lane-limit-tile')) {
       expect(provider.textContent).toContain('Limit reached');
       expect(provider.textContent).toContain('2b78');
-      expect(provider.querySelector('[data-ptah-badge] [aria-hidden]')?.textContent).toBe('API');
+      expect(provider.querySelector('[data-testid="provider-source"] [aria-hidden]')?.textContent).toBe('API');
       const meters = [...provider.querySelectorAll<HTMLElement>('[role="meter"]')];
       expect(meters.map(meter => meter.getAttribute('aria-valuenow'))).toEqual(['100', '0']);
       expect(meters[0].getAttribute('aria-valuetext')).toMatch(/100% used.*Limit reached.*2026-10-26 23:40 UTC/);

@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { PtahBadgeDirective, PtahMeterComponent, PtahTooltipDirective } from '@ptah-extension/ui';
+import { Clock, Info, OctagonAlert, TriangleAlert, LucideAngularModule } from 'lucide-angular';
 import { windowMeter } from './plan-limit-tiles';
 import type { PlanLimitTileModel, ProviderLaneLimitModel } from './stats-limit-view-model.types';
 
@@ -16,25 +17,26 @@ const SOURCES = {
 @Component({
   selector: 'ptah-provider-lane-limit-tile',
   standalone: true,
-  imports: [PtahBadgeDirective, PtahMeterComponent, PtahTooltipDirective],
+  imports: [LucideAngularModule, PtahBadgeDirective, PtahMeterComponent, PtahTooltipDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let p = provider();
-    <div class="min-w-0" role="group" [attr.aria-label]="p.label + ' plan limits'" [attr.data-provider-id]="p.id">
-      <div class="flex items-baseline gap-2 text-xs">
-        <span class="min-w-0 break-words font-semibold text-base-content">{{ p.label }}</span>
-        <span class="shrink-0 font-mono text-[11px] text-base-content-muted"
-          [attr.aria-label]="p.accountId ? 'Account ' + p.accountId : 'Account unknown'">{{ p.accountId ?? '—' }}</span>
+    <div class="provider-card grid min-w-0 gap-1" role="group" [attr.aria-label]="p.label + ' plan limits'" [attr.data-provider-id]="p.id">
+      <div class="flex min-w-0 items-center gap-1.5 text-xs">
+        <span class="min-w-0 truncate font-semibold text-base-content" [attr.title]="p.label">{{ p.label }}</span>
+        <span class="account-chip shrink-0 font-mono"
+          [attr.aria-label]="p.accountId ? 'Account ' + p.accountId : 'Account unknown'">{{ p.accountId ? '#' + p.accountId : '—' }}</span>
         @if (p.indicator; as indicator) {
-          <span class="min-w-0 truncate text-[11px] font-semibold focus-visible:outline focus-visible:outline-base-content"
-            [class.text-error]="indicator.tone === 'error'" [class.text-warning]="indicator.tone === 'warning'"
+          <span ptahBadge size="xs" [tone]="indicator.tone === 'error' ? 'err' : 'warn'"
+            class="inline-flex shrink-0 items-center gap-0.5 focus-visible:outline focus-visible:outline-base-content"
             role="group" tabindex="0" [attr.aria-label]="indicator.text" [ptahTooltip]="indicator.text">
+            <lucide-angular [img]="indicator.state === 'at-limit' ? LimitIcon : NearIcon" class="size-2.5" aria-hidden="true" />
             {{ indicator.state === 'at-limit' ? 'Limit reached' : 'Near limit' }}
           </span>
         }
-        <span class="ml-auto flex max-w-[50%] flex-wrap justify-end gap-1">
+        <span class="ml-auto flex shrink-0 flex-wrap justify-end gap-1">
           @if (p.source; as source) {
-            <span ptahBadge size="xs" [attr.title]="sources[source][1]">
+            <span ptahBadge size="xs" data-testid="provider-source" [attr.title]="sources[source][1]">
               <span aria-hidden="true">{{ sources[source][0] }}</span>
               <span class="sr-only">{{ sources[source][1] }}</span>
             </span>
@@ -46,18 +48,20 @@ const SOURCES = {
         </span>
       </div>
       @if (failure(); as failure) {
-        <p class="break-words text-[11px] text-base-content-muted focus-visible:outline focus-visible:outline-base-content"
+        <p class="flex items-start gap-1 break-words text-[11px] text-base-content-muted focus-visible:outline focus-visible:outline-base-content"
           data-testid="provider-limit-message" tabindex="0" [ptahTooltip]="failure.detail">
-          {{ failure.reason }}
+          <lucide-angular [img]="InfoIcon" class="mt-px size-3 shrink-0" aria-hidden="true" />
+          <span class="min-w-0">{{ failure.reason }}</span>
         </p>
       } @else if (p.message || p.windows.length === 0) {
-        <p class="text-[11px] text-base-content-muted" data-testid="provider-limit-message">
-          {{ p.ownerState === 'untracked' ? 'Usage not tracked' : p.message || 'Limits not tracked' }}
+        <p class="flex items-center gap-1 text-[11px] text-base-content-muted" data-testid="provider-limit-message">
+          <lucide-angular [img]="InfoIcon" class="size-3 shrink-0" aria-hidden="true" />
+          <span class="min-w-0">{{ p.ownerState === 'untracked' ? 'Usage not tracked' : p.message || 'Limits not tracked' }}</span>
         </p>
       }
       @for (group of groups(); track group.label) {
         @if (group.label; as label) {
-          <div class="mt-1 text-[11px] text-base-content-muted" data-testid="plan-window-group">{{ label }}</div>
+          <div class="mt-0.5 text-[10.5px] font-medium uppercase tracking-wide text-base-content-muted" data-testid="plan-window-group">{{ label }}</div>
         }
         @for (tile of group.tiles; track tile.id) {
           @let row = windowRowModel(tile);
@@ -80,7 +84,10 @@ const SOURCES = {
               }
               {{ row.displayValue }}
             </span>
-            <span class="truncate text-right text-base-content-muted" data-testid="plan-window-reset">{{ tile.window?.reset?.short ?? '—' }}</span>
+            <span class="inline-flex min-w-0 items-center justify-end gap-0.5 text-base-content-muted">
+              <lucide-angular [img]="ResetIcon" class="size-2.5 shrink-0" aria-hidden="true" />
+              <span class="truncate" data-testid="plan-window-reset">{{ tile.window?.reset?.short ?? '—' }}</span>
+            </span>
           </div>
         }
       }
@@ -102,14 +109,32 @@ const SOURCES = {
     </div>
   `,
   styles: `
-    .plan-window-row { grid-template-columns: 3rem minmax(0, 1fr) 3.25rem 3.75rem; }
-    .plan-window-row.stacked-label { grid-template-columns: minmax(0, 1fr) 3.25rem 3.75rem; }
+    .provider-card {
+      border-radius: 0.5rem;
+      padding: 0.45rem 0.6rem 0.5rem;
+      background: color-mix(in srgb, currentColor 3.5%, transparent);
+      box-shadow: 0 1px 2px rgb(0 0 0 / 0.2), inset 0 0 0 1px color-mix(in srgb, currentColor 6%, transparent);
+    }
+    .account-chip {
+      border-radius: 9999px;
+      padding: 0 0.3rem;
+      font-size: 10px;
+      line-height: 1rem;
+      color: var(--bcm, oklch(var(--bc) / 0.6));
+      background: color-mix(in srgb, currentColor 7%, transparent);
+    }
+    .plan-window-row { grid-template-columns: 3rem minmax(0, 1fr) 3rem 4rem; }
+    .plan-window-row.stacked-label { grid-template-columns: minmax(0, 1fr) 3rem 4rem; }
     .stacked-label .plan-window-label { grid-column: 1 / -1; }
   `,
 })
 export class ProviderLaneLimitTileComponent {
   readonly provider = input.required<ProviderLaneLimitModel>();
   protected readonly sources = SOURCES;
+  protected readonly InfoIcon = Info;
+  protected readonly ResetIcon = Clock;
+  protected readonly NearIcon = TriangleAlert;
+  protected readonly LimitIcon = OctagonAlert;
   protected readonly failure = computed(() => {
     const tile = this.provider().windows.find(window => window.unavailableReason);
     if (!tile?.unavailableReason) return null;
