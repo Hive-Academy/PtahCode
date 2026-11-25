@@ -52,6 +52,7 @@ const ROUTING_KEYS = new Set([
   'agentOrchestration.decisionModel',
   'agentOrchestration.decisionModelPrefillTokensPerSecond',
   'agentOrchestration.laneRotation',
+  'agentOrchestration.performanceRouting',
   'agentOrchestration.routingRules',
 ]);
 
