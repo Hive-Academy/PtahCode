@@ -149,6 +149,25 @@ describe('deriveChoiceEvidence', () => {
     expect(withoutRates.cell(KEY)?.local).toBeUndefined();
   });
 
+  it('excludes caller stops from scoring and counts them as unverified in the funnel', () => {
+    const valid = row('finished', { verdict: 'failed', effort: 'high' });
+    const evidence = deriveChoiceEvidence([
+      valid,
+      row('stopped-failure', { verdict: 'failed', failureClass: 'user-stop', effort: 'high' }),
+      // A stop can coexist with a recorded deliverable and review.
+      row('stopped-delivered', { failureClass: 'user-stop', finalReview: 'approved', effort: 'high' }),
+    ], NOW);
+    const validOnly = deriveChoiceEvidence([valid], NOW);
+    for (const effort of [ANY_EFFORT, 'high'] as const) {
+      const key = { ...KEY, effort };
+      expect(evidence.cell(key)?.local).toEqual(validOnly.cell(key)?.local);
+      expect(evidence.cell(key)?.funnel).toMatchObject({
+        spawned: 3, completed: 3, capacityDropped: 0, unverified: 2,
+        failed: 1, delivered: 0, approved: 0,
+      });
+    }
+  });
+
   it('uses a matching effort seed and falls back to the model-wide seed', () => {
     const [modelSeed] = buildSeedMatrix(NOW).profiles;
     const implement = modelSeed?.cells.implement;
@@ -164,6 +183,18 @@ describe('deriveChoiceEvidence', () => {
     expect(evidence.cell({ ...KEY, effort: 'high' })?.local?.score).toBe(18);
     expect(evidence.cell({ ...KEY, effort: 'medium' })?.local?.score).toBe(73);
     expect(evidence.cell(KEY)?.local?.score).toBe(67);
+  });
+
+  it('uses the model-wide seed for a task kind missing from the effort profile', () => {
+    const [seed] = buildSeedMatrix(NOW).profiles;
+    const implement = seed?.cells.implement;
+    if (implement?.kind !== 'value') throw new Error('expected an implementation seed');
+    const rows = [row('high', { verdict: 'failed', effort: 'high' })];
+    const evidence = deriveChoiceEvidence(rows, NOW, [
+      { ...seed, effort: 'high', cells: { ...seed.cells, implement: { kind: 'unknown' } } },
+      seed,
+    ]);
+    expect(evidence.cell({ ...KEY, effort: 'high' })?.local?.score).toBe(73);
   });
 
   it('uses the same window and dedupe for cells and counts routed runs once', () => {

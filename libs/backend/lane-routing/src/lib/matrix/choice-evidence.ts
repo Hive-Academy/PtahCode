@@ -1,5 +1,6 @@
 import {
   LANE_DEFAULT_MODEL,
+  LANE_USER_STOP_CLASS,
   type AgentRoutingDecisionModelEvidence,
   type LaneOutcomeSummary,
   type OutcomeTaskKind,
@@ -12,6 +13,7 @@ import {
   dedupeByRun,
   deriveLocalCell,
   isCapacityFailure,
+  isExcludedFromRates,
 } from './local-derivation';
 import { FAMILY_PROFILE_MODEL, type MatrixProfile, type ValueMatrixCell } from './matrix.types';
 import { buildSeedMatrix } from './seed-matrix';
@@ -133,6 +135,11 @@ function addToFunnel(funnel: FunnelDraft, row: LaneOutcomeSummary, capacity: boo
   }
 
   funnel.completed += 1;
+  if (row.failureClass === LANE_USER_STOP_CLASS) {
+    // The stored failed verdict records how the run ended, with no verified outcome.
+    funnel.unverified += 1;
+    return;
+  }
   switch (row.verdict) {
     case 'unverified':
       funnel.unverified += 1;
@@ -199,7 +206,7 @@ function addChoiceRun(
 
   addToFunnel(draft.funnel, row, capacity);
   for (const field of AGGREGATE_FIELDS) addMeasuredValue(draft.aggregates[field], row[field]);
-  if (!capacity) draft.scoringRuns.push(row);
+  if (!isExcludedFromRates(row.failureClass)) draft.scoringRuns.push(row);
   if (row.effortDisposition === 'not-in-native-list' || row.effortDisposition === 'lane-refused') {
     draft.effortNotSent += 1;
   }

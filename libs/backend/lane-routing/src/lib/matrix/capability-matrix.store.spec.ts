@@ -427,7 +427,7 @@ describe('CapabilityMatrixStore', () => {
     try {
       const { store, files } = harness();
       writeUser(files, [
-        profile('z-ai', 'glm-5', { implement: userCell(42) }),
+        profile('z-ai', 'glm-5', { implement: userCell(42), plan: userCell(73) }),
         { ...profile('z-ai', 'glm-5', { implement: userCell(64) }), effort: 'high' },
         { ...profile('z-ai', 'glm-5', { implement: userCell(35) }), effort: 'low' },
         { ...profile('z-ai', 'effort-only', { implement: userCell(71) }), effort: 'high' },
@@ -439,6 +439,9 @@ describe('CapabilityMatrixStore', () => {
       expect(on.resolvePair?.('z-ai', 'glm-5', 'implement', 'high')?.layers).toMatchObject({
         user: { score: 64 },
         seed: { score: 95 },
+      });
+      expect(on.resolvePair?.('z-ai', 'glm-5', 'plan', 'high')?.layers).toMatchObject({
+        user: { score: 73 },
       });
       expect(on.resolvePair?.('z-ai', 'glm-5', 'implement', 'low')?.layers).toMatchObject({
         user: { score: 35 },

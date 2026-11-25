@@ -219,18 +219,22 @@ function scoreChoice(
       if (model === fallback && effort === policyEffort) continue;
       if (effort !== policyEffort && (choice.effortFixed || !supportsEffort(model, effort))) continue;
       const pair = resolve(model, effort);
-      if (pair.resolved.parts.evidence === 'prior') continue;
-      hasEvidence = true;
+      if (pair.resolved.parts.evidence === 'prior' && pair.resolved.parts.priorSource !== 'user') continue;
+      hasEvidence ||= pair.resolved.parts.evidence !== 'prior';
       if (pair.resolved.total - baseline.resolved.total <= CLOSENESS_BAND) continue;
       if (pair.resolved.total > exploit.resolved.total) exploit = pair;
     }
   }
 
-  if (!hasEvidence && !isSystemCliLane(candidate)) {
+  if (!hasEvidence && exploit === baseline && !isSystemCliLane(candidate)) {
     // Preserve a prior-only promotion that already won in the old model ranking.
     const legacy = score({ ...input, choice: undefined }, taskKind, matrix);
     if (legacy.model !== fallback.id || legacy.provenance !== fallback.provenance) {
-      exploit = resolve({ id: legacy.model, provenance: legacy.provenance }, policyEffort);
+      exploit = resolve({
+        id: legacy.model,
+        provenance: legacy.provenance,
+        efforts: listed.find((model) => model.id === legacy.model)?.efforts,
+      }, policyEffort);
     }
   }
 

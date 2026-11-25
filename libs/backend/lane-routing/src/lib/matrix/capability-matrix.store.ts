@@ -554,9 +554,8 @@ function valueAt(
   nowMs: number,
   pairKey?: string,
 ): ValueMatrixCell | undefined {
-  const profile = (pairKey === undefined ? undefined : index.byKey.get(pairKey))
-    ?? index.byKey.get(key);
-  const cell = profile?.cells[taskKind];
+  const pairCell = pairKey === undefined ? undefined : index.byKey.get(pairKey)?.cells[taskKind];
+  const cell = pairCell?.kind === 'value' ? pairCell : index.byKey.get(key)?.cells[taskKind];
   return cell?.kind === 'value' ? { ...cell, stale: isStale(cell.asOf, nowMs) } : undefined;
 }
 

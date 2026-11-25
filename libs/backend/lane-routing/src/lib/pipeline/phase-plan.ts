@@ -330,7 +330,7 @@ export function planRoutePhases(
       constraint,
       ranked,
       rankedByTotal,
-      alternates: constraint.pinAccepted ? [] : alternateOptions(ranked, taskKind, gathered),
+      alternates: constraint.pinAccepted ? [] : alternateOptions(ranked, taskKind, gathered, choice?.policyEffort),
       spread: spreadResult,
       inventory,
       ...(matchedRule !== undefined ? { matchedRule, ruleExclusionChangedChoice } : {}),
@@ -457,6 +457,7 @@ function alternateOptions(
   ranked: readonly ScoredCandidate[],
   taskKind: OutcomeTaskKind,
   gathered: GatheredCall,
+  effort: CandidateScore['effort'],
 ): AlternateOption[] {
   const options: AlternateOption[] = [];
   const top = ranked.length === 0 ? 0 : Math.max(...ranked.map((row) => effectiveTotal(row.scored)));
@@ -479,6 +480,7 @@ function alternateOptions(
         candidate,
         model: listed.id,
         provenance: 'reported',
+        ...(effort === undefined ? {} : { effort }),
         score: recomputed.score,
         total: recomputed.total,
         parts: recomputed.parts,
@@ -748,6 +750,7 @@ function toOption(row: ScoredCandidate): DecisionOption {
     laneId: row.candidate.id,
     family: row.candidate.family,
     model: row.scored.model,
+    ...(row.scored.effort === undefined ? {} : { effort: row.scored.effort }),
     limitState: limitOf(row.candidate),
     score: effectiveTotal(row.scored),
   };

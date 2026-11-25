@@ -18,7 +18,9 @@ import {
 } from '../routing-constants';
 import {
   buildDecisionPayload,
+  decisionOutcomeModel,
   formatDecisionOptionLabel,
+  outcomeFigureLabel,
   type DecisionOption,
   type DecisionOutcomeFigures,
   type DecisionPayload,
@@ -426,11 +428,13 @@ function offeredFigures(
   for (const phase of phases) {
     for (const option of offered.get(phase.phaseId) ?? []) {
       if (option.laneId === SUBAGENT_LANE_ID) continue;
-      const key = JSON.stringify([option.laneId, phase.taskKind]);
+      const model = decisionOutcomeModel(option.model);
+      const figure = outcomes(option.laneId, phase.taskKind, model, option.effort);
+      if (figure === null) continue;
+      const key = outcomeFigureLabel(figure);
       if (seen.has(key)) continue;
       seen.add(key);
-      const figure = outcomes(option.laneId, phase.taskKind);
-      if (figure !== null) figures.push(figure);
+      figures.push(figure);
     }
   }
   return figures;
@@ -504,7 +508,7 @@ function renderLanePrompt(
   }
   for (const figure of figures) {
     lines.push(
-      `past outcomes ${figure.laneId}/${figure.taskKind}: delivered ${figure.delivered}, failed ${figure.failed}`,
+      `past outcomes ${outcomeFigureLabel(figure)}: delivered ${figure.delivered}, failed ${figure.failed}`,
     );
   }
   return lines.join('\n');

@@ -174,7 +174,7 @@ function emptyRateBucket(key: RateKey): RateBucket {
   };
 }
 
-/** Score the deduplicated, non-capacity runs assigned to one choice key. */
+/** Score the deduplicated, rate-eligible runs assigned to one choice key. */
 export function deriveLocalCell(
   key: ChoiceRateKey,
   summaries: readonly LaneOutcomeSummary[],
@@ -290,8 +290,8 @@ function unknownCells(): Record<OutcomeTaskKind, MatrixCell> {
 }
 
 /**
- * The blend prior uses the effort-specific seed profile when present,
- * then the effort-agnostic profile for the same family and model.
+ * The blend prior uses the effort-specific seed cell when present,
+ * then the effort-agnostic cell for the same family, model, and task kind.
  */
 function priorScore(
   key: ChoiceRateKey,
@@ -303,8 +303,8 @@ function priorScore(
       candidate.model === key.model &&
       candidate.effort === effort,
   );
-  const exact = key.effort === undefined ? undefined : profileFor(key.effort);
-  const cell = (exact ?? profileFor(undefined))?.cells[key.taskKind];
+  const exact = key.effort === undefined ? undefined : profileFor(key.effort)?.cells[key.taskKind];
+  const cell = exact?.kind === 'value' ? exact : profileFor(undefined)?.cells[key.taskKind];
   return cell?.kind === 'value' ? cell.score : NEUTRAL_SCORE;
 }
 

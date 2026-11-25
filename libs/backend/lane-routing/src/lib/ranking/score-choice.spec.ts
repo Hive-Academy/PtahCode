@@ -209,6 +209,23 @@ describe('model and effort choices', () => {
     });
   });
 
+  it('promotes a user-scored model and effort without any runs for that choice', () => {
+    const priors: ScoreMatrix = {
+      ...matrix(),
+      resolvePair: (_family, id, _taskKind, effort) =>
+        matrixCell(id, id === 'candidate' && effort === 'high' ? value('user', 95) : undefined),
+    };
+    const result = score({
+      candidate: CODEX,
+      models: [model('candidate', ['high'])],
+      choice: choice([]),
+    }, 'implement', priors);
+    expect(result).toMatchObject({
+      model: 'candidate', effort: 'high', score: 95,
+      parts: { priorSource: 'user', evidence: 'prior' },
+    });
+  });
+
   it('uses catalog order and then canonical effort order to break equal scores', () => {
     const input: ScoreInput = {
       candidate: CODEX,

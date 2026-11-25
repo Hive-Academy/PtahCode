@@ -4,9 +4,10 @@ import type {
   PhaseKind,
 } from '@ptah-extension/shared';
 import { SUBAGENT_LANE_ID } from '@ptah-extension/shared';
-import type {
-  LaneCatalogRefresher,
-  LaneCatalogSnapshotReader,
+import {
+  isCatalogRefreshDue,
+  type LaneCatalogRefresher,
+  type LaneCatalogSnapshotReader,
 } from '../catalog/lane-catalog.types';
 import {
   effectiveMachineCapabilities,
@@ -511,8 +512,9 @@ async function readCatalogModels(
     rows.map(async (row) => {
       const id = laneCandidateId(row);
       let entry = catalog.get(id);
-      catalog.refreshIfDue(row, nowMs);
-      if (entry?.lastOkAt == null) {
+      if (entry?.lastOkAt != null) {
+        catalog.refreshIfDue(row, nowMs);
+      } else if (isCatalogRefreshDue(entry, nowMs)) {
         const rowDeadline =
           deadline === undefined
             ? createRouteDeadline(performance.now() + budgetMs)
@@ -539,10 +541,8 @@ async function readCatalogModels(
         entry = raced.value;
       }
 
-      if (entry.lastOkAt === null) {
-        const status = entry.status === 'timeout' || entry.status === 'error'
-          ? entry.status
-          : 'empty';
+      if (entry?.lastOkAt == null) {
+        const status = entry?.status === 'timeout' || entry?.status === 'error' ? entry.status : 'empty';
         return { id, facts: { models: [], status } as const };
       }
 

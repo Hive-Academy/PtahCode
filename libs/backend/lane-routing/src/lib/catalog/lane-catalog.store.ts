@@ -4,12 +4,11 @@ import type { LaneModelEntry, LaneModelListing } from '../lane-model-listing.por
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import { laneCandidateId } from '../ranking/candidate.types';
 import {
-  CATALOG_REFRESH_AGE_MS,
   CATALOG_REFRESH_TIMEOUT_MS,
-  CATALOG_RETRY_AFTER_MS,
   CATALOG_STORAGE_KEY,
 } from '../routing-constants';
 import {
+  isCatalogRefreshDue,
   LaneCatalogDocumentSchema,
   type CatalogStatus,
   type LaneCatalogEntry,
@@ -40,9 +39,7 @@ export class LaneCatalogStore implements LaneCatalogSnapshotReader, LaneCatalogR
   }
 
   refreshIfDue(row: CliDetectionResult, nowMs: number): void {
-    const entry = this.get(laneCandidateId(row));
-    const delay = entry?.status === 'ok' ? CATALOG_REFRESH_AGE_MS : CATALOG_RETRY_AFTER_MS;
-    if (entry?.fetchedAt == null || nowMs - entry.fetchedAt >= delay) {
+    if (isCatalogRefreshDue(this.get(laneCandidateId(row)), nowMs)) {
       void this.refresh(row, nowMs);
     }
   }

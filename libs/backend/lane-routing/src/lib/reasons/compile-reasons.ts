@@ -635,7 +635,7 @@ export function compileChosenReason(input: ChosenReasonInput): string {
       `explore ${input.model}/${effort}: ${sampleCount}/${EXPLORATION_MIN_SAMPLES} samples, 1 of every ${EXPLORATION_PERIOD} routed runs`,
     );
   }
-  if (input.executor.kind === 'lane' && input.effortCheck?.inList === false) {
+  if (input.executor.kind === 'lane' && input.effortCheck?.expected === 'not-in-native-list') {
     clauses.push(
       `effort ${input.effortCheck.requested} not in ${input.executor.id} native list; spawn sends no effort at this step`,
     );

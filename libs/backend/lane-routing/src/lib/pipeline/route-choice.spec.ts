@@ -17,7 +17,7 @@ import type { RouteCandidateSource } from '../route-candidate-source.port';
 import { PerformanceRoutingSetting } from '../scope/performance-routing-setting';
 import { assembleGateResult } from './assemble-gate';
 import { gatherRouteCall, type RouteMatrix } from './gather';
-import { planRoutePhases, type GateArgs, type RoutingRulesInput } from './phase-plan';
+import { laneQuestion, planRoutePhases, type GateArgs, type RoutingRulesInput } from './phase-plan';
 import { resolvePhase } from './phase-resolve';
 import { emptyTally } from './preflight-answer';
 
@@ -148,7 +148,7 @@ async function runRoute({
     ['codex'], emptyTally(), [], ROUTE_ID,
   );
   expect(GateResultSchema.safeParse(result).success).toBe(true);
-  return { result, gathered, list, load };
+  return { result, gathered, list, load, plans };
 }
 
 function chosenEntry(result: GateResult) {
@@ -183,12 +183,21 @@ describe('route choice', () => {
     expect(JSON.stringify(withoutEffortCheck)).toBe(JSON.stringify(legacy.result));
   });
 
+  it('omits the native-list warning when an off-mode fallback list omits the requested effort', async () => {
+    const { result } = await runRoute({
+      entries: [{ ...BASELINE, efforts: { provenance: 'ptah-fallback', supported: ['high'], default: null } }],
+    });
+    const entry = chosenEntry(result);
+    expect(entry.effortCheck).toMatchObject({ provenance: 'ptah-fallback', inList: false });
+    expect(entry.reason).not.toContain('native list');
+  });
+
   it('uses a stale catalog snapshot immediately and emits the selected model-effort pair', async () => {
     const catalog = catalogWith(snapshot([BASELINE, CANDIDATE], {
       lastOkAt: NOW - 2_500, status: 'error',
     }));
     const rows = [...runs(40), ...runs(10, { effort: 'medium', verdict: 'failed' })];
-    const { result, list, load } = await runRoute({ choice: true, catalog, rows });
+    const { result, list, load, plans } = await runRoute({ choice: true, catalog, rows });
     expect(catalog.get).toHaveBeenCalledWith('codex');
     expect(catalog.refreshIfDue).toHaveBeenCalledWith(CODEX, NOW);
     expect(catalog.refresh).not.toHaveBeenCalled();
@@ -209,6 +218,7 @@ describe('route choice', () => {
       },
     });
     expect(entry.reason).toContain('model candidate effort high (pair, 40 samples)');
+    expect(laneQuestion(plans[0]).options[0]).toMatchObject({ model: 'candidate', effort: 'high' });
   });
 
   it('waits for the first catalog read of a never-read lane', async () => {
@@ -217,6 +227,15 @@ describe('route choice', () => {
     expect(catalog.refresh).toHaveBeenCalledWith(CODEX, NOW);
     expect(list).not.toHaveBeenCalled();
     expect(chosenEntry(result).model).toBe(BASELINE.id);
+  });
+
+  it('uses the recent failure without refreshing a lane that has never listed successfully', async () => {
+    const catalog = catalogWith(snapshot([], { status: 'error', fetchedAt: NOW - 1, lastOkAt: null }));
+    const { result, list } = await runRoute({ choice: true, catalog });
+    expect(catalog.refresh).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(result.reasons).toContain('models unknown for codex (error)');
+    expect(chosenEntry(result).model).toBe('lane-default');
   });
 
   it('keeps a never-read lane eligible when the first catalog read times out', async () => {

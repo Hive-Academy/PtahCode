@@ -1,6 +1,7 @@
 import type { CliDetectionResult, EffortSupport } from '@ptah-extension/shared';
 import { z } from 'zod';
 import type { LaneModelEntry } from '../lane-model-listing.port';
+import { CATALOG_REFRESH_AGE_MS, CATALOG_RETRY_AFTER_MS } from '../routing-constants';
 
 const CatalogStatusSchema = z.enum(['ok', 'timeout', 'error', 'empty', 'never']);
 
@@ -28,6 +29,11 @@ export interface LaneCatalogSnapshotReader {
 export interface LaneCatalogRefresher {
   refresh(row: CliDetectionResult, nowMs: number): Promise<LaneCatalogEntry>;
   refreshIfDue(row: CliDetectionResult, nowMs: number): void;
+}
+
+export function isCatalogRefreshDue(entry: LaneCatalogEntry | undefined, nowMs: number): boolean {
+  const delay = entry?.status === 'ok' ? CATALOG_REFRESH_AGE_MS : CATALOG_RETRY_AFTER_MS;
+  return entry?.fetchedAt == null || nowMs - entry.fetchedAt >= delay;
 }
 
 const EffortSupportSchema = z.discriminatedUnion('provenance', [
