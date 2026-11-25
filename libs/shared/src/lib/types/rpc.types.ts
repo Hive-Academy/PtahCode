@@ -125,6 +125,7 @@ export * from './rpc/rpc-providers.types';
 export * from './rpc/rpc-provider-accounts.types';
 export * from './rpc/rpc-setup.types';
 export * from './rpc/rpc-setup-decisions.types';
+export * from './rpc/rpc-skill-judge.types';
 export * from './rpc/rpc-agents.types';
 import type { AgentPermissionRequest } from './agent-permission.types';
 export * from './rpc/rpc-misc.types';
@@ -470,6 +471,15 @@ import type {
   EnhancedPromptsGetRunStateParams,
   EnhancedPromptsGetRunStateResponse,
 } from './rpc/rpc-setup.types';
+
+import type {
+  WizardGenerateSkillDraftParams,
+  WizardGenerateSkillDraftResult,
+  WizardGetSetupModelParams,
+  WizardGetSetupModelResult,
+  WizardSetSetupModelParams,
+  WizardSetSetupModelResult,
+} from './rpc/rpc-skill-judge.types';
 
 import type {
   AgentOrchestrationConfig,
@@ -1586,6 +1596,18 @@ export interface RpcMethodRegistry
   'wizard:recommend-analysis-skills': {
     params: WizardRecommendAnalysisSkillsParams;
     result: WizardRecommendAnalysisSkillsResult;
+  };
+  'wizard:get-setup-model': {
+    params: WizardGetSetupModelParams;
+    result: WizardGetSetupModelResult;
+  };
+  'wizard:set-setup-model': {
+    params: WizardSetSetupModelParams;
+    result: WizardSetSetupModelResult;
+  };
+  'wizard:generate-skill-draft': {
+    params: WizardGenerateSkillDraftParams;
+    result: WizardGenerateSkillDraftResult;
   };
   'wizard:search-skills': {
     params: WizardSearchSkillsParams;
@@ -3859,6 +3881,9 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:analysis-status': true,
   'wizard:recommend-skills': true,
   'wizard:recommend-analysis-skills': true,
+  'wizard:get-setup-model': true,
+  'wizard:set-setup-model': true,
+  'wizard:generate-skill-draft': true,
   'wizard:search-skills': true,
   'wizard:get-project-guidance': true,
   'wizard:preview-skills-for-consent': true,

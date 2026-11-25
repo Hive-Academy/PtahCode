@@ -116,6 +116,9 @@ export const RPC_USER_ERROR_CODES = [
   'REVIEW_LANES_INVALID',
   /** The review operator settings were saved but the lane write failed (`ReviewLaneErrorCode`). */
   'REVIEW_LANES_NOT_SAVED',
+  'SETUP_MODEL_INVALID',
+  'ANALYSIS_LOAD_FAILED',
+  'SKILLS_RECOMMEND_FAILED',
 ] as const;
 
 export type RpcUserErrorCode = (typeof RPC_USER_ERROR_CODES)[number];
