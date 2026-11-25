@@ -153,15 +153,21 @@ describe('outcomeFiguresFrom', () => {
       delivered: 0,
       failed: 1,
     });
-    expect(lookup('codex', 'implement', 'gpt-5', 'max')).toBeNull();
-    expect(lookup('codex', 'implement', 'gpt-5', 'low')).toBeNull();
+    expect(lookup('codex', 'implement', 'gpt-5', 'max')).toEqual({
+      laneId: 'codex',
+      taskKind: 'implement',
+      model: 'gpt-5',
+      effort: ANY_EFFORT,
+      delivered: 3,
+      failed: 1,
+    });
     expect(lookup('codex', 'implement')).toBeNull();
     expect(Object.keys(lookup('codex', 'implement', 'gpt-5', 'high') ?? {}).sort()).toEqual([
       'delivered', 'effort', 'failed', 'laneId', 'model', 'taskKind',
     ]);
   });
 
-  it('defaults effort to "*" for runs whose effort was not sent when byModelEffort is true', () => {
+  it('counts runs with and without a known sent effort in the model aggregate', () => {
     const lookup = outcomeFiguresFrom([
       summary('omitted', 'delivered'),
       summary('refused', 'failed', {
@@ -178,16 +184,31 @@ describe('outcomeFiguresFrom', () => {
       taskKind: 'implement',
       model: 'gpt-5',
       effort: ANY_EFFORT,
-      delivered: 1,
+      delivered: 2,
       failed: 2,
     };
     expect(lookup('codex', 'implement', 'gpt-5')).toEqual(expectedAnyEffort);
     expect(lookup('codex', 'implement', 'gpt-5', ANY_EFFORT)).toEqual(expectedAnyEffort);
+    expect(lookup('codex', 'implement', 'gpt-5', 'medium')).toEqual(expectedAnyEffort);
     expect(lookup('codex', 'implement', 'gpt-5', 'high')).toEqual({
       laneId: 'codex',
       taskKind: 'implement',
       model: 'gpt-5',
       effort: 'high',
+      delivered: 1,
+      failed: 0,
+    });
+  });
+
+  it('uses effort-null history for a concrete effort', () => {
+    const lookup = outcomeFiguresFrom([
+      summary('pre-v2', 'delivered', { effort: null }),
+    ], { byModelEffort: true });
+    expect(lookup('codex', 'implement', 'gpt-5', 'high')).toEqual({
+      laneId: 'codex',
+      taskKind: 'implement',
+      model: 'gpt-5',
+      effort: ANY_EFFORT,
       delivered: 1,
       failed: 0,
     });
@@ -239,7 +260,10 @@ describe('outcomeFiguresFrom', () => {
       model: FAMILY_PROFILE_MODEL,
       effort: 'high',
       delivered: 2,
-      failed: 1,
+      failed: 2,
+    });
+    expect(lookup('codex', 'implement', FAMILY_PROFILE_MODEL, 'medium')).toMatchObject({
+      model: FAMILY_PROFILE_MODEL, effort: ANY_EFFORT, delivered: 2, failed: 2,
     });
     expect(lookup('codex', 'implement', 'other', 'high')).toBeNull();
     expect(lookup('codex', 'implement', LANE_DEFAULT_MODEL, 'high')).toBeNull();
@@ -265,7 +289,9 @@ describe('outcomeFiguresFrom', () => {
       delivered: 1,
       failed: 1,
     });
-    expect(lookup('codex', 'implement', 'gpt-5', 'low')).toBeNull();
+    expect(lookup('codex', 'implement', 'gpt-5', 'low')).toMatchObject({
+      effort: ANY_EFFORT, delivered: 1, failed: 1,
+    });
   });
 
   it('gives the same figures with byModelEffort false as the default mode', () => {

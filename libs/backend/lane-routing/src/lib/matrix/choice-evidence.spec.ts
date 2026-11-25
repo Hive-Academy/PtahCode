@@ -286,12 +286,16 @@ describe('model and effort outcome figures', () => {
       laneId: 'glm', taskKind: 'implement', model: KEY.model, effort: 'high',
       delivered: 1, failed: 1,
     });
-    expect(byChoice('glm', 'implement', KEY.model)).toEqual({
+    // The '*' bucket holds every run of the model, whatever effort it sent.
+    const anyEffort = {
       laneId: 'glm', taskKind: 'implement', model: KEY.model, effort: '*',
-      delivered: 0, failed: 1,
-    });
+      delivered: 1, failed: 2,
+    };
+    expect(byChoice('glm', 'implement', KEY.model)).toEqual(anyEffort);
     expect(byChoice('glm', 'implement', 'other', 'high')?.delivered).toBe(1);
-    expect(byChoice('glm', 'implement', KEY.model, 'max')).toBeNull();
+    // An effort with no runs of its own falls back to the model's '*' bucket.
+    expect(byChoice('glm', 'implement', KEY.model, 'max')).toEqual(anyEffort);
+    expect(byChoice('glm', 'implement', 'unknown-model', 'high')).toBeNull();
     expect(outcomeFiguresFrom(rows, { byModelEffort: false })('glm', 'implement')).toEqual({
       laneId: 'glm', taskKind: 'implement', delivered: 2, failed: 3,
     });

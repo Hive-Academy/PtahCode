@@ -219,7 +219,9 @@ function scoreChoice(
       if (model === fallback && effort === policyEffort) continue;
       if (effort !== policyEffort && (choice.effortFixed || !supportsEffort(model, effort))) continue;
       const pair = resolve(model, effort);
-      if (pair.resolved.parts.evidence === 'prior' && pair.resolved.parts.priorSource !== 'user') continue;
+      const explicitUserOverride = pair.resolved.parts.priorSource === 'user'
+        && (model === fallback || pair.resolved.profileModel === model.id);
+      if (pair.resolved.parts.evidence === 'prior' && !explicitUserOverride) continue;
       hasEvidence ||= pair.resolved.parts.evidence !== 'prior';
       if (pair.resolved.total - baseline.resolved.total <= CLOSENESS_BAND) continue;
       if (pair.resolved.total > exploit.resolved.total) exploit = pair;

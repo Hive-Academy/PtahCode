@@ -142,16 +142,20 @@ export function buildDecisionPayload(input: DecisionPayloadInput): DecisionPaylo
             : [option.laneId, option.family, option.model, option.effort];
         }
         const model = decisionOutcomeModel(option.model);
-        const byTask = figuresByChoice.get(figureGroup(option.laneId, model, option.effort))
-          ?? figuresByChoice.get(figureGroup(option.laneId));
+        const exact = figuresByChoice.get(figureGroup(option.laneId, model, option.effort));
+        const anyEffort = figuresByChoice.get(figureGroup(option.laneId, model, ANY_EFFORT));
+        const lane = figuresByChoice.get(figureGroup(option.laneId));
         let samples = 0;
         if (question.taskKind === undefined) {
+          const byTask = exact ?? anyEffort ?? lane;
           for (const { label, counts } of byTask?.values() ?? []) {
             state.pastOutcomes[label] = counts;
             samples += counts[1];
           }
         } else {
-          const outcome = byTask?.get(question.taskKind);
+          const outcome = exact?.get(question.taskKind)
+            ?? anyEffort?.get(question.taskKind)
+            ?? lane?.get(question.taskKind);
           if (outcome !== undefined) {
             state.pastOutcomes[outcome.label] = outcome.counts;
             samples = outcome.counts[1];

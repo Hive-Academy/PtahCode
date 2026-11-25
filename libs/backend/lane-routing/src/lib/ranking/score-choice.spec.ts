@@ -226,6 +226,33 @@ describe('model and effort choices', () => {
     });
   });
 
+  it('keeps the configured model over a higher user score inherited by an unprofiled model', () => {
+    const result = score({
+      candidate: CODEX,
+      configuredModel: { id: 'selected', provenance: 'configured' },
+      models: [model('unprofiled', ['high'])],
+      choice: choice([]),
+    }, 'implement', matrix({
+      selected: value('user', 40),
+      [FAMILY_PROFILE_MODEL]: value('user', 80),
+    }));
+    expect(result).toMatchObject({ model: 'selected', effort: 'medium', score: 40 });
+  });
+
+  it('lets a family user effort override promote the lane-default effort', () => {
+    const priors: ScoreMatrix = {
+      ...matrix(),
+      resolvePair: (_family, _id, _taskKind, effort) =>
+        matrixCell(FAMILY_PROFILE_MODEL, value('user', effort === 'high' ? 80 : 40)),
+    };
+    const result = score({
+      candidate: CODEX,
+      models: [model(LANE_DEFAULT_MODEL, ['high'])],
+      choice: choice([]),
+    }, 'implement', priors);
+    expect(result).toMatchObject({ model: LANE_DEFAULT_MODEL, effort: 'high', score: 80 });
+  });
+
   it('uses catalog order and then canonical effort order to break equal scores', () => {
     const input: ScoreInput = {
       candidate: CODEX,
