@@ -1,8 +1,10 @@
-import { DatePipe } from '@angular/common';
+import { DOCUMENT, DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  Injector,
+  NgZone,
   OnDestroy,
   OnInit,
   computed,
@@ -13,9 +15,28 @@ import {
   viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { ClockService } from '@ptah-extension/core';
-import { LucideAngularModule, Play, ScanSearch } from 'lucide-angular';
-import { SetupActionDirective } from '@ptah-extension/ui';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  ClockService,
+  type ViewType,
+} from '@ptah-extension/core';
+import {
+  getAnthropicProvider,
+  type SetupPairState,
+} from '@ptah-extension/shared';
+import {
+  ArrowUpRight,
+  LucideAngularModule,
+  Play,
+  ScanSearch,
+} from 'lucide-angular';
+import {
+  PtahAlertComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  SetupActionDirective,
+} from '@ptah-extension/ui';
 import {
   ConfirmationModalComponent,
   SetupWizardStateService,
@@ -35,6 +56,81 @@ import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { AnalysisStepStore } from './analysis-step.store';
 import { PhaseListComponent } from './phase-list.component';
 
+interface SetupCardIssue {
+  readonly message: string;
+  readonly actionLabel: string;
+  readonly action: 'choose-provider' | 'choose-model' | 'sign-in' | 'retry';
+  readonly provider: string | null;
+  readonly canUseWorkspace: boolean;
+}
+
+function formatProviderDisplayName(id: string): string {
+  const meta = getAnthropicProvider(id);
+  if (meta?.name) return meta.name;
+  return id.toLowerCase() === 'openai' ? 'OpenAI' : id;
+}
+
+function resolveOptionalAppState(injector: Injector): AppStateManager | null {
+  try {
+    return injector.get(AppStateManager, null);
+  } catch {
+    return null;
+  }
+}
+
+function describeSetupIssue(
+  state: SetupPairState | null,
+): SetupCardIssue | null {
+  if (!state || state.kind === 'set' || state.kind === 'unset') return null;
+  const providerName = state.provider
+    ? formatProviderDisplayName(state.provider)
+    : 'the selected provider';
+  const subject = state.source === 'setup' ? 'Setup' : 'The workspace model';
+  const base = {
+    provider: state.provider,
+    canUseWorkspace: state.source === 'setup',
+  };
+  if (state.kind === 'unavailable') {
+    return {
+      ...base,
+      message: `${subject} could not reach ${providerName}.`,
+      actionLabel: 'Retry',
+      action: 'retry',
+    };
+  }
+  if (state.cause === 'not-signed-in') {
+    const scope = state.source === 'setup' ? 'Setup' : 'the workspace model';
+    return {
+      ...base,
+      message: `${providerName} is not signed in for ${scope}.`,
+      actionLabel: 'Sign in',
+      action: 'sign-in',
+    };
+  }
+  if (state.cause === 'model-missing' || state.cause === 'model-stale') {
+    const detail =
+      state.cause === 'model-missing'
+        ? `has no model selected for ${providerName}`
+        : `uses ${state.model ?? 'a removed model'}, which ${providerName} no longer offers`;
+    return {
+      ...base,
+      message: `${subject} ${detail}.`,
+      actionLabel: 'Choose a model',
+      action: 'choose-model',
+    };
+  }
+  const detail =
+    state.cause === 'provider-missing'
+      ? 'has no provider selected'
+      : `uses ${providerName}, which is ${state.cause === 'provider-unknown' ? 'no longer offered' : 'unsupported for Setup'}`;
+  return {
+    ...base,
+    message: `${subject} ${detail}.`,
+    actionLabel: 'Choose a provider',
+    action: 'choose-provider',
+  };
+}
+
 @Component({
   selector: 'ptah-analyze-workspace-page',
   standalone: true,
@@ -47,6 +143,9 @@ import { PhaseListComponent } from './phase-list.component';
     RunPanelComponent,
     PhaseListComponent,
     LucideAngularModule,
+    PtahAlertComponent,
+    PtahBadgeDirective,
+    PtahButtonDirective,
     SetupActionDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -82,11 +181,99 @@ import { PhaseListComponent } from './phase-list.component';
           </h1>
           <p class="text-sm text-base-content-muted">
             Understand this project and find relevant skills.
-
           </p>
         </div>
       </header>
       <ptah-onboarding-stepper [steps]="steps" />
+
+      @if (
+        setupState() &&
+        !runner.isRunning() &&
+        !runner.isCanceling() &&
+        !stopRecovery()
+      ) {
+        <section
+          class="space-y-3 rounded-[22px] border border-base-300 p-4"
+          data-glass-surface="tile"
+          data-testid="setup-model-card"
+          aria-labelledby="setup-model-card-title"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 id="setup-model-card-title" class="text-base font-semibold">
+                Setup model
+              </h2>
+              <span
+                ptahBadge
+                [tone]="setupBadgeTone()"
+                data-testid="setup-model-badge"
+              >
+                {{ setupBadgeLabel() }}
+              </span>
+            </div>
+            <button
+              ptahButton
+              variant="link"
+              size="sm"
+              type="button"
+              data-testid="setup-model-settings-link"
+              (click)="openSetupSettings()"
+            >
+              Change in Settings
+              <lucide-angular
+                [img]="icons.external"
+                class="size-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <div class="space-y-1">
+            <p class="text-sm font-semibold" data-testid="setup-model-pair">
+              {{ setupPairText() }}
+            </p>
+            @if (setupHintText(); as hint) {
+              <p class="text-xs text-base-content-muted">{{ hint }}</p>
+            }
+          </div>
+          @if (setupIssue(); as issue) {
+            <ptah-alert
+              tone="error"
+              live="assertive"
+              data-testid="setup-model-alert"
+            >
+              {{ issue.message }}
+              <div alertAction class="flex flex-wrap items-center gap-2">
+                <button
+                  ptahButton
+                  variant="secondary"
+                  size="xs"
+                  type="button"
+                  data-testid="setup-model-issue-action"
+                  (click)="runSetupIssueAction(issue)"
+                >
+                  {{ issue.actionLabel }}
+                </button>
+                @if (issue.canUseWorkspace) {
+                  <button
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    type="button"
+                    data-testid="setup-model-use-workspace"
+                    [disabled]="setupUpdating()"
+                    (click)="useWorkspaceModel()"
+                  >
+                    Use workspace model
+                  </button>
+                }
+              </div>
+            </ptah-alert>
+          }
+          @if (setupActionError(); as actionError) {
+            <p class="text-xs text-state-err" role="alert">{{ actionError }}</p>
+          }
+        </section>
+      }
 
       @if (stopRecovery()) {
         <ptah-run-panel
@@ -160,7 +347,6 @@ import { PhaseListComponent } from './phase-list.component';
             'Completed in ' + duration(result.manifest.totalDurationMs)
           "
           (continueRun)="reviewSkills()"
-
         >
           <ptah-phase-list [phases]="store.phaseRows()" />
         </ptah-run-panel>
@@ -196,6 +382,7 @@ import { PhaseListComponent } from './phase-list.component';
             <button
               type="button"
               [ptahSetupAction]="'primaryCompact'"
+              [disabled]="setupInvalid()"
               (click)="continuePrevious()"
             >
               Continue previous run
@@ -203,11 +390,20 @@ import { PhaseListComponent } from './phase-list.component';
             <button
               type="button"
               [ptahSetupAction]="'ghost'"
+              [disabled]="setupInvalid()"
               (click)="startFresh()"
             >
               Start fresh
             </button>
           </div>
+          @if (setupInvalid()) {
+            <p
+              class="mt-2 text-sm text-base-content-muted"
+              data-testid="setup-start-hint"
+            >
+              Choose a valid Setup model to start.
+            </p>
+          }
         </section>
       } @else {
         <section
@@ -221,6 +417,8 @@ import { PhaseListComponent } from './phase-list.component';
           <button
             type="button"
             [ptahSetupAction]="'primaryFull'"
+            [disabled]="setupInvalid()"
+            data-testid="start-analysis-button"
             (click)="startFresh()"
           >
             <lucide-angular
@@ -229,6 +427,14 @@ import { PhaseListComponent } from './phase-list.component';
               aria-hidden="true"
             />Start analysis
           </button>
+          @if (setupInvalid()) {
+            <p
+              class="mt-2 text-sm text-base-content-muted"
+              data-testid="setup-start-hint"
+            >
+              Choose a valid Setup model to start.
+            </p>
+          }
         </section>
       }
 
@@ -299,27 +505,85 @@ import { PhaseListComponent } from './phase-list.component';
   `,
 })
 export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
-  readonly analysis = input<string | undefined>();
-  readonly rerun = input<string | undefined>();
+  public readonly analysis = input<string | undefined>();
+  public readonly rerun = input<string | undefined>();
   protected readonly store = inject(AnalysisStepStore);
   protected readonly runner = inject(WizardAnalysisRunner);
   private readonly rpc = inject(WizardRpcService);
+  private readonly claudeRpc = inject(ClaudeRpcService);
+  private readonly appState = resolveOptionalAppState(inject(Injector));
+  private readonly ngZone = inject(NgZone);
+  private readonly doc = inject(DOCUMENT);
   private readonly wizardState = inject(SetupWizardStateService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private destroyed = false;
   private pendingAnalysis: string | null = null;
+  private setupAbort: AbortController | null = null;
+  private setupRequestSeq = 0;
+  private lastView: ViewType | null = null;
   protected readonly stopModal =
     viewChild.required<ConfirmationModalComponent>('stopModal');
   protected readonly steps: readonly OnboardingStep[] = [
     { id: 'analyze', label: 'Analyze', state: 'current' },
     { id: 'skills', label: 'Review skills', state: 'upcoming' },
-
     { id: 'guidance', label: 'Project guidance', state: 'upcoming' },
     { id: 'done', label: 'Done', state: 'upcoming' },
   ];
   protected readonly interrupted = signal(false);
   protected readonly savedError = signal(false);
+  protected readonly setupState = signal<SetupPairState | null>(null);
+  protected readonly setupUpdating = signal(false);
+  protected readonly setupActionError = signal<string | null>(null);
+  protected readonly setupIssue = computed(() =>
+    describeSetupIssue(this.setupState()),
+  );
+  protected readonly setupInvalid = computed(() => this.setupIssue() !== null);
+  protected readonly setupBadgeLabel = computed(() => {
+    const state = this.setupState();
+    if (!state) return '';
+    return state.kind === 'unset'
+      ? 'Default'
+      : state.kind === 'set'
+        ? 'Set'
+        : 'Needs attention';
+  });
+  protected readonly setupBadgeTone = computed<'neutral' | 'info' | 'err'>(
+    () => {
+      const state = this.setupState();
+      if (state?.kind === 'set') return 'info';
+      return state?.kind === 'invalid' || state?.kind === 'unavailable'
+        ? 'err'
+        : 'neutral';
+    },
+  );
+  protected readonly setupPairText = computed(() => {
+    const state = this.setupState();
+    if (!state) return '';
+    if (state.kind === 'unset') {
+      return `${formatProviderDisplayName(state.effective.provider)} / ${state.effective.model}`;
+    }
+    if (state.kind === 'set') {
+      return `${formatProviderDisplayName(state.pair.provider)} / ${state.pair.model}`;
+    }
+    const providerLabel = state.provider
+      ? formatProviderDisplayName(state.provider)
+      : 'No provider';
+    return `${providerLabel} / ${state.model || 'No model'}`;
+  });
+  protected readonly setupHintText = computed<string | null>(() => {
+    const state = this.setupState();
+    if (!state) return null;
+    if (state.kind === 'unset') {
+      return 'Default: uses the workspace provider and selected model for setup.';
+    }
+    if (state.kind === 'set') {
+      return 'Used for project analysis, skill review, agent generation, and guidance.';
+    }
+    return state.source === 'setup'
+      ? 'Configured Setup model cannot be used until fixed or cleared.'
+      : 'Workspace model cannot be used for setup until fixed.';
+  });
   protected readonly visibleSaved = computed(() =>
     this.store
       .saved()
@@ -345,16 +609,43 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   private readonly clock = inject(ClockService);
   private readonly now = this.clock.now;
   private releaseClock: (() => void) | null = null;
-  protected readonly elapsedSeconds = computed(() =>
-    this.openedAt() === null
+  protected readonly elapsedSeconds = computed(() => {
+    const opened = this.openedAt();
+    return opened === null
       ? null
-      : Math.max(0, Math.floor((this.now() - this.openedAt()!) / 1000)),
-  );
-  protected readonly icons = { scan: ScanSearch, play: Play } as const;
-  constructor() {
+      : Math.max(0, Math.floor((this.now() - opened) / 1000));
+  });
+  protected readonly icons = {
+    scan: ScanSearch,
+    play: Play,
+    external: ArrowUpRight,
+  } as const;
+
+  public constructor() {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
+      this.setupAbort?.abort();
+      this.setupAbort = null;
     });
+    const win = this.doc.defaultView;
+    if (win) {
+      const onFocus = (): void => {
+        if (!this.destroyed) void this.refreshSetupModel();
+      };
+      win.addEventListener('focus', onFocus);
+      this.destroyRef.onDestroy(() => win.removeEventListener('focus', onFocus));
+    }
+    if (this.appState) {
+      const appState = this.appState;
+      effect(() => {
+        const view = appState.currentView();
+        const prev = this.lastView;
+        this.lastView = view;
+        if (prev === 'settings' && view === 'onboarding') {
+          void this.refreshSetupModel();
+        }
+      });
+    }
     effect(() => {
       if (
         this.openedAt() !== null &&
@@ -364,10 +655,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         this.stopClock();
     });
   }
-  async ngOnInit(): Promise<void> {
+
+  public async ngOnInit(): Promise<void> {
+    void this.refreshSetupModel();
     if (this.rerun() === '1') {
-      // Clear the one-time intent first, so a reload or Back during the run
-      // cannot start another fresh analysis.
       await this.router.navigate([], {
         queryParams: { rerun: null },
         queryParamsHandling: 'merge',
@@ -387,10 +678,86 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         resumable.analysis?.manifest.lifecycle !== 'completed',
     );
   }
-  ngOnDestroy(): void {
+
+  public ngOnDestroy(): void {
     this.store.detachStream();
     this.stopClock();
   }
+
+  protected async refreshSetupModel(): Promise<void> {
+    this.setupAbort?.abort();
+    const controller = new AbortController();
+    this.setupAbort = controller;
+    const seq = ++this.setupRequestSeq;
+    try {
+      const response = await this.ngZone.runOutsideAngular(() =>
+        this.claudeRpc.call(
+          'wizard:get-setup-model',
+          {},
+          { signal: controller.signal },
+        ),
+      );
+      if (this.destroyed || seq !== this.setupRequestSeq) return;
+      if (response.isSuccess()) {
+        this.ngZone.run(() => {
+          this.setupActionError.set(null);
+          this.setupState.set(response.data.state);
+        });
+      }
+    } catch {
+      // Read-only preview refresh failure leaves prior state untouched.
+    }
+  }
+
+  protected openSetupSettings(providerId?: string): void {
+    if (!this.appState) return;
+    this.appState.requestSettingsTab({
+      tab: 'providers',
+      section: 'setup',
+      ...(providerId ? { providerId } : {}),
+    });
+    this.appState.setCurrentView('settings');
+  }
+
+  protected runSetupIssueAction(issue: SetupCardIssue): void {
+    if (issue.action === 'retry') {
+      void this.refreshSetupModel();
+      return;
+    }
+    this.openSetupSettings(
+      issue.action === 'sign-in' && issue.provider ? issue.provider : undefined,
+    );
+  }
+
+  protected async useWorkspaceModel(): Promise<void> {
+    if (this.setupUpdating()) return;
+    this.setupUpdating.set(true);
+    this.setupActionError.set(null);
+    const seq = ++this.setupRequestSeq;
+    try {
+      const response = await this.claudeRpc.call('wizard:set-setup-model', {
+        provider: '',
+        model: '',
+      });
+      if (this.destroyed || seq !== this.setupRequestSeq) return;
+      if (!response.isSuccess()) {
+        this.setupActionError.set(
+          'Could not switch to the workspace model. Try again.',
+        );
+        return;
+      }
+      this.setupState.set(response.data.state);
+    } catch {
+      if (!this.destroyed && seq === this.setupRequestSeq) {
+        this.setupActionError.set(
+          'Could not switch to the workspace model. Try again.',
+        );
+      }
+    } finally {
+      if (!this.destroyed) this.setupUpdating.set(false);
+    }
+  }
+
   protected safeError(raw: string): string {
     return safeFailureCopy(raw, 'Analysis could not finish. Try again.');
   }
@@ -401,7 +768,6 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     try {
       await this.store.listAnalyses();
     } catch {
-      // degradation-audit: reported — savedError displays the saved-analyses load failure.
       if (!this.destroyed) this.savedError.set(true);
       return;
     }
@@ -438,6 +804,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     }
   }
   protected async startFresh(): Promise<void> {
+    if (this.setupInvalid()) return;
     this.pendingAnalysis = null;
     this.wizardState.reset();
     this.runner.reset();
@@ -450,6 +817,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     await this.loadSaved();
   }
   protected async continuePrevious(): Promise<void> {
+    if (this.setupInvalid()) return;
     this.pendingAnalysis = null;
     this.store.clearSelection();
     this.interrupted.set(false);
@@ -492,11 +860,9 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       analysis: this.store.selected() ?? this.store.loaded()?.manifest.slug,
     };
     const link = onboardingStepLink('analyze', 'skills', identity);
-
     await this.router.navigate([...link.commands], {
       queryParams: link.queryParams,
       state: { explicitBack: false },
     });
   }
 }
-

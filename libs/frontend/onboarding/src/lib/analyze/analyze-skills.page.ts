@@ -5,6 +5,7 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  NgZone,
   OnInit,
   computed,
   effect,
@@ -13,15 +14,121 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
-import type { WizardRecommendAnalysisSkillsResult } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import {
+  getAnthropicProvider,
+  type SetupPairState,
+  type WizardRecommendAnalysisSkillsResult,
+} from '@ptah-extension/shared';
+import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { StackSkillStore } from '../proposal/stack-skill.store';
 import { StackSkillConsentComponent } from '../proposal/stack-skill-consent.component';
-import { StackSkillReviewComponent } from '../proposal/stack-skill-review.component';
+import {
+  StackSkillReviewComponent,
+  type SkillDraftCreateAction,
+  type SkillDraftPreviewAction,
+} from '../proposal/stack-skill-review.component';
+import { OnboardingRunPillService } from '../shell/onboarding-run-pill.service';
 import { AnalysisStepStore } from './analysis-step.store';
+
+type SetupRecoveryAction =
+  | 'choose-provider'
+  | 'choose-model'
+  | 'sign-in'
+  | 'retry';
+
+export interface SetupBlockView {
+  readonly message: string;
+  readonly actionLabel: string;
+  readonly action: SetupRecoveryAction;
+  readonly provider: string | null;
+  readonly source: 'setup' | 'workspace';
+  readonly hasPriorResult: boolean;
+}
+
+function formatProviderDisplayName(id: string): string {
+  const meta = getAnthropicProvider(id);
+  if (meta?.name) return meta.name;
+  return id.toLowerCase() === 'openai' ? 'OpenAI' : id;
+}
+
+function buildSetupBlock(
+  state: SetupPairState,
+  hasPriorResult: boolean,
+): SetupBlockView | null {
+  if (state.kind === 'set' || state.kind === 'unset') return null;
+  const providerName = state.provider
+    ? formatProviderDisplayName(state.provider)
+    : 'the selected provider';
+  const subject = state.source === 'setup' ? 'Setup' : 'The workspace model';
+  const suffix = hasPriorResult
+    ? ' Your previous results remain visible below.'
+    : '';
+  const base = {
+    provider: state.provider,
+    source: state.source,
+    hasPriorResult,
+  };
+  if (state.kind === 'unavailable') {
+    return {
+      ...base,
+      message: `${subject} could not reach ${providerName}.${suffix}`,
+      actionLabel: 'Retry',
+      action: 'retry',
+    };
+  }
+  if (state.cause === 'not-signed-in') {
+    const scope = state.source === 'setup' ? 'Setup' : 'the workspace model';
+    return {
+      ...base,
+      message: `${providerName} is not signed in for ${scope}.${suffix}`,
+      actionLabel: 'Sign in',
+      action: 'sign-in',
+    };
+  }
+  if (state.cause === 'model-missing' || state.cause === 'model-stale') {
+    const detail =
+      state.cause === 'model-missing'
+        ? `has no model selected for ${providerName}`
+        : `uses ${state.model ?? 'a removed model'}, which ${providerName} no longer offers`;
+    return {
+      ...base,
+      message: `${subject} ${detail}.${suffix}`,
+      actionLabel: 'Choose a model',
+      action: 'choose-model',
+    };
+  }
+  const detail =
+    state.cause === 'provider-missing'
+      ? 'has no provider selected'
+      : `uses ${providerName}, which is ${state.cause === 'provider-unknown' ? 'no longer offered' : 'unsupported for Setup'}`;
+  return {
+    ...base,
+    message: `${subject} ${detail}.${suffix}`,
+    actionLabel: 'Choose a provider',
+    action: 'choose-provider',
+  };
+}
+
+function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
+  const suffix = hasPriorResult
+    ? ' Your previous results remain visible below.'
+    : '';
+  return {
+    message: `Setup model needs attention before finding skills.${suffix}`,
+    actionLabel: 'Choose a model',
+    action: 'choose-model',
+    provider: null,
+    source: 'setup',
+    hasPriorResult,
+  };
+}
 
 @Component({
   selector: 'ptah-analyze-skills-page',
@@ -29,6 +136,7 @@ import { AnalysisStepStore } from './analysis-step.store';
   imports: [
     StackSkillReviewComponent,
     StackSkillConsentComponent,
+    PtahAlertComponent,
     PtahButtonDirective,
   ],
   providers: [StackSkillStore],
@@ -60,8 +168,90 @@ import { AnalysisStepStore } from './analysis-step.store';
         >
           Continue to Project guidance
         </button>
+      } @else if (setupBlock() && !summary()) {
+        @if (setupBlock(); as block) {
+          <div class="space-y-4 p-4">
+            <header class="flex items-start gap-3">
+              <button
+                ptahButton
+                variant="ghost"
+                type="button"
+                [disabled]="leaving()"
+                (click)="back()"
+              >
+                Back
+              </button>
+              <div>
+                <h1
+                  id="skill-review-title"
+                  tabindex="-1"
+                  class="text-xl font-semibold"
+                >
+                  Choose skills for your stack
+                </h1>
+                <p class="text-sm text-base-content-muted">
+                  Choose skills for this project. You can continue without
+                  installing any.
+                </p>
+              </div>
+            </header>
+            <ptah-alert
+              tone="error"
+              live="assertive"
+              data-testid="setup-model-blocked"
+            >
+              {{ block.message }}
+              <button
+                alertAction
+                ptahButton
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="setup-model-recovery-action"
+                (click)="runSetupRecovery(block)"
+              >
+                {{ block.actionLabel }}
+              </button>
+            </ptah-alert>
+            <div class="flex flex-wrap gap-2">
+              <button
+                ptahButton
+                variant="ghost"
+                type="button"
+                [disabled]="leaving()"
+                (click)="continueToGuidance()"
+              >
+                Skip skills
+              </button>
+            </div>
+          </div>
+        }
       } @else {
+        @if (setupBlock(); as block) {
+          <div class="px-4 pt-4">
+            <ptah-alert
+              tone="error"
+              live="assertive"
+              data-testid="setup-model-blocked"
+            >
+              {{ block.message }}
+              <button
+                alertAction
+                ptahButton
+                variant="secondary"
+                size="sm"
+                type="button"
+                data-testid="setup-model-recovery-action"
+                (click)="runSetupRecovery(block)"
+              >
+                {{ block.actionLabel }}
+              </button>
+            </ptah-alert>
+          </div>
+        }
         <ptah-stack-skill-review
+          [store]="state"
+          [runId]="loadedRunId()"
           [headingLevel]="1"
           [showOwnerDecision]="false"
           [busy]="leaving()"
@@ -83,7 +273,7 @@ import { AnalysisStepStore } from './analysis-step.store';
           [selectionReset]="selectionReset()"
           [error]="state.error()"
           [loadError]="loadError()"
-          [backOnLoadError]="!canRetry()"
+          [backOnLoadError]="backOnLoadError()"
           [searchError]="state.searchError()"
           [query]="state.searchQuery()"
           (selectionToggled)="toggleSelection($event)"
@@ -91,7 +281,10 @@ import { AnalysisStepStore } from './analysis-step.store';
           (selectionResetDismissed)="dismissSelectionReset()"
           (retryRequested)="retry()"
           (searchRequested)="search($event)"
+          (itemSearchRequested)="searchForItem($event)"
           (searchCleared)="clearSearch()"
+          (draftPreviewRequested)="generateDraftPreview($event)"
+          (draftCreateRequested)="createDraft($event)"
           (continueRequested)="preview()"
           (skip)="continueToGuidance()"
           (back)="back()"
@@ -128,8 +321,12 @@ import { AnalysisStepStore } from './analysis-step.store';
 export class AnalyzeSkillsPage implements OnInit {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
+  private readonly ngZone = inject(NgZone);
   private readonly loadErrorState = signal(true);
   public readonly loadError = this.loadErrorState.asReadonly();
+  private readonly backOnLoadErrorState = signal(false);
+  private readonly setupBlockState = signal<SetupBlockView | null>(null);
+  public readonly setupBlock = this.setupBlockState.asReadonly();
   private readonly skillsInstalledState = signal(false);
   public readonly skillsInstalled = this.skillsInstalledState.asReadonly();
   private readonly route = inject(ActivatedRoute);
@@ -139,6 +336,8 @@ export class AnalyzeSkillsPage implements OnInit {
   private readonly tabs = inject(TabManagerService);
   private readonly analysis = inject(AnalysisStepStore);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly appState = inject(AppStateManager);
+  private readonly runPill = inject(OnboardingRunPillService);
   public readonly state = inject(StackSkillStore);
   private readonly wizardRpc = inject(WizardRpcService);
   public readonly summary = signal<WizardRecommendAnalysisSkillsResult | null>(
@@ -146,17 +345,24 @@ export class AnalyzeSkillsPage implements OnInit {
   );
   private readonly leavingState = signal(false);
   public readonly leaving = this.leavingState.asReadonly();
+  public readonly loadedRunId = computed(
+    () => this.analysis.loaded()?.manifest.runId ?? '',
+  );
   public readonly canRetry = computed(() =>
     Boolean(
       this.analysis.loaded()?.manifest.runId &&
       this.workspace.config().workspaceRoot,
     ),
   );
+  public readonly backOnLoadError = computed(
+    () => !this.canRetry() || this.backOnLoadErrorState(),
+  );
   private readonly selectionResetState = signal(false);
   public readonly selectionReset = this.selectionResetState.asReadonly();
   private version = 0;
   private searchVersion = 0;
   private identity = '\u0000';
+  private pendingGuidanceTab: { identity: string; tab: string } | null = null;
 
   public constructor() {
     effect(() => {
@@ -168,15 +374,21 @@ export class AnalyzeSkillsPage implements OnInit {
       this.version++;
       this.searchVersion++;
       this.summary.set(null);
+      this.setupBlockState.set(null);
       this.selectionResetState.set(false);
       this.state.reset();
+      this.runPill.clear();
       this.loadErrorState.set(true);
+      this.backOnLoadErrorState.set(false);
       this.skillsInstalledState.set(false);
       if (!runId) this.state.setError('Choose a completed analysis first.');
       else if (root) void this.load(runId, this.version);
       else this.state.setError('Open a workspace to find skills.');
     });
-    this.destroyRef.onDestroy(() => this.version++);
+    this.destroyRef.onDestroy(() => {
+      this.version++;
+      this.runPill.clear();
+    });
   }
 
   public ngOnInit(): void {
@@ -227,12 +439,74 @@ export class AnalyzeSkillsPage implements OnInit {
       );
   }
 
+  private applySetupBlock(block: SetupBlockView): void {
+    this.setupBlockState.set(block);
+    this.state.setLoading(false);
+    if (!this.summary()) {
+      this.loadErrorState.set(false);
+      this.backOnLoadErrorState.set(false);
+      this.state.setError(null);
+    }
+  }
+
+  private applyLoadFailure(message: string): void {
+    this.setupBlockState.set(null);
+    this.loadErrorState.set(true);
+    this.backOnLoadErrorState.set(true);
+    this.state.setError(message);
+  }
+
+  private async resolveSetupBlockFromRpc(
+    version: number,
+    hasPriorResult: boolean,
+  ): Promise<void> {
+    try {
+      const setupResp = await this.rpc.call('wizard:get-setup-model', {});
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (setupResp.isSuccess()) {
+        const block = buildSetupBlock(setupResp.data.state, hasPriorResult);
+        if (block) {
+          this.applySetupBlock(block);
+          return;
+        }
+      }
+    } catch {
+      if (version !== this.version || this.destroyRef.destroyed) return;
+    }
+    this.applySetupBlock(fallbackSetupBlock(hasPriorResult));
+  }
+
   private async load(
     runId: string,
     version: number,
     rerun = false,
   ): Promise<void> {
-    this.loadErrorState.set(true);
+    const hasPriorResult = this.summary() !== null;
+    try {
+      const setupResp = await this.rpc.call('wizard:get-setup-model', {});
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (!setupResp.isSuccess()) {
+        if (setupResp.errorCode === 'SETUP_MODEL_INVALID') {
+          this.applySetupBlock(fallbackSetupBlock(hasPriorResult));
+          return;
+        }
+        this.applyLoadFailure('Could not load skill recommendations.');
+        return;
+      }
+      const block = buildSetupBlock(setupResp.data.state, hasPriorResult);
+      if (block) {
+        this.applySetupBlock(block);
+        return;
+      }
+    } catch {
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      this.applyLoadFailure('Could not load skill recommendations.');
+      return;
+    }
+
+    this.setupBlockState.set(null);
+    this.loadErrorState.set(!hasPriorResult);
+    this.backOnLoadErrorState.set(false);
     this.state.setPreviewing(false);
     this.state.setPreview([]);
     this.state.setLoading(true);
@@ -243,28 +517,53 @@ export class AnalyzeSkillsPage implements OnInit {
         { runId },
         { timeout: 75_000 },
       );
-      if (version !== this.version) return;
-      if (!response.isSuccess()) throw new Error('Registry unavailable');
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (!response.isSuccess()) {
+        if (response.errorCode === 'SETUP_MODEL_INVALID') {
+          await this.resolveSetupBlockFromRpc(version, hasPriorResult);
+          return;
+        }
+        const message =
+          response.errorCode === 'ANALYSIS_LOAD_FAILED'
+            ? 'Could not read the saved analysis.'
+            : 'Could not load skill recommendations.';
+        this.applyLoadFailure(message);
+        return;
+      }
       this.selectionResetState.set(rerun);
       this.summary.set(response.data);
-      this.state.setRecommendations(response.data.skills);
-      this.state.setSelectedIds(
-        new Set(
-          response.data.skills.map(
-            ({ skill }) => `${skill.source}/${skill.skillId}`,
-          ),
-        ),
-      );
+      this.state.applyRecommendationResult(response.data);
+      this.runPill.recordRun({
+        analysisPair: this.state.analysisPair(),
+        stages: response.data.judge.stages,
+      });
       this.loadErrorState.set(false);
+      this.backOnLoadErrorState.set(false);
       this.state.setStage('review');
     } catch {
-      if (version === this.version)
-        this.state.setError(
-          'Could not find skills. Try again or skip this step.',
-        );
+      if (version === this.version && !this.destroyRef.destroyed) {
+        this.applyLoadFailure('Could not load skill recommendations.');
+      }
     } finally {
-      if (version === this.version) this.state.setLoading(false);
+      if (version === this.version && !this.destroyRef.destroyed) {
+        this.state.setLoading(false);
+      }
     }
+  }
+
+  public runSetupRecovery(block: SetupBlockView): void {
+    if (block.action === 'retry') {
+      this.retry();
+      return;
+    }
+    this.appState.requestSettingsTab({
+      tab: 'providers',
+      section: 'setup',
+      ...(block.action === 'sign-in' && block.provider
+        ? { providerId: block.provider }
+        : {}),
+    });
+    this.appState.setCurrentView('settings');
   }
 
   public dismissSelectionReset(): void {
@@ -281,7 +580,9 @@ export class AnalyzeSkillsPage implements OnInit {
     this.searchVersion++;
     this.state.setSearching(false);
     this.state.setSearchError(null);
-    void this.load(runId, ++this.version, true);
+    this.ngZone.run(() => {
+      void this.load(runId, ++this.version, this.summary() !== null);
+    });
   }
 
   public clearSearch(): void {
@@ -312,12 +613,95 @@ export class AnalyzeSkillsPage implements OnInit {
     }
   }
 
+  public async searchForItem(request: {
+    readonly itemId: string;
+    readonly query: string;
+  }): Promise<void> {
+    const query = request.query.trim();
+    if (!query) return;
+    const version = this.version;
+    const searchVersion = ++this.searchVersion;
+    this.state.setSearching(true);
+    this.state.setSearchError(null);
+    try {
+      const response = await this.rpc.call('wizard:search-skills', { query });
+      if (version !== this.version || searchVersion !== this.searchVersion)
+        return;
+      if (!response.isSuccess()) throw new Error('Search failed');
+      this.state.setItemSearchResults(request.itemId, response.data.skills);
+    } catch {
+      if (version === this.version && searchVersion === this.searchVersion)
+        this.state.setSearchError('Skill search failed. Try again.');
+    } finally {
+      if (version === this.version && searchVersion === this.searchVersion)
+        this.state.setSearching(false);
+    }
+  }
+
+  public async generateDraftPreview(
+    action: SkillDraftPreviewAction,
+  ): Promise<void> {
+    if (this.state.consentOpen()) return;
+    const version = this.version;
+    const req = {
+      revision: action.revision,
+      previewRequestSeq: action.previewRequestSeq,
+    };
+    const fallback =
+      'Could not generate a skill draft. You can write it manually below.';
+    try {
+      const response = await this.rpc.call(
+        'wizard:generate-skill-draft',
+        action.params,
+        { timeout: 60_000 },
+      );
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (!response.isSuccess()) {
+        this.state.applyDraftPreviewError(req, fallback);
+        return;
+      }
+      this.state.applyDraftPreviewResult(req, response.data);
+    } catch {
+      if (version === this.version && !this.destroyRef.destroyed) {
+        this.state.applyDraftPreviewError(req, fallback);
+      }
+    }
+  }
+
+  public async createDraft(action: SkillDraftCreateAction): Promise<void> {
+    if (this.state.consentOpen()) return;
+    const version = this.version;
+    const fallback = 'Could not create this skill. Your draft is still here.';
+    try {
+      const response = await this.rpc.call('harness:create-skill', {
+        name: action.submitted.name,
+        description: action.submitted.description,
+        content: action.submitted.body,
+      });
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (!response.isSuccess()) {
+        this.state.failCreateDraft(action.revision, fallback);
+        return;
+      }
+      this.state.completeCreateDraft(action.revision, response.data.skillPath);
+    } catch {
+      if (version === this.version && !this.destroyRef.destroyed) {
+        this.state.failCreateDraft(action.revision, fallback);
+      }
+    }
+  }
+
   public async preview(): Promise<void> {
     if (this.skillsInstalled()) {
       await this.continueToGuidance();
       return;
     }
-    if (this.state.loading() || this.state.previewing() || this.leaving())
+    if (
+      this.state.loading() ||
+      this.state.previewing() ||
+      this.leaving() ||
+      this.state.draftOpen()
+    )
       return;
     if (!this.state.selectedIds().size) {
       await this.continueToGuidance();
@@ -342,9 +726,7 @@ export class AnalyzeSkillsPage implements OnInit {
         )
       )
         throw new Error('Preview incomplete');
-      this.state.setPreview(response.data.skills);
-      this.state.setApprovedIds(new Set());
-      this.state.setStage('consent');
+      this.state.openConsent(response.data.skills);
     } catch {
       if (version === this.version)
         this.state.setError('Could not preview skills. Try again.');
@@ -403,7 +785,8 @@ export class AnalyzeSkillsPage implements OnInit {
   }
 
   public closeConsent(): void {
-    this.state.setStage('review');
+    if (this.state.stage() === 'consent') this.state.closeConsent();
+    else if (this.state.stage() === 'installing') this.state.setStage('review');
     afterNextRender(
       () => {
         if (!this.destroyRef.destroyed)
@@ -416,8 +799,6 @@ export class AnalyzeSkillsPage implements OnInit {
       { injector: this.injector },
     );
   }
-
-  private pendingGuidanceTab: { identity: string; tab: string } | null = null;
 
   private guidanceIdentity(): string {
     return `${this.identity}:${this.route.snapshot.queryParamMap.get('analysis') ?? ''}:${this.route.snapshot.queryParamMap.get('run') ?? ''}`;
