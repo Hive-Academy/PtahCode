@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2328_5bd6
-status: in_progress
+status: in_review
 type: FEATURE
 title: Score lane models from real outcomes and auto-discover catalogs
 depends_on: []
