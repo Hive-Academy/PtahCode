@@ -43,6 +43,8 @@ describe('ONBOARDING_ROUTES', () => {
     const router = configure();
     await router.navigateByUrl('/onboarding/analyze/skills');
     expect(router.url).toBe('/onboarding/analyze/skills');
-
+    let page = router.routerState.snapshot.root;
+    while (page.firstChild) page = page.firstChild;
+    expect(page.data['layout']).toBe('full');
   });
 });

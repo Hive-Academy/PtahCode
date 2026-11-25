@@ -352,7 +352,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                 @if (row.id === 'setup') {
                   @if (setupIssue(); as issue) {
                     <div class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2 text-xs">
-                      <span class="min-w-0 flex-1" role="alert" data-testid="setup-model-issue">
+                      <span class="min-w-0 basis-full" role="alert" data-testid="setup-model-issue">
                         {{ issue.message }}
                       </span>
                       @switch (issue.action) {

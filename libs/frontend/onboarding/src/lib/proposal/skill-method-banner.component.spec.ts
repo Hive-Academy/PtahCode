@@ -95,6 +95,7 @@ describe('SkillMethodBannerComponent', () => {
     expect(button?.getAttribute('aria-expanded')).toBe('false');
     expect(button?.getAttribute('aria-controls')).toBe(details?.id);
     expect(details?.hasAttribute('hidden')).toBe(true);
+    expect(details?.classList.contains('flex')).toBe(false);
     expect(root.textContent).toContain('Details');
 
     button?.click();
@@ -103,6 +104,7 @@ describe('SkillMethodBannerComponent', () => {
       'true',
     );
     expect(root.querySelector('ul')?.hasAttribute('hidden')).toBe(false);
+    expect(details?.classList.contains('flex')).toBe(true);
     expect(root.textContent).toContain('Hide details');
 
     root.querySelector('button')?.click();

@@ -69,7 +69,8 @@ interface StageDetail {
       <ul
         [id]="detailsId"
         [hidden]="!detailsExpanded()"
-        class="mt-[var(--ptah-gap-label)] flex list-none flex-col gap-[var(--ptah-gap-label)] p-0"
+        [class.flex]="detailsExpanded()"
+        class="mt-[var(--ptah-gap-label)] list-none flex-col gap-[var(--ptah-gap-label)] p-0"
       >
         @for (stage of stageDetails(); track $index) {
           <li

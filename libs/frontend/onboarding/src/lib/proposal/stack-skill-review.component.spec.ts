@@ -467,12 +467,14 @@ describe('StackSkillReviewComponent judged review', () => {
   it('opens a blank manual draft in the empty state and allows another skill after Create', () => {
     const { fixture, root, store } = setup({
       ...judge,
+      method: 'none',
       items: [],
       candidates: [],
       proposals: [],
       counts: { decision: 0, normal: 0, notJudged: 0 },
     });
     expect(root.textContent).toContain('No skills match your stack yet');
+    expect(root.querySelector('ptah-skill-method-banner')).toBeNull();
     const search = root.querySelector('[aria-labelledby="search-title"]');
     if (!search) throw new Error('Missing search controls');
     const opener = button(search, 'Write a skill by hand');

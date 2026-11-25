@@ -53,11 +53,13 @@
               No stack summary was found for this analysis.
             </p>
           }
-          <ptah-skill-method-banner
-            [method]="judge.method"
-            [counts]="judge.counts"
-            [stages]="judge.stages"
-          />
+          @if (judge.items.length || judge.candidates.length || judge.proposals.length) {
+            <ptah-skill-method-banner
+              [method]="judge.method"
+              [counts]="judge.counts"
+              [stages]="judge.stages"
+            />
+          }
           @if (coverage().length) {
             <ptah-stack-coverage-strip
               data-testid="stack-coverage-strip"

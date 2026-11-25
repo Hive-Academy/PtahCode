@@ -14,8 +14,8 @@ import { OnboardingRunPillService } from './onboarding-run-pill.service';
 import { WorkspaceHeaderComponent } from './workspace-header.component';
 
 /**
- * The frame every onboarding page renders in: a 1120px column (1440px for a
- * page route with `data.layout: 'wide'`, such as three cards side by side), the top bar
+ * The frame every onboarding page renders in: a 1120px column by default,
+ * 1440px for `data.layout: 'wide'`, and uncapped for `data.layout: 'full'`, the top bar
  * (breadcrumb and the read-only provider/model pill of a running flow), the
  * page outlet and the one polite status region.
  *
@@ -35,8 +35,8 @@ import { WorkspaceHeaderComponent } from './workspace-header.component';
   template: `
     <div
       class="mx-auto w-full px-5 pb-16 pt-5 text-base-content max-[720px]:px-3.5 max-[720px]:pt-4"
-      [class.max-w-[1120px]]="!wide()"
-      [class.max-w-[1440px]]="wide()"
+      [class.max-w-[1120px]]="layout() === null"
+      [class.max-w-[1440px]]="layout() === 'wide'"
       data-testid="onboarding-column"
     >
       <div class="mb-6 flex flex-wrap items-center gap-3">
@@ -126,8 +126,7 @@ export class OnboardingShellComponent {
   protected readonly onEntryPage = signal(false);
   /** The second crumb, from the active child route's `data.crumb`. */
   protected readonly crumb = signal<string | null>(null);
-  /** The active page asked for the wide column (`data.layout === 'wide'`). */
-  protected readonly wide = signal(false);
+  protected readonly layout = signal<'wide' | 'full' | null>(null);
 
   /** A new page is in the outlet: update the crumb and focus its h1. */
   protected onPageActivated(): void {
@@ -139,7 +138,8 @@ export class OnboardingShellComponent {
     this.crumb.set(typeof crumb === 'string' ? crumb : null);
     let page = child;
     while (page?.firstChild) page = page.firstChild;
-    this.wide.set(page?.snapshot.data['layout'] === 'wide');
+    const layout: unknown = page?.snapshot.data['layout'];
+    this.layout.set(layout === 'wide' || layout === 'full' ? layout : null);
     this.focus.focusHeading(this.host.nativeElement);
   }
 

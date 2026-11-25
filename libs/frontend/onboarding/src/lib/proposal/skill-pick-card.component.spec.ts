@@ -138,6 +138,7 @@ describe('SkillPickCardComponent', () => {
         `#${more.getAttribute('aria-controls')}`,
       ) as HTMLElement;
       expect(region.hidden).toBe(true);
+      expect(region.classList.contains('flex')).toBe(false);
       const toggled = jest.fn();
       fixture.componentInstance.toggled.subscribe(toggled);
       more.click();
@@ -146,6 +147,7 @@ describe('SkillPickCardComponent', () => {
       expect(more.getAttribute('aria-expanded')).toBe('true');
       expect(more.textContent?.trim()).toBe('Less');
       expect(region.hidden).toBe(false);
+      expect(region.classList.contains('flex')).toBe(true);
       expect(region.textContent).toContain(long);
       expect(region.textContent).toContain('Runs scripts/install.sh');
       expect(region.textContent).toContain('A, B, C, D');
