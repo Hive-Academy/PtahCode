@@ -62,7 +62,7 @@ const FUNNEL_FIELDS = [
   template: `
     <ptah-form-section wide level="2" heading="Routing evidence" data-glass-surface="content">
       <ng-template #funnelDetails let-funnel>
-        <dl class="my-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs tabular-nums">
+        <dl class="my-[var(--ptah-space-2)] grid grid-cols-2 gap-x-[var(--ptah-space-3)] gap-y-[var(--ptah-gap-label)] text-xs tabular-nums">
           @for (field of funnelFields; track field[0]) {
             <dt>{{ field[1] }}</dt>
             <dd>{{ funnel[field[0]] }}</dd>
@@ -85,9 +85,9 @@ const FUNNEL_FIELDS = [
         <div class="space-y-[var(--ptah-gap-section)]">
           <p class="text-xs text-base-content-muted">Outcomes from the last {{ evidence.windowDays }} days</p>
           @for (lane of evidence.lanes; track lane.laneId) {
-            <div class="min-w-0 space-y-2">
+            <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
               <h3 class="font-semibold break-all">{{ lane.laneId }}</h3>
-              <div class="flex flex-wrap items-center gap-2 text-xs text-base-content-muted">
+              <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] text-xs text-base-content-muted">
                 <span>Catalog</span>
                 <span ptahBadge [tone]="lane.catalog.status === 'ok' ? 'ok' : 'warn'">
                   {{ catalogStatus[lane.catalog.status] }}
@@ -163,7 +163,7 @@ const FUNNEL_FIELDS = [
             <p class="text-xs text-base-content-muted">No lane evidence yet.</p>
           }
 
-          <div class="min-w-0 space-y-2">
+          <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
             <h3 class="font-semibold">Decision models</h3>
             @if (evidence.decisionModels.length > 0) {
               <ptah-table label="Decision model outcomes" density="compact">
