@@ -6,7 +6,11 @@
  * sent. There are no retries. A live 404/405 is reported as `notFound` for
  * the caller to re-check; this module never persists a mark.
  */
-import { SUBAGENT_LANE_ID, type OutcomeTaskKind } from '@ptah-extension/shared';
+import {
+  SUBAGENT_LANE_ID,
+  type ModelPair,
+  type OutcomeTaskKind,
+} from '@ptah-extension/shared';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import {
   MIN_OPTIONS_PER_PHASE,
@@ -67,11 +71,13 @@ export interface FixedQuestion {
   readonly criteria: Readonly<Record<string, string>>;
 }
 
-export interface ModelRequestOutcome {
+export interface ModelRequestOutcome<
+  Cause extends ModelRequestCause = FallbackCause,
+> {
   readonly sent: boolean;
   readonly succeeded: boolean;
   /** Shared cause when the request was not sent or the whole response failed. */
-  readonly requestCause: FallbackCause | null;
+  readonly requestCause: Cause | null;
   /** Set only for a live HTTP 404/405. The pipeline re-checks; it does not mark. */
   readonly notFoundDetail: string | null;
   readonly answers: ReadonlyMap<string, ChoiceValidation>;
@@ -82,10 +88,14 @@ export interface ModelRequestOutcome {
   readonly outcomeFigures: number;
 }
 
+export type ModelRequestCause = FallbackCause | 'cancelled';
+
 export type ModelDispatch =
   | {
       readonly kind: 'system-one';
       readonly caller: SystemOneCaller;
+      /** Dispatches constructed by DecisionCaller supply the resolved provider. */
+      readonly provider?: 'ollama' | 'jev';
       readonly model: string;
       /**
        * Ollama `keep_alive` this caller will send. The fit measures the same
@@ -185,13 +195,25 @@ export async function runLaneRequest(input: {
   return { ...outcome, outcomeFigures: fitted.figureCount };
 }
 
-export async function runFixedRequest(input: {
+interface FixedRequestInput {
   readonly request: string;
   readonly questions: readonly FixedQuestion[];
   readonly maxRequestBytes: number;
   readonly dispatch: ModelDispatch;
   readonly logger: LaneRoutingLogger;
-}): Promise<ModelRequestOutcome> {
+  readonly signal?: AbortSignal;
+  readonly onProviderSubmit?: (submitted: ModelPair) => void;
+}
+
+export function runFixedRequest(
+  input: FixedRequestInput & { readonly signal?: undefined },
+): Promise<ModelRequestOutcome>;
+export function runFixedRequest(
+  input: FixedRequestInput,
+): Promise<ModelRequestOutcome<ModelRequestCause>>;
+export async function runFixedRequest(
+  input: FixedRequestInput,
+): Promise<ModelRequestOutcome<ModelRequestCause>> {
   const payload = buildDecisionPayload({
     request: input.request,
     questions: input.questions.map((question) => ({
@@ -213,10 +235,18 @@ export async function runFixedRequest(input: {
   if (bytes > input.maxRequestBytes) {
     return emptyOutcome('payload-too-large');
   }
+  if (input.signal?.aborted) {
+    return emptyOutcome('cancelled');
+  }
   const offered = new Map<string, readonly DecisionOption[]>();
   const asked = askedFromFixed(input.questions);
+  const { signal, onProviderSubmit } = input;
   if (input.dispatch.kind === 'system-one') {
-    return callSystemOne(input.dispatch.caller, payload, offered, asked);
+    return callSystemOne(input.dispatch.caller, payload, offered, asked, {
+      pair: { provider: input.dispatch.provider ?? 'ollama', model },
+      signal,
+      onProviderSubmit,
+    });
   }
   return callStructured(
     input.dispatch,
@@ -225,6 +255,7 @@ export async function runFixedRequest(input: {
     offered,
     asked,
     input.logger,
+    { signal, onProviderSubmit },
   );
 }
 

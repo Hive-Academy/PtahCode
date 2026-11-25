@@ -2,6 +2,7 @@
  * Sends one fitted decision-model request. A live HTTP 404/405 is reported
  * as `notFoundDetail` and is not marked here.
  */
+import type { ModelPair } from '@ptah-extension/shared';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import type {
   DecisionOption,
@@ -21,6 +22,7 @@ import type {
   FixedQuestion,
   LaneQuestion,
   ModelDispatch,
+  ModelRequestCause,
   ModelRequestOutcome,
   SystemOneCaller,
 } from './model-refine';
@@ -30,7 +32,17 @@ interface AskedQuestion {
   readonly labels: readonly string[];
 }
 
-export function emptyOutcome(cause: FallbackCause): ModelRequestOutcome {
+interface ProviderSubmission {
+  readonly signal?: AbortSignal;
+  readonly onProviderSubmit?: (submitted: ModelPair) => void;
+}
+
+type SystemOneSubmission = ProviderSubmission & { readonly pair: ModelPair };
+type StructuredDispatch = Extract<ModelDispatch, { kind: 'structured' }>;
+
+export function emptyOutcome<Cause extends ModelRequestCause>(
+  cause: Cause,
+): ModelRequestOutcome<Cause> {
   return {
     sent: false,
     succeeded: false,
@@ -65,12 +77,30 @@ export function askedFromFixed(
   }));
 }
 
+export function callSystemOne(
+  caller: SystemOneCaller,
+  payload: DecisionPayload,
+  offered: ReadonlyMap<string, readonly DecisionOption[]>,
+  questions: readonly AskedQuestion[],
+): Promise<ModelRequestOutcome>;
+export function callSystemOne(
+  caller: SystemOneCaller,
+  payload: DecisionPayload,
+  offered: ReadonlyMap<string, readonly DecisionOption[]>,
+  questions: readonly AskedQuestion[],
+  submission: SystemOneSubmission,
+): Promise<ModelRequestOutcome<ModelRequestCause>>;
 export async function callSystemOne(
   caller: SystemOneCaller,
   payload: DecisionPayload,
   offered: ReadonlyMap<string, readonly DecisionOption[]>,
   questions: readonly AskedQuestion[],
-): Promise<ModelRequestOutcome> {
+  submission?: SystemOneSubmission,
+): Promise<ModelRequestOutcome<ModelRequestCause>> {
+  if (submission?.signal?.aborted) {
+    return emptyOutcome('cancelled');
+  }
+  submission?.onProviderSubmit?.(submission.pair);
   const result = await caller.decide(payload);
   if (!result.ok) {
     return {
@@ -99,21 +129,50 @@ export async function callSystemOne(
   };
 }
 
-export async function callStructured(
-  dispatch: Extract<ModelDispatch, { kind: 'structured' }>,
+export function callStructured(
+  dispatch: StructuredDispatch,
   prompt: string,
   schema: Record<string, unknown>,
   offered: ReadonlyMap<string, readonly DecisionOption[]>,
   questions: readonly AskedQuestion[],
   logger: LaneRoutingLogger,
-): Promise<ModelRequestOutcome> {
-  const pending = dispatch.completer.complete({
+): Promise<ModelRequestOutcome>;
+export function callStructured(
+  dispatch: StructuredDispatch,
+  prompt: string,
+  schema: Record<string, unknown>,
+  offered: ReadonlyMap<string, readonly DecisionOption[]>,
+  questions: readonly AskedQuestion[],
+  logger: LaneRoutingLogger,
+  submission: ProviderSubmission,
+): Promise<ModelRequestOutcome<ModelRequestCause>>;
+export async function callStructured(
+  dispatch: StructuredDispatch,
+  prompt: string,
+  schema: Record<string, unknown>,
+  offered: ReadonlyMap<string, readonly DecisionOption[]>,
+  questions: readonly AskedQuestion[],
+  logger: LaneRoutingLogger,
+  submission?: ProviderSubmission,
+): Promise<ModelRequestOutcome<ModelRequestCause>> {
+  const signal = submission?.signal
+    ? AbortSignal.any([dispatch.signal, submission.signal])
+    : dispatch.signal;
+  const input = {
     providerId: dispatch.providerId,
     model: dispatch.model,
     prompt,
     jsonSchema: schema,
-    signal: dispatch.signal,
+    signal,
+  };
+  if (submission?.signal && signal.aborted) {
+    return emptyOutcome('cancelled');
+  }
+  submission?.onProviderSubmit?.({
+    provider: input.providerId,
+    model: input.model,
   });
+  const pending = dispatch.completer.complete(input);
   let payload: unknown;
   try {
     const raced = await raceDeadline(

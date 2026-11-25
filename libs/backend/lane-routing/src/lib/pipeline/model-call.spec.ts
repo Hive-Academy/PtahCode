@@ -17,7 +17,7 @@ import {
   DECISION_RETURN_MARGIN_MS,
 } from '../routing-constants';
 import { callStructured, callSystemOne } from './model-call';
-import { systemOneClientOptions } from './model-refine';
+import { runFixedRequest, systemOneClientOptions } from './model-refine';
 
 const BUDGET = DECISION_REQUEST_TIMEOUT_MS + DECISION_RETURN_MARGIN_MS;
 
@@ -92,6 +92,120 @@ function completer(
 ): StructuredDecisionCompleter {
   return { isReady: async () => true, complete };
 }
+
+describe.each(['system-one', 'structured'] as const)(
+  'fixed request submission (%s)',
+  (kind) => {
+    function setup() {
+      const decide = jest.fn(async () => ({
+        ok: false as const,
+        cause: 'provider-error' as const,
+        detail: 'test failure',
+        notFound: false,
+      }));
+      const complete = jest.fn(async () => ({}));
+      const dispatch =
+        kind === 'system-one'
+          ? {
+              kind,
+              caller: { decide },
+              provider: 'jev' as const,
+              model: 'effective-system-one',
+            }
+          : {
+              kind,
+              completer: completer(complete),
+              providerId: 'structured-provider',
+              model: 'effective-structured',
+              signal: new AbortController().signal,
+            };
+      const onProviderSubmit = jest.fn();
+      return {
+        input: {
+          request: 'Classify the task',
+          questions: [],
+          maxRequestBytes: 10_000,
+          dispatch,
+          logger: quietLogger(),
+          onProviderSubmit,
+        },
+        decide,
+        complete,
+        onProviderSubmit,
+      };
+    }
+
+    it('onProviderSubmit fires immediately before decide/complete with effective pair', async () => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+      const pending = runFixedRequest(input);
+      const providerCall = kind === 'system-one' ? decide : complete;
+
+      expect(providerCall).toHaveBeenCalledTimes(1);
+      expect(onProviderSubmit).toHaveBeenCalledTimes(1);
+      expect(onProviderSubmit).toHaveBeenCalledWith(
+        kind === 'system-one'
+          ? { provider: 'jev', model: 'effective-system-one' }
+          : { provider: 'structured-provider', model: 'effective-structured' },
+      );
+      expect(onProviderSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        providerCall.mock.invocationCallOrder[0],
+      );
+      await expect(pending).resolves.toMatchObject({ sent: true });
+    });
+
+    it.each([
+      {
+        requestCause: 'payload-too-large',
+        maxRequestBytes: 1,
+        signal: undefined,
+      },
+      {
+        requestCause: 'cancelled',
+        maxRequestBytes: 10_000,
+        signal: AbortSignal.abort(),
+      },
+    ])('suppresses dispatch and onProviderSubmit on $requestCause', async ({
+      requestCause,
+      maxRequestBytes,
+      signal,
+    }) => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+
+      await expect(
+        runFixedRequest({ ...input, maxRequestBytes, signal }),
+      ).resolves.toMatchObject({ sent: false, requestCause });
+      expect(onProviderSubmit).not.toHaveBeenCalled();
+      expect(decide).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+    });
+
+    it('checks cancellation again at the provider call boundary', async () => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+      const { dispatch, logger } = input;
+      const submission = { signal: AbortSignal.abort(), onProviderSubmit };
+      const outcome =
+        dispatch.kind === 'system-one'
+          ? await callSystemOne(dispatch.caller, PAYLOAD, new Map(), [], {
+              ...submission,
+              pair: { provider: dispatch.provider, model: dispatch.model },
+            })
+          : await callStructured(
+              dispatch,
+              'prompt',
+              {},
+              new Map(),
+              [],
+              logger,
+              submission,
+            );
+
+      expect(outcome).toMatchObject({ sent: false, requestCause: 'cancelled' });
+      expect(onProviderSubmit).not.toHaveBeenCalled();
+      expect(decide).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+    });
+  },
+);
 
 describe('callStructured deadline', () => {
   afterEach(() => {

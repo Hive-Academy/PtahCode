@@ -7,6 +7,7 @@ import {
   SUBAGENT_FAMILY,
   isRetiredRole,
   type LaneLimitState,
+  type ModelPair,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
 
@@ -48,7 +49,11 @@ type GatePhase = GateArgs['phases'][number];
 
 export type OpenedCaller =
   | { readonly kind: 'unset' }
-  | { readonly kind: 'blocked'; readonly cause: FallbackCause }
+  | {
+      readonly kind: 'blocked';
+      readonly cause: FallbackCause;
+      readonly configuredPair?: ModelPair;
+    }
   | {
       readonly kind: 'system-one';
       /** The selection the target was resolved for (404 re-check identity). */
