@@ -276,6 +276,10 @@ export class PtahFileSettingsManager {
    * key is present), fires watchers synchronously in one turn, and returns the
    * frozen `committedSlice` captured inside this transaction.
    *
+   * A later {@link set} on a batch key can have its optimistic value overwritten
+   * by the batch if it runs before the batch commits. Await `setMany()` before
+   * calling `set()` on the same key to preserve that order.
+   *
    * On failure, removes the temp file, leaves `this.settings` and disk
    * unchanged for those keys, fires no watchers, and throws
    * {@link SettingsPersistError}. The write queue keeps accepting writes.
@@ -313,7 +317,13 @@ export class PtahFileSettingsManager {
       committedSlice = frozenSlice;
       for (const [key, value] of pendingEntries) {
         this.listeners.get(key)?.forEach((cb) => {
-          cb(value);
+          try {
+            cb(value);
+          } catch {
+            console.warn(
+              `[PtahFileSettingsManager] Watcher failed after committing batch key ${key}.`,
+            );
+          }
         });
       }
     };

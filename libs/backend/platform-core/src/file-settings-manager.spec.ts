@@ -1257,6 +1257,32 @@ describe('PtahFileSettingsManager', () => {
       });
     });
 
+    it('returns committed values and notifies remaining watchers when a watcher throws', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      const entries = {
+        'setup.provider': 'openrouter',
+        'setup.model': 'anthropic/claude-sonnet-4-5',
+      };
+      const providerWatcher = jest.fn();
+      const modelWatcher = jest.fn();
+      mgr.watch('setup.provider', () => {
+        throw new Error('watcher failed');
+      });
+      mgr.watch('setup.provider', providerWatcher);
+      mgr.watch('setup.model', modelWatcher);
+
+      await expect(mgr.setMany(entries)).resolves.toEqual(entries);
+
+      expect(mgr.getMany(Object.keys(entries))).toEqual(entries);
+      const restarted = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      expect(restarted.getMany(Object.keys(entries))).toEqual(entries);
+      expect(providerWatcher).toHaveBeenCalledWith(entries['setup.provider']);
+      expect(modelWatcher).toHaveBeenCalledWith(entries['setup.model']);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[PtahFileSettingsManager] Watcher failed after committing batch key setup.provider.',
+      );
+    });
+
     it('set() behavior is unchanged (optimistic read-after-set, rollback on failure)', async () => {
       const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
       await mgr.set('authMethod', 'claudeCli');

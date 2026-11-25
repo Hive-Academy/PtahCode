@@ -92,6 +92,19 @@ describe('serializeSkillDocument', () => {
     );
   });
 
+  it('escapes backslashes, quotes and line breaks in quoted frontmatter values', () => {
+    const result = serializeSkillDocument({
+      name: 'Skill\n"Name"\\',
+      description: 'Path "C:\\path"\r\nEnds with \\',
+      body: 'Body',
+    });
+
+    expect(result.content.split('\n').slice(1, 3)).toEqual([
+      String.raw`name: "Skill\n\"Name\"\\"`,
+      String.raw`description: "Path \"C:\\path\"\r\nEnds with \\"`,
+    ]);
+  });
+
   it('preserves delimiter-prefixed body verbatim with source: custom and sanitized allowed_tools', () => {
     const body = '---\nname: model-metadata\n---\n\n## Instructions\n';
     const result = serializeSkillDocument({

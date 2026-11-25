@@ -19,6 +19,14 @@ export function skillDocumentSlug(name: string): string {
     .replace(/^-|-$/g, '');
 }
 
+function escapeFrontmatterValue(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
+
 /**
  * Serialize a SKILL.md document without changing the supplied body.
  * Draft frontmatter normalization belongs to normalizeDraftBody, not this writer.
@@ -26,10 +34,8 @@ export function skillDocumentSlug(name: string): string {
 export function serializeSkillDocument(
   input: SerializeSkillDocumentInput,
 ): SerializedSkillDocument {
-  const escapedName = input.name.replace(/"/g, '\\"');
-  const escapedDescription = input.description
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
+  const escapedName = escapeFrontmatterValue(input.name);
+  const escapedDescription = escapeFrontmatterValue(input.description);
   const safeToolName = (tool: string) => tool.replace(/[^\w:/.\\-]/g, '');
   const toolsSection =
     input.allowedTools && input.allowedTools.length > 0
