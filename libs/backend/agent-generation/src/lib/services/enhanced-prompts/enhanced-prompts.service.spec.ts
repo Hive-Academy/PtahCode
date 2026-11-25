@@ -48,6 +48,7 @@ jest.mock('@ptah-extension/agent-sdk', () => ({
 }));
 
 import { EnhancedPromptsService } from './enhanced-prompts.service';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import type {
   PromptDesignerInput,
   PromptDesignerOutput,
@@ -79,7 +80,7 @@ interface Mocks {
     getCurrentWorkspaceInfo: jest.Mock;
   };
   internalQueryService: { execute: jest.Mock };
-  workspaceLlm: { resolveForPath: jest.Mock };
+  workspaceLlm: { resolveForPath: jest.Mock; resolveSetup: jest.Mock };
   analysisStorage: {
     writeEnhancedPromptTrace: jest.Mock;
     resolveAuthorizedAnalysisDir: jest.Mock;
@@ -131,6 +132,14 @@ function createMocks(): Mocks {
       execute: jest.fn(),
     },
     workspaceLlm: {
+      resolveSetup: jest.fn().mockResolvedValue({
+        kind: 'set',
+        snapshot: {
+          providerId: 'anthropic',
+          model: 'setup-model',
+          auth: { env: { ANTHROPIC_API_KEY: 'setup-key' } },
+        },
+      }),
       resolveForPath: jest.fn(
         async (_root: string, opts?: { requestedModel?: string }) => ({
           providerId: 'anthropic',
@@ -607,10 +616,7 @@ describe('EnhancedPromptsService', () => {
         error: 'Generation already in progress',
       });
       const controller = new AbortController();
-      const route = await service.resolveGuidanceRoute(
-        testWorkspacePath,
-        'requested',
-      );
+      const route = await service.resolveGuidanceRoute(testWorkspacePath);
       const result = await service.runWizard(
         testWorkspacePath,
         undefined,
@@ -632,11 +638,40 @@ describe('EnhancedPromptsService', () => {
       service.releaseBoundGeneration(reservation!);
       expect(service.generationInProgress).toBe(false);
       expect(mocks.freshness.getStatus).not.toHaveBeenCalled();
-      expect(mocks.workspaceLlm.resolveForPath).toHaveBeenCalledWith(
+      expect(mocks.workspaceLlm.resolveSetup).toHaveBeenCalledWith(
         testWorkspacePath,
-        { requestedModel: 'requested' },
+      );
+      expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mocks.internalQueryService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'setup-model',
+          auth: { env: { ANTHROPIC_API_KEY: 'setup-key' } },
+        }),
       );
     });
+
+    it.each([
+      ['invalid', 'model-stale'],
+      ['unavailable', 'provider-unavailable'],
+    ])(
+      'rejects %s Setup routes without a workspace fallback',
+      async (kind, cause) => {
+        mocks.workspaceLlm.resolveSetup.mockResolvedValue({
+          kind,
+          cause,
+          source: 'setup',
+          provider: 'anthropic',
+          model: 'setup-model',
+        });
+        await expect(
+          service.resolveGuidanceRoute(testWorkspacePath),
+        ).rejects.toThrow(
+          `Setup model for guidance could not be resolved (${cause})`,
+        );
+        expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+        expect(mocks.internalQueryService.execute).not.toHaveBeenCalled();
+      },
+    );
 
     it('stops before trace and state commit when cancelled during preparation', async () => {
       primeSuccessfulSdk();
@@ -1228,6 +1263,156 @@ describe('EnhancedPromptsService', () => {
           auth: { env: { ANTHROPIC_AUTH_TOKEN: 'ws-key' } },
         }),
       );
+    });
+
+    it('Set row: dispatches the supplied Setup route without resolveForPath', async () => {
+      primeSuccessfulSdk();
+      const setupRoute: ResolvedSetupSnapshot = {
+        providerId: 'openrouter',
+        model: 'anthropic/setup-model',
+        auth: {
+          env: { ANTHROPIC_AUTH_TOKEN: 'setup-auth' },
+          baseUrl: 'https://openrouter.ai/api',
+        },
+      };
+      const input: PromptDesignerInput = {
+        workspacePath: testWorkspacePath,
+        projectType: 'app',
+        isMonorepo: false,
+        dependencies: [],
+        devDependencies: [],
+      };
+
+      await service.runWizard(testWorkspacePath, undefined, undefined, input, {
+        mcpServerRunning: false,
+        model: 'conflicting-chat-picker-model',
+        route: setupRoute,
+      });
+
+      expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mocks.internalQueryService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: setupRoute.model,
+          auth: setupRoute.auth,
+        }),
+      );
+    });
+
+    it('Unset row: runWizard and regenerate use workspace auth and ignore picker and tab overrides', async () => {
+      primeSuccessfulSdk();
+      const workspaceRoute: ResolvedSetupSnapshot = {
+        providerId: 'anthropic',
+        model: 'workspace-selected-model',
+        auth: { env: { ANTHROPIC_API_KEY: 'workspace-auth' } },
+      };
+      const pickerModel = 'conflicting-picker-model';
+      const tabOverrideModel = 'conflicting-tab-override-model';
+      expect(pickerModel).not.toBe(workspaceRoute.model);
+      expect(tabOverrideModel).not.toBe(workspaceRoute.model);
+      expect(tabOverrideModel).not.toBe(pickerModel);
+      const input: PromptDesignerInput = {
+        workspacePath: testWorkspacePath,
+        projectType: 'app',
+        isMonorepo: false,
+        dependencies: [],
+        devDependencies: [],
+      };
+
+      const wizardResult = await service.runWizard(
+        testWorkspacePath,
+        undefined,
+        undefined,
+        input,
+        {
+          mcpServerRunning: false,
+          model: pickerModel,
+          route: workspaceRoute,
+        },
+      );
+      mocks.workspaceIntelligence.getProjectInfo.mockResolvedValue({
+        name: 'p',
+        type: 'app',
+        path: testWorkspacePath,
+        dependencies: ['react'],
+        devDependencies: ['jest'],
+        fileStatistics: { '.ts': 5 },
+        totalFiles: 5,
+      });
+      mocks.workspaceIntelligence.getCurrentWorkspaceInfo.mockReturnValue({
+        name: 'p',
+        path: testWorkspacePath,
+        projectType: 'app',
+        frameworks: ['react'],
+      });
+      const regenerateResult = await service.regenerate(
+        testWorkspacePath,
+        { force: false },
+        undefined,
+        {
+          mcpServerRunning: false,
+          model: tabOverrideModel,
+          route: workspaceRoute,
+        },
+      );
+
+      expect(wizardResult.success).toBe(true);
+      expect(
+        regenerateResult.success ? undefined : regenerateResult.error,
+      ).toBeUndefined();
+      expect(regenerateResult).toMatchObject({ success: true });
+      expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mocks.internalQueryService.execute).toHaveBeenCalledTimes(2);
+      for (const [query] of mocks.internalQueryService.execute.mock.calls) {
+        expect(query).toMatchObject({
+          model: workspaceRoute.model,
+          auth: workspaceRoute.auth,
+        });
+        expect(query.model).not.toBe(pickerModel);
+        expect(query.model).not.toBe(tabOverrideModel);
+      }
+    });
+
+    it('uses a bound Setup route without a second workspace resolution', async () => {
+      primeSuccessfulSdk();
+      const reservation = service.acquireBoundGeneration();
+      if (!reservation) throw new Error('Expected a bound reservation');
+      const controller = new AbortController();
+      const setupRoute: ResolvedSetupSnapshot = {
+        providerId: 'vertex',
+        model: 'setup-bound-model',
+        auth: { env: { ANTHROPIC_AUTH_TOKEN: 'bound-setup-auth' } },
+      };
+      const input: PromptDesignerInput = {
+        workspacePath: testWorkspacePath,
+        projectType: 'app',
+        isMonorepo: false,
+        dependencies: [],
+        devDependencies: [],
+      };
+
+      const result = await service.runWizard(
+        testWorkspacePath,
+        undefined,
+        undefined,
+        input,
+        { mcpServerRunning: false, model: 'legacy-client-model' },
+        undefined,
+        {
+          reservation,
+          signal: controller.signal,
+          route: setupRoute,
+        },
+      );
+
+      expect(result.success).toBe(true);
+      expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mocks.internalQueryService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: setupRoute.model,
+          auth: setupRoute.auth,
+        }),
+      );
+      service.releaseBoundGeneration(reservation);
     });
 
     it('forwards onStreamEvent through to the stream processor', async () => {

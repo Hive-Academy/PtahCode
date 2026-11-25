@@ -5,6 +5,7 @@
 import {
   LANE_DEFAULT_MODEL,
   type LaneLimitState,
+  type ModelPair,
   type OutcomeTaskKind,
   type RoutingRule,
 } from '@ptah-extension/shared';
@@ -77,7 +78,11 @@ export interface RoutingRulesInput {
 
 export type OpenedCaller =
   | { readonly kind: 'unset' }
-  | { readonly kind: 'blocked'; readonly cause: FallbackCause }
+  | {
+      readonly kind: 'blocked';
+      readonly cause: FallbackCause;
+      readonly configuredPair?: ModelPair;
+    }
   | {
       readonly kind: 'system-one';
       /** The selection the target was resolved for (404 re-check identity). */

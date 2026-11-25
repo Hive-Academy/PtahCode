@@ -1,7 +1,13 @@
 import { InjectionToken, type Provider } from '@angular/core';
 
 /** Each look preserves one class list from the setup source pages. */
-export type SetupActionLook = 'primaryCompact' | 'primaryFull' | 'ghost' | 'glass';
+export type SetupActionLook =
+  | 'primaryCompact'
+  | 'primaryFull'
+  | 'plainFull'
+  | 'ghost'
+  | 'ghostLink'
+  | 'glass';
 
 export const SETUP_ACTION_LOOK = new InjectionToken<SetupActionLook>('SETUP_ACTION_LOOK', {
   providedIn: 'root',

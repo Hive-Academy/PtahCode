@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { ClaudeRpcService, ModelStateService } from '@ptah-extension/core';
-import { TabManagerService } from '@ptah-extension/chat-state';
+import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   AnalysisStatus,
   EnhancedPromptsRunWizardResponse,
@@ -21,7 +20,6 @@ import type {
   EnhancedPromptsCancelResponse,
 } from '@ptah-extension/shared';
 import { AgentSelection } from './setup-wizard-state.service';
-import { findBoundGenerationTab } from './bound-generation-tab';
 
 /**
  * Centralized RPC timeout budget for wizard backend calls. The values
@@ -49,6 +47,42 @@ export type BoundAgentDecisions = Pick<
   WizardSubmitSelectionParams,
   'previewToken' | 'fileDecisions' | 'target'
 >;
+
+const SETUP_REFUSAL =
+  /\((provider-unknown|provider-unsupported|provider-missing|model-missing|model-stale|not-signed-in|provider-unavailable)(?:;\s*provider=([a-z0-9][a-z0-9._-]{0,63}))?\)/i;
+
+/** Transport failure with its stable code retained for fixed view copy. */
+export class WizardRpcError extends Error {
+  public constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly reason?: string,
+    public readonly provider?: string,
+  ) {
+    super(message);
+    this.name = 'WizardRpcError';
+  }
+}
+
+function guidanceFailure(
+  message: string | undefined,
+  code: string | undefined,
+  fallback: string,
+): WizardRpcError {
+  const text = message || fallback;
+  const setup = code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
+  const reason = setup?.[1].toLowerCase();
+  const provider = setup?.[2];
+  const detail = reason
+    ? ` reason=${reason}${provider ? ` provider=${provider}` : ''}`
+    : '';
+  return new WizardRpcError(
+    code?.startsWith('SETUP_') ? `${code}${detail}: ${text}` : text,
+    code,
+    reason,
+    provider,
+  );
+}
 
 /** Only the decision fields that are set, so absent ones keep server defaults. */
 function boundDecisionFields(
@@ -104,8 +138,6 @@ export interface AgentSelectionResponse {
 })
 export class WizardRpcService {
   private readonly rpcService = inject(ClaudeRpcService);
-  private readonly modelState = inject(ModelStateService);
-  private readonly tabs = inject(TabManagerService);
 
   async getBoundRunState(
     binding: SetupGenerationTabBinding,
@@ -148,14 +180,11 @@ export class WizardRpcService {
     resume = false,
     decisions?: BoundAgentDecisions,
   ): Promise<WizardSubmitSelectionResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'wizard:submit-selection',
       {
         tabBinding: binding,
         selectedAgentIds,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
         ...(resume ? { resume: true } : {}),
         ...boundDecisionFields(decisions),
       },
@@ -177,39 +206,39 @@ export class WizardRpcService {
   async startBoundGuidance(
     binding: SetupGenerationTabBinding,
   ): Promise<EnhancedPromptsRunWizardResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'enhancedPrompts:runWizard',
       {
         workspacePath: binding.workspacePath,
         tabBinding: binding,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
-    if (!result.isSuccess() || !result.data)
-      throw new Error('Start unconfirmed');
+    if (!result.isSuccess() || !result.data) {
+      const error = !result.isSuccess() ? result.error : undefined;
+      const code = !result.isSuccess() ? result.errorCode : undefined;
+      throw guidanceFailure(error, code, 'Start unconfirmed');
+    }
     return result.data;
   }
 
   async regenerateBoundGuidance(
     binding: SetupGenerationTabBinding,
   ): Promise<EnhancedPromptsRunWizardResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'enhancedPrompts:regenerate',
       {
         workspacePath: binding.workspacePath,
         tabBinding: binding,
         force: true,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
-    if (!result.isSuccess() || !result.data)
-      throw new Error('Regeneration unconfirmed');
+    if (!result.isSuccess() || !result.data) {
+      const error = !result.isSuccess() ? result.error : undefined;
+      const code = !result.isSuccess() ? result.errorCode : undefined;
+      throw guidanceFailure(error, code, 'Regeneration unconfirmed');
+    }
     return result.data;
   }
 
@@ -264,7 +293,6 @@ export class WizardRpcService {
       {
         selectedAgentIds: selectedIds,
         analysisDir,
-        model: this.modelState.currentModel() || undefined,
         ...boundDecisionFields(decisions),
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
@@ -347,7 +375,6 @@ export class WizardRpcService {
     const result = await this.rpcService.call(
       'wizard:deep-analyze',
       {
-        model: this.modelState.currentModel() || undefined,
         ...(options?.resume ? { resume: true } : {}),
       },
       { timeout: WIZARD_RPC_TIMEOUTS.DEEP_ANALYSIS_MS },
@@ -427,7 +454,6 @@ export class WizardRpcService {
       {
         workspacePath,
         ...(analysisDir ? { analysisDir } : {}),
-        model: this.modelState.currentModel() || undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );

@@ -4,7 +4,10 @@ import { SETUP_ACTION_LOOK, type SetupActionLook } from './setup-action.look';
 const LOOK_CLASSES: Record<SetupActionLook, string> = {
   primaryCompact: 'btn btn-primary btn-sm',
   primaryFull: 'btn btn-primary mt-4',
+  plainFull: 'btn mt-4',
   ghost: 'btn btn-sm',
+  ghostLink:
+    'btn btn-ghost btn-sm px-2 text-xs font-medium text-base-content underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content',
   glass: 'btn btn-primary btn-sm min-h-8',
 };
 

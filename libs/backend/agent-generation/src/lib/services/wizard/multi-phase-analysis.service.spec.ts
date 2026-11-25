@@ -77,6 +77,7 @@ import {
   createMockFileSystemProvider,
   type MockFileSystemProvider,
 } from '@ptah-extension/platform-core/testing';
+import type { IWorkspaceLlmResolver } from '@ptah-extension/agent-sdk';
 import { AnalysisStorageService } from '../analysis-storage.service';
 import { AnalysisClaudeMdLinker } from '../analysis-claude-md-linker';
 import { computeWorkspaceFingerprint } from '../analysis-fingerprint';
@@ -186,7 +187,8 @@ describe('MultiPhaseAnalysisService', () => {
   >;
   let closeFn: jest.Mock;
   let broadcastMessage: jest.Mock;
-  let resolveLlm: jest.Mock;
+  let resolveLlm: jest.Mock<IWorkspaceLlmResolver['resolveForPath']>;
+  let resolveSetup: jest.Mock<IWorkspaceLlmResolver['resolveSetup']>;
   const SNAPSHOT_AUTH = { env: { ANTHROPIC_AUTH_TOKEN: 'ws-key' } };
   const logger = {
     debug: jest.fn(),
@@ -235,10 +237,18 @@ describe('MultiPhaseAnalysisService', () => {
       },
     );
     broadcastMessage = jest.fn();
-    resolveLlm = jest.fn(async () => ({
+    resolveLlm = jest.fn<IWorkspaceLlmResolver['resolveForPath']>(async () => ({
       providerId: 'kimi-code',
       model: 'snapshot-model',
       auth: SNAPSHOT_AUTH,
+    }));
+    resolveSetup = jest.fn<IWorkspaceLlmResolver['resolveSetup']>(async () => ({
+      kind: 'set',
+      snapshot: {
+        providerId: 'kimi-code',
+        model: 'snapshot-model',
+        auth: SNAPSHOT_AUTH,
+      },
     }));
     service = new MultiPhaseAnalysisService(
       logger as never,
@@ -247,6 +257,7 @@ describe('MultiPhaseAnalysisService', () => {
       storage,
       {
         resolveForPath: resolveLlm,
+        resolveSetup,
       } as never,
       fs,
       new AnalysisClaudeMdLinker(storage, fs, logger as never),
@@ -277,6 +288,12 @@ describe('MultiPhaseAnalysisService', () => {
     expect(manifest.version).toBe(4);
     expect(manifest.runId).toHaveLength(26);
     expect(manifest.lifecycle).toBe('completed');
+    if (manifest.version === 4) {
+      expect(manifest.analysisPair).toEqual({
+        provider: 'kimi-code',
+        model: 'snapshot-model',
+      });
+    }
     for (const config of PHASE_CONFIGS) {
       expect(manifest.phases[config.id].status).toBe('completed');
       if (manifest.version === 4) {
@@ -288,12 +305,18 @@ describe('MultiPhaseAnalysisService', () => {
           manifest.workspaceFingerprint.digest,
         );
         expect(phase.input?.promptSha256).toMatch(/^[0-9a-f]{64}$/);
+        expect(phase.input?.provider).toBe('kimi-code');
+        expect(phase.input?.model).toBe('snapshot-model');
         expect(phase.verification.status).toBe('verified');
         expect(phase.verification.outputSha256).toBe(
           createHash('sha256').update(bytes).digest('hex'),
         );
       }
     }
+    const rawManifest = await fs.readFile(join(SLUG_DIR, 'manifest.json'));
+    expect(rawManifest).not.toContain('ws-key');
+    expect(rawManifest).not.toContain('setupSnapshot');
+    expect(rawManifest).not.toContain('"auth"');
     expect(await readManifest()).toEqual(manifest);
     expect(closeFn).toHaveBeenCalledTimes(4);
 
@@ -504,7 +527,7 @@ describe('MultiPhaseAnalysisService', () => {
   });
 
   describe('resume', () => {
-    async function seedPausedManifest(): Promise<MultiPhaseManifest> {
+    async function seedPausedManifest(): Promise<MultiPhaseManifestV4> {
       await fs.createDirectory(WORKSPACE);
       const fingerprint = await computeWorkspaceFingerprint(WORKSPACE, fs);
       const prompts = buildPhase1Prompts('.ptah/analysis/demo');
@@ -517,8 +540,9 @@ describe('MultiPhaseAnalysisService', () => {
         analyzedAt: '2026-08-30T10:00:00.000Z',
         updatedAt: '2026-08-30T10:05:00.000Z',
         lifecycle: 'paused',
-        // Same model the snapshot resolves — a resumable run.
+        // Same provider + model the snapshot resolves — a resumable run.
         model: 'snapshot-model',
+        analysisPair: { provider: 'kimi-code', model: 'snapshot-model' },
         totalDurationMs: 5_000,
         workspaceFingerprint: fingerprint,
         phases: {
@@ -534,6 +558,7 @@ describe('MultiPhaseAnalysisService', () => {
                 JSON.stringify([prompts.systemPrompt, prompts.userPrompt]),
               ),
               priorPhaseSha256: null,
+              provider: 'kimi-code',
               model: 'snapshot-model',
             },
             verification: {
@@ -873,9 +898,11 @@ describe('MultiPhaseAnalysisService', () => {
     it('starts fresh instead of resuming when the workspace now resolves a different model', async () => {
       // The run was paused on another model; the workspace's provider/model
       // has changed since. Resuming would finish it on a second model.
+      const paused = await seedPausedManifest();
       await storage.writeManifest(SLUG_DIR, {
-        ...(await seedPausedManifest()),
+        ...paused,
         model: 'old-provider-model',
+        analysisPair: { provider: 'kimi-code', model: 'old-provider-model' },
       });
       await storage.writePhaseFile(SLUG_DIR, FILES[0], 'OLD PROFILE');
       scenarios = FILES.map((file) => agentWritesFile(file));
@@ -896,6 +923,148 @@ describe('MultiPhaseAnalysisService', () => {
         expect((call as unknown as { model: string }).model).toBe(
           'snapshot-model',
         );
+      }
+      expect(await fs.readFile(join(SLUG_DIR, FILES[0]))).not.toBe(
+        'OLD PROFILE',
+      );
+    });
+
+    it('starts fresh instead of resuming on a provider-only change with the same model ID', async () => {
+      const paused = await seedPausedManifest();
+      const phase1Input = paused.phases['project-profile'].input;
+      if (!phase1Input) throw new Error('Expected phase 1 input');
+      paused.model = 'shared-model-id';
+      paused.analysisPair = {
+        provider: 'provider-a',
+        model: 'shared-model-id',
+      };
+      paused.phases['project-profile'].input = {
+        ...phase1Input,
+        provider: 'provider-a',
+        model: 'shared-model-id',
+      };
+      await storage.writeManifest(SLUG_DIR, paused);
+      await storage.writePhaseFile(SLUG_DIR, FILES[0], 'OLD PROFILE');
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const providerBAuth = {
+        env: { ANTHROPIC_AUTH_TOKEN: 'provider-b-secret' },
+      };
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        resume: true,
+        setupSnapshot: {
+          providerId: 'provider-b',
+          model: 'shared-model-id',
+          auth: providerBAuth,
+        },
+      });
+
+      expect(result.isOk()).toBe(true);
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.runId).not.toBe('RUN-KEEP');
+      expect(manifest.model).toBe('shared-model-id');
+      expect(manifest.analysisPair).toEqual({
+        provider: 'provider-b',
+        model: 'shared-model-id',
+      });
+      expect(execute).toHaveBeenCalledTimes(4);
+      for (const [call] of execute.mock.calls) {
+        const config = call as unknown as { model: string; auth: unknown };
+        expect(config.model).toBe('shared-model-id');
+        expect(config.auth).toBe(providerBAuth);
+      }
+      expect(manifest.phases['project-profile'].input?.provider).toBe(
+        'provider-b',
+      );
+      expect(await fs.readFile(join(SLUG_DIR, FILES[0]))).not.toBe(
+        'OLD PROFILE',
+      );
+      const rawManifest = await fs.readFile(join(SLUG_DIR, 'manifest.json'));
+      expect(rawManifest).not.toContain('provider-b-secret');
+      expect(rawManifest).not.toContain('"auth"');
+    });
+
+    it('does not reuse a completed phase on a provider-only input mismatch with the same model ID', async () => {
+      const paused = await seedPausedManifest();
+      const phase1Input = paused.phases['project-profile'].input;
+      if (!phase1Input) throw new Error('Expected phase 1 input');
+      paused.phases['project-profile'].input = {
+        ...phase1Input,
+        provider: 'different-provider',
+        model: 'snapshot-model',
+      };
+      await storage.writeManifest(SLUG_DIR, paused);
+      await storage.writePhaseFile(SLUG_DIR, FILES[0], 'OLD PROFILE');
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        resume: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.runId).toBe('RUN-KEEP');
+      expect(execute).toHaveBeenCalledTimes(4);
+      expect(manifest.phases['project-profile'].attempt).toBe(2);
+      expect(manifest.phases['project-profile'].input?.provider).toBe(
+        'kimi-code',
+      );
+      expect(await fs.readFile(join(SLUG_DIR, FILES[0]))).not.toBe(
+        'OLD PROFILE',
+      );
+    });
+
+    it('does not reuse a completed phase whose input omits provider even when manifest analysisPair matches', async () => {
+      const paused = await seedPausedManifest();
+      const phase1Input = paused.phases['project-profile'].input;
+      if (!phase1Input) throw new Error('Expected phase 1 input');
+      const { provider: _omitted, ...legacyInput } = phase1Input;
+      paused.phases['project-profile'].input = legacyInput;
+      await storage.writeManifest(SLUG_DIR, paused);
+      await storage.writePhaseFile(SLUG_DIR, FILES[0], 'OLD PROFILE');
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        resume: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(execute).toHaveBeenCalledTimes(4);
+      expect(manifest.phases['project-profile'].input?.provider).toBe(
+        'kimi-code',
+      );
+    });
+
+    it('starts fresh instead of resuming a legacy pair-less unfinished v4 checkpoint', async () => {
+      const paused = await seedPausedManifest();
+      delete paused.analysisPair;
+      if (paused.phases['project-profile'].input) {
+        delete paused.phases['project-profile'].input.provider;
+      }
+      await storage.writeManifest(SLUG_DIR, paused);
+      await storage.writePhaseFile(SLUG_DIR, FILES[0], 'OLD PROFILE');
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        resume: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.version).toBe(4);
+      expect(manifest.runId).not.toBe('RUN-KEEP');
+      expect(manifest.analysisPair).toEqual({
+        provider: 'kimi-code',
+        model: 'snapshot-model',
+      });
+      expect(execute).toHaveBeenCalledTimes(4);
+      for (const config of PHASE_CONFIGS) {
+        expect(manifest.phases[config.id].input?.provider).toBe('kimi-code');
       }
       expect(await fs.readFile(join(SLUG_DIR, FILES[0]))).not.toBe(
         'OLD PROFILE',
@@ -1134,29 +1303,307 @@ describe('MultiPhaseAnalysisService', () => {
     );
   });
 
-  it('runs every phase on the provider AND model of one snapshot for the analyzed workspace', async () => {
-    scenarios = FILES.map((file) => agentWritesFile(file));
-
-    const result = await service.analyzeWorkspace(WORKSPACE, {
-      mcpServerRunning: true,
-      model: 'frontend-model',
-    });
-
-    expect(result.isOk()).toBe(true);
-    expect(resolveLlm).toHaveBeenCalledWith(WORKSPACE, {
-      requestedModel: 'frontend-model',
-    });
-    expect(execute).toHaveBeenCalledTimes(4);
-    for (const [call] of execute.mock.calls) {
-      const config = call as unknown as {
-        model: string;
-        auth: unknown;
-        cwd: string;
+  describe('Setup pair resolution and isolation', () => {
+    it('uses the supplied setupSnapshot across every phase, ignores options.model, and never persists auth', async () => {
+      scenarios = FILES.map((file) => agentWritesFile(file));
+      const setupAuth = {
+        env: { ANTHROPIC_API_KEY: 'setup-ephemeral-secret' },
       };
-      expect(config.model).toBe('snapshot-model');
-      expect(config.auth).toBe(SNAPSHOT_AUTH);
-      expect(config.cwd).toBe(WORKSPACE);
-    }
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        model: 'legacy-client-model',
+        setupSnapshot: {
+          providerId: 'setup-provider',
+          model: 'setup-model',
+          auth: setupAuth,
+        },
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(resolveSetup).not.toHaveBeenCalled();
+      expect(resolveLlm).not.toHaveBeenCalled();
+      expect(execute).toHaveBeenCalledTimes(4);
+      for (const [call] of execute.mock.calls) {
+        const config = call as unknown as {
+          model: string;
+          auth: unknown;
+          cwd: string;
+        };
+        expect(config.model).toBe('setup-model');
+        expect(config.auth).toBe(setupAuth);
+        expect(config.cwd).toBe(WORKSPACE);
+      }
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.analysisPair).toEqual({
+        provider: 'setup-provider',
+        model: 'setup-model',
+      });
+      const rawManifest = await fs.readFile(join(SLUG_DIR, 'manifest.json'));
+      expect(rawManifest).not.toContain('setup-ephemeral-secret');
+      expect(rawManifest).not.toContain('setupSnapshot');
+      expect(rawManifest).not.toContain('"auth"');
+    });
+
+    it('Unset Setup dispatches concrete workspace pair and isolated auth at every phase, ignoring conflicting chat picker and tab override', async () => {
+      const workspaceProvider = 'ws-provider';
+      const workspaceModel = 'ws-concrete-model';
+      const chatPickerModel = 'chat-picker-conflict-model';
+      const chatTabOverrideModel = 'chat-tab-override-conflict-model';
+      const workspaceAuth = {
+        env: { ANTHROPIC_AUTH_TOKEN: 'ws-isolated-secret' },
+      };
+
+      // Conflicting fixtures: picker !== workspace and tab override !== both.
+      expect(chatPickerModel).not.toBe(workspaceModel);
+      expect(chatTabOverrideModel).not.toBe(workspaceModel);
+      expect(chatTabOverrideModel).not.toBe(chatPickerModel);
+
+      resolveLlm.mockResolvedValue({
+        providerId: 'picker-provider',
+        model: chatPickerModel,
+        auth: { env: { ANTHROPIC_AUTH_TOKEN: 'picker-secret' } },
+      });
+      resolveSetup.mockResolvedValue({
+        kind: 'unset',
+        snapshot: {
+          providerId: workspaceProvider,
+          model: workspaceModel,
+          auth: workspaceAuth,
+        },
+      });
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        // Even if a legacy caller forwards the conflicting chat-tab override,
+        // Setup analysis must drop it and use the resolved workspace pair.
+        model: chatTabOverrideModel,
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(resolveSetup).toHaveBeenCalledTimes(1);
+      expect(resolveSetup).toHaveBeenCalledWith(WORKSPACE);
+      expect(resolveLlm).not.toHaveBeenCalled();
+      expect(execute).toHaveBeenCalledTimes(4);
+      for (const [call] of execute.mock.calls) {
+        const config = call as unknown as {
+          model: string;
+          auth: unknown;
+          cwd: string;
+        };
+        expect(config.model).toBe(workspaceModel);
+        expect(config.model).not.toBe(chatPickerModel);
+        expect(config.model).not.toBe(chatTabOverrideModel);
+        expect(config.auth).toBe(workspaceAuth);
+        expect(config.auth).toBeDefined();
+        expect(config.cwd).toBe(WORKSPACE);
+      }
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.analysisPair).toEqual({
+        provider: workspaceProvider,
+        model: workspaceModel,
+      });
+      const rawManifest = await fs.readFile(join(SLUG_DIR, 'manifest.json'));
+      expect(rawManifest).not.toContain('ws-isolated-secret');
+      expect(rawManifest).not.toContain('"auth"');
+    });
+
+    it('fails pre-phase with a named error on invalid or unavailable Setup and leaves completed records untouched', async () => {
+      // Seed an existing completed legacy v4 manifest to prove blocked launches
+      // never mutate completed records.
+      const fingerprint = await computeWorkspaceFingerprint(WORKSPACE, fs);
+      const completedHash = 'b'.repeat(64);
+      const completedPhases = Object.fromEntries(
+        PHASE_CONFIGS.map((c) => [
+          c.id,
+          {
+            status: 'completed' as const,
+            file: c.file,
+            durationMs: 10,
+            attempt: 1,
+            sessionId: 'completed-session',
+            input: {
+              workspaceSha256: fingerprint.digest,
+              promptSha256: completedHash,
+              priorPhaseSha256: null,
+              model: 'earlier-model',
+            },
+            verification: {
+              status: 'verified' as const,
+              outputSha256: completedHash,
+              checkedAt: '2026-08-30T10:00:00.000Z',
+            },
+          },
+        ]),
+      ) as MultiPhaseManifestV4['phases'];
+      await storage.writeManifest(SLUG_DIR, {
+        version: 4,
+        runId: 'COMPLETED-KEEP',
+        slug: 'demo',
+        analyzedAt: '2026-08-30T10:00:00.000Z',
+        updatedAt: '2026-08-30T10:05:00.000Z',
+        lifecycle: 'completed',
+        model: 'earlier-model',
+        totalDurationMs: 40,
+        workspaceFingerprint: fingerprint,
+        phases: completedPhases,
+      });
+      const completedBytesBefore = await fs.readFile(
+        join(SLUG_DIR, 'manifest.json'),
+      );
+
+      const failures = [
+        {
+          resolution: {
+            kind: 'invalid' as const,
+            source: 'setup' as const,
+            provider: 'kimi-code',
+            model: 'kimi-k2',
+            cause: 'not-signed-in' as const,
+          },
+          expectedSubstrings: ['Setup model', 'kimi-code', 'not-signed-in'],
+          forbiddenSubstrings: ['Workspace model'],
+        },
+        {
+          resolution: {
+            kind: 'invalid' as const,
+            source: 'setup' as const,
+            provider: 'anthropic',
+            model: 'sonnet',
+            cause: 'model-stale' as const,
+          },
+          expectedSubstrings: ['Setup model', 'anthropic/sonnet', 'model-stale'],
+          forbiddenSubstrings: ['Workspace model'],
+        },
+        {
+          resolution: {
+            kind: 'invalid' as const,
+            source: 'workspace' as const,
+            provider: 'anthropic',
+            model: null,
+            cause: 'model-missing' as const,
+          },
+          expectedSubstrings: ['Workspace model', 'anthropic', 'model-missing'],
+          forbiddenSubstrings: ['Setup model'],
+        },
+        {
+          resolution: {
+            kind: 'unavailable' as const,
+            source: 'setup' as const,
+            provider: 'proxy-provider',
+            model: 'proxy-model',
+            cause: 'provider-unavailable' as const,
+          },
+          expectedSubstrings: [
+            'Setup model',
+            'proxy-provider/proxy-model',
+            'provider-unavailable',
+          ],
+          forbiddenSubstrings: ['Workspace model'],
+        },
+      ];
+
+      for (const testCase of failures) {
+        resolveSetup.mockResolvedValueOnce(testCase.resolution);
+        const result = await service.analyzeWorkspace(WORKSPACE, {
+          mcpServerRunning: true,
+        });
+        expect(result.isErr()).toBe(true);
+        for (const fragment of testCase.expectedSubstrings) {
+          expect(result.error?.message).toContain(fragment);
+        }
+        for (const forbidden of testCase.forbiddenSubstrings) {
+          expect(result.error?.message).not.toContain(forbidden);
+        }
+      }
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(await fs.readFile(join(SLUG_DIR, 'manifest.json'))).toBe(
+        completedBytesBefore,
+      );
+    });
+
+    it('keeps the launch snapshot across in-flight phases even if Setup changes mid-run', async () => {
+      const initialAuth = { env: { ANTHROPIC_AUTH_TOKEN: 'launch-secret' } };
+      resolveSetup.mockResolvedValueOnce({
+        kind: 'set',
+        snapshot: {
+          providerId: 'initial-provider',
+          model: 'initial-model',
+          auth: initialAuth,
+        },
+      });
+      scenarios = [
+        streamOf([assistant('p1'), success('p1')], async () => {
+          await storage.writePhaseFile(SLUG_DIR, FILES[0], '# p1');
+          // Simulate Setup changing mid-run before phases 2-4 begin.
+          resolveSetup.mockResolvedValue({
+            kind: 'set',
+            snapshot: {
+              providerId: 'mutated-provider',
+              model: 'mutated-model',
+              auth: { env: { ANTHROPIC_AUTH_TOKEN: 'mutated-secret' } },
+            },
+          });
+        }),
+        ...FILES.slice(1).map((file) => agentWritesFile(file)),
+      ];
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(resolveSetup).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledTimes(4);
+      for (const [call] of execute.mock.calls) {
+        const config = call as unknown as { model: string; auth: unknown };
+        expect(config.model).toBe('initial-model');
+        expect(config.auth).toBe(initialAuth);
+      }
+      const manifest = result.value as MultiPhaseManifestV4;
+      expect(manifest.analysisPair).toEqual({
+        provider: 'initial-provider',
+        model: 'initial-model',
+      });
+    });
+
+    it('names the Analysis pair in phase errors after a valid start without leaking credentials', async () => {
+      const secretAuth = { env: { ANTHROPIC_API_KEY: 'top-secret-token' } };
+      scenarios = [
+        streamOf([assistant('partial'), errorResult()], () =>
+          storage.writePhaseFile(SLUG_DIR, FILES[0], 'partial'),
+        ),
+        () => {
+          throw new Error('upstream 502');
+        },
+        agentWritesFile(FILES[2]),
+        agentWritesFile(FILES[3]),
+      ];
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+        setupSnapshot: {
+          providerId: 'setup-provider',
+          model: 'setup-model',
+          auth: secretAuth,
+        },
+      });
+
+      expect(result.isOk()).toBe(true);
+      const manifest = result.value;
+      if (!manifest) throw new Error('Expected manifest');
+      const phase1 = manifest.phases['project-profile'];
+      const phase2 = manifest.phases['architecture-assessment'];
+      expect(phase1.status).toBe('failed');
+      expect(phase1.error).toContain('setup-provider/setup-model');
+      expect(phase1.error).not.toContain('top-secret-token');
+      expect(phase2.status).toBe('failed');
+      expect(phase2.error).toContain('upstream 502');
+      expect(phase2.error).toContain('setup-provider/setup-model');
+      expect(phase2.error).not.toContain('top-secret-token');
+    });
   });
 
   it('executes quality-audit with higher maxTurns (120) and other phases with 50', async () => {

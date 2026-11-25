@@ -355,6 +355,22 @@ describe('SettingsRpcHandlers', () => {
   });
 
   describe('settings:set', () => {
+    it.each(['setup.provider', 'setup.model'])(
+      'refuses a standalone write to %s',
+      async (key) => {
+        const h = makeHarness();
+        h.handlers.register();
+
+        const result = await call(h, 'settings:set', { key, value: 'ptah-test' });
+
+        expect(result).toEqual({
+          success: false,
+          error: `Setting key '${key}' is not writable through settings:set; save it from its own settings row`,
+        });
+        expect(h.workspaceProvider.setConfiguration).not.toHaveBeenCalled();
+      },
+    );
+
     it('writes a file-based key through the workspace provider', async () => {
       const h = makeHarness();
       h.handlers.register();

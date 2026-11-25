@@ -71,6 +71,7 @@ const PROVIDERS_SECTIONS: ReadonlySet<string> =
 const AGENTS_ROUTING_SECTIONS: ReadonlySet<string> =
   new Set<AgentsRoutingFocusTarget>([
     'background-models',
+    'setup',
     'cli-agents',
     'memory-curator',
     'enhancement',
@@ -325,8 +326,9 @@ export class SettingsComponent implements OnInit {
 
   /**
    * The one routing table for deep links (implementation-plan.md Component 10). The section decides the tab, not the
-   * caller's `tab`: Providers sections and every `providerId` land on Providers; `cli-agents`, `background-models` and
-   * the role ids land on Providers too, where `AgentsRoutingSettingsComponent` focuses the CLI matrix table
+   * caller's `tab`: Providers sections and every `providerId` land on Providers. The `cli-agents`,
+   * `background-models` and role sections (including `setup`) land on Providers too, where
+   * `AgentsRoutingSettingsComponent` focuses the CLI matrix table
    * (`[data-testid="cli-matrix"]`) or opens the background roles. Callers that still name `tab: 'orchestration'` for
    * those sections keep working unchanged.
    */

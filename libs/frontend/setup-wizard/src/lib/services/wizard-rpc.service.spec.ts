@@ -24,7 +24,7 @@ describe('WizardRpcService', () => {
       call: rpcCall as unknown as ClaudeRpcService['call'],
     };
     mockModelState = {
-      currentModel: jest.fn().mockReturnValue(null),
+      currentModel: jest.fn().mockReturnValue('picker-model'),
     } as unknown as Partial<ModelStateService>;
 
     TestBed.configureTestingModule({
@@ -57,10 +57,11 @@ describe('WizardRpcService', () => {
   });
 
   /** Factory for a failure-shape RPC result. */
-  const errResult = (error: string) => ({
+  const errResult = (error: string, errorCode?: string) => ({
     success: false,
     isSuccess: () => false,
     error,
+    ...(errorCode ? { errorCode } : {}),
   });
 
   it('gets the current workspace analysis status', async () => {
@@ -84,7 +85,7 @@ describe('WizardRpcService', () => {
     );
   });
 
-  it('uses the bound guidance tab model and preserves tabless Settings calls', async () => {
+  it('sends no model on bound guidance starts even with a tab override model', async () => {
     rpcCall.mockResolvedValue(okResult({ accepted: { runId: 'r' } }));
     const binding = {
       tabId: 'guidance',
@@ -99,7 +100,7 @@ describe('WizardRpcService', () => {
     await service.startBoundGuidance(binding);
     expect(rpcCall).toHaveBeenCalledWith(
       'enhancedPrompts:runWizard',
-      { workspacePath: '/ws', tabBinding: binding, model: 'tab-model' },
+      { workspacePath: '/ws', tabBinding: binding },
       { timeout: 300_000 },
     );
     rpcCall.mockClear();
@@ -110,7 +111,6 @@ describe('WizardRpcService', () => {
         workspacePath: '/ws',
         tabBinding: binding,
         force: true,
-        model: 'tab-model',
       },
       { timeout: 300_000 },
     );
@@ -123,7 +123,31 @@ describe('WizardRpcService', () => {
     );
   });
 
-  it('passes the VS Code active tab override model for all bound starts', async () => {
+  it.each(['start', 'regenerate'] as const)(
+    'preserves the Setup code and message for a bound guidance %s',
+    async (kind) => {
+      const message =
+        'Setup model cannot run guidance (not-signed-in; provider=openrouter). Update Background models and retry.';
+      rpcCall.mockResolvedValue(errResult(message, 'SETUP_MODEL_INVALID'));
+      const binding = {
+        tabId: 'guidance',
+        workflow: 'setup-project-prompt' as const,
+        workspacePath: '/ws',
+      };
+      const request =
+        kind === 'start'
+          ? service.startBoundGuidance(binding)
+          : service.regenerateBoundGuidance(binding);
+      await expect(request).rejects.toMatchObject({
+        code: 'SETUP_MODEL_INVALID',
+        reason: 'not-signed-in',
+        provider: 'openrouter',
+        message: `SETUP_MODEL_INVALID reason=not-signed-in provider=openrouter: ${message}`,
+      });
+    },
+  );
+
+  it('sends no model for all bound starts despite conflicting tab override and picker models', async () => {
     rpcCall.mockResolvedValue(okResult({ accepted: { runId: 'r' } }));
     const tabs = TestBed.inject(TabManagerService);
     jest.spyOn(tabs, 'findTabByIdAcrossWorkspaces').mockReturnValue({
@@ -147,25 +171,14 @@ describe('WizardRpcService', () => {
     await service.startBoundAgents(agentBinding, ['agent']);
     await service.startBoundGuidance(guidanceBinding);
     await service.regenerateBoundGuidance(guidanceBinding);
-    expect(rpcCall).toHaveBeenNthCalledWith(
-      1,
+    expect(rpcCall.mock.calls.map((call) => call[0])).toEqual([
       'wizard:submit-selection',
-      expect.objectContaining({ model: 'tab-model' }),
-      expect.any(Object),
-    );
-    expect(rpcCall).toHaveBeenNthCalledWith(
-      2,
       'enhancedPrompts:runWizard',
-      expect.objectContaining({ model: 'tab-model' }),
-      expect.any(Object),
-    );
-    expect(rpcCall).toHaveBeenNthCalledWith(
-      3,
       'enhancedPrompts:regenerate',
-      expect.objectContaining({ model: 'tab-model' }),
-      expect.any(Object),
-    );
-    expect(tabs.getWorkspaceTabs).toHaveBeenCalledWith('/ws');
+    ]);
+    for (const call of rpcCall.mock.calls) {
+      expect(call[1]).not.toHaveProperty('model');
+    }
   });
 
   describe('previewGeneration', () => {
@@ -276,7 +289,6 @@ describe('WizardRpcService', () => {
         {
           selectedAgentIds: ['1'],
           analysisDir: '/analysis',
-          model: undefined,
           previewToken: 'tok-1',
           fileDecisions: { '1': { decision: 'replace', revision: 'r1' } },
           target: 'opened-folder',
@@ -363,15 +375,15 @@ describe('WizardRpcService', () => {
   });
 
   describe('deepAnalyze', () => {
-    it('should call wizard:deep-analyze without a resume flag by default', async () => {
+    it('should call wizard:deep-analyze with no model or resume flag by default', async () => {
       rpcCall.mockResolvedValue(okResult({ isMultiPhase: true }));
 
       await service.deepAnalyze();
 
       expect(rpcCall).toHaveBeenCalledWith(
         'wizard:deep-analyze',
-        expect.not.objectContaining({ resume: true }),
-        expect.any(Object),
+        {},
+        { timeout: 3_660_000 },
       );
     });
 
@@ -456,6 +468,36 @@ describe('WizardRpcService', () => {
       rpcCall.mockResolvedValue(errResult('no checkpoint'));
 
       await expect(service.resumeGeneration()).rejects.toThrow('no checkpoint');
+    });
+  });
+
+  describe('runEnhancedPromptsWizard', () => {
+    it('sends no model field and resolves with the response payload', async () => {
+      const response = { success: true };
+      rpcCall.mockResolvedValue(okResult(response));
+
+      await expect(
+        service.runEnhancedPromptsWizard('/ws', '/analysis'),
+      ).resolves.toEqual(response);
+      expect(rpcCall).toHaveBeenCalledWith(
+        'enhancedPrompts:runWizard',
+        { workspacePath: '/ws', analysisDir: '/analysis' },
+        { timeout: 300_000 },
+      );
+    });
+
+    it('returns a failure response without a model field on RPC failure', async () => {
+      rpcCall.mockResolvedValue(errResult('denied'));
+
+      await expect(service.runEnhancedPromptsWizard('/ws')).resolves.toEqual({
+        success: false,
+        error: 'denied',
+      });
+      expect(rpcCall).toHaveBeenCalledWith(
+        'enhancedPrompts:runWizard',
+        { workspacePath: '/ws' },
+        { timeout: 300_000 },
+      );
     });
   });
 
@@ -553,7 +595,7 @@ describe('WizardRpcService', () => {
     });
   });
 
-  it('sends the tab picker model on bound submit and resume', async () => {
+  it('sends no model on bound submit and resume even with a tab override model', async () => {
     const tabBinding = {
       tabId: 'tab',
       workspacePath: '/ws',
@@ -570,15 +612,17 @@ describe('WizardRpcService', () => {
     expect(rpcCall).toHaveBeenNthCalledWith(
       1,
       'wizard:submit-selection',
-      expect.objectContaining({ model: 'opus', selectedAgentIds: ['a'] }),
+      expect.objectContaining({ selectedAgentIds: ['a'] }),
       expect.any(Object),
     );
+    expect(rpcCall.mock.calls[0][1]).not.toHaveProperty('model');
     expect(rpcCall).toHaveBeenNthCalledWith(
       2,
       'wizard:submit-selection',
-      expect.objectContaining({ model: 'opus', resume: true }),
+      expect.objectContaining({ resume: true }),
       expect.any(Object),
     );
+    expect(rpcCall.mock.calls[1][1]).not.toHaveProperty('model');
   });
 
   it('looks up and stops a tab-bound run using its exact identity', async () => {

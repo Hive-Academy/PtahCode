@@ -177,9 +177,10 @@ describe('StackSkillReviewComponent coverage board', () => {
       new Set(['owner/repo/angular', 'owner/repo/jest']),
     );
     fixture.detectChanges();
+    // R19: a selected skill covers an item even when its original search failed.
     expect(
       panel?.querySelector('[data-coverage-count]')?.textContent,
-    ).toContain('1 of 2 stack items covered');
+    ).toContain('2 of 2 stack items covered');
     fixture.componentRef.setInput('detectedItems', []);
     fixture.detectChanges();
     expect(root.querySelector('ptah-stack-coverage-strip')).toBeNull();

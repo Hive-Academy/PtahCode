@@ -35,6 +35,7 @@ import {
   USER_LAYER_MIRROR_SERVICE_TOKEN,
   resolveSkillsRoot,
 } from '@ptah-extension/skill-synthesis';
+import { serializeSkillDocument } from '@ptah-extension/shared';
 import type {
   HarnessCreateSkillParams,
   HarnessCreateSkillResponse,
@@ -78,11 +79,13 @@ export class HarnessFsService {
   async createSkillPlugin(
     params: HarnessCreateSkillParams,
   ): Promise<HarnessCreateSkillResponse> {
-    const sanitizedName = params.name
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
+    const { slug: sanitizedName, content: skillContent } =
+      serializeSkillDocument({
+        name: params.name,
+        description: params.description,
+        body: params.content,
+        allowedTools: params.allowedTools,
+      });
 
     if (sanitizedName.length === 0) {
       throw new Error(
@@ -100,26 +103,6 @@ export class HarnessFsService {
     const skillMdPath = path.join(skillDir, 'SKILL.md');
 
     await fs.mkdir(skillDir, { recursive: true });
-    const escapedName = params.name.replace(/"/g, '\\"');
-    const escapedDesc = params.description
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n');
-    const safeToolName = (t: string) => t.replace(/[^\w:/.\\-]/g, '');
-    const toolsSection =
-      params.allowedTools && params.allowedTools.length > 0
-        ? `\nallowed_tools:\n${params.allowedTools.map((t) => `  - ${safeToolName(t)}`).join('\n')}`
-        : '';
-
-    const skillContent = [
-      '---',
-      `name: "${escapedName}"`,
-      `description: "${escapedDesc}"`,
-      `source: custom${toolsSection}`,
-      '---',
-      '',
-      params.content,
-      '',
-    ].join('\n');
 
     // Not an unconditional overwrite. Re-running create/apply with the SAME
     // body used to rewrite the file anyway, which changes nothing on disk but

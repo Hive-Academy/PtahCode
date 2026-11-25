@@ -70,7 +70,7 @@ export const ONBOARDING_ROUTES: Routes = [
       {
         path: 'analyze/skills',
         component: AnalyzeSkillsPage,
-        data: { crumb: 'Review skills' },
+        data: { crumb: 'Review skills', layout: 'full' },
       },
       {
         path: 'analyze/agents',

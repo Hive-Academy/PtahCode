@@ -40,12 +40,16 @@ export class DecisionCaller {
     const selection = this.deps.config.getSelection();
     if (selection.kind === 'unset') return { kind: 'unset' };
     if (selection.kind === 'structured') {
+      const configuredPair = {
+        provider: selection.providerId,
+        model: selection.model,
+      };
       if (this.deps.structured === undefined) {
         this.deps.logger.warn(
           '[lane-routing] structured decision port is not registered',
           { providerId: selection.providerId },
         );
-        return { kind: 'blocked', cause: 'provider-error' };
+        return { kind: 'blocked', cause: 'provider-error', configuredPair };
       }
       return {
         kind: 'structured',
@@ -53,25 +57,31 @@ export class DecisionCaller {
         model: selection.model,
       };
     }
+    const configuredPair = {
+      provider: systemOneProvider(selection.kind),
+      model: selection.model,
+    };
     try {
       // Resolve the target from the same selection used for a live 404 re-check.
       const target = await this.deps.config.resolveSystemOneTarget(selection);
-      if (target === null) return { kind: 'blocked', cause: 'unreachable' };
+      if (target === null) {
+        return { kind: 'blocked', cause: 'unreachable', configuredPair };
+      }
       if (selection.kind === 'jev' && target.apiKey === undefined) {
-        return { kind: 'blocked', cause: 'auth' };
+        return { kind: 'blocked', cause: 'auth', configuredPair };
       }
       return {
         kind: 'system-one',
         selection,
         target,
-        provider: systemOneProvider(selection.kind),
+        provider: configuredPair.provider,
       };
     } catch (error: unknown) {
       this.deps.logger.warn(
         '[lane-routing] decision model target could not be resolved',
         { name: loggableErrorName(error) },
       );
-      return { kind: 'blocked', cause: 'unreachable' };
+      return { kind: 'blocked', cause: 'unreachable', configuredPair };
     }
   }
 
@@ -130,6 +140,7 @@ export class DecisionCaller {
           coldTimeoutMs: undefined,
         }).decide(payload),
       },
+      provider: caller.provider,
       model: caller.target.model,
       ...(defaults.keepAlive !== undefined ? { keepAlive: defaults.keepAlive } : {}),
       ...(budget === undefined ? {} : {
@@ -162,7 +173,7 @@ export class DecisionCaller {
   /** Re-check live 404/405 results; only a failed probe can mark unsupported. */
   async noteLive(
     caller: OpenedCaller,
-    outcome: ModelRequestOutcome,
+    outcome: Pick<ModelRequestOutcome, 'sent' | 'succeeded' | 'notFoundDetail'>,
   ): Promise<void> {
     if (caller.kind !== 'system-one' || !outcome.sent) return;
     if (outcome.notFoundDetail !== null) {

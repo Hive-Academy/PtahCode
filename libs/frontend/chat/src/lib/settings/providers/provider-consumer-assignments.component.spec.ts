@@ -3,7 +3,8 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { signal } from '@angular/core';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import { By } from '@angular/platform-browser';
+import { NativePopoverComponent, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import { rpcSuccess } from '@ptah-extension/core/testing';
 import {
   ClaudeRpcService,
@@ -13,12 +14,17 @@ import {
   type ProvidersSettingsCommit,
   type ProvidersSettingsPatch,
   type ProvidersSettingsSection,
+  type ProvidersSetupCommitState,
+  type ProvidersSetupRowState,
+  type ProvidersSetupUndoEntry,
 } from '@ptah-extension/core';
 import type {
   AgentOrchestrationConfig,
   ConfigGetScopesResult,
   DecisionModelStatusDto,
+  ModelPair,
   ScopedSettingEntry,
+  SetupPairState,
 } from '@ptah-extension/shared';
 
 const UNSET_DECISION: DecisionModelStatusDto = {
@@ -37,6 +43,60 @@ import {
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 class MockProvidersSettingsStateService {
+  readonly workspacePair = { provider: 'anthropic', model: 'claude-3-5-sonnet' };
+  readonly setupModel = signal<ProvidersSettingsSection<ProvidersSetupRowState>>({
+    status: 'ready',
+    data: {
+      state: { kind: 'unset', effective: this.workspacePair },
+      committed: null,
+      commitSeq: 0,
+    },
+    error: null,
+  });
+  readonly setupCommit = signal<ProvidersSetupCommitState>({ status: 'idle', message: null });
+  readonly setupUndoEntry = signal<ProvidersSetupUndoEntry | null>(null);
+
+  publishSetup(committed: ModelPair | null, state?: SetupPairState): void {
+    this.setupModel.set({
+      status: 'ready',
+      data: {
+        committed,
+        commitSeq: (this.setupModel().data?.commitSeq ?? 0) + 1,
+        state: state ?? (committed
+          ? { kind: 'set', pair: committed }
+          : { kind: 'unset', effective: this.workspacePair }),
+      },
+      error: null,
+    });
+  }
+
+  readonly refreshSetupModel = jest.fn(async () => undefined);
+  readonly clearSetupDraftFeedback = jest.fn(() => {
+    const status = this.setupCommit().status;
+    if (status === 'invalid' || status === 'failed') {
+      this.setupCommit.set({ status: 'idle', message: null });
+    }
+  });
+  readonly commitSetupPair = jest.fn(async (pair: ModelPair | null) => {
+    const previous = this.setupModel().data?.committed ?? null;
+    this.publishSetup(pair);
+    this.setupUndoEntry.set({
+      targetPair: previous,
+      committedReceipt: pair,
+      commitSeq: this.setupModel().data?.commitSeq ?? 0,
+    });
+    this.setupCommit.set({
+      status: 'saved',
+      message: pair ? 'Setup model saved.' : 'Setup now uses the workspace model.',
+    });
+    return true;
+  });
+  readonly undoSetupPair = jest.fn(async () => {
+    this.publishSetup(this.setupUndoEntry()?.targetPair ?? null);
+    this.setupUndoEntry.set(null);
+    this.setupCommit.set({ status: 'saved', message: 'Setup model restored.' });
+    return true;
+  });
   readonly routeStore = signal<
     ProvidersSettingsSection<ProvidersEffectiveRoute>
   >({
@@ -47,6 +107,7 @@ class MockProvidersSettingsStateService {
       ready: true,
       driverProviderId: 'anthropic',
       resolvedAuthModality: 'api-key',
+      authMethodIsUnset: false,
       // Real discriminated union from AuthGetEffectiveRouteResult.
       resolvedModel: { kind: 'model', id: 'claude-3-5-sonnet' },
       storedAuthMethodScope: 'global',
@@ -310,13 +371,173 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     fixture.detectChanges();
   });
 
-  it('renders the two consumer rows and the decision model', async () => {
+  it('renders Setup first, followed by the other consumer rows and the decision model', async () => {
     await settle();
+    const table = query(fixture, 'consumer-table');
+    expect(table?.firstElementChild?.getAttribute('data-testid')).toBe('consumer-row-setup');
     expect(query(fixture, 'consumer-row-memory-curator')).toBeTruthy();
     expect(query(fixture, 'consumer-row-enhancement')).toBeTruthy();
     expect(query(fixture, 'consumer-row-judge')).toBeNull();
     expect(query(fixture, 'enhancement-timeout-section')).toBeTruthy();
     expect(fixture.nativeElement.querySelector('ptah-decision-model-row')).toBeTruthy();
+  });
+
+  it('opens and focuses the Setup editor when the deep link arrives before the row loads', async () => {
+    mockState.setupModel.set({ status: 'loading', data: null, error: null });
+    const opened = jest.fn();
+    component.deepLinkOpened.subscribe(opened);
+    fixture.componentRef.setInput('initialEditingConsumerId', 'setup');
+    await settle();
+    expect(query(fixture, 'picker-setup')).toBeNull();
+    mockState.publishSetup(null);
+    fixture.detectChanges();
+    const popover = fixture.debugElement
+      .query(By.css('[data-testid="consumer-row-setup"] ptah-native-popover'))
+      .injector.get(NativePopoverComponent);
+    await new Promise<void>((resolve) => popover.opened.subscribe(resolve));
+    await settle();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveBeenCalledWith('setup');
+    expect(query(fixture, 'picker-setup')).not.toBeNull();
+    expect(query(fixture, 'consumer-row-setup')?.classList.contains('border-primary')).toBe(true);
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('consumer-edit-setup');
+  });
+
+  it('keeps provider and model choices local until Save, then shows the receipt and can Undo to Unset', async () => {
+    const originalCalls = mockRpc.call.mock.calls.length;
+    await openRow('setup');
+    expect(button(fixture, 'setup-save')?.disabled).toBe(true);
+    expect([...providerSelect('setup').options].map((option) => option.value))
+      .not.toContain('openai-codex');
+    await choose(providerSelect('setup'), 'anthropic');
+    expect(mockState.commitSetupPair).not.toHaveBeenCalled();
+    expect(mockState.saveSettings).not.toHaveBeenCalled();
+    expect(mockRpc.call).toHaveBeenCalledTimes(originalCalls);
+    expect(button(fixture, 'setup-save')?.disabled).toBe(true);
+    await choose(modelSelect('setup'), 'claude-3-5-haiku');
+    expect(mockState.commitSetupPair).not.toHaveBeenCalled();
+    button(fixture, 'setup-save')?.click();
+    await settle();
+    expect(mockState.commitSetupPair).toHaveBeenCalledTimes(1);
+    expect(mockState.commitSetupPair).toHaveBeenCalledWith({
+      provider: 'anthropic',
+      model: 'claude-3-5-haiku',
+    });
+    expect(query(fixture, 'consumer-summary-setup')?.textContent).toContain('anthropic / claude-3-5-haiku');
+    expect(query(fixture, 'setup-commit-feedback')?.getAttribute('role')).toBe('status');
+    button(fixture, 'setup-undo')?.click();
+    await settle();
+    expect(mockState.undoSetupPair).toHaveBeenCalledTimes(1);
+    expect(mockState.commitSetupPair).toHaveBeenCalledTimes(1);
+    expect(query(fixture, 'consumer-summary-setup')?.textContent).toContain('Workspace model: anthropic / claude-3-5-sonnet');
+    await openRow('setup');
+    expect(providerSelect('setup').value).toBe('');
+  });
+
+  it('blocks reopening Setup until a pending save settles and then applies the deep link', async () => {
+    await openRow('setup');
+    mockState.setupCommit.set({ status: 'saving', message: null });
+    await settle();
+    expect(button(fixture, 'consumer-edit-setup')?.getAttribute('aria-disabled')).toBe('true');
+    button(fixture, 'consumer-close-setup')?.click();
+    await settle();
+    await openRow('setup');
+    expect(query(fixture, 'picker-setup')).toBeNull();
+
+    const opened = jest.fn();
+    component.deepLinkOpened.subscribe(opened);
+    fixture.componentRef.setInput('initialEditingConsumerId', 'setup');
+    await settle();
+    expect(opened).not.toHaveBeenCalled();
+    expect(query(fixture, 'picker-setup')).toBeNull();
+
+    mockState.setupCommit.set({ status: 'saved', message: 'Setup model saved.' });
+    await settle();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(opened).toHaveBeenCalledWith('setup');
+    expect(query(fixture, 'picker-setup')).not.toBeNull();
+  });
+
+  it('clears a committed pair through one core call and leaves the workspace pair as read-back', async () => {
+    mockState.publishSetup({ provider: 'anthropic', model: 'claude-3-5-haiku' });
+    await settle();
+    await openRow('setup');
+    button(fixture, 'setup-clear')?.click();
+    await settle();
+    expect(mockState.commitSetupPair).toHaveBeenCalledTimes(1);
+    expect(mockState.commitSetupPair).toHaveBeenCalledWith(null);
+    expect(mockState.saveSettings).not.toHaveBeenCalled();
+    expect(query(fixture, 'consumer-tier-setup')?.textContent).toContain('Following workspace');
+  });
+
+  it('uses the workspace model through one core call for a stale override and attributes workspace alerts', async () => {
+    const stale = { provider: 'anthropic', model: 'retired' };
+    mockState.publishSetup(stale, { ...stale, kind: 'invalid', source: 'setup', cause: 'model-stale' });
+    await settle();
+    expect(query(fixture, 'consumer-summary-setup')?.textContent).toContain('anthropic / retired');
+    expect(query(fixture, 'setup-model-issue')?.textContent).toContain('Setup uses retired');
+    button(fixture, 'setup-use-workspace')?.click();
+    await settle();
+    expect(mockState.commitSetupPair).toHaveBeenCalledTimes(1);
+    expect(mockState.commitSetupPair).toHaveBeenCalledWith(null);
+    mockState.publishSetup(null, { ...stale, kind: 'invalid', source: 'workspace', cause: 'model-stale' });
+    await settle();
+    expect(query(fixture, 'setup-model-issue')?.textContent).toContain('The workspace model uses retired');
+    expect(button(fixture, 'setup-use-workspace')).toBeNull();
+  });
+
+  it('routes the sign-in recovery action without opening the Setup picker', async () => {
+    const pair = { provider: 'openrouter', model: 'model-id' };
+    mockState.publishSetup(pair, { ...pair, kind: 'invalid', source: 'setup', cause: 'not-signed-in' });
+    const requested = jest.fn();
+    component.setupProviderRequested.subscribe(requested);
+    await settle();
+    expect(query(fixture, 'setup-model-issue')?.textContent).toContain('OpenRouter is not signed in');
+    button(fixture, 'readiness-setup-setup')?.click();
+    await settle();
+    expect(requested).toHaveBeenCalledWith('openrouter');
+    expect(query(fixture, 'picker-setup')).toBeNull();
+  });
+
+  it.each(['invalid', 'failed'] as const)('shows saving and %s feedback without changing the saved pair', async (status) => {
+    const message = status === 'invalid' ? 'Choose an available model.' : 'Could not save Setup model.';
+    let finish: () => void = () => undefined;
+    mockState.commitSetupPair.mockImplementationOnce(() => {
+      mockState.setupCommit.set({ status: 'saving', message: null });
+      return new Promise<boolean>((resolve) => {
+        finish = () => {
+          mockState.setupCommit.set({ status, message });
+          resolve(false);
+        };
+      });
+    });
+    mockState.setupUndoEntry.set({
+      targetPair: { provider: 'anthropic', model: 'claude-3-5-sonnet' },
+      committedReceipt: null,
+      commitSeq: 1,
+    });
+    await openRow('setup');
+    await choose(providerSelect('setup'), 'anthropic');
+    await choose(modelSelect('setup'), 'claude-3-5-haiku');
+    button(fixture, 'setup-save')?.click();
+    fixture.detectChanges();
+    expect(query(fixture, 'setup-commit-feedback')?.textContent).toContain('Saving Setup model');
+    expect(button(fixture, 'setup-save')?.disabled).toBe(true);
+    finish();
+    await settle();
+    expect(query(fixture, 'setup-commit-feedback')?.getAttribute('role')).toBe('alert');
+    expect(query(fixture, 'setup-commit-feedback')?.textContent).toContain(message);
+    expect(query(fixture, 'consumer-tier-setup')?.textContent).toContain('Following workspace');
+    expect(modelSelect('setup').value).toBe('claude-3-5-haiku');
+    button(fixture, 'consumer-close-setup')?.click();
+    await settle();
+    expect(query(fixture, 'setup-commit-feedback')).toBeNull();
+    expect(button(fixture, 'setup-undo')).toBeNull();
+
+    mockState.setupCommit.set({ status, message });
+    await settle();
+    expect(query(fixture, 'setup-commit-feedback')?.getAttribute('role')).toBe('alert');
+    expect(button(fixture, 'setup-undo')).toBeNull();
   });
 
   it('loads the enhancement provider and model from the new section', async () => {

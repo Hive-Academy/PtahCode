@@ -1,67 +1,102 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  untracked,
+} from '@angular/core';
 import { ClaudeRpcService } from '@ptah-extension/core';
+import { skillDocumentSlug } from '@ptah-extension/shared';
 import type { StackSummaryItem } from '@ptah-extension/shared';
-import { PtahButtonDirective, PtahInputDirective, PtahTextareaDirective } from '@ptah-extension/ui';
+import {
+  SkillDraftPreviewComponent,
+  type SkillDraftMode,
+  type SkillDraftSubmission,
+  type SkillDraftValue,
+} from '../proposal/skill-draft-preview.component';
 
 @Component({
   selector: 'ptah-project-skill-draft',
   standalone: true,
-  imports: [FormsModule, PtahButtonDirective, PtahInputDirective, PtahTextareaDirective],
+  imports: [SkillDraftPreviewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="rounded-lg border border-base-300 p-3 space-y-2" aria-label="Project skill draft">
-      <h3 class="font-semibold">Create a project skill for {{ item().name }}</h3>
-      <p class="break-all text-xs">Destination: ~/.ptah/plugins/ptah-harness-{{ slug() }}/skills/{{ slug() }}/SKILL.md. Ptah syncs the skill into the workspace.</p>
-      <label class="block">Skill name <input ptahInput class="w-full" [ngModel]="name()" (ngModelChange)="name.set($event)" /></label>
-      <label class="block">Description <input ptahInput class="w-full" [ngModel]="description()" (ngModelChange)="description.set($event)" /></label>
-      <label class="block">Skill content <textarea ptahTextarea class="min-h-40 w-full" [ngModel]="content()" (ngModelChange)="content.set($event)"></textarea></label>
-      @if (error()) { <p role="alert" class="text-state-err">{{ error() }}</p> }
-      @if (createdPath()) { <p role="status">Created: {{ createdPath() }}</p> }
-      <button ptahButton variant="primary" type="button" [disabled]="busy() || !slug() || !content().trim()" (click)="create()">{{ busy() ? 'Creating…' : 'Create skill' }}</button>
-    </section>
+    @if (createdPath(); as path) {
+      <p role="status">Created: {{ path }}</p>
+    } @else {
+      <ptah-skill-draft-preview
+        [draft]="draft()"
+        [mode]="mode()"
+        [busy]="busy()"
+        [createError]="error()"
+        [showCancel]="false"
+        (draftChange)="updateDraft($event)"
+        (modeChange)="mode.set($event)"
+        (createRequested)="create($event)"
+      />
+    }
   `,
 })
 export class ProjectSkillDraftComponent {
   private readonly rpc = inject(ClaudeRpcService);
-  readonly item = input.required<StackSummaryItem>();
+  public readonly item = input.required<StackSummaryItem>();
   private readonly itemKey = computed(() => `${this.item().kind}:${this.item().name}`);
-  readonly name = signal('');
-  readonly slug = computed(() => this.name().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, ''));
-  readonly description = signal('');
-  readonly content = signal('');
-  readonly busy = signal(false);
-  readonly error = signal<string | null>(null);
-  readonly createdPath = signal<string | null>(null);
-  private revision = 0;
+  protected readonly draft = linkedSignal({
+    source: this.itemKey,
+    computation: (): SkillDraftValue => {
+      const item = untracked(this.item);
+      return {
+        name: skillDocumentSlug(item.name),
+        description: `Project guidance for ${item.name}`,
+        body: `## Project evidence\n\n- ${item.name}: ${item.evidence}\n\n`,
+      };
+    },
+  });
+  protected readonly mode = linkedSignal({
+    source: this.itemKey,
+    computation: (): SkillDraftMode => 'edit',
+  });
+  protected readonly busy = linkedSignal({ source: this.itemKey, computation: () => false });
+  protected readonly error = linkedSignal({
+    source: this.itemKey,
+    computation: (): string | null => null,
+  });
+  protected readonly createdPath = linkedSignal({
+    source: this.itemKey,
+    computation: (): string | null => null,
+  });
 
-  constructor() {
-    effect(() => {
-      this.itemKey();
-      const item = untracked(() => this.item());
-      this.revision++;
-      this.name.set(item.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''));
-      this.description.set(`Project guidance for ${item.name}`);
-      this.content.set(`# ${item.name}\n\n## Verified project evidence\n\n${item.evidence}\n\n## Guidance\n\nDescribe how to work with ${item.name} in this project.`);
-      this.error.set(null);
-      this.createdPath.set(null);
-    });
+  protected updateDraft(patch: Partial<SkillDraftValue>): void {
+    if (this.busy()) return;
+    this.draft.update((draft) => ({ ...draft, ...patch }));
   }
 
-  async create(): Promise<void> {
-    if (this.busy() || !this.slug() || !this.content().trim()) return;
-    const revision = this.revision;
+  protected async create(submitted: SkillDraftSubmission): Promise<void> {
+    if (this.busy() || this.createdPath()) return;
+    const draft = this.draft();
     this.busy.set(true);
     this.error.set(null);
     try {
       const response = await this.rpc.call('harness:create-skill', {
-        name: this.name().trim(), description: this.description().trim(), content: this.content(),
+        name: submitted.name,
+        description: submitted.description,
+        content: submitted.body,
       });
-      if (revision !== this.revision) return;
-      if (!response.isSuccess()) throw new Error('Create failed');
-      this.createdPath.set(response.data.skillPath);
+      if (this.draft() !== draft) return;
+      const skillPath = response.isSuccess() ? response.data?.skillPath : undefined;
+      if (typeof skillPath !== 'string' || !skillPath.trim()) {
+        this.error.set('Could not create this skill. Your draft is still here.');
+        return;
+      }
+      this.createdPath.set(skillPath);
     } catch {
-      if (revision === this.revision) this.error.set('Could not create this skill. Your draft is still here.');
-    } finally { if (revision === this.revision) this.busy.set(false); }
+      if (this.draft() === draft) {
+        this.error.set('Could not create this skill. Your draft is still here.');
+      }
+    } finally {
+      if (this.draft() === draft) this.busy.set(false);
+    }
   }
 }

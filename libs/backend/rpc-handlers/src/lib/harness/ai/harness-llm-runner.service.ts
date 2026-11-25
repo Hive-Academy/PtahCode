@@ -16,9 +16,8 @@
  *      messages on both success and failure.
  *   6. `clearTimeout` + `handle.close()` cleanup in `finally`.
  *
- * The runner preserves all of that behaviour byte-identically. Per-service
- * post-processing (validation, sanitisation, response shaping) is kept at the
- * call site — services either:
+ * Per-service post-processing (validation, sanitisation, response shaping)
+ * stays at the call site — services either:
  *   - pass a `postProcess` callback that runs INSIDE the try block (so a
  *     post-validation throw broadcasts `success=false`); or
  *   - omit the callback and run their post-processing AFTER the runner returns
@@ -28,13 +27,19 @@
 
 import { inject, injectable } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
-import { SDK_TOKENS, SdkStreamProcessor } from '@ptah-extension/agent-sdk';
+import {
+  InternalQueryQueueTimeoutError,
+  SDK_TOKENS,
+  SdkStreamProcessor,
+} from '@ptah-extension/agent-sdk';
 import type {
   InternalQueryHandle,
   InternalQueryService,
   IWorkspaceLlmResolver,
+  StreamProcessorResult,
+  WorkspaceLlmSnapshot,
 } from '@ptah-extension/agent-sdk';
-import type { HarnessStreamOperation } from '@ptah-extension/shared';
+import type { HarnessStreamOperation, ModelPair } from '@ptah-extension/shared';
 
 import { HARNESS_TOKENS } from '../tokens';
 import { HarnessStreamBroadcaster } from '../streaming/harness-stream-broadcaster.service';
@@ -62,6 +67,14 @@ export interface HarnessLlmExecuteParams {
   mcpServerRunning: boolean;
   maxTurns: number;
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
+  /** Use an already resolved workspace snapshot for this run. */
+  resolved?: WorkspaceLlmSnapshot;
+  /** Run-local attribution, updated synchronously at SDK submission. */
+  stageTrace?: {
+    pairConfigured?: ModelPair;
+    pairAttempted?: ModelPair;
+    pairUsed?: ModelPair;
+  };
 }
 
 /** Arguments for {@link HarnessLlmRunner.run}. */
@@ -79,7 +92,7 @@ export interface HarnessLlmRunArgs<TPostProcessed = unknown> {
    *
    * Runs INSIDE the try block AFTER `processor.process(...)` but BEFORE the
    * success-complete broadcast. If it throws, the runner broadcasts
-   * `success=false` with the error message and rethrows.
+   * `success=false` with a safe failure message and rethrows.
    *
    * Omit this when the call site needs to broadcast success immediately
    * after streaming and run validation outside the try block (preserves
@@ -95,7 +108,16 @@ export interface HarnessLlmRunArgs<TPostProcessed = unknown> {
 export interface HarnessLlmRunResult<TPostProcessed = unknown> {
   structuredOutput: unknown;
   postProcessed: TPostProcessed | undefined;
+  resultText?: StreamProcessorResult['resultText'];
+  terminal?: StreamProcessorResult['terminal'];
 }
+
+const FAILURE_MESSAGES = {
+  'queue-timed-out': 'Timed out waiting for an AI provider slot',
+  'pre-dispatch-error': 'Could not start the AI request',
+  'timed-out': 'The AI request timed out',
+  'provider-error': 'The AI request did not complete successfully',
+} as const;
 
 @injectable()
 export class HarnessLlmRunner {
@@ -111,17 +133,18 @@ export class HarnessLlmRunner {
 
   /**
    * Run a harness LLM call with streaming, teeing, broadcast, and cleanup
-   * all centralised. Returns `{ structuredOutput, postProcessed }`.
+   * all centralised. Returns output and the SDK terminal outcome.
    */
   async run<TPostProcessed = unknown>(
     args: HarnessLlmRunArgs<TPostProcessed>,
   ): Promise<HarnessLlmRunResult<TPostProcessed>> {
-    const abortController = new AbortController();
-    const timeout = setTimeout(() => abortController.abort(), args.timeoutMs);
-
     const { emitter, operationId } = this.broadcaster.createStreamEmitter(
       args.operation,
     );
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), args.timeoutMs);
+    const { stageTrace } = args.execute;
+    let submitted: ModelPair | undefined;
 
     // Resolution and query start sit inside the try so a failure in either
     // still clears the abort timer and broadcasts `success=false`.
@@ -130,10 +153,13 @@ export class HarnessLlmRunner {
       // Provider and model come from ONE snapshot resolved for the harness's
       // workspace — never the process-wide auth env (which belongs to whichever
       // workspace was configured last) and never the active workspace's model.
-      const { model, auth } = await this.workspaceLlm.resolveForPath(
+      const snapshot = args.execute.resolved ?? await this.workspaceLlm.resolveForPath(
         args.execute.workspaceRoot ?? args.execute.cwd,
         { requestedModel: args.execute.model },
       );
+      const { providerId, model, auth } = snapshot;
+      if (stageTrace) stageTrace.pairConfigured = { provider: providerId, model };
+      abortController.signal.throwIfAborted();
 
       handle = await this.internalQueryService.execute({
         cwd: args.execute.cwd,
@@ -147,7 +173,11 @@ export class HarnessLlmRunner {
           ? { toolAccess: args.execute.toolAccess }
           : {}),
         abortController,
-        ...(auth ? { auth } : {}),
+        ...(auth ? { auth: { ...auth, providerId } } : {}),
+        onProviderSubmit: (pair) => {
+          submitted = pair;
+          if (stageTrace) stageTrace.pairAttempted = pair;
+        },
       });
 
       const processor = new SdkStreamProcessor({
@@ -159,31 +189,54 @@ export class HarnessLlmRunner {
         handle.stream,
         operationId,
       );
-      const result = await processor.process(teedStream);
-      const structuredOutput = result.structuredOutput;
+      const { structuredOutput, resultText, terminal } = await processor.process(teedStream);
+      abortController.signal.throwIfAborted();
 
       let postProcessed: TPostProcessed | undefined;
-      if (args.postProcess) {
+      if (terminal?.kind === 'success' && args.postProcess) {
         postProcessed = await args.postProcess(structuredOutput);
       }
+      abortController.signal.throwIfAborted();
 
-      this.broadcaster.broadcastComplete(args.operation, operationId, true);
-      this.broadcaster.broadcastFlatComplete(operationId, true);
+      if (terminal?.kind === 'success') {
+        if (stageTrace && submitted) stageTrace.pairUsed = submitted;
+        this.broadcaster.broadcastComplete(args.operation, operationId, true);
+        this.broadcaster.broadcastFlatComplete(operationId, true);
+      } else {
+        this.broadcastFailure(args, operationId, 'provider-error');
+      }
 
-      return { structuredOutput, postProcessed };
+      return {
+        structuredOutput,
+        postProcessed,
+        ...(resultText !== undefined ? { resultText } : {}),
+        ...(terminal ? { terminal } : {}),
+      };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.broadcaster.broadcastComplete(
-        args.operation,
-        operationId,
-        false,
-        message,
-      );
-      this.broadcaster.broadcastFlatComplete(operationId, false, message);
+      let category: keyof typeof FAILURE_MESSAGES = submitted
+        ? 'provider-error'
+        : 'pre-dispatch-error';
+      if (submitted && abortController.signal.aborted) {
+        category = 'timed-out';
+      } else if (!submitted && error instanceof InternalQueryQueueTimeoutError) {
+        category = 'queue-timed-out';
+      }
+      this.broadcastFailure(args, operationId, category);
       throw error;
     } finally {
       clearTimeout(timeout);
       handle?.close();
     }
+  }
+
+  private broadcastFailure(
+    args: HarnessLlmRunArgs,
+    operationId: string,
+    category: keyof typeof FAILURE_MESSAGES,
+  ): void {
+    const message = FAILURE_MESSAGES[category];
+    this.logger.warn(`${args.serviceTag} ${message}`, { category });
+    this.broadcaster.broadcastComplete(args.operation, operationId, false, message);
+    this.broadcaster.broadcastFlatComplete(operationId, false, message);
   }
 }

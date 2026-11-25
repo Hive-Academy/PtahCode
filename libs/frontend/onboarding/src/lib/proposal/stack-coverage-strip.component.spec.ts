@@ -1,6 +1,26 @@
 import { TestBed } from '@angular/core/testing';
 import { StackCoverageStripComponent } from './stack-coverage-strip.component';
 import type { StackCoverageItem } from './stack-coverage';
+
+function makeRect(
+  top: number,
+  left: number,
+  width: number,
+  height = 28,
+): DOMRect {
+  return {
+    top,
+    left,
+    width,
+    height,
+    right: left + width,
+    bottom: top + height,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
+
 describe('StackCoverageStripComponent', () => {
   it('renders all coverage states with accessible filter buttons and evidence titles', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
@@ -43,46 +63,68 @@ describe('StackCoverageStripComponent', () => {
     buttons[0]?.click();
     expect(emitted).toHaveBeenLastCalledWith(null);
   });
-  it('shows six skeleton chips and announces loading', () => {
+
+  it('shows six skeleton chips and announces loading (GAP 27)', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
     fixture.componentRef.setInput('loading', true);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('ptah-skeleton')).toHaveLength(6);
-    expect(root.textContent).toContain('Finding recommended skills');
+    const status = root.querySelector('[role="status"][aria-live="polite"]');
+    expect(status?.textContent).toContain('Finding recommended skills');
     expect(root.querySelector('button')).toBeNull();
     expect(root.querySelector('[data-coverage-count]')).toBeNull();
   });
-  it('collapses more than twelve stack chips and expands the full list in place', () => {
+
+  it('collapses more than twelve stack chips behind "Show N more" and focuses the first newly shown chip (GAP 28)', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
-    fixture.componentRef.setInput(
-      'items',
-      Array.from({ length: 14 }, (_, index): StackCoverageItem => ({
+    const items = Array.from(
+      { length: 14 },
+      (_, index): StackCoverageItem => ({
         name: `Framework ${index}`,
         kind: 'framework',
         evidence: 'package.json',
         state: 'none',
         selectedCount: 0,
         totalCount: 0,
-      })),
+      }),
     );
+    fixture.componentRef.setInput('items', items);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('button[aria-label]')).toHaveLength(11);
     const more = [...root.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('+3 more'),
+      button.textContent?.includes('Show 3 more'),
     );
     expect(more).toBeDefined();
+    expect(more?.getAttribute('aria-expanded')).toBe('false');
     more?.click();
     fixture.detectChanges();
     expect(root.querySelectorAll('button[aria-label]')).toHaveLength(14);
-    expect(root.textContent).not.toContain('+3 more');
+    expect(root.textContent).not.toContain('Show 3 more');
     TestBed.tick();
     expect(document.activeElement?.getAttribute('aria-label')).toContain(
       'Framework 11',
     );
+
+    const withSelection = items.map(
+      (item, index): StackCoverageItem =>
+        index === 0
+          ? { ...item, state: 'covered', selectedCount: 1, totalCount: 1 }
+          : item,
+    );
+    fixture.componentRef.setInput('items', withSelection);
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(14);
+    expect(root.textContent).toContain('1 of 14 stack items covered');
+
+    fixture.componentRef.setInput('items', [...withSelection].reverse());
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(11);
+    expect(root.textContent).toContain('Show 3 more');
   });
-  it('distinguishes filter keys for equal names of different kinds', () => {
+
+  it('distinguishes filter keys and description IDs for equal names of different kinds (GAP 29)', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
     fixture.componentRef.setInput('items', [
       {
@@ -91,7 +133,7 @@ describe('StackCoverageStripComponent', () => {
         state: 'none',
         selectedCount: 0,
         totalCount: 0,
-        evidence: '',
+        evidence: 'tsconfig.json',
       },
       {
         name: 'TypeScript',
@@ -99,7 +141,7 @@ describe('StackCoverageStripComponent', () => {
         state: 'none',
         selectedCount: 0,
         totalCount: 0,
-        evidence: '',
+        evidence: 'package.json',
       },
     ]);
     fixture.componentRef.setInput('activeItem', 'language:TypeScript');
@@ -112,24 +154,220 @@ describe('StackCoverageStripComponent', () => {
     );
     expect(chips[0]?.getAttribute('aria-pressed')).toBe('true');
     expect(chips[1]?.getAttribute('aria-pressed')).toBe('false');
+    expect(chips[0]?.getAttribute('aria-describedby')).not.toBe(
+      chips[1]?.getAttribute('aria-describedby'),
+    );
     chips[1]?.click();
     expect(changed).toHaveBeenCalledWith('library:TypeScript');
   });
-  it('excludes selected matches with failed searches from the covered count', () => {
+
+  it('renders judged coverage status words, R19 covered failed-search wording, and dual-fact aria-labels (design-spec 3.6)', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
-    fixture.componentRef.setInput('items', [
+    const items: StackCoverageItem[] = [
       {
-        name: 'Jest',
+        itemId: 'framework:angular',
+        name: 'Angular',
         kind: 'framework',
-        evidence: '',
-        state: 'failed',
+        evidence: 'package.json',
+        state: 'covered',
+        selectedCount: 1,
+        totalCount: 2,
+        registry: 'matched',
+        verdict: 'install-and-build',
+      },
+      {
+        itemId: 'test-tool:jest',
+        name: 'Jest',
+        kind: 'test-tool',
+        evidence: 'jest.config.ts',
+        state: 'covered',
+        originalSearchFailed: true,
         selectedCount: 1,
         totalCount: 1,
+        registry: 'search-failed',
+        verdict: 'build',
       },
-    ]);
+      {
+        itemId: 'library:tailwind',
+        name: 'Tailwind',
+        kind: 'library',
+        evidence: 'tailwind.config.js',
+        state: 'none',
+        selectedCount: 0,
+        totalCount: 0,
+        registry: 'no-match',
+        verdict: 'no-skill',
+      },
+      {
+        itemId: 'pattern:nx',
+        name: 'Nx',
+        kind: 'pattern',
+        evidence: 'nx.json',
+        state: 'failed',
+        originalSearchFailed: true,
+        selectedCount: 0,
+        totalCount: 0,
+        registry: 'search-failed',
+        verdict: 'not-judged',
+      },
+      {
+        itemId: 'library:rxjs',
+        name: 'RxJS',
+        kind: 'library',
+        evidence: 'package.json',
+        state: 'none',
+        selectedCount: 0,
+        totalCount: 0,
+        registry: 'not-searched',
+        verdict: 'install',
+      },
+    ];
+    fixture.componentRef.setInput('items', items);
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
-      '0 of 1 stack items covered',
+    const root = fixture.nativeElement as HTMLElement;
+
+    // R19: covered failed-search item IS counted in coveredCount, uncovered failed item is NOT
+    expect(root.querySelector('[data-coverage-count]')?.textContent).toContain(
+      '2 of 5 stack items covered',
     );
+
+    const chips = root.querySelectorAll<HTMLButtonElement>('[data-strip-chip]');
+    expect(chips[0]?.getAttribute('aria-label')).toBe(
+      'Angular, framework. Registry: covered by 1 selected skill. Verdict: Install + Build',
+    );
+    expect(chips[1]?.getAttribute('aria-label')).toBe(
+      'Jest, test-tool. Registry: Covered - original search failed. Verdict: Build',
+    );
+    expect(chips[1]?.textContent).toContain('Covered - original search failed');
+    expect(chips[1]?.textContent).toContain('Build');
+    expect(chips[2]?.textContent).toContain('no match');
+    expect(chips[2]?.textContent).toContain('No skill needed');
+    expect(chips[3]?.textContent).toContain('search failed');
+    expect(chips[3]?.textContent).toContain('Not judged');
+    expect(chips[4]?.textContent).toContain('not searched');
+    expect(chips[4]?.textContent).toContain('Install');
+  });
+
+  it('measures at most two lines via one strip-level ResizeObserver, focuses first newly shown chip, and disconnects on destroy (F23)', () => {
+    let observerCallback: ResizeObserverCallback | null = null;
+    const observe = jest.fn();
+    const disconnect = jest.fn();
+    const originalResizeObserver = globalThis.ResizeObserver;
+    class MockResizeObserver implements ResizeObserver {
+      public constructor(callback: ResizeObserverCallback) {
+        observerCallback = callback;
+      }
+      public observe = observe;
+      public unobserve = jest.fn();
+      public disconnect = disconnect;
+    }
+    globalThis.ResizeObserver = MockResizeObserver;
+
+    try {
+      const fixture = TestBed.createComponent(StackCoverageStripComponent);
+      const items: StackCoverageItem[] = Array.from(
+        { length: 7 },
+        (_, index): StackCoverageItem => ({
+          itemId: `framework:item-${index}`,
+          name: `Item ${index}`,
+          kind: 'framework',
+          evidence: 'package.json',
+          state: 'available',
+          selectedCount: 0,
+          totalCount: 1,
+        }),
+      );
+      fixture.componentRef.setInput('items', items);
+      fixture.detectChanges();
+
+      const root = fixture.nativeElement as HTMLElement;
+      const chipRow = root.querySelector<HTMLElement>('[role="group"]');
+      expect(chipRow).not.toBeNull();
+      if (!chipRow) return;
+      expect(observe).toHaveBeenCalledTimes(1);
+      expect(observe).toHaveBeenCalledWith(chipRow);
+
+      // Lay out the current buttons in DOM order, including the overflow control.
+      let rowWidth = 340;
+      const gap = 8;
+      chipRow.style.columnGap = `${gap}px`;
+      const rectSpy = jest
+        .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+        .mockImplementation(function (this: HTMLElement): DOMRect {
+          if (this === chipRow) {
+            return makeRect(0, 0, rowWidth, 108);
+          }
+          let top = 0;
+          let left = 0;
+          for (const button of chipRow.querySelectorAll<HTMLElement>('button')) {
+            const width = button.hasAttribute('data-strip-all')
+              ? 80
+              : button.hasAttribute('data-strip-show-more')
+                ? 146
+                : 90;
+            if (left > 0 && left + width > rowWidth) {
+              top += 36;
+              left = 0;
+            }
+            if (button === this) return makeRect(top, left, width, 28);
+            left += width + gap;
+          }
+          return makeRect(0, 0, 0, 0);
+        });
+
+      const triggerResize = (width: number): void => {
+        rowWidth = width;
+        observerCallback?.(
+          [
+            {
+              contentRect: makeRect(0, 0, rowWidth, 108),
+              target: chipRow,
+            } as unknown as ResizeObserverEntry,
+          ],
+          {} as ResizeObserver,
+        );
+        fixture.detectChanges();
+        TestBed.tick();
+        fixture.detectChanges();
+      };
+
+      try {
+        const showMore = () =>
+          root.querySelector<HTMLButtonElement>('[data-strip-show-more]');
+
+        triggerResize(340);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(3);
+        expect(showMore()?.textContent).toContain('Show 4 more');
+        expect(showMore()?.getBoundingClientRect().top).toBe(36);
+
+        // All skills takes line one. Show more needs line two to itself.
+        triggerResize(150);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(0);
+        expect(showMore()?.textContent).toContain('Show 7 more');
+        expect(showMore()?.getBoundingClientRect().top).toBe(36);
+
+        triggerResize(900);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(7);
+        expect(showMore()).toBeNull();
+
+        triggerResize(340);
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(3);
+        showMore()?.click();
+        fixture.detectChanges();
+        TestBed.tick();
+
+        expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(7);
+        expect(document.activeElement?.getAttribute('aria-label')).toContain(
+          'Item 3',
+        );
+
+        fixture.destroy();
+        expect(disconnect).toHaveBeenCalledTimes(1);
+      } finally {
+        rectSpy.mockRestore();
+      }
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 });

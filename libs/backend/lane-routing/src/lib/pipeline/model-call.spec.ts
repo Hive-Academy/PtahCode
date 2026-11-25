@@ -103,6 +103,120 @@ function completer(
   return { isReady: async () => true, complete };
 }
 
+describe.each(['system-one', 'structured'] as const)(
+  'fixed request submission (%s)',
+  (kind) => {
+    function setup() {
+      const decide = jest.fn(async () => ({
+        ok: false as const,
+        cause: 'provider-error' as const,
+        detail: 'test failure',
+        notFound: false,
+      }));
+      const complete = jest.fn(async () => ({}));
+      const dispatch =
+        kind === 'system-one'
+          ? {
+              kind,
+              caller: { decide },
+              provider: 'jev' as const,
+              model: 'effective-system-one',
+            }
+          : {
+              kind,
+              completer: completer(complete),
+              providerId: 'structured-provider',
+              model: 'effective-structured',
+              signal: new AbortController().signal,
+            };
+      const onProviderSubmit = jest.fn();
+      return {
+        input: {
+          request: 'Classify the task',
+          questions: [],
+          maxRequestBytes: 10_000,
+          dispatch,
+          logger: quietLogger(),
+          onProviderSubmit,
+        },
+        decide,
+        complete,
+        onProviderSubmit,
+      };
+    }
+
+    it('onProviderSubmit fires immediately before decide/complete with effective pair', async () => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+      const pending = runFixedRequest(input);
+      const providerCall = kind === 'system-one' ? decide : complete;
+
+      expect(providerCall).toHaveBeenCalledTimes(1);
+      expect(onProviderSubmit).toHaveBeenCalledTimes(1);
+      expect(onProviderSubmit).toHaveBeenCalledWith(
+        kind === 'system-one'
+          ? { provider: 'jev', model: 'effective-system-one' }
+          : { provider: 'structured-provider', model: 'effective-structured' },
+      );
+      expect(onProviderSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+        providerCall.mock.invocationCallOrder[0],
+      );
+      await expect(pending).resolves.toMatchObject({ sent: true });
+    });
+
+    it.each([
+      {
+        requestCause: 'payload-too-large',
+        maxRequestBytes: 1,
+        signal: undefined,
+      },
+      {
+        requestCause: 'cancelled',
+        maxRequestBytes: 10_000,
+        signal: AbortSignal.abort(),
+      },
+    ])('suppresses dispatch and onProviderSubmit on $requestCause', async ({
+      requestCause,
+      maxRequestBytes,
+      signal,
+    }) => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+
+      await expect(
+        runFixedRequest({ ...input, maxRequestBytes, signal }),
+      ).resolves.toMatchObject({ sent: false, requestCause });
+      expect(onProviderSubmit).not.toHaveBeenCalled();
+      expect(decide).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+    });
+
+    it('checks cancellation again at the provider call boundary', async () => {
+      const { input, decide, complete, onProviderSubmit } = setup();
+      const { dispatch, logger } = input;
+      const submission = { signal: AbortSignal.abort(), onProviderSubmit };
+      const outcome =
+        dispatch.kind === 'system-one'
+          ? await callSystemOne(dispatch.caller, PAYLOAD, new Map(), [], undefined, {
+              ...submission,
+              pair: { provider: dispatch.provider, model: dispatch.model },
+            })
+          : await callStructured(
+              dispatch,
+              'prompt',
+              {},
+              new Map(),
+              [],
+              logger,
+              submission,
+            );
+
+      expect(outcome).toMatchObject({ sent: false, requestCause: 'cancelled' });
+      expect(onProviderSubmit).not.toHaveBeenCalled();
+      expect(decide).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+    });
+  },
+);
+
 describe('callStructured deadline', () => {
   afterEach(() => {
     jest.useRealTimers();
@@ -267,17 +381,22 @@ describe('System One admission and token measurement', () => {
 
   it('skips over-budget estimates and dispatches at the cost boundary', async () => {
     const { metrics, rates, advance, logger } = admissionTest(1250);
+    const submission = {
+      pair: { provider: 'jev', model: 'nimble' },
+      onProviderSubmit: jest.fn(),
+    };
     const decide = jest.fn(async () => {
       advance(1000);
       return reply;
     });
     rates.recordCompleted('target', 99, 1000);
-    const skipped = await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics);
+    const skipped = await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics, submission);
     expect(skipped).toMatchObject({
       sent: false, requestCause: 'deadline',
       requestReason: 'estimated decision model cost 1261 ms exceeds 1250 ms remaining',
     });
     expect(decide).not.toHaveBeenCalled();
+    expect(submission.onProviderSubmit).not.toHaveBeenCalled();
     expect(logger.debug).not.toHaveBeenCalled();
 
     rates.recordAbort('target', 100, 1000);
@@ -285,9 +404,14 @@ describe('System One admission and token measurement', () => {
       ...metrics,
       admission: { ...metrics.admission, configuredRate: 100 },
     };
-    const sent = await callSystemOne({ decide }, PAYLOAD, new Map(), [], atBoundary);
+    const sent = await callSystemOne({ decide }, PAYLOAD, new Map(), [], atBoundary, submission);
     expect(sent).toMatchObject({ sent: true, inputTokens: 80 });
     expect(decide).toHaveBeenCalledWith(PAYLOAD, 1250);
+    expect(submission.onProviderSubmit).toHaveBeenCalledTimes(1);
+    expect(submission.onProviderSubmit).toHaveBeenCalledWith(submission.pair);
+    expect(submission.onProviderSubmit.mock.invocationCallOrder[0]).toBeLessThan(
+      decide.mock.invocationCallOrder[0],
+    );
     expect(rates.rate('target')).toBeCloseTo(93.3);
     expect(logger.debug).toHaveBeenCalledTimes(1);
     expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 80, inputTokensSource: 'usage' });
@@ -320,6 +444,33 @@ describe('System One admission and token measurement', () => {
     await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], broken)).rejects.toThrow('clock failed');
     expect(decide).not.toHaveBeenCalled();
     await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics)).resolves.toMatchObject({ sent: true });
+  });
+
+  it('releases the target when the caller cancels after admission', async () => {
+    const { metrics, rates, logger } = admissionTest();
+    const caller = new AbortController();
+    const decide = jest.fn(async () => reply);
+    const onProviderSubmit = jest.fn();
+    const admitted = {
+      ...metrics,
+      admission: {
+        ...metrics.admission,
+        now: () => {
+          caller.abort();
+          return 0;
+        },
+      },
+    };
+
+    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], admitted, {
+      pair: { provider: 'jev', model: 'nimble' },
+      signal: caller.signal,
+      onProviderSubmit,
+    })).resolves.toMatchObject({ sent: false, requestCause: 'cancelled' });
+    expect(decide).not.toHaveBeenCalled();
+    expect(onProviderSubmit).not.toHaveBeenCalled();
+    expect(logger.debug).not.toHaveBeenCalled();
+    expect(rates.tryStart('target')).toBe(true);
   });
 
   it('releases an aborted target before transport settles and preserves the next reservation', async () => {

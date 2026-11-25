@@ -8,6 +8,7 @@ import {
   computed,
   input,
   output,
+  signal,
 } from '@angular/core';
 import {
   PtahButtonDirective,
@@ -30,7 +31,7 @@ let nextRailId = 0;
     '[class.responsive]': 'responsive()',
     '[attr.data-layout]': 'layout()',
     '[class]':
-      "layout() === 'rail' ? 'sticky top-6 block min-h-0' : 'sticky bottom-0 z-[var(--ptah-z-raised)] block'",
+      "layout() === 'rail' ? 'sticky top-6 block min-h-0' : 'sticky bottom-0 z-[var(--ptah-z-raised)] block w-full box-border'",
   },
   templateUrl: './skill-selection-rail.component.html',
   styleUrl: './skill-selection-rail.component.css',
@@ -89,15 +90,42 @@ export class SkillSelectionRailComponent {
   public readonly loading = input(false);
   public readonly previewing = input(false);
   public readonly previewScriptCount = input<number | null>(null);
+  public readonly installBlockedReason = input<string | null>(null);
   public readonly layout = input<'rail' | 'bar'>('rail');
   public readonly primary = output<void>();
   public readonly skip = output<void>();
   public readonly removed = output<string>();
   protected readonly close = X;
-  protected readonly helperId = `skill-selection-helper-${nextRailId++}`;
+  private readonly instanceId = nextRailId++;
+  protected readonly helperId = `skill-selection-helper-${this.instanceId}`;
+  protected readonly installBlockedId = `skill-selection-blocked-${this.instanceId}`;
+  protected readonly selectedListId = `skill-selection-list-${this.instanceId}`;
+  protected readonly selectedListOpen = signal(false);
+  protected readonly normalizedInstallBlockedReason = computed(() => {
+    const reason = this.installBlockedReason()?.trim() ?? '';
+    return reason.length > 0 ? reason : null;
+  });
   protected readonly blocked = computed(
     () => this.busy() || this.loading() || this.previewing(),
   );
+  protected readonly primaryDisabled = computed(
+    () => this.blocked() || this.normalizedInstallBlockedReason() !== null,
+  );
+  protected readonly primaryDescribedBy = computed(() => {
+    if (this.normalizedInstallBlockedReason() !== null) {
+      return this.installBlockedId;
+    }
+    return this.loading() ? null : this.helperId;
+  });
+  protected toggleSelectedList(): void {
+    this.selectedListOpen.update((open) => !open);
+  }
+  protected onPrimaryClick(): void {
+    if (this.primaryDisabled()) {
+      return;
+    }
+    this.primary.emit();
+  }
   protected readonly primaryLabel = computed(() =>
     this.previewing()
       ? 'Preparing install…'

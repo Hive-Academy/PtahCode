@@ -13,10 +13,10 @@
 import type { IDisposable } from '@ptah-extension/platform-core';
 import type { PtahFileSettingsManager } from '@ptah-extension/platform-core';
 import type { IMasterKeyProvider } from '@ptah-extension/platform-core';
-import type { ISettingsStore } from '@ptah-extension/settings-core';
+import type { IGlobalBatchSettingsStore } from '@ptah-extension/settings-core';
 import { SecretsFileStore } from '@ptah-extension/settings-core';
 
-export class FileSettingsStore implements ISettingsStore {
+export class FileSettingsStore implements IGlobalBatchSettingsStore {
   private readonly fileSettings: PtahFileSettingsManager;
   private readonly masterKeyProvider: IMasterKeyProvider;
   private readonly secretsStore: SecretsFileStore;
@@ -43,6 +43,16 @@ export class FileSettingsStore implements ISettingsStore {
 
   async writeGlobal<T>(key: string, value: T): Promise<void> {
     await this.fileSettings.set(key, value);
+  }
+
+  readGlobalMany(keys: readonly string[]): Record<string, unknown> {
+    return this.fileSettings.getMany(keys);
+  }
+
+  writeGlobalBatch(
+    entries: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    return this.fileSettings.setMany(entries);
   }
 
   /**

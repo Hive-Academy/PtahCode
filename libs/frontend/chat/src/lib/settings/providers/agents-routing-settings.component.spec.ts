@@ -200,13 +200,13 @@ describe('AgentsRoutingSettingsComponent', () => {
       'background-roles-summary',
     );
     expect(summary?.textContent).toContain('Background models');
-    expect(summary?.textContent).toContain('3 roles');
+    expect(summary?.textContent).toContain('4 roles');
     expect(
       summary
         ?.querySelector('[data-testid="background-roles-list"]')
         ?.textContent?.replace(/\s+/g, ' ')
         .trim(),
-    ).toBe('Memory curator, enhancement, decision');
+    ).toBe('Setup, Memory curator, enhancement, decision');
     const list = Array.from(summary?.querySelectorAll('span') ?? []).find(
       (span) => span.textContent?.includes('enhancement'),
     );
@@ -222,7 +222,7 @@ describe('AgentsRoutingSettingsComponent', () => {
     ).not.toBeNull();
   });
 
-  it.each(['memory-curator', 'enhancement'] as const)(
+  it.each(['setup', 'memory-curator', 'enhancement'] as const)(
     'opens the roles for the %s deep link, forwards the role and focuses the background section',
     async (target) => {
       fixture.componentRef.setInput('focusTarget', target);

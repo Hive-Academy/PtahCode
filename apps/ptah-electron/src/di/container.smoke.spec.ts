@@ -413,6 +413,10 @@ function buildMinimalContainer(): DependencyContainer {
   // graph is covered by auth-providers' registration regression test.
   c.registerInstance(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, {});
   c.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+  // Production binds the workspace LLM resolver in registerAuthProvidersServices
+  // (auth-providers di/register.ts). Setup-pair handlers such as
+  // EnhancedPromptsRpcHandlers inject it.
+  c.registerInstance(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {});
   c.register<Pick<AuthRpcHandlers, 'invalidateAuthStatusCache'>>(
     AuthRpcHandlers,
     {

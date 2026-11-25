@@ -747,11 +747,19 @@ export class AnalysisStorageService {
         runId: manifest.runId,
       });
     }
+    const analysisPair =
+      manifest.version === 4 && manifest.analysisPair
+        ? {
+            provider: manifest.analysisPair.provider,
+            model: manifest.analysisPair.model,
+          }
+        : null;
     return {
       isMultiPhase: true,
       manifest,
       phaseContents,
       stackSummary: extraction.summary,
+      analysisPair,
       analysisDir: slugDir,
     };
   }

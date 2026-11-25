@@ -8,14 +8,16 @@
 import { DependencyContainer, Lifecycle } from 'tsyringe';
 import {
   SKILL_RECOMMENDATION_SERVICE,
-  SKILL_RANKING_SERVICE,
+  SKILL_JUDGE_SERVICE,
+  SKILL_DRAFT_GENERATION_SERVICE,
   SKILL_PROJECT_GUIDANCE_SERVICE,
   SKILL_SELECTION_SERVICE,
   SKILL_CONSENT_SERVICE,
 } from './tokens';
 import {
   SkillRecommendationService,
-  SkillRankingService,
+  SkillJudgeService,
+  SkillDraftGenerationService,
   ProjectGuidanceService,
   SkillSelectionService,
   SkillConsentService,
@@ -28,8 +30,13 @@ import {
  */
 export function registerSkillServices(container: DependencyContainer): void {
   container.register(
-    SKILL_RANKING_SERVICE,
-    { useClass: SkillRankingService },
+    SKILL_JUDGE_SERVICE,
+    { useClass: SkillJudgeService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    SKILL_DRAFT_GENERATION_SERVICE,
+    { useClass: SkillDraftGenerationService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

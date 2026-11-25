@@ -28,10 +28,17 @@
  * for.
  */
 import { expect, type Page } from '@playwright/test';
-import type { AgentGetRoutingEvidenceResult } from '@ptah-extension/shared';
+import type {
+  AgentGetRoutingEvidenceResult,
+  ModelPair,
+  SetupPairState,
+  WizardGetSetupModelResult,
+  WizardSetSetupModelResult,
+} from '@ptah-extension/shared';
 import {
   installHost,
   installRpcAutoResponder,
+  rpcError,
   waitForAnimationsSettled,
   type RpcFixtureResolver,
 } from '../marketplace/marketplace.fixtures';
@@ -265,6 +272,15 @@ function settingsGetResolver(params: unknown): {
   }
   if (key === 'skills.enhancement.timeoutMs') {
     return { success: true, value: 120000 };
+  }
+  // The Setup pair keys (TASK_2026_2325_899d, registered with the default `''`
+  // in `file-settings-keys.ts`): an empty value is the Unset state, which the
+  // Background models Setup row renders as "workspace model applies".
+  if (key === 'setup.provider') {
+    return { success: true, value: '' };
+  }
+  if (key === 'setup.model') {
+    return { success: true, value: '' };
   }
   if (key === 'agentOrchestration.performanceRouting') {
     return { success: true, value: true };
@@ -567,6 +583,10 @@ export interface FixtureState {
   readonly connectionChecks: Map<string, FixtureCheckRecord>;
   /** Third-party provider ids whose stored key was deleted via `auth:deleteStoredKey` (read back by `auth:getApiKeyStatus`). */
   readonly deletedKeys: Set<string>;
+  /** Committed Setup model pair (`wizard:set-setup-model`); `null` means unset (follows workspace model). */
+  setupPair: ModelPair | null;
+  /** Monotonic receipt sequence returned by `wizard:set-setup-model`. */
+  setupCommitSeq: number;
 }
 
 function createFixtureState(): FixtureState {
@@ -584,6 +604,8 @@ function createFixtureState(): FixtureState {
     modelTiers: new Map(),
     clearedOverrides: new Set(),
     deletedKeys: new Set(),
+    setupPair: null,
+    setupCommitSeq: 0,
     customEntries: CUSTOM_ENTRIES_FIXTURE.entries.map((entry) => ({
       ...entry,
     })),
@@ -608,6 +630,56 @@ function record(state: FixtureState, method: string, params: unknown): void {
 
 function tierKey(providerId: string, scope: string): string {
   return `${providerId}:${scope}`;
+}
+
+/** The fixture's effective workspace pair for Setup when no Setup-specific pair is stored. */
+function effectiveSetupWorkspacePair(state: FixtureState): ModelPair {
+  return {
+    provider:
+      state.authStatus.anthropicProviderId ||
+      EFFECTIVE_ROUTE_FIXTURE.driverProviderId,
+    model: state.model || 'claude-sonnet-4-5',
+  };
+}
+
+function setupPairStateFor(state: FixtureState): SetupPairState {
+  return state.setupPair
+    ? { kind: 'set', pair: { ...state.setupPair } }
+    : { kind: 'unset', effective: effectiveSetupWorkspacePair(state) };
+}
+
+function parseSetupModelParams(
+  params: unknown,
+): { ok: true; pair: ModelPair | null } | { ok: false; error: string } {
+  if (params === null || typeof params !== 'object' || Array.isArray(params)) {
+    return {
+      ok: false,
+      error: 'Setup pair must supply string provider and model values.',
+    };
+  }
+  const raw = params as Record<string, unknown>;
+  if (Object.keys(raw).some((k) => k !== 'provider' && k !== 'model')) {
+    return {
+      ok: false,
+      error: 'Setup pair accepts only provider and model fields.',
+    };
+  }
+  if (typeof raw['provider'] !== 'string' || typeof raw['model'] !== 'string') {
+    return {
+      ok: false,
+      error: 'Setup pair must supply string provider and model values.',
+    };
+  }
+  const provider = raw['provider'].trim();
+  const model = raw['model'].trim();
+  if (Boolean(provider) !== Boolean(model)) {
+    return {
+      ok: false,
+      error:
+        'Setup pair must specify both provider and model, or both empty strings to clear.',
+    };
+  }
+  return { ok: true, pair: provider && model ? { provider, model } : null };
 }
 
 /** `config:getScopes` resolver, state-aware version of the plain one above. */
@@ -816,6 +888,23 @@ function statefulSettingsFixtures(
     'config:getScopes': statefulConfigGetScopesResolver(state),
     'config:model-get': () => ({ model: state.model }),
     'config:effort-get': () => ({ effort: state.effort }),
+    'wizard:get-setup-model': (): WizardGetSetupModelResult => ({
+      state: setupPairStateFor(state),
+    }),
+    'wizard:set-setup-model': (
+      params: unknown,
+    ): WizardSetSetupModelResult | ReturnType<typeof rpcError> => {
+      record(state, 'wizard:set-setup-model', params);
+      const parsed = parseSetupModelParams(params);
+      if (!parsed.ok) return rpcError(parsed.error);
+      state.setupPair = parsed.pair;
+      state.setupCommitSeq += 1;
+      return {
+        committed: state.setupPair ? { ...state.setupPair } : null,
+        state: setupPairStateFor(state),
+        commitSeq: state.setupCommitSeq,
+      };
+    },
     'memory:getTriggers': MEMORY_TRIGGERS_FIXTURE,
     'ptahCli:list': () => ({ agents: state.ptahCliAgents }),
     'ptahCli:testConnection': (params: unknown) => {

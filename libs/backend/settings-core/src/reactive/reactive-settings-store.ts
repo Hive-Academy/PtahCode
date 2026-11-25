@@ -1,6 +1,10 @@
 import { EventEmitter } from 'events';
 import type { IDisposable } from '@ptah-extension/platform-core';
-import type { ISettingsStore } from '../ports/settings-store.interface';
+import {
+  isGlobalBatchSettingsStore,
+  type IGlobalBatchSettingsStore,
+  type ISettingsStore,
+} from '../ports/settings-store.interface';
 
 /**
  * Reactive wrapper around a backend ISettingsStore.
@@ -11,17 +15,22 @@ import type { ISettingsStore } from '../ports/settings-store.interface';
  * Responsibilities:
  * - Maintains an in-memory read-through cache for global settings.
  * - On write, persists via the backend store, updates the cache, and fires listeners.
+ * - On batch write, commits through the backend, publishes all committed keys
+ *   to the cache in FIFO commit order before emitting events, and returns the
+ *   committed slice.
  * - Delegates secret reads/writes directly to the backend (no caching of secrets).
  * - Delegates flushSync() to the backend.
  *
  * This class does NOT perform I/O itself — that is the backend store's job.
  * Adapters in platform-{electron,cli,vscode} supply the concrete backend.
  */
-export class ReactiveSettingsStore implements ISettingsStore {
+export class ReactiveSettingsStore implements IGlobalBatchSettingsStore {
   private readonly backend: ISettingsStore;
   private readonly globalCache = new Map<string, unknown>();
   private readonly globalEmitter = new EventEmitter();
   private readonly secretEmitter = new EventEmitter();
+  /** Serializes batch cache updates and watcher emissions in FIFO commit order. */
+  private batchPublicationQueue: Promise<void> = Promise.resolve();
 
   constructor(backend: ISettingsStore) {
     this.backend = backend;
@@ -38,6 +47,27 @@ export class ReactiveSettingsStore implements ISettingsStore {
     return value;
   }
 
+  readGlobalMany(keys: readonly string[]): Record<string, unknown> {
+    if (keys.some((key) => !this.globalCache.has(key))) {
+      if (isGlobalBatchSettingsStore(this.backend)) {
+        const fetched = this.backend.readGlobalMany(keys);
+        for (const key of keys) {
+          this.globalCache.set(key, fetched[key]);
+        }
+      } else {
+        for (const key of keys) {
+          const value = this.backend.readGlobal(key);
+          this.globalCache.set(key, value);
+        }
+      }
+    }
+    const result: Record<string, unknown> = {};
+    for (const key of keys) {
+      result[key] = this.globalCache.get(key);
+    }
+    return result;
+  }
+
   hasGlobal(key: string): boolean {
     return this.backend.hasGlobal
       ? this.backend.hasGlobal(key)
@@ -48,6 +78,46 @@ export class ReactiveSettingsStore implements ISettingsStore {
     await this.backend.writeGlobal(key, value);
     this.globalCache.set(key, value);
     this.globalEmitter.emit(key, value);
+  }
+
+  async writeGlobalBatch(
+    entries: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    if (!isGlobalBatchSettingsStore(this.backend)) {
+      throw new Error(
+        'Underlying settings store does not support atomic batch writes (writeGlobalBatch)',
+      );
+    }
+    const snapshot: Readonly<Record<string, unknown>> = Object.freeze({
+      ...entries,
+    });
+    const backendPromise = this.backend.writeGlobalBatch(snapshot);
+    // Attach a no-op catch synchronously so an out-of-order backend rejection
+    // does not trigger UnhandledPromiseRejection while awaiting prevPublication.
+    // degradation-audit: reported - Awaiting backendPromise later rejects the originating batch call.
+    backendPromise.catch(() => undefined);
+
+    const prevPublication = this.batchPublicationQueue;
+    let committedSlice: Readonly<Record<string, unknown>> = Object.freeze({});
+
+    const publish = async (): Promise<void> => {
+      // degradation-audit: reported - The previous batch caller receives its own publication rejection.
+      await prevPublication.catch(() => undefined);
+      const committed = await backendPromise;
+      const committedEntries = Object.entries(committed);
+      for (const [key, value] of committedEntries) {
+        this.globalCache.set(key, value);
+      }
+      committedSlice = committed;
+      for (const [key, value] of committedEntries) {
+        this.globalEmitter.emit(key, value);
+      }
+    };
+
+    const step = publish();
+    this.batchPublicationQueue = step;
+    await step;
+    return committedSlice;
   }
 
   readSecret(key: string): Promise<string | undefined> {

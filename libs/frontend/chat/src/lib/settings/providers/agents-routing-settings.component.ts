@@ -147,7 +147,7 @@ export type AgentsRoutingFocusTarget =
               class="text-xs text-base-content-muted"
               data-testid="background-roles-list"
             >
-              Memory curator, enhancement, decision
+              Setup, Memory curator, enhancement, decision
             </span>
           </header>
           <section

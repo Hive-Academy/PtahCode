@@ -6,7 +6,11 @@
  * sent. There are no retries. A live 404/405 is reported as `notFound` for
  * the caller to re-check; this module never persists a mark.
  */
-import { SUBAGENT_LANE_ID, type OutcomeTaskKind } from '@ptah-extension/shared';
+import {
+  SUBAGENT_LANE_ID,
+  type ModelPair,
+  type OutcomeTaskKind,
+} from '@ptah-extension/shared';
 import type { PrunedCause } from '../contracts/route-decide-result.schema';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import {
@@ -72,11 +76,13 @@ export interface FixedQuestion {
   readonly criteria: Readonly<Record<string, string>>;
 }
 
-export interface ModelRequestOutcome {
+export interface ModelRequestOutcome<
+  Cause extends ModelRequestCause = FallbackCause,
+> {
   readonly sent: boolean;
   readonly succeeded: boolean;
   /** Shared cause when the request was not sent or the whole response failed. */
-  readonly requestCause: FallbackCause | null;
+  readonly requestCause: Cause | null;
   readonly requestReason?: string;
   readonly questionCap?: ReadonlySet<string>;
   /** Set only for a live HTTP 404/405. The pipeline re-checks; it does not mark. */
@@ -93,10 +99,14 @@ export interface ModelRequestOutcome {
   readonly outcomeFigures: number;
 }
 
+export type ModelRequestCause = FallbackCause | 'cancelled';
+
 export type ModelDispatch =
   | {
       readonly kind: 'system-one';
       readonly caller: SystemOneCaller;
+      /** Dispatches constructed by DecisionCaller supply the resolved provider. */
+      readonly provider?: 'ollama' | 'jev';
       readonly admission?: SystemOneAdmission;
       readonly model: string;
       /**
@@ -222,13 +232,25 @@ export async function runLaneRequest(input: {
   };
 }
 
-export async function runFixedRequest(input: {
+interface FixedRequestInput {
   readonly request: string;
   readonly questions: readonly FixedQuestion[];
   readonly maxRequestBytes: number;
   readonly dispatch: ModelDispatch;
   readonly logger: LaneRoutingLogger;
-}): Promise<ModelRequestOutcome> {
+  readonly signal?: AbortSignal;
+  readonly onProviderSubmit?: (submitted: ModelPair) => void;
+}
+
+export function runFixedRequest(
+  input: FixedRequestInput & { readonly signal?: undefined },
+): Promise<ModelRequestOutcome>;
+export function runFixedRequest(
+  input: FixedRequestInput,
+): Promise<ModelRequestOutcome<ModelRequestCause>>;
+export async function runFixedRequest(
+  input: FixedRequestInput,
+): Promise<ModelRequestOutcome<ModelRequestCause>> {
   // AM6 caps lane questions only: they fall back to ranking. Fixed-criteria
   // questions (pre-flight, task kind, scope, skills) have no ranking fallback,
   // so a cap would drop their answers. They are small, so send them all.
@@ -255,14 +277,29 @@ export async function runFixedRequest(input: {
   if (bytes > input.maxRequestBytes) {
     return { ...emptyOutcome('payload-too-large'), questionCap };
   }
+  if (input.signal?.aborted) {
+    return { ...emptyOutcome('cancelled'), questionCap };
+  }
   const offered = new Map<string, readonly DecisionOption[]>();
   const asked = askedFromFixed(questions);
+  const { signal, onProviderSubmit } = input;
   if (input.dispatch.kind === 'system-one') {
-    const outcome = await callSystemOne(input.dispatch.caller, payload, offered, asked, {
-      promptTokens: bytes / 4,
-      logger: input.logger,
-      admission: input.dispatch.admission,
-    });
+    const outcome = await callSystemOne(
+      input.dispatch.caller,
+      payload,
+      offered,
+      asked,
+      {
+        promptTokens: bytes / 4,
+        logger: input.logger,
+        admission: input.dispatch.admission,
+      },
+      {
+        pair: { provider: input.dispatch.provider ?? 'ollama', model },
+        signal,
+        onProviderSubmit,
+      },
+    );
     return { ...outcome, questionCap };
   }
   return callStructured(
@@ -272,6 +309,7 @@ export async function runFixedRequest(input: {
     offered,
     asked,
     input.logger,
+    { signal, onProviderSubmit },
   );
 }
 

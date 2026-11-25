@@ -1,33 +1,85 @@
-@if (items().length) {
+@if (rows().length) {
   <section
     aria-label="Unmatched project stack"
     class="space-y-[var(--ptah-gap-heading)] rounded-[22px] border border-base-300 p-[var(--ptah-surface-pad)]"
   >
-    <h2 class="text-base font-semibold">No match in the registry</h2>
+    <h2 class="text-base font-semibold">
+      {{
+        judgedItems() === null
+          ? 'No match in the registry'
+          : 'No registry skill chosen'
+      }}
+    </h2>
+    @if (draftBlockedReason(); as blocked) {
+      <p class="text-xs text-base-content-muted">{{ blocked }}</p>
+    }
     <ul class="space-y-2">
-      @for (item of items(); track item.kind + ':' + item.name) {
+      @for (
+        row of rows();
+        track (row.itemId ?? row.item.kind) + ':' + row.item.name
+      ) {
         <li
-          class="space-y-3 rounded-[var(--glass-radius-inner,var(--ptah-radius-surface))] border border-[var(--ptah-border-color)] bg-[var(--glass-fill-tile,var(--surface-1))] p-3"
+          class="space-y-2 rounded-[var(--glass-radius-inner,var(--ptah-radius-surface))] border border-[var(--ptah-border-color)] bg-[var(--glass-fill-tile,var(--surface-1))] p-3"
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span
-              ><strong>{{ item.name }}</strong>
+            <span class="min-w-0"
+              ><strong>{{ row.item.name }}</strong>
               <span class="text-xs text-base-content-muted">{{
-                item.kind
-              }}</span></span
-            ><button
-              ptahButton
-              type="button"
-              variant="secondary"
-              size="sm"
-              [attr.aria-disabled]="searching()"
-              (click)="!searching() && searchRequested.emit(item.name)"
-            >
-              Search for {{ item.name }}
-            </button>
+                row.item.kind
+              }}</span>
+              @switch (row.status) {
+                @case ('build') {
+                  <span ptahBadge tone="accent" size="xs">Build</span>
+                }
+                @case ('no-skill') {
+                  <span ptahBadge size="xs">No skill needed</span>
+                }
+                @case ('not-judged') {
+                  <span ptahBadge tone="warn" size="xs">Not judged</span>
+                }
+              }
+              @if (row.searchFailed) {
+                <span ptahBadge tone="err" size="xs">Search failed</span>
+              }
+            </span>
+            <span class="flex flex-wrap items-center gap-2">
+              <button
+                ptahButton
+                type="button"
+                variant="secondary"
+                size="sm"
+                [attr.aria-disabled]="searching()"
+                (click)="requestSearch(row)"
+              >
+                Search for {{ row.item.name }}
+              </button>
+              @if (row.itemId !== null) {
+                <button
+                  #opener
+                  ptahButton
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  [attr.aria-label]="'Write a skill by hand for ' + row.item.name"
+                  [attr.aria-disabled]="isManualDraftDisabled(row) ? 'true' : null"
+                  (click)="requestManualDraft(row, opener)"
+                >
+                  Write a skill by hand
+                </button>
+              }
+            </span>
           </div>
-          @if (item.kind === 'framework' || item.kind === 'pattern') {
-            <ptah-project-skill-draft [item]="item" />
+          @for (reason of row.reasons; track $index) {
+            <p class="text-xs text-base-content-muted">{{ reason }}</p>
+          }
+          @if (
+            row.searchFailed &&
+            row.status !== null &&
+            row.status !== 'not-judged'
+          ) {
+            <p class="text-xs text-base-content-muted">
+              Judged without registry candidates (search failed)
+            </p>
           }
         </li>
       }

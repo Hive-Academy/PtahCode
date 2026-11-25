@@ -117,6 +117,12 @@ export class InternalQueryService {
 
     let handle: InternalQueryHandle;
     try {
+      if (config.abortController?.signal.aborted) {
+        throw new DOMException(
+          'Internal query aborted before launch.',
+          'AbortError',
+        );
+      }
       handle = await this.runner.runOneShot({
         mode: 'oneShot',
         cwd: config.cwd,
@@ -131,6 +137,7 @@ export class InternalQueryService {
         auth: config.auth,
         toolAccess: config.toolAccess,
         dispatch: config.dispatch,
+        onProviderSubmit: config.onProviderSubmit,
         includeConnectors: config.includeConnectors,
       });
     } catch (error: unknown) {

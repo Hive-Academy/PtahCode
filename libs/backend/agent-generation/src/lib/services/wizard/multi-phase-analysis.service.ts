@@ -34,7 +34,9 @@ import { Result, MESSAGE_TYPES, WizardPhaseId } from '@ptah-extension/shared';
 import type {
   AnalysisPhase,
   AnalysisStreamPayload,
+  ModelPair,
   ScanProgressPayload,
+  SetupPairState,
   FlatStreamEventUnion,
   MessageStartEvent,
   TextDeltaEvent,
@@ -53,6 +55,7 @@ import type {
   InternalQueryService,
   IWorkspaceLlmResolver,
   OneShotAuthOverride,
+  ResolvedSetupSnapshot,
   SDKMessage,
   StreamEventEmitter,
   StreamEvent,
@@ -199,20 +202,7 @@ export class MultiPhaseAnalysisService {
     const mcpPort = options?.mcpPort;
     const pluginPaths = options?.pluginPaths;
     const resume = options?.resume === true;
-    // Provider and model of ONE snapshot for the workspace being analyzed —
-    // never the active workspace's model or the process-wide auth env. A
-    // caller model is kept only when that provider offers it.
-    const { model, auth } = await this.workspaceLlm.resolveForPath(
-      workspacePath,
-      { requestedModel: options?.model },
-    );
 
-    this.logger.info(`${SERVICE_TAG} Starting multi-phase analysis`, {
-      workspace: workspacePath,
-      model,
-      mcpServerRunning,
-      resume,
-    });
     if (!mcpServerRunning) {
       return Result.err(
         new Error(
@@ -220,6 +210,47 @@ export class MultiPhaseAnalysisService {
         ),
       );
     }
+
+    // Use the launch-scoped Setup snapshot when provided by the handler;
+    // otherwise resolve Setup strictly once for this launch (never reading
+    // client `options.model`, chat picker, or tab override, and never falling
+    // back to process-wide auth).
+    let snapshot: ResolvedSetupSnapshot;
+    if (options?.setupSnapshot) {
+      snapshot = options.setupSnapshot;
+    } else {
+      const resolution = await this.workspaceLlm.resolveSetup(workspacePath);
+      if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+        const message = formatSetupResolutionError(resolution);
+        this.logger.warn(
+          `${SERVICE_TAG} Multi-phase analysis blocked by Setup resolution`,
+          {
+            workspace: workspacePath,
+            source: resolution.source,
+            kind: resolution.kind,
+            cause: resolution.cause,
+            provider: resolution.provider,
+            model: resolution.model,
+          },
+        );
+        return Result.err(new Error(message));
+      }
+      snapshot = resolution.snapshot;
+    }
+
+    const analysisPair: ModelPair = {
+      provider: snapshot.providerId,
+      model: snapshot.model,
+    };
+    const { auth } = snapshot;
+
+    this.logger.info(`${SERVICE_TAG} Starting multi-phase analysis`, {
+      workspace: workspacePath,
+      provider: analysisPair.provider,
+      model: analysisPair.model,
+      mcpServerRunning,
+      resume,
+    });
     if (this.activeAbortController) {
       this.activeAbortController.abort('new_analysis_started');
       this.activeAbortController = null;
@@ -236,7 +267,7 @@ export class MultiPhaseAnalysisService {
         this.logger,
         workspacePath,
         folderName,
-        model,
+        analysisPair,
         resume,
       );
       const { slugDir, manifest } = checkpoint;
@@ -340,9 +371,10 @@ export class MultiPhaseAnalysisService {
             i,
             slugDir,
             workspacePath,
-            // The snapshot's model. A resumed manifest always records the same
-            // one: `AnalysisRunCheckpoint.open` starts fresh when it differs.
-            model,
+            // The launch snapshot's pair. A resumed manifest always records
+            // the same pair: `AnalysisRunCheckpoint.open` starts fresh when
+            // either provider or model differs.
+            analysisPair,
             auth,
             mcpServerRunning,
             mcpPort,
@@ -361,12 +393,14 @@ export class MultiPhaseAnalysisService {
             paused = true;
             break;
           }
+          const rawMessage =
+            error instanceof Error ? error.message : String(error);
           outcome = {
             resultReceived: false,
             timedOut: false,
             assistantText: null,
             sessionId: null,
-            error: error instanceof Error ? error.message : String(error),
+            error: `${rawMessage} (${analysisPair.provider}/${analysisPair.model})`,
           };
         }
         if (!outcome.resultReceived && masterAbortController.signal.aborted) {
@@ -633,7 +667,14 @@ export class MultiPhaseAnalysisService {
     );
     this.logger.error(
       `${SERVICE_TAG} Phase ${phaseId} failed after ${durationMs}ms: ${error}`,
-      { phaseId, durationMs, timedOut: outcome.timedOut },
+      {
+        phaseId,
+        durationMs,
+        timedOut: outcome.timedOut,
+        ...(checkpoint.manifest.analysisPair
+          ? { analysisPair: checkpoint.manifest.analysisPair }
+          : {}),
+      },
     );
     await checkpoint.markFailed(phaseId, durationMs, error, outcome.sessionId);
   }
@@ -714,8 +755,8 @@ export class MultiPhaseAnalysisService {
     phaseIndex: number,
     slugDir: string,
     cwd: string,
-    model: string,
-    auth: OneShotAuthOverride | undefined,
+    analysisPair: ModelPair,
+    auth: OneShotAuthOverride,
     mcpServerRunning: boolean,
     mcpPort: number | undefined,
     masterAbortController: AbortController,
@@ -739,7 +780,8 @@ export class MultiPhaseAnalysisService {
       `${SERVICE_TAG} Executing phase ${phaseIndex + 1}/${LLM_PHASE_COUNT}: ${phaseConfig.id}`,
       {
         phaseId: phaseConfig.id,
-        model,
+        provider: analysisPair.provider,
+        model: analysisPair.model,
         cwd,
         mcpServerRunning,
         mcpPort,
@@ -771,14 +813,14 @@ export class MultiPhaseAnalysisService {
       const executeStartMs = Date.now();
       const handle = await this.internalQueryService.execute({
         cwd,
-        model,
+        model: analysisPair.model,
         prompt: userPrompt,
         systemPromptAppend: systemPrompt,
         mcpServerRunning,
         mcpPort,
         maxTurns,
         abortController: phaseAbortController,
-        ...(auth ? { auth } : {}),
+        auth,
       });
 
       this.logger.info(
@@ -824,9 +866,12 @@ export class MultiPhaseAnalysisService {
       capture.assistantTexts.length > 0
         ? capture.assistantTexts.join('\n\n')
         : null;
+    const pairLabel = `${analysisPair.provider}/${analysisPair.model}`;
     const error = timedOut
-      ? `analysis_timeout: phase exceeded ${PER_PHASE_TIMEOUT_MS} ms`
-      : capture.resultError;
+      ? `analysis_timeout: phase exceeded ${PER_PHASE_TIMEOUT_MS} ms (${pairLabel})`
+      : capture.resultError
+        ? `${capture.resultError} (${pairLabel})`
+        : undefined;
 
     if (capture.resultReceived && !error) {
       this.logger.info(`${SERVICE_TAG} Phase ${phaseConfig.id} completed`, {
@@ -1158,6 +1203,39 @@ export class MultiPhaseAnalysisService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+}
+
+/**
+ * Format a strict Setup resolution failure as a safe, actionable error
+ * message that distinguishes stored Setup overrides from unset workspace
+ * defaults without exposing credentials or raw provider errors.
+ */
+function formatSetupResolutionError(
+  failure: Extract<SetupPairState, { kind: 'invalid' | 'unavailable' }>,
+): string {
+  const scopeLabel =
+    failure.source === 'setup' ? 'Setup model' : 'Workspace model';
+  const target =
+    failure.provider && failure.model
+      ? `${failure.provider}/${failure.model}`
+      : (failure.provider ?? failure.model);
+
+  switch (failure.cause) {
+    case 'provider-missing':
+      return `${scopeLabel} is missing a provider (${failure.cause}). Choose a provider.`;
+    case 'provider-unknown':
+      return `${scopeLabel} provider "${failure.provider ?? 'unknown'}" is not recognized (${failure.cause}). Choose a provider.`;
+    case 'provider-unsupported':
+      return `${scopeLabel} provider "${failure.provider ?? 'unknown'}" is not supported for analysis (${failure.cause}). Choose a provider.`;
+    case 'model-missing':
+      return `${scopeLabel}${failure.provider ? ` (${failure.provider})` : ''} is missing a model (${failure.cause}). Choose a model.`;
+    case 'model-stale':
+      return `${scopeLabel}${target ? ` (${target})` : ''} is not a valid concrete model (${failure.cause}). Choose a model.`;
+    case 'not-signed-in':
+      return `${scopeLabel} provider "${failure.provider ?? 'unknown'}" is not signed in (${failure.cause}). Sign in and try again.`;
+    case 'provider-unavailable':
+      return `${scopeLabel} (${target}) is unavailable (${failure.cause}). Retry when the provider is reachable.`;
   }
 }
 

@@ -13,12 +13,14 @@ export type FailureKind =
   | 'partial'
   | 'plan-expired'
   | 'not-found'
+  | 'setup-model'
   | 'unknown';
 
 /** Patterns checked in order; the first match names the kind. */
 const KIND_PATTERNS: ReadonlyArray<
   readonly [Exclude<FailureKind, 'unknown'>, RegExp]
 > = [
+  ['setup-model', /\bsetup_model_invalid\b/],
   ['timeout', /\btimed?[\s-]?out\b|\btimeout\b|\betimedout\b/],
   [
     'permission',
@@ -38,6 +40,8 @@ const KIND_PATTERNS: ReadonlyArray<
 ];
 
 const KIND_COPY: Readonly<Record<Exclude<FailureKind, 'unknown'>, string>> = {
+  'setup-model':
+    'Setup model cannot run guidance. Update Background models and retry.',
   timeout: 'The request timed out. Try again.',
   permission:
     'The folder did not allow the write (permission denied). Check the folder permissions and try again.',
@@ -49,6 +53,47 @@ const KIND_COPY: Readonly<Record<Exclude<FailureKind, 'unknown'>, string>> = {
     'The source could not be reached. Check your connection and try again.',
   'not-found': 'A file was not found at its source. Try again later.',
 };
+
+const SETUP_REFUSAL =
+  /\bsetup_model_invalid\s+reason=(provider-unknown|provider-unsupported|provider-missing|model-missing|model-stale|not-signed-in|provider-unavailable)(?:\s+provider=([a-z0-9][a-z0-9._-]{0,63}))?\b/i;
+const PROVIDER_LABELS: Readonly<Record<string, string>> = {
+  anthropic: 'Anthropic',
+  claude: 'Claude',
+  codex: 'Codex',
+  google: 'Google',
+  kimi: 'Kimi',
+  ollama: 'Ollama',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+};
+
+function setupModelCopy(raw: string | null | undefined): string {
+  const match = SETUP_REFUSAL.exec(raw ?? '');
+  if (!match) return KIND_COPY['setup-model'];
+  const reason = match[1].toLowerCase();
+  const provider = match[2]?.toLowerCase();
+  const label = provider
+    ? (PROVIDER_LABELS[provider] ?? provider)
+    : undefined;
+  switch (reason) {
+    case 'not-signed-in':
+      return `Sign in to ${label ?? 'the configured provider'}. Then retry guidance.`;
+    case 'model-stale':
+      return `The saved model${label ? ` for ${label}` : ''} is not available. Choose another model in Settings > Background models.`;
+    case 'model-missing':
+      return `The Setup model${label ? ` for ${label}` : ''} is not set. Choose a model in Settings > Background models.`;
+    case 'provider-missing':
+      return 'The Setup provider is not set. Choose a provider and model in Settings > Background models.';
+    case 'provider-unknown':
+      return 'The Setup provider is not recognized. Choose a provider in Settings > Background models.';
+    case 'provider-unsupported':
+      return 'The Setup provider is not supported. Choose another provider in Settings > Background models.';
+    case 'provider-unavailable':
+      return `${label ?? 'The Setup provider'} is unavailable. Check the provider connection and retry.`;
+    default:
+      return KIND_COPY['setup-model'];
+  }
+}
 
 /** Classify a raw failure text without exposing it. */
 export function failureKind(raw: string | null | undefined): FailureKind {
@@ -69,5 +114,6 @@ export function safeFailureCopy(
   fallback: string,
 ): string {
   const kind = failureKind(raw);
+  if (kind === 'setup-model') return setupModelCopy(raw);
   return kind === 'unknown' ? fallback : KIND_COPY[kind];
 }

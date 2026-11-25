@@ -9,6 +9,7 @@ import type {
   ConfigGetScopesResult,
   RpcMethodName,
   ScopedSettingEntry,
+  SetupPairState,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService, RpcResult } from './claude-rpc.service';
 import { ModelStateService } from './model-state.service';
@@ -167,6 +168,12 @@ describe('ProvidersSettingsStateService', () => {
       ['auth:getEffectiveRoute', async () => success(route())],
       ['config:getScopes', async () => success(scopeResponse)],
       ['config:model-get', async () => success({ model: 'pinned-model' })],
+      [
+        'wizard:get-setup-model',
+        async () => success({
+          state: { kind: 'unset', effective: { provider: 'first', model: 'pinned-model' } },
+        }),
+      ],
       ['config:effort-get', async () => success({ effort: undefined })],
       ['memory:getTriggers', async () => success({ triggers: memoryResponse })],
       ['ptahCli:list', async () => success({ agents: [] })],
@@ -232,6 +239,178 @@ describe('ProvidersSettingsStateService', () => {
     service = TestBed.inject(ProvidersSettingsStateService);
   });
   afterEach(() => TestBed.resetTestingModule());
+
+  it('loads the Setup row on open and keeps the workspace fallback separate from the committed pair', async () => {
+    expect(service.setupModel().status).toBe('unloaded');
+    await service.open();
+
+    expect(call).toHaveBeenCalledWith('wizard:get-setup-model', {}, undefined);
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: {
+        state: { kind: 'unset', effective: { provider: 'first', model: 'pinned-model' } },
+        committed: null,
+        undoBaseline: null,
+        commitSeq: 0,
+      },
+      error: null,
+    });
+  });
+
+  it('applies the Setup receipt and ignores a superseded load', async () => {
+    const pending = deferred<RpcResult<unknown>>();
+    handlers.set('wizard:get-setup-model', () => pending.promise);
+    const read = service.refreshSetupModel();
+    const pair = { provider: 'openrouter', model: 'setup-model' };
+    const state: SetupPairState = { kind: 'set', pair };
+    const receipt = { state, committed: pair, commitSeq: 7 };
+    handlers.set('wizard:set-setup-model', async () => success(receipt));
+
+    await expect(service.commitSetupPair(pair)).resolves.toBe(true);
+    pending.resolve(success({ state: { kind: 'unset', effective: pair } }));
+    await read;
+
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: { ...receipt, undoBaseline: pair },
+      error: null,
+    });
+    expect(service.setupUndoEntry()).toEqual({
+      targetPair: null,
+      committedReceipt: pair,
+      commitSeq: 7,
+    });
+  });
+
+  it.each(['apiKey', 'claudeCli'])(
+    'seeds the Setup picker row with the canonical pair after reloading %s',
+    async (provider) => {
+      const committed = { provider, model: 'sonnet' };
+      const pair = { provider: 'anthropic', model: 'claude-sonnet-4-5' };
+      handlers.set('wizard:get-setup-model', async () =>
+        success({ state: { kind: 'set', pair }, committed }),
+      );
+
+      await service.refreshSetupModel();
+
+      expect(service.setupModel().data?.committed).toEqual(pair);
+    },
+  );
+
+  it.each(['apiKey', 'claudeCli'])(
+    'restores the stored %s Setup selector on Undo after a reload',
+    async (provider) => {
+      const original = { provider, model: 'claude-sonnet-4-5' };
+      const state: SetupPairState = {
+        kind: 'set',
+        pair: { ...original, provider: 'anthropic' },
+      };
+      const replacement = { provider: 'openrouter', model: 'setup-model' };
+      handlers.set('wizard:get-setup-model', async () =>
+        success({ state, committed: original }),
+      );
+      await service.refreshSetupModel();
+
+      handlers.set('wizard:set-setup-model', async () =>
+        success({
+          state: { kind: 'set', pair: replacement },
+          committed: replacement,
+          commitSeq: 1,
+        }),
+      );
+      await expect(service.commitSetupPair(replacement)).resolves.toBe(true);
+
+      handlers.set('wizard:set-setup-model', async () =>
+        success({ state, committed: original, commitSeq: 2 }),
+      );
+      await expect(service.undoSetupPair()).resolves.toBe(true);
+      expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', original);
+      expect(service.setupModel().data).toMatchObject({
+        committed: state.pair,
+        undoBaseline: original,
+      });
+      expect(service.setupCommit().message).toBe(
+        'Saved claude-sonnet-4-5 from anthropic for Setup.',
+      );
+    },
+  );
+
+  it('uses an external Setup clear as the baseline for the next save and Undo', async () => {
+    const first = { provider: 'openrouter', model: 'first-model' };
+    const second = { provider: 'openrouter', model: 'second-model' };
+    const unset: SetupPairState = { kind: 'unset', effective: first };
+    const firstReceipt = {
+      state: { kind: 'set', pair: first },
+      committed: first,
+      commitSeq: 7,
+    };
+    handlers.set('wizard:set-setup-model', async () => success(firstReceipt));
+    await expect(service.commitSetupPair(first)).resolves.toBe(true);
+
+    handlers.set('wizard:get-setup-model', async () =>
+      success({ state: { kind: 'set', pair: { ...first } } }),
+    );
+    await service.refreshSetupModel();
+    expect(service.setupCommit().status).toBe('saved');
+    expect(service.setupUndoEntry()?.committedReceipt).toEqual(first);
+
+    handlers.set('wizard:get-setup-model', async () => success({ state: unset }));
+    await service.refreshSetupModel();
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: { state: unset, committed: null, undoBaseline: null, commitSeq: 7 },
+      error: null,
+    });
+    expect(service.setupCommit().status).toBe('idle');
+    expect(service.setupUndoEntry()).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ ...firstReceipt, commitSeq: 6 }),
+    );
+    await expect(service.commitSetupPair(first)).resolves.toBe(false);
+    expect(service.setupModel().data?.committed).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ state: { kind: 'set', pair: second }, committed: second, commitSeq: 9 }),
+    );
+    await expect(service.commitSetupPair(second)).resolves.toBe(true);
+    expect(service.setupUndoEntry()?.targetPair).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ state: unset, committed: null, commitSeq: 10 }),
+    );
+    await expect(service.undoSetupPair()).resolves.toBe(true);
+    expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', { provider: '', model: '' });
+    expect(service.setupModel().data?.committed).toBeNull();
+  });
+
+  it('loads typed invalid Setup state and maps a rejected pair to safe commit feedback', async () => {
+    const state: SetupPairState = {
+      kind: 'invalid',
+      source: 'setup',
+      provider: 'openrouter',
+      model: 'stale-model',
+      cause: 'model-stale',
+    };
+    handlers.set('wizard:get-setup-model', async () => success({ state }));
+    handlers.set('wizard:set-setup-model', async () =>
+      new RpcResult(false, undefined, 'private provider detail', 'SETUP_MODEL_INVALID'),
+    );
+    await service.refreshSetupModel();
+    const loaded = service.setupModel();
+    expect(loaded).toMatchObject({ status: 'ready', data: { state } });
+
+    await expect(
+      service.commitSetupPair({ provider: 'openrouter', model: 'another-stale-model' }),
+    ).resolves.toBe(false);
+
+    expect(service.setupCommit()).toEqual({
+      status: 'invalid',
+      message: 'Choose an available provider and model for Setup.',
+    });
+    expect(service.setupModel()).toEqual(loaded);
+    expect(service.setupUndoEntry()).toBeNull();
+  });
 
   it('loads enhancement file settings into its own section', async () => {
     enhancementResponse['skills.enhancement.provider'] = 'openrouter';
@@ -1846,6 +2025,22 @@ describe('ProvidersSettingsStateService', () => {
       refreshFailed: true,
     });
     expect(service.activeProviderId()).toBeNull();
+  });
+
+  it('includes a failed Setup read in the post-commit refresh warning', async () => {
+    const reviewed = await context();
+    handlers.set('auth:saveSettings', async () => success({ success: true }));
+    handlers.set(
+      'wizard:get-setup-model',
+      async () => new RpcResult(false, undefined, 'raw failure'),
+    );
+    await service.saveSettings({ auth: { authMethod: 'apiKey' } }, reviewed);
+
+    expect(service.setupModel().status).toBe('error');
+    expect(service.commit()).toMatchObject({
+      saved: ['authMethod'],
+      refreshFailed: true,
+    });
   });
 
   it('uses draft verification without saving, aborts superseded work and discards late results', async () => {

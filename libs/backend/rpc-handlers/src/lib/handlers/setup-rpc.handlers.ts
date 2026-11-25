@@ -37,10 +37,23 @@ import {
   AnalysisClaudeMdLinker,
 } from '@ptah-extension/agent-generation';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
+import type { IWorkspaceLlmResolver, SetupResolution } from '@ptah-extension/agent-sdk';
+import {
+  SETTINGS_TOKENS,
+  type WorkspaceScopeResolver,
+} from '@ptah-extension/settings-core';
 import type {
+  ModelPair,
+  SetupPairState,
   MultiPhaseAnalysisResponse,
   SavedAnalysisMetadata,
   WizardDeepAnalyzeParams,
+  WizardGenerateSkillDraftParams,
+  WizardGenerateSkillDraftResult,
+  WizardGetSetupModelParams,
+  WizardGetSetupModelResult,
+  WizardSetSetupModelParams,
+  WizardSetSetupModelResult,
   WizardGetResumableRunParams,
   WizardGetResumableRunResponse,
   WizardAnalysisStatusParams,
@@ -58,8 +71,10 @@ import type {
   WizardInstallSkillsWithConsentParams,
   WizardInstallSkillsWithConsentResponse,
 } from '@ptah-extension/shared';
-import { Result } from '@ptah-extension/shared';
-import type { MultiPhaseManifest } from '@ptah-extension/agent-generation';
+import type {
+  MultiPhaseAnalysisService,
+  MultiPhaseManifest,
+} from '@ptah-extension/agent-generation';
 import type { RpcMethodName } from '@ptah-extension/shared';
 import { isAuthorizedWorkspace } from '../utils/workspace-authorization';
 import { toResumableGenerationRun } from './wizard-generation-checkpoint.service';
@@ -86,14 +101,132 @@ import {
 } from '@ptah-extension/harness-sync';
 import {
   SKILL_CONSENT_SERVICE,
+  SKILL_DRAFT_GENERATION_SERVICE,
   SKILL_RECOMMENDATION_SERVICE,
   SKILL_SELECTION_SERVICE,
   SKILL_PROJECT_GUIDANCE_SERVICE,
 } from '../di/tokens';
 import type { SkillRecommendationService } from '../skills-sh/services/skill-recommendation.service';
-export { SkillRankingService } from '../skills-sh/services/skill-ranking.service';
+import type { SkillDraftGenerationService } from '../skills-sh/services/skill-draft-generation.service';
 import type { SkillSelectionService } from '../skills-sh/services/skill-selection.service';
 import type { ProjectGuidanceService } from '../skills-sh/services/project-guidance.service';
+
+const RECOMMEND_PRE_SEARCH_MS = 6_000;
+const SETUP_RESOLUTION_MS = 15_000;
+let setupCommitSeq = 0;
+
+const SetupModelParamsSchema = z.strictObject({
+  provider: z.string().trim(),
+  model: z.string().trim(),
+});
+
+function draftText(max: number, multiline = false) {
+  return z
+    .string()
+    .max(max)
+    .transform((value) => {
+      const text = value
+        .replace(/\r\n?/g, '\n')
+        .replace(/[\p{Cc}\p{Bidi_Control}]/gu, (char) =>
+          multiline && char === '\n' ? '\n' : ' ',
+        );
+      return text.trim();
+    });
+}
+
+const DraftParamsSchema = z.strictObject({
+  runId: draftText(200).pipe(z.string().min(1)),
+  proposalId: draftText(200).pipe(z.string().min(1)),
+  proposalName: draftText(64).pipe(z.string().min(1)),
+  items: z
+    .array(
+      z.strictObject({
+        itemId: draftText(200).pipe(z.string().min(1)),
+        name: draftText(200).pipe(z.string().min(1)),
+        kind: draftText(200).pipe(z.string().min(1)),
+        evidence: draftText(2_000, true),
+        buildReasons: z.array(draftText(2_000, true)).max(10),
+      }),
+    )
+    .min(1)
+    .max(30),
+});
+
+async function beforeDeadline<T>(
+  deadline: number,
+  operation: () => Promise<T>,
+  failure: RpcUserError,
+): Promise<T> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw failure;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(failure), remaining);
+    });
+    return await Promise.race([operation(), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function sanitizeProviderId(
+  provider: string | null | undefined,
+): string | null {
+  const cleaned = provider
+    ?.replace(/[\p{Cc}\p{Bidi_Control}]/gu, ' ')
+    .trim();
+  return cleaned ? cleaned.slice(0, 64) : null;
+}
+
+function setupModelError(
+  resolution?: Extract<SetupResolution, { kind: 'invalid' | 'unavailable' }>,
+  fallbackProvider?: string,
+): RpcUserError {
+  const provider = sanitizeProviderId(resolution?.provider ?? fallbackProvider);
+  const sourceLabel = resolution
+    ? resolution.source === 'setup'
+      ? 'Setup'
+      : 'workspace'
+    : null;
+  const parts: string[] = [];
+  if (sourceLabel && provider) {
+    parts.push(`${sourceLabel} provider ${provider}`);
+  } else if (sourceLabel) {
+    parts.push(sourceLabel);
+  } else if (provider) {
+    parts.push(`Setup provider ${provider}`);
+  }
+  if (resolution) {
+    parts.push(resolution.cause);
+  }
+  const detail = parts.length > 0 ? ` (${parts.join(': ')})` : '';
+  return new RpcUserError(
+    `The Setup model could not be resolved${detail}. Update Background models and retry.`,
+    'SETUP_MODEL_INVALID',
+  );
+}
+
+function requireSetup(resolution: SetupResolution) {
+  if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+    throw setupModelError(resolution);
+  }
+  return resolution.snapshot;
+}
+
+function setupPairState(resolution: SetupResolution): SetupPairState {
+  if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+    return resolution;
+  }
+  const pair = {
+    provider: resolution.snapshot.providerId,
+    model: resolution.snapshot.model,
+  };
+  return resolution.kind === 'set'
+    ? { kind: 'set', pair }
+    : { kind: 'unset', effective: pair };
+}
 
 type SkillConsentPort = {
   hasScripts(packagePath: string): boolean;
@@ -121,6 +254,9 @@ export class SetupRpcHandlers {
   static readonly METHODS = [
     'setup-status:get-status',
     'wizard:deep-analyze',
+    'wizard:get-setup-model',
+    'wizard:set-setup-model',
+    'wizard:generate-skill-draft',
     'wizard:get-resumable-run',
     'wizard:analysis-status',
     'wizard:recommend-skills',
@@ -199,6 +335,8 @@ export class SetupRpcHandlers {
   register(): void {
     this.registerGetStatus();
     this.registerDeepAnalyze();
+    this.registerSetupModel();
+    this.registerGenerateSkillDraft();
     this.registerGetResumableRun();
     this.registerAnalysisStatus();
     this.registerRecommendSkills();
@@ -226,6 +364,113 @@ export class SetupRpcHandlers {
       );
     }
     return result.data;
+  }
+
+  private async resolveSetup(
+    workspaceRoot: string | undefined,
+    deadline = Date.now() + SETUP_RESOLUTION_MS,
+    pair?: ModelPair,
+  ): Promise<SetupResolution> {
+    const failure = setupModelError(undefined, pair?.provider);
+    try {
+      return await beforeDeadline(
+        deadline,
+        () => {
+          const resolver = this.container.resolve<IWorkspaceLlmResolver>(
+            SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER,
+          );
+          if (!pair) return resolver.resolveSetup(workspaceRoot);
+          if (!resolver.validateSetupPair) throw failure;
+          return resolver.validateSetupPair(workspaceRoot, pair);
+        },
+        failure,
+      );
+    } catch {
+      throw failure;
+    }
+  }
+
+  private registerSetupModel(): void {
+    this.rpcHandler.registerMethod<
+      WizardGetSetupModelParams,
+      WizardGetSetupModelResult
+    >('wizard:get-setup-model', async (rawParams) => {
+      this.parse(z.strictObject({}), rawParams);
+      const resolution = await this.resolveSetup(
+        this.workspaceProvider.getWorkspaceRoot(),
+      );
+      const state = setupPairState(resolution);
+      return resolution.kind === 'set'
+        ? { state, committed: resolution.storedPair }
+        : { state };
+    });
+
+    this.rpcHandler.registerMethod<
+      WizardSetSetupModelParams,
+      WizardSetSetupModelResult
+    >('wizard:set-setup-model', async (rawParams) => {
+      const pair = this.parse(SetupModelParamsSchema, rawParams);
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (pair.provider || pair.model) {
+        requireSetup(await this.resolveSetup(workspaceRoot, undefined, pair));
+      }
+
+      let committed: ModelPair | null;
+      try {
+        const scope = this.container.resolve<WorkspaceScopeResolver>(
+          SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER,
+        );
+        committed = await scope.commitSetupPair(pair);
+      } catch {
+        this.logger.warn('Could not persist the Setup model settings.');
+        throw new RpcUserError(
+          'Could not save the Setup model.',
+          'PERSISTENCE_UNAVAILABLE',
+        );
+      }
+      const commitSeq = ++setupCommitSeq;
+      let state: SetupPairState;
+      try {
+        state = setupPairState(await this.resolveSetup(workspaceRoot));
+      } catch {
+        this.logger.warn(
+          'Could not resolve the Setup model state after commit.',
+        );
+        state = {
+          kind: 'unavailable',
+          source: committed ? 'setup' : 'workspace',
+          provider: committed?.provider ?? '',
+          model: committed?.model ?? '',
+          cause: 'provider-unavailable',
+        };
+      }
+      return { committed, state, commitSeq };
+    });
+  }
+
+  private registerGenerateSkillDraft(): void {
+    this.rpcHandler.registerMethod<
+      WizardGenerateSkillDraftParams,
+      WizardGenerateSkillDraftResult
+    >('wizard:generate-skill-draft', async (rawParams) => {
+      const params = this.parse(DraftParamsSchema, rawParams);
+      try {
+        const service = this.container.resolve<SkillDraftGenerationService>(
+          SKILL_DRAFT_GENERATION_SERVICE,
+        );
+        return await service.generateDraft(
+          params,
+          this.workspaceProvider.getWorkspaceRoot(),
+        );
+      } catch {
+        this.logger.warn('Could not generate the skill draft.');
+        return {
+          ok: false,
+          category: 'provider-error',
+          message: 'Could not generate the skill draft.',
+        };
+      }
+    });
   }
 
   /**
@@ -322,20 +567,12 @@ export class SetupRpcHandlers {
         throw new Error('MCP server required for workspace analysis.');
       }
 
+      const setupSnapshot = requireSetup(
+        await this.resolveSetup(workspaceRoot),
+      );
       const pluginPaths = this.resolvePluginPaths();
 
-      const multiPhaseService = this.resolveService<{
-        analyzeWorkspace: (
-          workspacePath: string,
-          options?: {
-            model?: string;
-            mcpServerRunning?: boolean;
-            mcpPort?: number;
-            pluginPaths?: string[];
-            resume?: boolean;
-          },
-        ) => Promise<Result<MultiPhaseManifest, Error>>;
-      }>(
+      const multiPhaseService = this.resolveService<MultiPhaseAnalysisService>(
         AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
         'MultiPhaseAnalysisService',
       );
@@ -343,9 +580,7 @@ export class SetupRpcHandlers {
       const multiPhaseResult = await multiPhaseService.analyzeWorkspace(
         workspaceRoot,
         {
-          // The analysis resolves provider + model for `workspaceRoot` itself;
-          // a frontend model is only a request it validates against them.
-          model: params?.model,
+          setupSnapshot,
           mcpServerRunning,
           mcpPort,
           pluginPaths,
@@ -612,16 +847,22 @@ export class SetupRpcHandlers {
         );
       }
 
-      const storageService = this.resolveService<AnalysisStorageService>(
-        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
-        'AnalysisStorageService',
-      );
-
-      const safeFilename = path.basename(params.filename);
-      const loaded = await storageService.loadMultiPhase(
-        workspaceRoot,
-        safeFilename,
-      );
+      let loaded: MultiPhaseAnalysisResponse;
+      try {
+        const storageService = this.container.resolve<AnalysisStorageService>(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        );
+        loaded = await storageService.loadMultiPhase(
+          workspaceRoot,
+          path.basename(params.filename),
+        );
+      } catch {
+        this.logger.warn('Could not read the saved analysis.');
+        throw new RpcUserError(
+          'Could not read the saved analysis.',
+          'ANALYSIS_LOAD_FAILED',
+        );
+      }
       if (loaded.manifest.lifecycle === 'completed') {
         const linker = this.resolveService<AnalysisClaudeMdLinker>(
           AGENT_GENERATION_TOKENS.ANALYSIS_CLAUDE_MD_LINKER,
@@ -640,50 +881,92 @@ export class SetupRpcHandlers {
       WizardRecommendAnalysisSkillsParams,
       WizardRecommendAnalysisSkillsResult
     >('wizard:recommend-analysis-skills', async (rawParams) => {
+      const rpcEntry = Date.now();
       const { runId } = this.parse(
         WizardRecommendAnalysisSkillsParamsSchema,
         rawParams,
       );
-      const empty = (warning: string): WizardRecommendAnalysisSkillsResult => ({
+      const empty = (
+        warning: string,
+        analysisPair: ModelPair | null = null,
+      ): WizardRecommendAnalysisSkillsResult => ({
         skills: [],
         detectedItems: [],
         unmatchedItems: [],
         searchFailures: [],
         summarySource: 'none',
         warning,
+        analysisPair,
+        judge: {
+          method: 'none',
+          counts: { decision: 0, normal: 0, notJudged: 0 },
+          items: [],
+          candidates: [],
+          proposals: [],
+          stages: [],
+        },
       });
+
       const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
       if (!workspaceRoot)
         return empty('Open a workspace to review recommended skills.');
+
+      const preSearchDeadline = rpcEntry + RECOMMEND_PRE_SEARCH_MS;
+      const resolved = requireSetup(
+        await this.resolveSetup(workspaceRoot, preSearchDeadline),
+      );
+      const loadError = new RpcUserError(
+        'Could not read the saved analysis.',
+        'ANALYSIS_LOAD_FAILED',
+      );
+      let saved: MultiPhaseAnalysisResponse | null;
       try {
-        const storage = this.resolveService<AnalysisStorageService>(
-          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
-          'AnalysisStorageService',
+        saved = await beforeDeadline(
+          preSearchDeadline,
+          () => {
+            const storage = this.container.resolve<AnalysisStorageService>(
+              AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+            );
+            return storage.loadByRunId(workspaceRoot, runId);
+          },
+          loadError,
         );
-        const saved = await storage.loadByRunId(workspaceRoot, runId);
-        if (!saved)
-          return empty(
-            'The saved analysis run was not found in this workspace.',
+      } catch {
+        this.logger.warn(loadError.message);
+        throw loadError;
+      }
+
+      if (!saved)
+        return empty('The saved analysis run was not found in this workspace.');
+      const analysisPair = saved.analysisPair ?? null;
+      const summary = saved.stackSummary;
+      if (!summary?.items.length)
+        return empty(
+          'No technology stack was found in this analysis.',
+          analysisPair,
+        );
+
+      try {
+        const recommendation =
+          this.container.resolve<SkillRecommendationService>(
+            SKILL_RECOMMENDATION_SERVICE,
           );
-        const summary = saved.stackSummary;
-        if (!summary?.items.length)
-          return empty('No technology stack was found in this analysis.');
-        const recommendation = this.resolveService<SkillRecommendationService>(
-          SKILL_RECOMMENDATION_SERVICE,
-          'SkillRecommendationService',
-        );
         return await recommendation.recommendAnalysis({
           workspaceRoot,
           items: summary.items,
           summarySource: summary.source,
           search: (query) => this.skillsShApi.search(query),
+          rpcEntry,
+          resolved,
+          analysisPair,
         });
       } catch (error: unknown) {
-        this.logger.error(
-          'Could not recommend skills from saved analysis',
-          error instanceof Error ? error : new Error(String(error)),
+        if (error instanceof RpcUserError) throw error;
+        this.logger.warn('Could not load skill recommendations.');
+        throw new RpcUserError(
+          'Could not load skill recommendations.',
+          'SKILLS_RECOMMEND_FAILED',
         );
-        return empty('Could not read the saved analysis or search for skills.');
       }
     });
   }

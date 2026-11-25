@@ -1,8 +1,9 @@
 import { Component, OnDestroy, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { ClockService } from '@ptah-extension/core';
+import { ClaudeRpcService, ClockService } from '@ptah-extension/core';
 import { ExecutionTreeBuilderService } from '@ptah-extension/chat-streaming';
+import type { SetupPairState } from '@ptah-extension/shared';
 import {
   AnalysisTranscriptComponent,
   SetupWizardStateService,
@@ -129,6 +130,21 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
         { provide: AnalysisStepStore, useValue: store },
         { provide: WizardAnalysisRunner, useValue: runner },
         { provide: WizardRpcService, useValue: rpc },
+        {
+          provide: ClaudeRpcService,
+          useValue: {
+            call: async (method: string) => {
+              if (method !== 'wizard:get-setup-model') {
+                throw new Error(`Unexpected RPC: ${method}`);
+              }
+              const state: SetupPairState = {
+                kind: 'unset',
+                effective: { provider: 'claude', model: 'claude-sonnet-4' },
+              };
+              return { isSuccess: () => true, data: { state } };
+            },
+          },
+        },
         { provide: SetupWizardStateService, useValue: { reset: jest.fn() } },
         { provide: Router, useValue: router },
         { provide: ClockService, useValue: clock },
@@ -495,6 +511,8 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
   it('stops the elapsed timer after the run reaches a terminal state', async () => {
     running.set(true);
     const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+    fixture.detectChanges();
+    await fixture.whenStable();
     await fixture.componentInstance['startFresh']();
     expect(clock.acquire).toHaveBeenCalledTimes(1);
     clockNow.set(103_000);
@@ -507,6 +525,8 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
 
   it('shows 0s, not a negative time, when a run starts after the page was created', async () => {
     const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+    fixture.detectChanges();
+    await fixture.whenStable();
     clockNow.set(105_000);
     await fixture.componentInstance['startFresh']();
     expect(fixture.componentInstance['elapsedSeconds']()).toBe(0);

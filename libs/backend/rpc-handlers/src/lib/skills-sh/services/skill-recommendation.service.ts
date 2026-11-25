@@ -1,27 +1,34 @@
 /**
  * Skill Recommendation Service
  *
- * Ranks skills.sh entries against the dependencies a project declares.
- * A skill is recommended only when a declared dependency proves its
- * technology. The evidence field names that dependency.
+ * Searches skills.sh for detected stack items within an entry-anchored
+ * deadline schedule, preserves stable per-item identity and the full
+ * candidate pool, and delegates per-item verdicts to SkillJudgeService.
  *
- * @module @ptah-extension/agent-generation/services
+ * @module @ptah-extension/rpc-handlers/skills-sh/services
  */
 
 import { injectable, inject } from 'tsyringe';
 import { z } from 'zod';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   DeepProjectAnalysis,
+  ModelPair,
+  SkillJudgeItem,
+  SkillJudgeResult,
+  SkillJudgeStageCategory,
+  SkillJudgeStageRecord,
   SkillRecommendation,
   SkillShEntry,
   StackSummaryItem,
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 
-import type { SkillRankingService } from './skill-ranking.service';
-import { SKILL_RANKING_SERVICE } from '../../di/tokens';
-import type { SkillRankingRequest } from './skill-ranking.types';
+import { SKILL_JUDGE_SERVICE } from '../../di/tokens';
+import { prepareItems } from './skill-judge.service';
+import type { SkillJudgeService } from './skill-judge.service';
+import type { SkillJudgeInputItem } from './skill-judge.types';
 
 /** Search function for the skills.sh catalog. */
 export type SkillCatalogSearch = (query: string) => Promise<SkillShEntry[]>;
@@ -38,10 +45,23 @@ export interface AnalysisSkillRecommendationInput {
   items: readonly StackSummaryItem[];
   search: SkillCatalogSearch;
   summarySource: 'structured' | 'legacy' | 'none';
+  /** Entry timestamp (Date.now() ms) captured before Setup resolution and search. */
+  rpcEntry?: number;
+  /** Strict Setup snapshot resolved before registry search. */
+  resolved?: ResolvedSetupSnapshot;
+  /** Immutable analysis model pair from the saved analysis manifest, or null. */
+  analysisPair?: ModelPair | null;
 }
 
+const HARD_DEADLINE_MS = 70_000;
+const SEARCH_DEADLINE_MS = 26_000;
 const SEARCH_TIMEOUT_MS = 8_000;
+const MIN_SEARCH_REMAINING_MS = 500;
+const SEARCH_WORKERS = 4;
 const MAX_TERMS = 30;
+
+const BUDGET_FAILURE = { kind: 'budget-exceeded' as const, reason: 'Search budget reached' };
+const TIMED_OUT_FAILURE = { kind: 'timed-out' as const, reason: 'Search timed out' };
 
 const recommendationEntrySchema = z.object({
   source: z.string().trim().min(1),
@@ -57,6 +77,27 @@ const recommendationEntrySchema = z.object({
   installUrl: z.string().optional(),
 });
 
+interface PreparedStackItem {
+  itemId: string;
+  item: StackSummaryItem;
+  term: string;
+}
+
+interface TermBucket {
+  term: string;
+  firstItemName: string;
+  started: boolean;
+  status: 'not-searched' | 'searched' | 'failed';
+  entries: SkillShEntry[];
+  failure?: SkillJudgeItem['registryFailure'];
+}
+
+interface ScoredCandidate {
+  skill: SkillShEntry;
+  score: number;
+  described: boolean;
+}
+
 /** Use the primary technology in composite names, without version annotations. */
 function technologyName(name: string): string {
   return name
@@ -68,8 +109,8 @@ function technologyName(name: string): string {
 }
 
 function compareRecommendations(
-  a: SkillRecommendation,
-  b: SkillRecommendation,
+  a: Pick<SkillRecommendation, 'skill' | 'score'>,
+  b: Pick<SkillRecommendation, 'skill' | 'score'>,
 ): number {
   return (
     b.score - a.score ||
@@ -82,22 +123,31 @@ function compareRecommendations(
 function searchWithTimeout(
   search: SkillCatalogSearch,
   query: string,
+  timeoutMs = SEARCH_TIMEOUT_MS,
 ): Promise<SkillShEntry[]> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error('Search timed out')),
-      SEARCH_TIMEOUT_MS,
-    );
-    search(query).then(
-      (entries) => {
-        clearTimeout(timer);
-        resolve(entries);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('Search timed out'));
+    }, Math.max(0, timeoutMs));
+    Promise.resolve()
+      .then(() => search(query))
+      .then(
+        (entries) => {
+          clearTimeout(timer);
+          if (settled) return;
+          settled = true;
+          resolve(entries);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          if (settled) return;
+          settled = true;
+          reject(error);
+        },
+      );
   });
 }
 
@@ -118,197 +168,466 @@ function tokenize(value: string): string[] {
     .filter((t) => t.length > 0);
 }
 
+function assignStableItemIds(
+  items: readonly StackSummaryItem[],
+): PreparedStackItem[] {
+  const baseIds = items.map(
+    (item) => `${item.kind}:${item.name.trim().toLowerCase()}`,
+  );
+  const reserved = new Set(baseIds);
+  const occurrences = new Map<string, number>();
+  return items.map((item, index) => {
+    const baseId = baseIds[index];
+    let count = (occurrences.get(baseId) ?? 0) + 1;
+    let itemId = count === 1 ? baseId : `${baseId}#${count}`;
+    while (itemId !== baseId && reserved.has(itemId)) {
+      count++;
+      itemId = `${baseId}#${count}`;
+    }
+    occurrences.set(baseId, count);
+    return {
+      itemId,
+      item,
+      term: dependencyKeyword(technologyName(item.name)),
+    };
+  });
+}
+
+function legacyRankedBy(
+  counts: SkillJudgeResult['counts'],
+): 'decision-model' | 'session-model' | 'heuristic' {
+  if (counts.decision > 0) return 'decision-model';
+  if (counts.normal > 0) return 'session-model';
+  return 'heuristic';
+}
+
+function makeStage(
+  stage: SkillJudgeStageRecord['stage'],
+  status: 'failed' | 'skipped',
+  category: SkillJudgeStageCategory,
+  pairConfigured?: ModelPair,
+): SkillJudgeStageRecord {
+  return { stage, status, category, ...(pairConfigured && { pairConfigured }), itemsJudged: 0, invalidItemIds: [] };
+}
+
+function buildFallbackJudgeResult(
+  inputItems: readonly SkillJudgeInputItem[],
+  stages: SkillJudgeStageRecord[],
+): SkillJudgeResult {
+  const { candidates, items } = prepareItems({ items: inputItems });
+
+  return {
+    method: 'none',
+    counts: { decision: 0, normal: 0, notJudged: items.length },
+    items,
+    candidates: [...candidates.values()],
+    proposals: [],
+    stages,
+  };
+}
+
+function finalizeRecommendations(
+  skills: SkillRecommendation[],
+): SkillRecommendation[] {
+  skills.sort(compareRecommendations);
+  skills.forEach((skill, index) => {
+    skill.rank = index + 1;
+  });
+  return skills;
+}
+
+function buildInstallRecommendations(
+  judge: SkillJudgeResult,
+): SkillRecommendation[] {
+  const candidateById = new Map(
+    judge.candidates.map((c) => [c.candidateId, c]),
+  );
+  const selectedById = new Map<
+    string,
+    { rec: SkillRecommendation; evidenceNames: string[] }
+  >();
+
+  for (const judgeItem of judge.items) {
+    for (const outcome of judgeItem.outcomes) {
+      if (outcome.verdict !== 'install') continue;
+      const candidate = candidateById.get(outcome.candidateId);
+      if (!candidate) continue;
+
+      const existing = selectedById.get(outcome.candidateId);
+      if (existing) {
+        if (!existing.evidenceNames.includes(judgeItem.item.name)) {
+          existing.evidenceNames.push(judgeItem.item.name);
+          existing.rec.evidence = existing.evidenceNames.join(', ');
+        }
+        continue;
+      }
+
+      const rec: SkillRecommendation = {
+        skill: candidate.skill,
+        evidence: judgeItem.item.name,
+        score: 100 + Math.log10(1 + Math.max(0, candidate.skill.installs)),
+        rankedBy:
+          outcome.stage === 'decision' ? 'decision-model' : 'session-model',
+        reason: outcome.reason,
+      };
+      selectedById.set(outcome.candidateId, {
+        rec,
+        evidenceNames: [judgeItem.item.name],
+      });
+    }
+  }
+
+  return finalizeRecommendations(
+    [...selectedById.values()].map(({ rec }) => rec),
+  );
+}
+
+function buildHeuristicRecommendations(
+  judge: SkillJudgeResult,
+  termByItemId: ReadonlyMap<string, string>,
+): SkillRecommendation[] {
+  const candidateById = new Map(
+    judge.candidates.map((c) => [c.candidateId, c]),
+  );
+  const usedIds = new Set<string>();
+  const usedNames = new Set<string>();
+  const skills: SkillRecommendation[] = [];
+  const evidenceNames = new Map<SkillRecommendation, string[]>();
+  const skillByTerm = new Map<string, SkillRecommendation>();
+
+  const identity = (skill: SkillShEntry) => ({
+    id: `${skill.source}/${skill.skillId}`.toLowerCase(),
+    name: skill.name.toLowerCase(),
+  });
+  const appendEvidence = (rec: SkillRecommendation, name: string): void => {
+    const names = evidenceNames.get(rec);
+    if (!names || names.includes(name)) return;
+    names.push(name);
+    rec.evidence = names.join(', ');
+  };
+
+  for (const judgeItem of judge.items) {
+    const eligible = judgeItem.candidateAssessments.flatMap((a) => {
+      if (!a.eligible) return [];
+      const c = candidateById.get(a.candidateId);
+      return c ? [c] : [];
+    });
+    if (!eligible.length) continue;
+
+    const term = termByItemId.get(judgeItem.itemId);
+    const sameTermChoice = term ? skillByTerm.get(term) : undefined;
+    if (sameTermChoice) {
+      appendEvidence(sameTermChoice, judgeItem.item.name);
+      continue;
+    }
+
+    const best = eligible.find((c) => {
+      const { id, name } = identity(c.skill);
+      return !usedIds.has(id) && !usedNames.has(name);
+    });
+    if (best) {
+      const { id, name } = identity(best.skill);
+      usedIds.add(id);
+      usedNames.add(name);
+      const rec: SkillRecommendation = {
+        skill: best.skill,
+        evidence: judgeItem.item.name,
+        score: 100 + Math.log10(1 + Math.max(0, best.skill.installs)),
+        rankedBy: 'heuristic',
+      };
+      skills.push(rec);
+      evidenceNames.set(rec, [judgeItem.item.name]);
+      if (term) skillByTerm.set(term, rec);
+      continue;
+    }
+
+    const covering = skills.find((chosen) =>
+      eligible.some((c) => {
+        const left = identity(chosen.skill);
+        const right = identity(c.skill);
+        return left.id === right.id;
+      }),
+    );
+    if (covering) {
+      appendEvidence(covering, judgeItem.item.name);
+      if (term) skillByTerm.set(term, covering);
+    }
+  }
+
+  return finalizeRecommendations(skills);
+}
+
 @injectable()
 export class SkillRecommendationService {
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
-    @inject(SKILL_RANKING_SERVICE, { isOptional: true })
-    private readonly ranker?: SkillRankingService,
+    @inject(SKILL_JUDGE_SERVICE, { isOptional: true })
+    private readonly skillJudge?: Pick<SkillJudgeService, 'judge'>,
   ) {}
 
   async recommendAnalysis(
     input: AnalysisSkillRecommendationInput,
   ): Promise<WizardRecommendAnalysisSkillsResult> {
-    const needs = new Map<string, StackSummaryItem>();
-    for (const item of input.items) {
-      const term = dependencyKeyword(technologyName(item.name));
-      if (!needs.has(term)) needs.set(term, item);
-    }
-    const detectedItems = [...needs.values()].slice(0, MAX_TERMS);
-    const results: SkillShEntry[][] = new Array(detectedItems.length);
-    const failures: { item: string; reason: string }[] = [];
-    let next = 0;
-    await Promise.all(
-      Array.from({ length: Math.min(4, detectedItems.length) }, async () => {
-        while (next < detectedItems.length) {
-          const index = next++;
-          const item = detectedItems[index];
-          try {
-            results[index] = await searchWithTimeout(
-              input.search,
-              dependencyKeyword(technologyName(item.name)),
-            );
-          } catch (error: unknown) {
-            const reason =
-              error instanceof Error && error.message === 'Search timed out'
-                ? 'Search timed out'
-                : 'Search failed';
-            failures.push({ item: item.name, reason });
-            this.logger.warn('[SkillRecommendation] skills.sh search failed', {
-              item: item.name,
-              reason,
-            });
-            results[index] = [];
-          }
-        }
-      }),
-    );
+    const rpcEntry = input.rpcEntry ?? Date.now();
+    const searchDeadlineAt = rpcEntry + SEARCH_DEADLINE_MS;
+    const hardDeadlineAt = rpcEntry + HARD_DEADLINE_MS;
 
-    const usedIds = new Set<string>();
-    const usedNames = new Set<string>();
-    const skills: SkillRecommendation[] = [];
-    const unmatchedItems: StackSummaryItem[] = [];
-    const collected: (SkillRecommendation & { described: boolean })[][] = [];
-    for (const [index, item] of detectedItems.entries()) {
-      const term = dependencyKeyword(technologyName(item.name));
-      const candidates: (SkillRecommendation & { described: boolean })[] = [];
-      for (const rawEntry of results[index] ?? []) {
-        const parsed = recommendationEntrySchema.safeParse(rawEntry);
-        if (!parsed.success) {
-          this.logger.debug(
-            '[SkillRecommendation] Invalid registry row dropped',
-            { item: item.name },
-          );
-          continue;
-        }
-        const entry = parsed.data;
-        const words = [...tokenize(entry.skillId), ...tokenize(entry.name)];
-        const pairs = words
-          .slice(0, -1)
-          .map((word, position) => word + words[position + 1]);
-        const complete = [entry.skillId, entry.name].some(
-          (value) => dependencyKeyword(value) === term,
-        );
-        if (
-          term.length < 2 ||
-          (!complete &&
-            !words.includes(term) &&
-            (term.length < 3 || !pairs.includes(term)))
-        )
-          continue;
-        const score = 100 + Math.log10(1 + Math.max(0, entry.installs));
-        candidates.push({
-          skill: {
-            ...entry,
-            description:
-              entry.description.trim() ||
-              `${entry.source} - ${entry.installs} installs`,
-          },
-          evidence: item.name,
-          score,
-          described: Boolean(entry.description.trim()),
-        });
+    const prepared = assignStableItemIds(input.items);
+    const termByItemId = new Map<string, string>();
+    const bucketByTerm = new Map<string, TermBucket>();
+    const buckets: TermBucket[] = [];
+
+    for (const entry of prepared) {
+      termByItemId.set(entry.itemId, entry.term);
+      if (!bucketByTerm.has(entry.term)) {
+        const bucket: TermBucket = {
+          term: entry.term,
+          firstItemName: entry.item.name,
+          started: false,
+          status: 'not-searched',
+          entries: [],
+          failure: BUDGET_FAILURE,
+        };
+        bucketByTerm.set(entry.term, bucket);
+        buckets.push(bucket);
       }
-      candidates.sort(
-        (a, b) =>
-          Number(b.described) - Number(a.described) ||
-          compareRecommendations(a, b),
+    }
+
+    await this.runBoundedSearch(buckets, input.search, searchDeadlineAt);
+
+    const candidatesByTerm = new Map<string, SkillShEntry[]>();
+    for (const bucket of buckets) {
+      if (bucket.status !== 'searched') continue;
+      candidatesByTerm.set(
+        bucket.term,
+        this.filterAndSortCandidates(bucket.entries, bucket.term, bucket.firstItemName),
       );
-      collected.push(candidates);
     }
-    const rankingItems: SkillRankingRequest['items'] = Object.fromEntries(
-      detectedItems.map((item, index) => [
-        String(index),
-        {
-          kind: item.kind,
-          name: item.name,
-          candidates: collected[index].map((candidate, candidateIndex) => ({
-            label: String(candidateIndex),
-            name: candidate.skill.name,
-            source: candidate.skill.source,
-            skillId: candidate.skill.skillId,
-            installs: candidate.skill.installs,
-            description: candidate.described ? candidate.skill.description : '',
-          })),
-        },
-      ]),
-    );
-    let ranking: Awaited<ReturnType<SkillRankingService['rank']>> | undefined;
-    if (this.ranker && input.workspaceRoot) {
-      try {
-        ranking = await this.ranker.rank({
-          workspaceRoot: input.workspaceRoot,
-          items: rankingItems,
-        });
-      } catch (error: unknown) {
-        // degradation-audit: reported - unexpected ranker failures preserve the existing selection flow.
-        this.logger.debug('[SkillRecommendation] Ranking unavailable', {
-          error: String(error),
-        });
+
+    const unmatchedItems: StackSummaryItem[] = [];
+    const searchFailures: { item: string; reason: string }[] = [];
+    const judgeInputItems: SkillJudgeInputItem[] = prepared.map(({ itemId, item, term }) => {
+      const bucket = bucketByTerm.get(term);
+      if (!bucket || bucket.status === 'not-searched') {
+        return { itemId, item, registry: 'not-searched', registryFailure: bucket?.failure ?? BUDGET_FAILURE, candidates: [] };
       }
-    }
-    for (const [index, item] of detectedItems.entries()) {
-      const candidates = collected[index];
-      const order = ranking?.items[String(index)]?.order;
-      const ordered = order
-        ? order
-            .map((label) => candidates[Number(label)])
-            .filter(
-              (candidate): candidate is (typeof candidates)[number] =>
-                candidate !== undefined,
-            )
-        : candidates;
-      const identity = (candidate: SkillRecommendation) => ({
-        id: `${candidate.skill.source}/${candidate.skill.skillId}`.toLowerCase(),
-        name: candidate.skill.name.toLowerCase(),
-      });
-      // Use the highest-ranked candidate not already selected for an earlier item.
-      const best = ordered.find((candidate) => {
-        const { id, name } = identity(candidate);
-        return !usedIds.has(id) && !usedNames.has(name);
-      });
-      if (best) {
-        const { id, name } = identity(best);
-        usedIds.add(id);
-        usedNames.add(name);
-        const itemRanking = ranking?.items[String(index)];
-        skills.push({
-          skill: best.skill,
-          evidence: best.evidence,
-          score: best.score,
-          rankedBy: itemRanking?.rankedBy ?? 'heuristic',
-          ...(best !== ordered[0] || itemRanking?.reason === undefined
-            ? {}
-            : { reason: itemRanking.reason }),
-        });
-      } else if (candidates.length) {
-        const covering = skills.find((chosen) =>
-          candidates.some((candidate) => {
-            const left = identity(chosen);
-            const right = identity(candidate);
-            return left.id === right.id || left.name === right.name;
-          }),
-        );
-        if (covering) covering.evidence += `, ${item.name}`;
-      } else if (
-        candidates.length === 0 &&
-        !failures.some((failure) => failure.item === item.name)
-      ) {
+      if (bucket.status === 'failed') {
+        const failure = bucket.failure ?? { kind: 'registry-error' as const, reason: 'Search failed' };
+        searchFailures.push({ item: item.name, reason: failure.reason });
+        return { itemId, item, registry: 'search-failed', registryFailure: failure, candidates: [] };
+      }
+      const matched = candidatesByTerm.get(term) ?? [];
+      if (matched.length === 0) {
         unmatchedItems.push(item);
+        return { itemId, item, registry: 'no-match', candidates: [] };
       }
-    }
-    skills.sort(compareRecommendations);
-    skills.forEach((skill, index) => {
-      skill.rank = index + 1;
+      return { itemId, item, registry: 'matched', candidates: matched };
     });
+
+    const judge = await this.runJudgeWithDeadline(input, rpcEntry, hardDeadlineAt, judgeInputItems);
+    const skills =
+      judge.method === 'none'
+        ? buildHeuristicRecommendations(judge, termByItemId)
+        : buildInstallRecommendations(judge);
+
     return {
       skills,
-      detectedItems,
+      judge,
+      analysisPair: input.analysisPair
+        ? { provider: input.analysisPair.provider, model: input.analysisPair.model }
+        : null,
+      rankedBy: legacyRankedBy(judge.counts),
+      detectedItems: input.items.slice(),
       unmatchedItems,
-      searchFailures: failures,
-      rankedBy: ranking?.rankedBy ?? 'heuristic',
+      searchFailures,
       summarySource: input.summarySource,
     };
+  }
+
+  private async runBoundedSearch(
+    buckets: TermBucket[],
+    search: SkillCatalogSearch,
+    searchDeadlineAt: number,
+  ): Promise<void> {
+    const searchableCount = Math.min(buckets.length, MAX_TERMS);
+    if (searchableCount === 0) return;
+
+    let searchSettled = false;
+    let next = 0;
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const workerCount = Math.min(SEARCH_WORKERS, searchableCount);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (!searchSettled && next < searchableCount) {
+        const remainingMs = searchDeadlineAt - Date.now();
+        if (remainingMs < MIN_SEARCH_REMAINING_MS) break;
+        const bucket = buckets[next++];
+        bucket.started = true;
+        const timeoutMs = Math.min(
+          SEARCH_TIMEOUT_MS,
+          Math.max(0, remainingMs),
+        );
+        try {
+          const entries = await searchWithTimeout(
+            search,
+            bucket.term,
+            timeoutMs,
+          );
+          if (searchSettled) return;
+          bucket.status = 'searched';
+          bucket.entries = entries;
+          bucket.failure = undefined;
+        } catch (error: unknown) {
+          // degradation-audit: reported - Late rejections are covered by the bucket timeout in registryFailure.
+          if (searchSettled) return;
+          const timedOut =
+            error instanceof Error && error.message === 'Search timed out';
+          const reason = timedOut ? 'Search timed out' : 'Search failed';
+          bucket.status = 'failed';
+          bucket.entries = [];
+          bucket.failure = timedOut
+            ? TIMED_OUT_FAILURE
+            : { kind: 'registry-error', reason };
+          this.logger.warn('[SkillRecommendation] skills.sh search failed', {
+            item: bucket.firstItemName,
+            reason,
+          });
+        }
+      }
+    });
+
+    try {
+      await Promise.race([
+        Promise.all(workers),
+        new Promise<void>((resolve) => {
+          deadlineTimer = setTimeout(
+            resolve,
+            Math.max(0, searchDeadlineAt - Date.now()),
+          );
+        }),
+      ]);
+    } finally {
+      searchSettled = true;
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+    }
+
+    for (let i = 0; i < searchableCount; i++) {
+      const bucket = buckets[i];
+      if (bucket.started && bucket.status === 'not-searched') {
+        bucket.status = 'failed';
+        bucket.entries = [];
+        bucket.failure = TIMED_OUT_FAILURE;
+        this.logger.warn('[SkillRecommendation] skills.sh search failed', {
+          item: bucket.firstItemName,
+          reason: TIMED_OUT_FAILURE.reason,
+        });
+      }
+    }
+  }
+
+  private filterAndSortCandidates(
+    rawEntries: readonly SkillShEntry[],
+    term: string,
+    logItemName: string,
+  ): SkillShEntry[] {
+    const scored: ScoredCandidate[] = [];
+    for (const rawEntry of rawEntries) {
+      const parsed = recommendationEntrySchema.safeParse(rawEntry);
+      if (!parsed.success) {
+        this.logger.debug(
+          '[SkillRecommendation] Invalid registry row dropped',
+          { item: logItemName },
+        );
+        continue;
+      }
+      const entry = parsed.data;
+      const words = [...tokenize(entry.skillId), ...tokenize(entry.name)];
+      const pairs = words
+        .slice(0, -1)
+        .map((word, position) => word + words[position + 1]);
+      const complete = [entry.skillId, entry.name].some(
+        (value) => dependencyKeyword(value) === term,
+      );
+      if (
+        term.length < 2 ||
+        (!complete &&
+          !words.includes(term) &&
+          (term.length < 3 || !pairs.includes(term)))
+      ) {
+        continue;
+      }
+      const trimmed = entry.description.trim();
+      scored.push({
+        skill: {
+          ...entry,
+          description:
+            trimmed || `${entry.source} - ${entry.installs} installs`,
+        },
+        score: 100 + Math.log10(1 + Math.max(0, entry.installs)),
+        described: Boolean(trimmed),
+      });
+    }
+
+    scored.sort(
+      (a, b) =>
+        Number(b.described) - Number(a.described) ||
+        compareRecommendations(a, b),
+    );
+    return scored.map(({ skill }) => skill);
+  }
+
+  private async runJudgeWithDeadline(
+    input: AnalysisSkillRecommendationInput,
+    rpcEntry: number,
+    hardDeadlineAt: number,
+    judgeInputItems: readonly SkillJudgeInputItem[],
+  ): Promise<SkillJudgeResult> {
+    const pairConfigured = input.resolved
+      ? { provider: input.resolved.providerId, model: input.resolved.model }
+      : undefined;
+    const fallback = (
+      decisionStatus: 'failed' | 'skipped',
+      decisionCategory: SkillJudgeStageCategory,
+      normalStatus: 'failed' | 'skipped',
+      normalCategory: SkillJudgeStageCategory,
+    ) =>
+      buildFallbackJudgeResult(judgeInputItems, [
+        makeStage('decision', decisionStatus, decisionCategory),
+        makeStage('normal', normalStatus, normalCategory, pairConfigured),
+      ]);
+
+    if (!this.skillJudge || !input.resolved) {
+      return fallback('skipped', 'unavailable', 'skipped', 'unavailable');
+    }
+
+    const remainingHardMs = hardDeadlineAt - Date.now();
+    if (remainingHardMs <= 0) {
+      return fallback('skipped', 'timed-out', 'failed', 'timed-out');
+    }
+
+    const timedOut = Symbol('Skill judge hard deadline');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const outcome = await Promise.race([
+        this.skillJudge.judge({
+          workspaceRoot: input.workspaceRoot,
+          rpcEntry,
+          resolved: input.resolved,
+          items: judgeInputItems,
+        }),
+        new Promise<typeof timedOut>((resolve) => {
+          timer = setTimeout(() => resolve(timedOut), remainingHardMs);
+        }),
+      ]);
+      if (outcome !== timedOut) return outcome;
+      this.logger.warn('[SkillRecommendation] Skill judge hit hard deadline');
+      return fallback('failed', 'timed-out', 'failed', 'timed-out');
+    } catch {
+      // degradation-audit: reported - unexpected judge errors preserve registry candidates.
+      this.logger.warn('[SkillRecommendation] Skill judge failed unexpectedly');
+      return fallback('failed', 'unavailable', 'failed', 'provider-error');
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async recommend(

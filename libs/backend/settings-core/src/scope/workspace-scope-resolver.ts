@@ -1,13 +1,30 @@
 import { createHash } from 'crypto';
 import * as path from 'path';
 import type { IDisposable } from '@ptah-extension/platform-core';
-import type { ISettingsStore } from '../ports/settings-store.interface';
+import type { ModelPair } from '@ptah-extension/shared';
+import {
+  isGlobalBatchSettingsStore,
+  type ISettingsStore,
+} from '../ports/settings-store.interface';
 import type { IActiveWorkspaceSource } from './active-workspace-source';
 
 const WORKSPACE_KEY_PREFIX = 'workspace';
 const APP_KEY_PREFIX = 'app';
+const SETUP_PROVIDER_KEY = 'setup.provider';
+const SETUP_MODEL_KEY = 'setup.model';
 
 export type WorkspaceWriteTarget = 'global' | 'app' | 'workspace';
+
+export interface StoredSetupPair {
+  readonly provider: string | null;
+  readonly model: string | null;
+}
+
+function normalizeSetupKey(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
 
 export function appScopePrefixFor(type: string): string {
   return `${APP_KEY_PREFIX}.${type}`;
@@ -364,6 +381,83 @@ export class WorkspaceScopeResolver {
       }
     }
     return globalKey;
+  }
+
+  /**
+   * Read the global-only Setup provider/model pair, bypassing app and workspace
+   * scopes completely. Preserves partial stored values (`provider` or `model`
+   * present while the other is null) so manual/legacy partial edits surface as
+   * invalid rather than silently falling back.
+   */
+  readSetupPair(): StoredSetupPair {
+    if (isGlobalBatchSettingsStore(this.store)) {
+      const slice = this.store.readGlobalMany([
+        SETUP_PROVIDER_KEY,
+        SETUP_MODEL_KEY,
+      ]);
+      return {
+        provider: normalizeSetupKey(slice[SETUP_PROVIDER_KEY]),
+        model: normalizeSetupKey(slice[SETUP_MODEL_KEY]),
+      };
+    }
+    return {
+      provider: normalizeSetupKey(this.store.readGlobal(SETUP_PROVIDER_KEY)),
+      model: normalizeSetupKey(this.store.readGlobal(SETUP_MODEL_KEY)),
+    };
+  }
+
+  /**
+   * Atomically persist the global-only Setup provider/model pair (or clear
+   * both with `{ provider: '', model: '' }`) through `writeGlobalBatch`.
+   *
+   * Constructs the returned receipt strictly from the committed slice returned
+   * by `writeGlobalBatch` — never from a trailing `readSetupPair()` — so
+   * overlapping concurrent saves each receive their own transaction receipt.
+   */
+  async commitSetupPair(input: {
+    provider: string;
+    model: string;
+  }): Promise<ModelPair | null> {
+    if (
+      !input ||
+      typeof input !== 'object' ||
+      typeof input.provider !== 'string' ||
+      typeof input.model !== 'string'
+    ) {
+      throw new Error(
+        'Setup pair must supply string provider and model values.',
+      );
+    }
+    const provider = input.provider.trim();
+    const model = input.model.trim();
+    const hasProvider = provider.length > 0;
+    const hasModel = model.length > 0;
+    if (hasProvider !== hasModel) {
+      throw new Error(
+        'Setup pair must specify both provider and model, or both empty strings to clear.',
+      );
+    }
+    if (!isGlobalBatchSettingsStore(this.store)) {
+      throw new Error(
+        'Settings store does not support atomic batch writes (writeGlobalBatch).',
+      );
+    }
+
+    const committed = await this.store.writeGlobalBatch({
+      [SETUP_PROVIDER_KEY]: provider,
+      [SETUP_MODEL_KEY]: model,
+    });
+    const committedProvider = normalizeSetupKey(committed[SETUP_PROVIDER_KEY]);
+    const committedModel = normalizeSetupKey(committed[SETUP_MODEL_KEY]);
+    if (committedProvider === null && committedModel === null) {
+      return null;
+    }
+    if (committedProvider !== null && committedModel !== null) {
+      return { provider: committedProvider, model: committedModel };
+    }
+    throw new Error(
+      'Atomic Setup pair commit returned an incomplete committed slice.',
+    );
   }
 
   onActiveChange(cb: () => void): IDisposable {

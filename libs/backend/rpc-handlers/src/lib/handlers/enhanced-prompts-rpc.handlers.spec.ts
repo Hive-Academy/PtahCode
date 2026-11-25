@@ -16,9 +16,10 @@
  *     content buffer is handed to `ISaveDialogProvider.showSaveAndWrite`
  *     with the expected filename/filters/title; user-cancelled save
  *     surfaces as a structured error, not a throw.
- *   - Never throws to the RPC boundary: handler surfaces errors as response
- *     objects (otherwise `handleMessage` would serialize them as generic
- *     failures — the UI relies on the structured `error` field).
+ *   - Expected Setup failures use `RpcUserError` with `SETUP_MODEL_INVALID`;
+ *     other handler failures keep their structured response objects.
+ *   - Other errors do not throw to the RPC boundary: the UI relies on the
+ *     structured `error` field.
  *
  * Mocking posture: direct constructor injection, no tsyringe container.
  *
@@ -127,7 +128,11 @@ import {
   createMockWorkspaceProvider,
   type MockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
-import type { PluginLoaderService } from '@ptah-extension/agent-sdk';
+import type {
+  IWorkspaceLlmResolver,
+  PluginLoaderService,
+  ResolvedSetupSnapshot,
+} from '@ptah-extension/agent-sdk';
 import type {
   AnalysisStorageService,
   EnhancedPromptsService,
@@ -192,7 +197,6 @@ type MockEnhancedPromptsService = jest.Mocked<
     | 'getFullCombinedPromptContent'
     | 'acquireBoundGeneration'
     | 'releaseBoundGeneration'
-    | 'resolveGuidanceRoute'
     | 'resolveGuidanceSource'
   >
 > & { generationInProgress: boolean };
@@ -206,9 +210,6 @@ function createMockEnhancedPromptsService(): MockEnhancedPromptsService {
     getFullCombinedPromptContent: jest.fn(),
     acquireBoundGeneration: jest.fn().mockReturnValue({}),
     releaseBoundGeneration: jest.fn(),
-    resolveGuidanceRoute: jest
-      .fn()
-      .mockResolvedValue({ providerId: 'anthropic', model: 'sonnet' }),
     resolveGuidanceSource: jest
       .fn()
       .mockResolvedValue({ kind: 'workspace-discovery', reason: 'missing' }),
@@ -227,6 +228,30 @@ function createMockPluginLoader(): MockPluginLoader {
       disabledSkillIds: [],
     }),
     resolvePluginPaths: jest.fn().mockReturnValue([]),
+  };
+}
+
+const DEFAULT_SETUP_ROUTE: ResolvedSetupSnapshot = {
+  providerId: 'openrouter',
+  model: 'anthropic/setup-default',
+  auth: { env: { ANTHROPIC_AUTH_TOKEN: 'setup-auth' } },
+};
+
+type MockWorkspaceLlmResolver = jest.Mocked<
+  Pick<IWorkspaceLlmResolver, 'resolveForPath' | 'resolveSetup'>
+>;
+
+function createMockWorkspaceLlmResolver(): MockWorkspaceLlmResolver {
+  return {
+    resolveForPath: jest.fn().mockResolvedValue({
+      providerId: 'anthropic',
+      model: 'chat-picker-model',
+      auth: { env: { ANTHROPIC_API_KEY: 'picker-auth' } },
+    }),
+    resolveSetup: jest.fn().mockResolvedValue({
+      kind: 'set',
+      snapshot: DEFAULT_SETUP_ROUTE,
+    }),
   };
 }
 
@@ -263,6 +288,7 @@ interface Harness {
   enhancedPrompts: MockEnhancedPromptsService;
   analysisStorage: MockAnalysisStorage;
   pluginLoader: MockPluginLoader;
+  workspaceLlm: MockWorkspaceLlmResolver;
   workspace: MockWorkspaceProvider;
   saveDialog: MockSaveDialog;
   container: MockContainer;
@@ -277,6 +303,7 @@ function makeHarness(
   const enhancedPrompts = createMockEnhancedPromptsService();
   const analysisStorage = createMockAnalysisStorage();
   const pluginLoader = createMockPluginLoader();
+  const workspaceLlm = createMockWorkspaceLlmResolver();
   const workspace = createMockWorkspaceProvider({
     folders: [opts.workspaceRoot ?? WORKSPACE],
   });
@@ -290,6 +317,7 @@ function makeHarness(
     enhancedPrompts as unknown as EnhancedPromptsService,
     analysisStorage as unknown as AnalysisStorageService,
     pluginLoader as unknown as PluginLoaderService,
+    workspaceLlm as unknown as IWorkspaceLlmResolver,
     workspace as unknown as IWorkspaceProvider,
     saveDialog as unknown as ISaveDialogProvider,
     sentry as unknown as SentryService,
@@ -304,6 +332,7 @@ function makeHarness(
     enhancedPrompts,
     analysisStorage,
     pluginLoader,
+    workspaceLlm,
     workspace,
     saveDialog,
     container,
@@ -325,6 +354,10 @@ async function call<TResult>(
     throw new Error(`RPC ${method} failed: ${response.error}`);
   }
   return response.data as TResult;
+}
+
+async function flushSetupResolution(): Promise<void> {
+  for (let index = 0; index < 6; index++) await Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
@@ -735,15 +768,19 @@ describe('EnhancedPromptsRpcHandlers', () => {
       );
     });
 
-    it('falls back to workspace discovery for stale analysis and records the effective model', async () => {
+    it('falls back to workspace discovery for stale analysis and records the Setup model', async () => {
       const h = makeHarness();
       h.enhancedPrompts.resolveGuidanceSource.mockResolvedValue({
         kind: 'workspace-discovery',
         reason: 'stale',
       });
-      h.enhancedPrompts.resolveGuidanceRoute.mockResolvedValue({
-        providerId: 'openrouter',
-        model: 'supported-fallback',
+      h.workspaceLlm.resolveSetup.mockResolvedValue({
+        kind: 'set',
+        snapshot: {
+          providerId: 'openrouter',
+          model: 'supported-fallback',
+          auth: { env: { ANTHROPIC_AUTH_TOKEN: 'setup-auth' } },
+        },
       });
       h.enhancedPrompts.runWizard.mockImplementation(
         () => new Promise(() => undefined),
@@ -765,10 +802,8 @@ describe('EnhancedPromptsRpcHandlers', () => {
         reason: 'stale',
       });
       expect(result.accepted?.effectiveModel).toBe('supported-fallback');
-      expect(h.enhancedPrompts.resolveGuidanceRoute).toHaveBeenCalledWith(
-        WORKSPACE,
-        'unsupported',
-      );
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(1);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledWith(WORKSPACE);
       expect(h.enhancedPrompts.runWizard).toHaveBeenCalledWith(
         WORKSPACE,
         undefined,
@@ -1061,7 +1096,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
       expect((broadcaster.broadcastMessage as jest.Mock).mock.calls.some(([, event]) => event.tabBinding?.runId === first.accepted?.runId && event.lifecycle === 'completed')).toBe(true);
     });
 
-    it('passes the bound guidance model to provider resolution', async () => {
+    it('ignores the bound client model and resolves Setup once', async () => {
       const h = makeHarness();
       h.enhancedPrompts.regenerate.mockImplementation(
         () => new Promise(() => undefined),
@@ -1080,11 +1115,9 @@ describe('EnhancedPromptsRpcHandlers', () => {
           model: 'tab-model',
         },
       );
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(1);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledWith(WORKSPACE);
       expect(response.accepted?.runId).toBeTruthy();
-      expect(h.enhancedPrompts.resolveGuidanceRoute).toHaveBeenCalledWith(
-        WORKSPACE,
-        'tab-model',
-      );
     });
     it('rejects missing workspacePath', async () => {
       const h = makeHarness();
@@ -1185,6 +1218,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
 
         const startedAt = new Date().toISOString();
         void begin(h);
+        await flushSetupResolution();
 
         expect((await read(h)).regenerationStartedAt).toBe(startedAt);
       });
@@ -1208,6 +1242,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
           workspacePath: WORKSPACE,
           force: true,
         });
+        await flushSetupResolution();
         expect(h.enhancedPrompts.regenerate).toHaveBeenCalledWith(
           WORKSPACE,
           expect.objectContaining({ force: true }),
@@ -1237,6 +1272,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
 
         const startedAt = new Date().toISOString();
         void begin(h);
+        await flushSetupResolution();
         expect(await begin(h)).toEqual({
           success: false,
           error: 'A regeneration is already running for this workspace.',
@@ -1257,6 +1293,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
         });
 
         void begin(h);
+        await flushSetupResolution();
         expect(await begin(h)).toEqual({
           success: false,
           error: 'A regeneration is already running for this workspace.',
@@ -1272,11 +1309,13 @@ describe('EnhancedPromptsRpcHandlers', () => {
         });
 
         void begin(h);
+        await flushSetupResolution();
         expect((await read(h)).regenerationStartedAt).not.toBeNull();
         h.enhancedPrompts.generationInProgress = false;
 
         expect((await read(h)).regenerationStartedAt).toBeNull();
         void begin(h);
+        await flushSetupResolution();
         expect(h.enhancedPrompts.regenerate).toHaveBeenCalledTimes(2);
       });
 
@@ -1288,6 +1327,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
         });
 
         void begin(h);
+        await flushSetupResolution();
         jest.advanceTimersByTime(ENHANCED_PROMPTS_RUN_CEILING_MS + 1);
 
         expect((await read(h)).regenerationStartedAt).toBeNull();
@@ -1311,6 +1351,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
           });
 
         const first = begin(h);
+        await flushSetupResolution();
         expect((await read(h)).regenerationStartedAt).not.toBeNull();
         h.enhancedPrompts.generationInProgress = false;
         expect((await read(h)).regenerationStartedAt).toBeNull();
@@ -1318,6 +1359,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
         jest.advanceTimersByTime(1);
         const secondStartedAt = new Date().toISOString();
         void begin(h);
+        await flushSetupResolution();
         finishFirst({ success: true, status });
 
         expect(await first).toMatchObject({ success: true, status });
@@ -1348,10 +1390,223 @@ describe('EnhancedPromptsRpcHandlers', () => {
         });
 
         void begin(h);
+        await flushSetupResolution();
 
         expect((await read(h, '/other/workspace')).regenerationStartedAt).toBeNull();
         expect((await read(h)).regenerationStartedAt).not.toBeNull();
       });
+    });
+  });
+
+  describe('Setup model routing', () => {
+    type GuidanceMethod =
+      | 'enhancedPrompts:runWizard'
+      | 'enhancedPrompts:regenerate';
+
+    const operations: Array<{ method: GuidanceMethod; bound: boolean }> = [
+      { method: 'enhancedPrompts:runWizard', bound: false },
+      { method: 'enhancedPrompts:runWizard', bound: true },
+      { method: 'enhancedPrompts:regenerate', bound: false },
+      { method: 'enhancedPrompts:regenerate', bound: true },
+    ];
+    const tabBinding = {
+      tabId: 'setup-route-tab',
+      workflow: 'setup-project-prompt' as const,
+      workspacePath: WORKSPACE,
+    };
+
+    function params(bound: boolean, model: string): Record<string, unknown> {
+      return {
+        workspacePath: WORKSPACE,
+        model,
+        ...(bound ? { tabBinding } : {}),
+      };
+    }
+
+    function primeSuccessfulService(h: Harness): void {
+      h.enhancedPrompts.runWizard.mockResolvedValue({
+        success: true,
+        state: {
+          enabled: true,
+          generatedPrompt: 'hidden',
+          generatedAt: '2026-01-01T00:00:00Z',
+          detectedStack: null,
+          configHash: 'hash',
+          workspacePath: WORKSPACE,
+        },
+        summary: null,
+      } as unknown as Awaited<ReturnType<EnhancedPromptsService['runWizard']>>);
+      h.enhancedPrompts.regenerate.mockResolvedValue({
+        success: true,
+        status: {
+          enabled: true,
+          hasGeneratedPrompt: true,
+          generatedAt: '2026-01-01T00:00:00Z',
+          detectedStack: null,
+          cacheValid: true,
+        },
+      });
+    }
+
+    function expectSnapshotPassed(
+      h: Harness,
+      method: GuidanceMethod,
+      bound: boolean,
+      snapshot: ResolvedSetupSnapshot,
+    ): void {
+      const serviceCall =
+        method === 'enhancedPrompts:runWizard'
+          ? h.enhancedPrompts.runWizard.mock.calls[0]
+          : h.enhancedPrompts.regenerate.mock.calls[0];
+      expect(serviceCall).toBeDefined();
+      const configIndex = method === 'enhancedPrompts:runWizard' ? 4 : 3;
+      expect(serviceCall?.[configIndex]).toMatchObject({ route: snapshot });
+      expect(serviceCall?.[configIndex]).not.toHaveProperty('model');
+      if (bound) {
+        const boundIndex = method === 'enhancedPrompts:runWizard' ? 6 : 4;
+        expect(serviceCall?.[boundIndex]).toMatchObject({ route: snapshot });
+      }
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(1);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledWith(WORKSPACE);
+      expect(h.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+    }
+
+    it.each(operations)(
+      'Set row: $method bound=$bound dispatches the exact Setup snapshot',
+      async ({ method, bound }) => {
+        const h = makeHarness();
+        primeSuccessfulService(h);
+        h.handlers.register();
+        const pickerModel = 'chat-picker-conflict';
+        const tabOverrideModel = 'chat-tab-override-conflict';
+        h.workspaceLlm.resolveForPath.mockResolvedValue({
+          providerId: 'anthropic',
+          model: pickerModel,
+          auth: { env: { ANTHROPIC_API_KEY: 'picker-auth' } },
+        });
+
+        const response = await call<{
+          accepted?: { effectiveProvider: string; effectiveModel: string };
+        }>(h, method, params(bound, tabOverrideModel));
+
+        expectSnapshotPassed(h, method, bound, DEFAULT_SETUP_ROUTE);
+        if (bound) {
+          expect(response.accepted).toMatchObject({
+            effectiveProvider: DEFAULT_SETUP_ROUTE.providerId,
+            effectiveModel: DEFAULT_SETUP_ROUTE.model,
+          });
+        }
+        await flushSetupResolution();
+      },
+    );
+
+    it.each(operations)(
+      'Unset row: $method bound=$bound ignores conflicting picker and tab models',
+      async ({ method, bound }) => {
+        const h = makeHarness();
+        primeSuccessfulService(h);
+        h.handlers.register();
+        const workspaceRoute: ResolvedSetupSnapshot = {
+          providerId: 'anthropic',
+          model: 'workspace-selected-model',
+          auth: { env: { ANTHROPIC_API_KEY: 'workspace-auth' } },
+        };
+        const pickerModel = 'picker-model-conflict';
+        const tabOverrideModel = 'tab-model-conflict';
+        expect(pickerModel).not.toBe(workspaceRoute.model);
+        expect(tabOverrideModel).not.toBe(workspaceRoute.model);
+        expect(tabOverrideModel).not.toBe(pickerModel);
+        h.workspaceLlm.resolveForPath.mockResolvedValue({
+          providerId: workspaceRoute.providerId,
+          model: pickerModel,
+          auth: { env: { ANTHROPIC_API_KEY: 'picker-auth' } },
+        });
+        h.workspaceLlm.resolveSetup.mockResolvedValue({
+          kind: 'unset',
+          snapshot: workspaceRoute,
+        });
+
+        const response = await call<{
+          accepted?: { effectiveProvider: string; effectiveModel: string };
+        }>(h, method, params(bound, tabOverrideModel));
+
+        expectSnapshotPassed(h, method, bound, workspaceRoute);
+        if (bound) {
+          expect(response.accepted).toMatchObject({
+            effectiveProvider: workspaceRoute.providerId,
+            effectiveModel: workspaceRoute.model,
+          });
+        }
+        await flushSetupResolution();
+      },
+    );
+
+    it('resolves a rootless Setup snapshot without workspace fallback', async () => {
+      const h = makeHarness();
+
+      const route = await h.handlers['resolveSetupRoute'](undefined);
+
+      expect(route).toBe(DEFAULT_SETUP_ROUTE);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(1);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledWith(undefined);
+      expect(h.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+    });
+
+    it.each(operations)(
+      'surfaces a Setup failure as SETUP_MODEL_INVALID for $method bound=$bound',
+      async ({ method, bound }) => {
+        const h = makeHarness();
+        h.workspaceLlm.resolveSetup.mockResolvedValue({
+          kind: 'invalid',
+          source: 'setup',
+          provider: 'openrouter',
+          model: 'stale-model',
+          cause: 'not-signed-in',
+        });
+        h.handlers.register();
+
+        const response = await h.rpcHandler.handleMessage({
+          method,
+          params: params(bound, 'legacy-client-model'),
+          correlationId: `invalid-${method}-${bound}`,
+        });
+
+        expect(response).toMatchObject({
+          success: false,
+          errorCode: 'SETUP_MODEL_INVALID',
+        });
+        expect(response.error).toContain('not-signed-in');
+        expect(response.error).toContain('provider=openrouter');
+        expect(h.enhancedPrompts.runWizard).not.toHaveBeenCalled();
+        expect(h.enhancedPrompts.regenerate).not.toHaveBeenCalled();
+        expect(h.sentry.captureException).not.toHaveBeenCalled();
+        if (bound) {
+          expect(h.enhancedPrompts.releaseBoundGeneration).toHaveBeenCalledTimes(
+            1,
+          );
+        }
+      },
+    );
+
+    it('does not expose a raw resolver error in the RPC response', async () => {
+      const h = makeHarness();
+      h.workspaceLlm.resolveSetup.mockRejectedValue(
+        new Error('raw-provider-error-with-secret'),
+      );
+      h.handlers.register();
+
+      const response = await h.rpcHandler.handleMessage({
+        method: 'enhancedPrompts:runWizard',
+        params: params(false, 'legacy-client-model'),
+        correlationId: 'setup-resolution-rejected',
+      });
+
+      expect(response).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(response.error).not.toContain('raw-provider-error-with-secret');
+      expect(h.sentry.captureException).not.toHaveBeenCalled();
     });
   });
 

@@ -7,6 +7,7 @@
 import type { ProjectAnalysisResult } from '../wizard';
 import type { HarnessTargetId } from '../harness-sync.types';
 import type { GenerationAgentOutcome } from '../wizard/phase';
+import type { ModelPair, SkillJudgeResult } from './rpc-skill-judge.types';
 import type {
   AgentModelPreview,
   FileDecisionEntry,
@@ -194,6 +195,7 @@ export interface PhaseResultV4 {
     promptSha256: string;
     priorPhaseSha256: string | null;
     model: string;
+    provider?: string;
   } | null;
   verification: {
     status: 'pending' | 'verified' | 'failed';
@@ -211,6 +213,7 @@ export interface MultiPhaseManifestV4 {
   updatedAt: string;
   lifecycle: 'running' | 'paused' | 'completed' | 'failed';
   model: string;
+  analysisPair?: ModelPair;
   totalDurationMs: number;
   workspaceFingerprint: WorkspaceFingerprint;
   phases: Record<string, PhaseResultV4>;
@@ -232,6 +235,8 @@ export interface WizardRecommendAnalysisSkillsParams {
 }
 export interface WizardRecommendAnalysisSkillsResult {
   skills: import('../rpc.types').SkillRecommendation[];
+  judge: SkillJudgeResult;
+  analysisPair: ModelPair | null;
   /** Ranking source for the result set; omitted by older servers. */
   rankedBy?: 'decision-model' | 'session-model' | 'heuristic';
   detectedItems: StackSummaryItem[];
@@ -275,6 +280,7 @@ export interface MultiPhaseAnalysisResponse {
   /** Phase file contents (markdown) keyed by phase ID */
   phaseContents: Record<string, string>;
   stackSummary?: StackSummary;
+  analysisPair?: ModelPair | null;
   /** Analysis directory path for downstream consumers (generation, enhanced prompts) */
   analysisDir: string;
 }

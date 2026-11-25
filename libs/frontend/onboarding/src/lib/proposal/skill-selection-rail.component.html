@@ -27,40 +27,56 @@
         ></progress>
       }
     </div>
+    @if (layout() === 'bar' && selected().length > 0) {
+      <button
+        ptahButton
+        type="button"
+        variant="ghost"
+        size="xs"
+        [attr.aria-controls]="selectedListId"
+        [attr.aria-expanded]="selectedListOpen()"
+        (click)="toggleSelectedList()"
+      >
+        {{ selectedListOpen() ? 'Hide selected skills' : 'Show selected skills' }}
+      </button>
+    }
   </div>
-  @if (responsive() || layout() === 'rail') {
-    <div data-selected-list class="min-h-0 flex-1 overflow-y-auto">
-      @if (loading()) {
-        <p role="status">Finding skills…</p>
-      } @else if (!selected().length) {
-        <p class="text-sm text-base-content-muted">No skills selected.</p>
+  <div
+    data-selected-list
+    class="min-h-0 flex-1 overflow-y-auto"
+    [id]="selectedListId"
+    [hidden]="layout() === 'bar' && (!selectedListOpen() || !selected().length)"
+  >
+    @if (loading()) {
+      <p role="status">Finding skills…</p>
+    } @else if (!selected().length) {
+      <p class="text-sm text-base-content-muted">No skills selected.</p>
+    }
+    <ul class="space-y-2">
+      @for (item of selected(); track item.key) {
+        <li class="flex min-w-0 items-center gap-2">
+          <span class="min-w-0 flex-1 truncate text-sm" [title]="item.name">{{
+            item.name
+          }}</span
+          ><button
+            ptahButton
+            type="button"
+            variant="ghost"
+            size="xs"
+            [disabled]="blocked()"
+            [attr.aria-label]="'Remove ' + item.name"
+            (click)="removed.emit(item.key)"
+          >
+            <lucide-icon
+              [img]="close"
+              class="size-ptah-icon-xs"
+              aria-hidden="true"
+            />
+          </button>
+        </li>
       }
-      <ul class="space-y-2">
-        @for (item of selected(); track item.key) {
-          <li class="flex min-w-0 items-center gap-2">
-            <span class="min-w-0 flex-1 truncate text-sm" [title]="item.name">{{
-              item.name
-            }}</span
-            ><button
-              ptahButton
-              type="button"
-              variant="ghost"
-              size="xs"
-              [disabled]="blocked()"
-              [attr.aria-label]="'Remove ' + item.name"
-              (click)="removed.emit(item.key)"
-            >
-              <lucide-icon
-                [img]="close"
-                class="size-ptah-icon-xs"
-                aria-hidden="true"
-              />
-            </button>
-          </li>
-        }
-      </ul>
-    </div>
-  }
+    </ul>
+  </div>
   <footer class="mt-auto shrink-0 space-y-2 border-t border-base-300 pt-3">
     <ptah-form-actions
       flush
@@ -81,10 +97,10 @@
         size="md"
         class="whitespace-normal"
         data-testid="skill-install-primary"
-        [disabled]="blocked()"
+        [disabled]="primaryDisabled()"
         [busy]="previewing()"
-        [attr.aria-describedby]="loading() ? null : helperId"
-        (click)="primary.emit()"
+        [attr.aria-describedby]="primaryDescribedBy()"
+        (click)="onPrimaryClick()"
       >
         {{ primaryLabel() }}
       </button>
@@ -102,24 +118,36 @@
         </button>
       }
     </ptah-form-actions>
-    @if (!loading()) {
+    @if (!loading() || normalizedInstallBlockedReason()) {
       <div
         data-selection-notes
         [id]="helperId"
         class="space-y-2 text-xs text-base-content-muted"
       >
-        <p>
-          {{
-            selected().length
-              ? 'Installs the selected skills in this workspace, then opens the next step.'
-              : 'Opens the next step. No skill is installed.'
-          }}
-        </p>
-        @if (scriptHelper(); as helper) {
-          <p>
-            <span aria-hidden="true" class="text-state-need">!</span>
-            {{ helper }}
+        @if (normalizedInstallBlockedReason(); as reason) {
+          <p
+            data-testid="skill-install-blocked-reason"
+            [id]="installBlockedId"
+            role="status"
+            class="font-medium text-state-need"
+          >
+            {{ reason }}
           </p>
+        }
+        @if (!loading()) {
+          <p>
+            {{
+              selected().length
+                ? 'Installs the selected skills in this workspace, then opens the next step.'
+                : 'Opens the next step. No skill is installed.'
+            }}
+          </p>
+          @if (scriptHelper(); as helper) {
+            <p>
+              <span aria-hidden="true" class="text-state-need">!</span>
+              {{ helper }}
+            </p>
+          }
         }
       </div>
     }

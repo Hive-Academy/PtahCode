@@ -17,8 +17,13 @@ export const SKILL_RECOMMENDATION_SERVICE = Symbol.for(
   'SkillRecommendationService',
 );
 
-/** SkillRankingService - model ranking with heuristic fallback. */
-export const SKILL_RANKING_SERVICE = Symbol.for('SkillRankingService');
+/** SkillJudgeService - two-stage AI judge for stack skill verdicts */
+export const SKILL_JUDGE_SERVICE = Symbol.for('SkillJudgeService');
+
+/** SkillDraftGenerationService - Setup-backed SKILL.md draft generation */
+export const SKILL_DRAFT_GENERATION_SERVICE = Symbol.for(
+  'SkillDraftGenerationService',
+);
 
 /** ProjectGuidanceService - labeled project facts and owner decision prompt */
 export const SKILL_PROJECT_GUIDANCE_SERVICE = Symbol.for(

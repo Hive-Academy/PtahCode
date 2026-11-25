@@ -133,7 +133,7 @@ import {
   createMockFileSystemProvider,
   createMockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
-import type { PluginLoaderService } from '@ptah-extension/agent-sdk';
+import { SDK_TOKENS, type PluginLoaderService } from '@ptah-extension/agent-sdk';
 import {
   AGENT_GENERATION_TOKENS,
   registerAgentGenerationServices,
@@ -280,6 +280,22 @@ function buildFixture(opts: { disabledAgentIds?: string[] } = {}): Fixture {
   container.register(TOKENS.LOGGER, { useValue: logger });
   container.register(TOKENS.SENTRY_SERVICE, {
     useValue: createMockSentryService(),
+  });
+  // The Setup pair `wizard:submit-selection` resolves first: a 'set'
+  // resolution whose snapshot carries isolated auth, as the production
+  // resolver returns. The provider/model pair matches the
+  // `SdkProviderModels` fake above, so the route stays consistent.
+  container.register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+    useValue: {
+      resolveSetup: async () => ({
+        kind: 'set' as const,
+        snapshot: {
+          providerId: 'anthropic',
+          model: 'sonnet',
+          auth: { env: { ANTHROPIC_API_KEY: 'preview-fidelity-setup-secret' } },
+        },
+      }),
+    },
   });
   container.register(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, {
     useValue: nodeFileSystem(),

@@ -62,7 +62,10 @@ function makeQuery(
 function makeResolver(
   impl: () => Promise<WorkspaceLlmSnapshot>,
 ): IWorkspaceLlmResolver & { resolveForPath: jest.Mock } {
-  return { resolveForPath: jest.fn(impl) };
+  return {
+    resolveForPath: jest.fn(impl),
+    resolveSetup: jest.fn(),
+  };
 }
 
 const OVERRIDE: OneShotAuthOverride = {

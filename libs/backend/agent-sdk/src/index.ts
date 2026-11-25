@@ -192,6 +192,8 @@ export type {
   IWorkspaceLlmResolver,
   WorkspaceLlmSnapshot,
   WorkspaceLlmResolveOptions,
+  ResolvedSetupSnapshot,
+  SetupResolution,
 } from './lib/auth/workspace-llm-resolver.port';
 export type { OneShotAuthOverride } from './lib/helpers';
 export type { IPricingProvider } from './lib/pricing.port';

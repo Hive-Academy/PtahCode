@@ -14,6 +14,7 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  ANTHROPIC_DIRECT_PROVIDER_ID,
   SCOPED_SETTING_KEYS,
   getAllAnthropicProviders,
   setCustomProviderEntries,
@@ -22,13 +23,16 @@ import {
   type AuthVerifyDraftConnectionParams,
   type ConfigGetScopesResult,
   type ConfigClearScopeOverrideResult,
+  type ModelPair,
   type RpcMethodName,
   type RpcMethodParams,
   type RpcMethodResult,
   type ScopedSettingEntry,
   type SettingScope,
+  type SetupPairState,
   type PtahCliConfig,
   type SystemCliType,
+  type WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from './provider-accounts-state.service';
 import { VSCodeService } from './vscode.service';
@@ -68,6 +72,7 @@ import type {
   ProvidersDetectedClis,
   ProvidersOrchestration,
   ProvidersSettingsPatch,
+  ProvidersSetupRowState,
   SaveOperation,
 } from './providers-settings.types';
 import { PROVIDERS_ENHANCEMENT_KEYS } from './providers-settings.types';
@@ -92,7 +97,10 @@ export type {
   ProvidersCliTest,
   ProvidersCustomEntry,
   ProvidersDetectedClis,
+  ProvidersSetupRowState,
+  ProvidersSetupUndoEntry,
 } from './providers-settings.types';
+export type { ProvidersSetupCommitState } from './providers-commit.service';
 // Account state is part of the Providers settings surface; this file is its public entry
 // point (re-exported by the package barrel), as for the types above.
 export {
@@ -107,6 +115,42 @@ export {
   ClaudeAmbientStatusService,
   type ClaudeAmbientStatusView,
 } from './claude-ambient-status.service';
+
+interface SetupModelData extends ProvidersSetupRowState {
+  readonly undoBaseline: ModelPair | null;
+}
+
+function setupModelData(
+  state: SetupPairState,
+  commitSeq: number,
+  storedPair: ModelPair | null | undefined,
+): SetupModelData {
+  let committed: ModelPair | null = null;
+  let fallbackBaseline: ModelPair | null = null;
+  if (state.kind === 'set') {
+    committed = state.pair;
+    fallbackBaseline = state.pair;
+  } else if (
+    (state.kind === 'invalid' || state.kind === 'unavailable') &&
+    state.source === 'setup'
+  ) {
+    const provider = state.provider ?? '';
+    const model = state.model ?? '';
+    fallbackBaseline = { provider, model };
+    committed = {
+      provider: provider === 'apiKey' || provider === 'claudeCli'
+        ? ANTHROPIC_DIRECT_PROVIDER_ID
+        : provider,
+      model,
+    };
+  }
+  return {
+    state,
+    committed,
+    undoBaseline: storedPair === undefined ? fallbackBaseline : storedPair,
+    commitSeq,
+  };
+}
 
 /** Route statuses that do not block a driver. `unknown`/`skipped` mean "not checkable", not "failed". */
 const ACTIVATABLE_STATUSES: ReadonlySet<string> = new Set([
@@ -141,6 +185,7 @@ export class ProvidersSettingsStateService {
     createSectionStore<RpcMethodResult<'memory:getTriggers'>['triggers']>();
   private readonly enhancementStore =
     createSectionStore<ProvidersEnhancementSettings>();
+  private readonly setupModelStore = createSectionStore<SetupModelData>();
   private readonly cliStore = createSectionStore<ProvidersCliAgents>();
   private readonly orchestrationStore =
     createSectionStore<ProvidersOrchestration>();
@@ -165,6 +210,9 @@ export class ProvidersSettingsStateService {
   readonly effort = this.freshEffortView(this.effortStore, this.effortRevision);
   readonly memory = this.view(this.memoryStore);
   readonly enhancement = this.view(this.enhancementStore);
+  readonly setupModel = this.view(this.setupModelStore);
+  readonly setupCommit = this.commits.setupCommit;
+  readonly setupUndoEntry = this.commits.setupUndoEntry;
   readonly cliAgents = this.view(this.cliStore);
   readonly orchestration = this.view(this.orchestrationStore);
   /** Last explicit CLI re-detection (`redetectClis`); `loading` while it runs. */
@@ -243,12 +291,67 @@ export class ProvidersSettingsStateService {
       this.refreshEffort(),
       this.refreshMemory(),
       this.refreshEnhancement(),
+      this.refreshSetupModel(),
       this.refreshCliAgents(),
       this.refreshCliModels(),
       this.refreshOrchestration(),
       this.refreshConnections(),
       ...(this.tierRequest ? [this.refreshTiers(this.tierRequest)] : []),
     ]);
+  }
+
+  async refreshSetupModel(): Promise<void> {
+    const store = this.setupModelStore;
+    const generation = store.generation + 1;
+    const scopeKey = this.workspace.scopeKey();
+    await readSection(store, this.workspace, async () => {
+      const { state, committed: storedPair } = await this.require(
+        'wizard:get-setup-model',
+        {},
+      );
+
+      return setupModelData(state, this.commits.setupCommitSeq, storedPair);
+    });
+    if (store.generation === generation && this.workspace.scopeKey() === scopeKey) {
+      const loaded = store.value();
+      if (loaded.status === 'ready' && loaded.data) {
+        this.commits.syncSetupBaseline(loaded.data.state, loaded.data.undoBaseline);
+      }
+    }
+  }
+
+  clearSetupDraftFeedback(): void {
+    this.commits.clearSetupDraftFeedback();
+  }
+
+  commitSetupPair(pair: ModelPair | null): Promise<boolean> {
+    return this.commits.commitSetupPair(
+      pair,
+      this.setupModel().data?.undoBaseline ?? null,
+      this.setupReceiptHandler(),
+    );
+  }
+
+  undoSetupPair(): Promise<boolean> {
+    return this.commits.undoSetupPair(this.setupReceiptHandler());
+  }
+
+  private setupReceiptHandler(): (receipt: WizardSetSetupModelResult) => void {
+    const scopeKey = this.workspace.scopeKey();
+    return ({ state, committed, commitSeq }) => {
+      if (this.workspace.scopeKey() !== scopeKey) {
+        void this.refreshSetupModel();
+        return;
+      }
+      const store = this.setupModelStore;
+      store.generation++;
+      store.scopeKey = scopeKey;
+      store.value.set({
+        status: 'ready',
+        data: setupModelData(state, commitSeq, committed),
+        error: null,
+      });
+    };
   }
 
   async refreshRoute(): Promise<void> {
@@ -1050,6 +1153,7 @@ export class ProvidersSettingsStateService {
         this.effort(),
         this.memory(),
         this.enhancement(),
+        this.setupModel(),
         this.cliAgents(),
         this.cliModels(),
         this.orchestration(),

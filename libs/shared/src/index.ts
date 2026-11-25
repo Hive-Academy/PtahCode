@@ -83,6 +83,7 @@ export * from './lib/utils/session-totals.utils';
 export * from './lib/utils/subagent-cost.utils';
 export * from './lib/utils/git.utils';
 export * from './lib/utils/auth-env.utils';
+export * from './lib/utils/skill-document';
 export * from './lib/types/wizard';
 export * from './lib/types/rpc/rpc-harness.types';
 export * from './lib/types/rpc/rpc-harness-proposal.types';

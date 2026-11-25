@@ -9,6 +9,7 @@
  */
 
 import { z } from 'zod';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import type {
   MultiPhaseManifestV4 as SharedMultiPhaseManifestV4,
   PhaseResultV4 as SharedPhaseResultV4,
@@ -116,6 +117,11 @@ export const MultiPhaseManifestV3Schema = z.object({
 
 const Sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 
+const ModelPairSchema = z.strictObject({
+  provider: z.string().trim().min(1),
+  model: z.string().trim().min(1),
+});
+
 const PhaseResultV4Schema = z
   .strictObject({
     status: z.enum(['pending', 'running', 'completed', 'failed', 'skipped']),
@@ -129,6 +135,7 @@ const PhaseResultV4Schema = z
         promptSha256: Sha256Schema,
         priorPhaseSha256: Sha256Schema.nullable(),
         model: z.string(),
+        provider: z.string().trim().min(1).optional(),
       })
       .nullable(),
     verification: z.strictObject({
@@ -168,6 +175,7 @@ export const MultiPhaseManifestV4Schema = z.strictObject({
   updatedAt: z.string(),
   lifecycle: z.enum(['running', 'paused', 'completed', 'failed']),
   model: z.string(),
+  analysisPair: ModelPairSchema.optional(),
   totalDurationMs: z.number(),
   workspaceFingerprint: z.strictObject({
     algorithm: z.enum(['sha256-v1', 'sha256-v2']),
@@ -183,15 +191,24 @@ export const MultiPhaseManifestV4Schema = z.strictObject({
 export interface MultiPhaseAnalysisOptions {
   /** Total pipeline timeout in milliseconds (default: 3600000 = 1 hour) */
   timeout?: number;
-  /** LLM model to use for phases 1-4 */
+  /**
+   * Deprecated client model hint; ignored by Setup-resolved analysis runs.
+   * Retained as optional while callers drop the field.
+   */
   model?: string;
+  /**
+   * Ephemeral Setup snapshot resolved once at launch entry.
+   * Contains isolated provider credentials kept strictly in memory and never
+   * persisted to checkpoints or manifests.
+   */
+  setupSnapshot?: ResolvedSetupSnapshot;
   /** Whether the MCP server is running (required for file access in phases 2-4) */
   mcpServerRunning?: boolean;
   /** Port the MCP server is listening on */
   mcpPort?: number;
   /** Absolute paths to plugin directories (for SDK queries) */
   pluginPaths?: string[];
-  /** Continue an unfinished version-3 manifest instead of starting a new run. */
+  /** Continue an unfinished version-4 manifest instead of starting a new run. */
   resume?: boolean;
 }
 

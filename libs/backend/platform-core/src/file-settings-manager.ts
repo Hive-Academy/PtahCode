@@ -136,16 +136,15 @@ function isJsonObject(value: unknown): value is Record<string, unknown> {
 export class PtahFileSettingsManager {
   /** In-memory cache using flat dot-notation keys */
   private settings: Record<string, unknown> = {};
+  /** Last persisted or reloaded image, without pending optimistic writes. */
+  private committedSettings: Readonly<Record<string, unknown>> = {};
   private readonly filePath: string;
   private readonly dirPath: string;
   private readonly defaults: FileSettingsDefaults;
-  /** Write serialization — prevents concurrent persist() calls from corrupting the file */
+  /** Write serialization — prevents concurrent writes from corrupting the file */
   private writePromise: Promise<void> = Promise.resolve();
-  /**
-   * Latest set() generation per key. A failed set() rolls the key back only
-   * while its generation is still the latest one (write ownership).
-   */
-  private readonly writeGenerations = new Map<string, number>();
+  /** The latest unresolved set() owns the optimistic value for its key. */
+  private readonly pendingWrites = new Map<string, { readonly epoch: number }>();
   /** Counts every effective in-memory routing write, including rollback. */
   private routingConfigurationGeneration = 0;
   /** Bumped whenever a cross-process reload replaces the in-memory map. */
@@ -194,6 +193,18 @@ export class PtahFileSettingsManager {
   }
 
   /**
+   * Read multiple settings synchronously in a single turn using the same
+   * lookup order as {@link get} (in-memory cache, then registered default).
+   */
+  getMany(keys: readonly string[]): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const key of keys) {
+      result[key] = this.get(key);
+    }
+    return result;
+  }
+
+  /**
    * Whether `key` has a stored (user-set) value. Unlike {@link get}, the
    * registered default does not count, so a caller can tell an explicit
    * choice from the fallback.
@@ -210,48 +221,114 @@ export class PtahFileSettingsManager {
    * Set a setting value. Updates in-memory cache, persists to disk atomically,
    * then fires in-process listeners registered via watch().
    *
-   * When the write fails, the previous in-memory value is restored (so memory
-   * matches disk), no listener fires, and the call rejects with
-   * {@link SettingsPersistError}. The write queue keeps accepting writes.
+   * When the write fails, the key rolls back to its last committed value.
+   * No listener fires, and the call rejects with {@link SettingsPersistError}.
+   * The write queue keeps accepting writes.
    */
   async set(key: string, value: unknown): Promise<void> {
-    const hadPrevious = Object.prototype.hasOwnProperty.call(
-      this.settings,
-      key,
-    );
-    const previous = this.settings[key];
-    const generation = (this.writeGenerations.get(key) ?? 0) + 1;
-    this.writeGenerations.set(key, generation);
-    const epoch = this.reloadEpoch;
+    const pending = { epoch: this.reloadEpoch };
+    this.pendingWrites.set(key, pending);
     this.settings[key] = value;
     if (ROUTING_KEYS.has(key)) this.routingConfigurationGeneration += 1;
-    const write = this.writePromise.then(
-      () => this.persist(),
-      () => this.persist(),
-    );
+    const runWrite = () =>
+      this.persistImage({ ...this.committedSettings, [key]: value });
+    const write = this.writePromise.then(runWrite, runWrite);
     this.writePromise = write;
     try {
       await write;
     } catch (error: unknown) {
       // Restore only while this call still owns the key: a later set() on the
       // same key (even with an identical value) or a cross-process reload of
-      // the map owns it otherwise. Ownership is by write generation, not value.
-      if (
-        this.writeGenerations.get(key) === generation &&
-        this.reloadEpoch === epoch
-      ) {
-        if (hadPrevious) {
-          this.settings[key] = previous;
-        } else {
-          delete this.settings[key];
+      // the map owns it otherwise.
+      if (this.pendingWrites.get(key) === pending) {
+        this.pendingWrites.delete(key);
+        if (this.reloadEpoch === pending.epoch) {
+          if (Object.prototype.hasOwnProperty.call(this.committedSettings, key)) {
+            this.settings[key] = this.committedSettings[key];
+          } else {
+            delete this.settings[key];
+          }
+          if (ROUTING_KEYS.has(key)) this.routingConfigurationGeneration += 1;
         }
-        if (ROUTING_KEYS.has(key)) this.routingConfigurationGeneration += 1;
       }
       throw error;
+    }
+    if (this.pendingWrites.get(key) === pending) {
+      this.pendingWrites.delete(key);
+      // A cross-process reload may have replaced the optimistic value.
+      if (!Object.is(this.settings[key], value)) {
+        this.settings[key] = value;
+        if (ROUTING_KEYS.has(key)) this.routingConfigurationGeneration += 1;
+      }
     }
     this.listeners.get(key)?.forEach((cb) => {
       cb(value);
     });
+  }
+
+  /**
+   * Atomically persist multiple settings in a single serialized disk write.
+   *
+   * Unlike {@link set}, in-memory state is never mutated before the atomic
+   * temp-file rename succeeds: the queued step builds an immutable `nextImage`
+   * from the committed settings merged with `entries`. After rename succeeds,
+   * it publishes the batch values for keys without a newer optimistic write,
+   * advances the routing generation when a routing key is present, fires
+   * watchers in one turn, and returns the frozen `committedSlice` captured
+   * inside this transaction.
+   *
+   * On failure, removes the temp file, leaves `this.settings` and disk
+   * unchanged for those keys, fires no watchers, and throws
+   * {@link SettingsPersistError}. The write queue keeps accepting writes.
+   */
+  async setMany(
+    entries: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const pendingEntries: ReadonlyArray<readonly [string, unknown]> =
+      Object.entries(entries);
+    let committedSlice: Readonly<Record<string, unknown>> = Object.freeze({});
+
+    const runBatch = async (): Promise<void> => {
+      const nextImage: Record<string, unknown> = { ...this.committedSettings };
+      for (const [key, value] of pendingEntries) {
+        nextImage[key] = value;
+      }
+      const frozenSlice = Object.freeze(
+        Object.fromEntries(pendingEntries.map(([key]) => [key, nextImage[key]])),
+      );
+
+      await this.persistImage(nextImage);
+
+      let touchedRoutingKey = false;
+      for (const [key, value] of pendingEntries) {
+        if (this.pendingWrites.get(key)?.epoch !== this.reloadEpoch) {
+          this.settings[key] = value;
+        }
+        if (ROUTING_KEYS.has(key)) {
+          touchedRoutingKey = true;
+        }
+      }
+      if (touchedRoutingKey) {
+        this.routingConfigurationGeneration += 1;
+      }
+      committedSlice = frozenSlice;
+      for (const [key, value] of pendingEntries) {
+        this.listeners.get(key)?.forEach((cb) => {
+          try {
+            cb(value);
+          } catch {
+            console.warn(
+              `[PtahFileSettingsManager] Watcher failed after committing batch key ${key}.`,
+            );
+          }
+        });
+      }
+    };
+
+    const write = this.writePromise.then(runBatch, runBatch);
+    this.writePromise = write;
+    await write;
+    return committedSlice;
   }
 
   /**
@@ -291,9 +368,8 @@ export class PtahFileSettingsManager {
    * contents against the in-memory cache, and fires listeners only for keys
    * whose values actually changed.
    *
-   * Self-write echo prevention: because `set()` updates `this.settings` before
-   * persisting, any file-change event triggered by our own write produces an
-   * empty diff (disk == cache) and no listeners fire. No mtime tracking needed.
+   * Self-write echoes match the committed image, even when the visible cache
+   * contains optimistic values for queued writes.
    *
    * Atomic-rename handling: Node emits one `change` event whose `eventType`
    * is `rename` when the inode is replaced. There is no `rename` event.
@@ -336,7 +412,7 @@ export class PtahFileSettingsManager {
 
   /**
    * Synchronously flush the current in-memory settings to disk using the same
-   * atomic tmp-rename pattern as persist(). Safe to call from process-exit
+   * atomic tmp-rename pattern as the queued writes. Safe to call from process-exit
    * handlers (will-quit, before-quit) — errors are caught and logged, never thrown.
    */
   flushSync(): void {
@@ -355,6 +431,7 @@ export class PtahFileSettingsManager {
 
       fs.writeFileSync(tmpPath, json, 'utf-8');
       fs.renameSync(tmpPath, this.filePath);
+      this.committedSettings = { ...this.settings };
     } catch (error: unknown) {
       console.error(
         `[PtahFileSettingsManager] flushSync failed for ${this.filePath}:`,
@@ -570,10 +647,8 @@ export class PtahFileSettingsManager {
    * Read the settings file from disk, diff against the in-memory cache, and
    * fire listeners for any keys that changed.
    *
-   * Self-write echo prevention: `set()` updates `this.settings` before the
-   * async persist completes. By the time `fs.watch` fires for our own write,
-   * the in-memory cache already matches disk — the diff produces zero changed
-   * keys, so no listeners fire.
+   * Ignore self-write echoes using the committed image so pending optimistic
+   * values do not create false changes.
    */
   private processCrossProcessChange(): void {
     let freshSettings: Record<string, unknown>;
@@ -591,6 +666,18 @@ export class PtahFileSettingsManager {
       );
       return;
     }
+    const committedKeys = new Set([
+      ...Object.keys(this.committedSettings),
+      ...Object.keys(freshSettings),
+    ]);
+    if (
+      [...committedKeys].every((key) =>
+        deepEqual(this.committedSettings[key], freshSettings[key]),
+      )
+    ) {
+      return;
+    }
+    this.committedSettings = { ...freshSettings };
     const previousSettings = this.settings;
     const allKeys = new Set([
       ...Object.keys(previousSettings),
@@ -633,6 +720,7 @@ export class PtahFileSettingsManager {
       const raw = fs.readFileSync(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       this.settings = flattenObject(parsed);
+      this.committedSettings = { ...this.settings };
 
       let migrated = false;
       for (const [oldKey, newKey] of SKILL_SETTINGS_MIGRATIONS) {
@@ -646,8 +734,9 @@ export class PtahFileSettingsManager {
       }
 
       if (migrated) {
+        const image = { ...this.settings };
         this.writePromise = this.writePromise
-          .then(() => this.persist())
+          .then(() => this.persistImage(image))
           .catch((error: unknown) => {
             console.warn(
               `[PtahFileSettingsManager] Could not migrate settings in ${this.filePath} (${fsErrorCode(error)})`,
@@ -719,11 +808,13 @@ export class PtahFileSettingsManager {
    * @throws SettingsPersistError when any step of the write fails. The error
    *   carries only the filesystem code, never a settings value.
    */
-  private async persist(): Promise<void> {
+  private async persistImage(
+    image: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
     const tmpPath = `${this.filePath}.${process.pid}.${++persistTempSequence}.tmp`;
     try {
       await fsPromises.mkdir(this.dirPath, { recursive: true });
-      const nested = unflattenObject(this.settings);
+      const nested = unflattenObject(image);
       const output = {
         $schema: 'https://ptah.live/schemas/settings.json',
         version: 1,
@@ -733,6 +824,7 @@ export class PtahFileSettingsManager {
       const json = JSON.stringify(output, null, 2);
       await fsPromises.writeFile(tmpPath, json, 'utf-8');
       await renameWithRetry(tmpPath, this.filePath);
+      this.committedSettings = image;
     } catch (error: unknown) {
       console.warn(
         `[PtahFileSettingsManager] Failed to persist settings to ${this.filePath}:`,
@@ -838,7 +930,7 @@ function flattenObject(
  *   => { provider: { "github-copilot": { clientId: "abc" } } }
  */
 function unflattenObject(
-  flat: Record<string, unknown>,
+  flat: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 

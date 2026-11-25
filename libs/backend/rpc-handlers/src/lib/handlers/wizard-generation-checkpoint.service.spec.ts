@@ -317,6 +317,8 @@ describe('run manifest decisions (target, output root, guards)', () => {
       analysisDir: null,
       selectedAgentIds: ['agent-a'],
       input: {},
+      effectiveProvider: 'setup-provider',
+      effectiveModel: 'setup-model',
       target: harnessTarget(),
       fileGuards: { 'agent-a': keep, 'not-selected': keep },
     });
@@ -325,6 +327,8 @@ describe('run manifest decisions (target, output root, guards)', () => {
     expect(prepared.manifest).toMatchObject({
       outputRoot: root,
       outputDirectory,
+      effectiveProvider: 'setup-provider',
+      effectiveModel: 'setup-model',
       target: harnessTarget(),
       fileGuards: { 'agent-a': keep },
     });
@@ -392,6 +396,10 @@ describe('run manifest decisions (target, output root, guards)', () => {
     const prepared = await service.prepareResume(
       { workspaceRoot: root, analysisDir: null },
       manifest,
+      {
+        effectiveProvider: 'next-provider',
+        effectiveModel: 'next-model',
+      },
     );
 
     expect(prepared.agentIds).toEqual(['pending']);
@@ -405,7 +413,47 @@ describe('run manifest decisions (target, output root, guards)', () => {
       written: 'unchanged',
     });
     expect(prepared.manifest.fileGuards).toEqual({ kept: { mode: 'keep' } });
+    expect(prepared.manifest).toMatchObject({
+      effectiveProvider: 'next-provider',
+      effectiveModel: 'next-model',
+      input: {},
+    });
+    expect(prepared.manifest).not.toHaveProperty('setupSnapshot');
+    expect(prepared.manifest).not.toHaveProperty('auth');
     expect(prepared.manifest).not.toHaveProperty('library');
+  });
+
+  it('records a retry launch pair without persisting snapshot credentials or replacing inputs', async () => {
+    const current = manifestWriting(root);
+    const writeGenerationManifest = jest
+      .fn()
+      .mockResolvedValue('manifest.json');
+    const service = serviceWith({
+      loadGenerationManifest: jest.fn().mockResolvedValue(current),
+      writeGenerationManifest,
+    });
+
+    await service.recordEffectivePair(
+      { workspaceRoot: opened, analysisDir: null },
+      {
+        effectiveProvider: 'retry-provider',
+        effectiveModel: 'retry-model',
+      },
+    );
+
+    expect(writeGenerationManifest).toHaveBeenCalledWith(
+      opened,
+      null,
+      expect.objectContaining({
+        effectiveProvider: 'retry-provider',
+        effectiveModel: 'retry-model',
+        input: {},
+      }),
+    );
+    const written = writeGenerationManifest.mock
+      .calls[0][2] as GenerationCheckpointManifest;
+    expect(written).not.toHaveProperty('setupSnapshot');
+    expect(written).not.toHaveProperty('auth');
   });
 
   it('rejects a persisted replace guard without a baseline', () => {

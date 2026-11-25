@@ -47,6 +47,7 @@ import {
   type AuthEnv,
   type EffectiveCapabilitySet,
   type ICapabilityResolver,
+  type ModelPair,
 } from '@ptah-extension/shared';
 import {
   PLATFORM_TOKENS,
@@ -171,6 +172,8 @@ function clearLeakedProviderIdentity(
 export interface OneShotAuthOverride {
   readonly env: AuthEnv;
   readonly baseUrl?: string;
+  /** Canonical provider ID for the isolated credentials, when known. */
+  readonly providerId?: string;
 }
 
 /**
@@ -205,6 +208,8 @@ export interface OneShotRunInput {
    * filled in this runner, from `resolveModelId`, not from `input.model`.
    */
   dispatch?: ModelDispatchRoute;
+  /** Called synchronously immediately before invoking the SDK query. */
+  onProviderSubmit?: (submitted: ModelPair) => void;
   /** Opt in to the user's own MCP servers served by `ptah` (unattended, never asked). */
   includeConnectors?: boolean;
 }
@@ -462,6 +467,12 @@ export class SdkQueryRunner {
         policy,
         credentialSubject,
       );
+      if (abortController.signal.aborted) {
+        throw new DOMException(
+          'Internal query aborted before launch.',
+          'AbortError',
+        );
+      }
 
       const systemPromptObj =
         typeof options.systemPrompt === 'object' &&
@@ -491,12 +502,19 @@ export class SdkQueryRunner {
       });
 
       const queryStartMs = Date.now();
-      const conversation = this.launch('oneShot', options, () =>
-        queryFn({
+      const conversation = this.launch('oneShot', options, () => {
+        input.onProviderSubmit?.({
+          provider:
+            input.auth?.providerId ??
+            getActiveProviderId(options.env ?? {}) ??
+            ANTHROPIC_DIRECT_PROVIDER_ID,
+          model: options.model,
+        });
+        return queryFn({
           prompt: input.prompt,
           options,
-        }),
-      );
+        });
+      });
 
       this.logger.info(
         `${SERVICE_TAG} SDK query() returned conversation handle in ${Date.now() - queryStartMs}ms`,
@@ -666,7 +684,7 @@ export class SdkQueryRunner {
     cliJsPath: string | null,
     policy: EffectiveCapabilitySet,
     credentialSubject: string,
-  ): SdkQueryOptions {
+  ): SdkQueryOptions & { model: string } {
     const authEnv = input.auth?.env ?? this.authEnv;
     const effectiveBaseUrl =
       input.auth?.baseUrl ??
@@ -721,7 +739,7 @@ export class SdkQueryRunner {
       `${SERVICE_TAG} Compaction config: enabled=${compactionConfig.enabled}, threshold=${compactionConfig.contextTokenThreshold ?? 'unset'} (not applied to one-shot queries)`,
     );
 
-    const options: SdkQueryOptions = {
+    const options: SdkQueryOptions & { model: string } = {
       abortController,
       cwd: input.cwd,
       model: resolvedModel,

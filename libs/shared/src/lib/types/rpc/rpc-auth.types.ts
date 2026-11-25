@@ -690,6 +690,8 @@ export const SCOPED_SETTING_KEYS: Record<
     supportedTargets: ['global'],
   },
   'memory.curatorModel': { appScopable: false, supportedTargets: ['global'] },
+  'setup.provider': { appScopable: false, supportedTargets: ['global'] },
+  'setup.model': { appScopable: false, supportedTargets: ['global'] },
   'skills.enhancement.provider': {
     appScopable: false,
     supportedTargets: ['global'],

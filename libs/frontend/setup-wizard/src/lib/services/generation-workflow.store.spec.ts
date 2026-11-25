@@ -2,6 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { QueuedFollowUpStore, TabManagerService } from '@ptah-extension/chat-state';
 import { WizardRpcService } from './wizard-rpc.service';
 import { GenerationWorkflowStore } from './generation-workflow.store';
+import { safeFailureCopy } from '../utils/safe-failure-copy';
 
 const binding = {
   tabId: 'tab',
@@ -475,6 +476,61 @@ describe('GenerationWorkflowStore', () => {
       expect(store.isBound()).toBe(false);
       expect(store.startError()).toBe(error);
       store.unbind();
+    },
+  );
+
+  it.each(['start', 'regenerate'] as const)(
+    'shows the Setup error after a bound guidance %s rejection',
+    async (kind) => {
+      jest.useFakeTimers();
+      const selectedBinding = {
+        ...binding,
+        workflow: 'setup-project-prompt' as const,
+      };
+      const message =
+        'Setup model cannot run guidance (not-signed-in; provider=openrouter). Update Background models and retry.';
+      const error = Object.assign(
+        new Error(
+          `SETUP_MODEL_INVALID reason=not-signed-in provider=openrouter: ${message}`,
+        ),
+        {
+          code: 'SETUP_MODEL_INVALID',
+          reason: 'not-signed-in',
+          provider: 'openrouter',
+        },
+      );
+      TestBed.configureTestingModule({
+        providers: [
+          GenerationWorkflowStore,
+          tabProvider,
+          {
+            provide: WizardRpcService,
+            useValue: {
+              getBoundRunState: jest.fn().mockResolvedValue(null),
+              startBoundGuidance: jest.fn().mockRejectedValue(error),
+              regenerateBoundGuidance: jest.fn().mockRejectedValue(error),
+            },
+          },
+        ],
+      });
+      const store = TestBed.inject(GenerationWorkflowStore);
+      store.bind(selectedBinding);
+      if (kind === 'start') await store.startGuidance();
+      else await store.regenerateGuidance();
+      await jest.advanceTimersByTimeAsync(7000);
+      const state = store.state();
+      const startError = store.startError();
+      const viewError = safeFailureCopy(
+        startError,
+        'Guidance could not start. Try again.',
+      );
+      store.unbind();
+      jest.useRealTimers();
+      expect(state).toBe('idle');
+      expect(startError).toBe(
+        `SETUP_MODEL_INVALID reason=not-signed-in provider=openrouter: ${message}`,
+      );
+      expect(viewError).toBe('Sign in to OpenRouter. Then retry guidance.');
     },
   );
 

@@ -80,7 +80,7 @@ interface Harness {
   };
   jobs: { update: jest.Mock };
   internalQuery: { execute: jest.Mock };
-  workspaceLlm: { resolveForPath: jest.Mock };
+  workspaceLlm: { resolveForPath: jest.Mock; resolveSetup: jest.Mock };
   logWithContext: jest.Mock;
 }
 
@@ -121,6 +121,7 @@ function makeHarness(
       model: 'glm-5.3',
       auth: { env: { ANTHROPIC_AUTH_TOKEN: 'ws-a-key' } },
     })),
+    resolveSetup: jest.fn(),
   };
   const handlers: IHandlerRegistry = {
     register: jest.fn(),

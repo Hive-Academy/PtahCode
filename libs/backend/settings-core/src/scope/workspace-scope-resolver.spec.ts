@@ -6,7 +6,11 @@ import * as path from 'path';
 import { PtahFileSettingsManager } from '@ptah-extension/platform-core';
 import type { IDisposable } from '@ptah-extension/platform-core';
 
-import type { ISettingsStore } from '../ports/settings-store.interface';
+import type {
+  IGlobalBatchSettingsStore,
+  ISettingsStore,
+} from '../ports/settings-store.interface';
+import { ReactiveSettingsStore } from '../reactive/reactive-settings-store';
 import type { IActiveWorkspaceSource } from './active-workspace-source';
 import { WorkspaceScopeResolver } from './workspace-scope-resolver';
 
@@ -834,5 +838,376 @@ describe('WorkspaceScopeResolver.writeForPath / inspectForPath', () => {
     await resolver.writeForPath('k', PATH_A, undefined);
 
     expect(store.data).toEqual({});
+  });
+});
+
+describe('WorkspaceScopeResolver.readSetupPair / commitSetupPair', () => {
+  const PATH_A = path.resolve(
+    process.platform === 'win32' ? 'C:\\wsSetupA' : '/wsSetupA',
+  );
+
+  function makeBatchMemoryStore(
+    seed: Record<string, unknown> = {},
+  ): IGlobalBatchSettingsStore & {
+    data: Record<string, unknown>;
+    batchCalls: Array<Readonly<Record<string, unknown>>>;
+    readGlobalSpy: jest.Mock;
+    readGlobalManySpy: jest.Mock;
+  } {
+    const base = makeMemoryStore(seed);
+    const batchCalls: Array<Readonly<Record<string, unknown>>> = [];
+    const readGlobalSpy = jest.fn(<T>(key: string): T | undefined =>
+      base.readGlobal<T>(key),
+    );
+    const readGlobalManySpy = jest.fn((keys: readonly string[]) => {
+      const slice: Record<string, unknown> = {};
+      for (const key of keys) {
+        slice[key] = base.data[key];
+      }
+      return slice;
+    });
+    return {
+      ...base,
+      batchCalls,
+      readGlobalSpy,
+      readGlobalManySpy,
+      readGlobal<T>(key: string): T | undefined {
+        return readGlobalSpy(key) as T | undefined;
+      },
+      readGlobalMany: readGlobalManySpy,
+      async writeGlobalBatch(
+        entries: Readonly<Record<string, unknown>>,
+      ): Promise<Readonly<Record<string, unknown>>> {
+        batchCalls.push(entries);
+        const committed: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(entries)) {
+          if (value === undefined) {
+            delete base.data[key];
+          } else {
+            base.data[key] = value;
+          }
+          committed[key] = value;
+        }
+        return Object.freeze(committed);
+      },
+    };
+  }
+
+  it('readSetupPair reads global-only keys and ignores workspace and app scoped overrides', async () => {
+    const store = makeBatchMemoryStore({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-sonnet-4.5',
+    });
+    const resolver = new WorkspaceScopeResolver(
+      store,
+      makeSource(PATH_A),
+      'app.electron',
+    );
+    // Write shadowing values at workspace, app, and app+workspace scopes.
+    await resolver.write('setup.provider', 'z-ai', 'workspace', false);
+    await resolver.write('setup.model', 'glm-5.2', 'workspace', false);
+    await resolver.write('setup.provider', 'kimi-code', 'app', true);
+    await resolver.write('setup.model', 'k3', 'app', true);
+    await resolver.write('setup.provider', 'ollama', 'workspace', true);
+    await resolver.write('setup.model', 'qwen3:32b', 'workspace', true);
+
+    expect(resolver.readSetupPair()).toEqual({
+      provider: 'openrouter',
+      model: 'anthropic/claude-sonnet-4.5',
+    });
+    expect(store.readGlobalManySpy).toHaveBeenCalledWith([
+      'setup.provider',
+      'setup.model',
+    ]);
+  });
+
+  it('readSetupPair preserves partial stored values and normalizes empty/whitespace/non-strings to null', () => {
+    const providerOnly = new WorkspaceScopeResolver(
+      makeBatchMemoryStore({ 'setup.provider': '  openrouter  ', 'setup.model': '   ' }),
+      makeSource(PATH_A),
+    );
+    expect(providerOnly.readSetupPair()).toEqual({
+      provider: 'openrouter',
+      model: null,
+    });
+
+    const modelOnly = new WorkspaceScopeResolver(
+      makeBatchMemoryStore({ 'setup.provider': '', 'setup.model': '  claude-sonnet-4-6  ' }),
+      makeSource(PATH_A),
+    );
+    expect(modelOnly.readSetupPair()).toEqual({
+      provider: null,
+      model: 'claude-sonnet-4-6',
+    });
+
+    const unset = new WorkspaceScopeResolver(
+      makeBatchMemoryStore({ 'setup.provider': '', 'setup.model': '' }),
+      makeSource(PATH_A),
+    );
+    expect(unset.readSetupPair()).toEqual({ provider: null, model: null });
+
+    const nonString = new WorkspaceScopeResolver(
+      makeBatchMemoryStore({ 'setup.provider': 42, 'setup.model': null }),
+      makeSource(PATH_A),
+    );
+    expect(nonString.readSetupPair()).toEqual({ provider: null, model: null });
+  });
+
+  it('readSetupPair falls back to bare global reads when store is not a batch store', () => {
+    const store = makeMemoryStore({
+      'setup.provider': 'z-ai',
+      'setup.model': 'glm-5.2',
+    });
+    const resolver = new WorkspaceScopeResolver(
+      store,
+      makeSource(PATH_A),
+      'app.electron',
+    );
+    expect(resolver.readSetupPair()).toEqual({
+      provider: 'z-ai',
+      model: 'glm-5.2',
+    });
+  });
+
+  it('commitSetupPair rejects partial and non-string inputs without touching the store', async () => {
+    const store = makeBatchMemoryStore();
+    const resolver = new WorkspaceScopeResolver(store, makeSource(PATH_A));
+
+    await expect(
+      resolver.commitSetupPair({ provider: 'openrouter', model: '' }),
+    ).rejects.toThrow(/both provider and model/i);
+    await expect(
+      resolver.commitSetupPair({ provider: '   ', model: 'glm-5.2' }),
+    ).rejects.toThrow(/both provider and model/i);
+    await expect(
+      resolver.commitSetupPair({
+        provider: null as unknown as string,
+        model: 'glm-5.2',
+      }),
+    ).rejects.toThrow(/string/i);
+    await expect(
+      resolver.commitSetupPair({
+        provider: 'z-ai',
+        model: undefined as unknown as string,
+      }),
+    ).rejects.toThrow(/string/i);
+
+    expect(store.batchCalls).toHaveLength(0);
+  });
+
+  it('commitSetupPair rejects stores without atomic batch write support', async () => {
+    const store = makeMemoryStore();
+    const resolver = new WorkspaceScopeResolver(store, makeSource(PATH_A));
+
+    await expect(
+      resolver.commitSetupPair({ provider: 'z-ai', model: 'glm-5.2' }),
+    ).rejects.toThrow(/writeGlobalBatch/);
+  });
+
+  it('commitSetupPair commits complete pair and clear ({ "", "" }) atomically', async () => {
+    const store = makeBatchMemoryStore();
+    const resolver = new WorkspaceScopeResolver(
+      store,
+      makeSource(PATH_A),
+      'app.electron',
+    );
+
+    const saved = await resolver.commitSetupPair({
+      provider: '  z-ai  ',
+      model: '  glm-5.2  ',
+    });
+    expect(saved).toEqual({ provider: 'z-ai', model: 'glm-5.2' });
+    expect(store.batchCalls).toEqual([
+      { 'setup.provider': 'z-ai', 'setup.model': 'glm-5.2' },
+    ]);
+    // Global keys only — never prefixed.
+    expect(
+      Object.keys(store.data).some(
+        (k) => k.startsWith('workspace.') || k.startsWith('app.'),
+      ),
+    ).toBe(false);
+
+    const cleared = await resolver.commitSetupPair({
+      provider: '',
+      model: '',
+    });
+    expect(cleared).toBeNull();
+    expect(store.data['setup.provider']).toBe('');
+    expect(store.data['setup.model']).toBe('');
+  });
+
+  it('commitSetupPair returns transaction receipt rather than reading a later concurrent write', async () => {
+    const data: Record<string, unknown> = {
+      'setup.provider': '',
+      'setup.model': '',
+    };
+    let resolveFirst!: (slice: Readonly<Record<string, unknown>>) => void;
+    const firstWritePending = new Promise<Readonly<Record<string, unknown>>>(
+      (resolve) => {
+        resolveFirst = resolve;
+      },
+    );
+    let callIndex = 0;
+    const readGlobalSpy = jest.fn(<T>(key: string) => data[key] as T | undefined);
+    const readGlobalManySpy = jest.fn((keys: readonly string[]) =>
+      Object.fromEntries(keys.map((k) => [k, data[k]])),
+    );
+    const store: IGlobalBatchSettingsStore = {
+      ...makeMemoryStore(data),
+      readGlobal<T>(key: string): T | undefined {
+        return readGlobalSpy(key) as T | undefined;
+      },
+      readGlobalMany: readGlobalManySpy,
+      async writeGlobalBatch(entries) {
+        callIndex += 1;
+        if (callIndex === 1) {
+          return firstWritePending;
+        }
+        Object.assign(data, entries);
+        return Object.freeze({ ...entries });
+      },
+    };
+    const resolver = new WorkspaceScopeResolver(store, makeSource(PATH_A));
+
+    // Start transaction 1 (paused before settling).
+    const tx1 = resolver.commitSetupPair({
+      provider: 'openrouter',
+      model: 'anthropic/claude-sonnet-4.5',
+    });
+
+    // Transaction 2 completes while transaction 1 is still pending, updating
+    // live store state to a different pair.
+    const receipt2 = await resolver.commitSetupPair({
+      provider: 'z-ai',
+      model: 'glm-5.2',
+    });
+    expect(receipt2).toEqual({ provider: 'z-ai', model: 'glm-5.2' });
+
+    // Now transaction 1 settles with its own committed slice (the store still
+    // holds transaction 2's values). Transaction 1 MUST return its own receipt
+    // without performing any trailing read.
+    resolveFirst(
+      Object.freeze({
+        'setup.provider': 'openrouter',
+        'setup.model': 'anthropic/claude-sonnet-4.5',
+      }),
+    );
+    const receipt1 = await tx1;
+    expect(receipt1).toEqual({
+      provider: 'openrouter',
+      model: 'anthropic/claude-sonnet-4.5',
+    });
+    expect(readGlobalSpy).not.toHaveBeenCalled();
+    expect(readGlobalManySpy).not.toHaveBeenCalled();
+  });
+
+  describe('file-backed Undo round-trip and fresh-instance restart read-back', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(
+        path.join(nodeOs.tmpdir(), 'ptah-setup-pair-scope-'),
+      );
+    });
+
+    afterEach(() => {
+      try {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    });
+
+    function createFileBatchStore(
+      manager: PtahFileSettingsManager,
+    ): IGlobalBatchSettingsStore {
+      return {
+        readGlobal<T>(key: string): T | undefined {
+          return manager.get<T>(key);
+        },
+        readGlobalMany(keys: readonly string[]): Record<string, unknown> {
+          return manager.getMany(keys);
+        },
+        hasGlobal(key: string): boolean {
+          return manager.has(key);
+        },
+        async writeGlobal<T>(key: string, value: T): Promise<void> {
+          await manager.set(key, value);
+        },
+        writeGlobalBatch(
+          entries: Readonly<Record<string, unknown>>,
+        ): Promise<Readonly<Record<string, unknown>>> {
+          return manager.setMany(entries);
+        },
+        readSecret: () => Promise.resolve(undefined),
+        writeSecret: () => Promise.resolve(),
+        deleteSecret: () => Promise.resolve(),
+        watchGlobal: () => ({ dispose: () => undefined }),
+        watchSecret: () => ({ dispose: () => undefined }),
+        flushSync: () => manager.flushSync(),
+      };
+    }
+
+    it('round-trips prior pair and unset Undo through disk and fresh-instance reload', async () => {
+      const manager = new PtahFileSettingsManager({}, tmpDir);
+      const reactive = new ReactiveSettingsStore(createFileBatchStore(manager));
+      const resolver = new WorkspaceScopeResolver(
+        reactive,
+        makeSource(PATH_A),
+        'app.electron',
+      );
+
+      // Initially unset.
+      expect(resolver.readSetupPair()).toEqual({ provider: null, model: null });
+
+      // Save pair A from unset, then Undo back to unset.
+      const savedA = await resolver.commitSetupPair({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+      expect(savedA).toEqual({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+      const undoneToUnset = await resolver.commitSetupPair({
+        provider: '',
+        model: '',
+      });
+      expect(undoneToUnset).toBeNull();
+      expect(resolver.readSetupPair()).toEqual({ provider: null, model: null });
+
+      // Save pair A, then pair B, then Undo back to pair A.
+      await resolver.commitSetupPair({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+      await resolver.commitSetupPair({
+        provider: 'z-ai',
+        model: 'glm-5.2',
+      });
+      const undoneToA = await resolver.commitSetupPair({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+      expect(undoneToA).toEqual({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+
+      // Fresh instance restart read-back from disk.
+      const reloadedManager = new PtahFileSettingsManager({}, tmpDir);
+      const reloadedReactive = new ReactiveSettingsStore(
+        createFileBatchStore(reloadedManager),
+      );
+      const reloadedResolver = new WorkspaceScopeResolver(
+        reloadedReactive,
+        makeSource(PATH_A),
+        'app.electron',
+      );
+      expect(reloadedResolver.readSetupPair()).toEqual({
+        provider: 'openrouter',
+        model: 'anthropic/claude-sonnet-4.5',
+      });
+    });
   });
 });

@@ -442,10 +442,7 @@ export class GenerationCheckpointService {
         ? { effectiveProvider: metadata.effectiveProvider }
         : {}),
       ...(metadata?.effectiveModel
-        ? {
-            effectiveModel: metadata.effectiveModel,
-            input: { ...manifest.input, model: metadata.effectiveModel },
-          }
+        ? { effectiveModel: metadata.effectiveModel }
         : {}),
       ...(metadata?.enhancedPromptsUsed !== undefined
         ? { enhancedPromptsUsed: metadata.enhancedPromptsUsed }
@@ -476,6 +473,26 @@ export class GenerationCheckpointService {
         ? { previousPropagation: propagation }
         : {}),
     };
+  }
+
+  /** Persist the launch pair without retaining its credentials or options. */
+  async recordEffectivePair(
+    location: GenerationCheckpointLocation,
+    pair: { effectiveProvider: string; effectiveModel: string },
+  ): Promise<void> {
+    const manifest = await this.loadAt(location);
+    if (!manifest)
+      throw new Error('Generation checkpoint is no longer available.');
+    await this.storage().writeGenerationManifest(
+      location.workspaceRoot,
+      location.analysisDir,
+      {
+        ...manifest,
+        effectiveProvider: pair.effectiveProvider,
+        effectiveModel: pair.effectiveModel,
+        updatedAt: new Date().toISOString(),
+      },
+    );
   }
 
   /**

@@ -106,6 +106,7 @@ describe('SdkInternalQueryCuratorLlm with a provider-session provider', () => {
         resolveForPath: jest.fn(async () => {
           throw refusal();
         }),
+        resolveSetup: jest.fn(),
       },
     );
 

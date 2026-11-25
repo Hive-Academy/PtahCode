@@ -228,6 +228,9 @@ export const FILE_BASED_SETTINGS_KEYS = new Set<string>([
   'skills.enhancement.model',
   'skills.enhancement.timeoutMs',
   'skills.telemetry.enabled',
+  // Setup wizard background model pair (global-only, committed atomically).
+  'setup.provider',
+  'setup.model',
   'memory.enabled',
   // MemoryRetentionService (memory-curator). Defaults below must equal the
   // `memory-retention-config.ts` fallbacks; pinned by memory-retention.service.spec.ts.
@@ -454,6 +457,8 @@ export const FILE_BASED_SETTINGS_DEFAULTS: Record<string, unknown> = {
   'skills.enhancement.model': 'inherit',
   'skills.enhancement.timeoutMs': ENHANCE_TIMEOUT_DEFAULT_MS,
   'skills.telemetry.enabled': true,
+  'setup.provider': '',
+  'setup.model': '',
   'memory.enabled': true,
   // Must equal the `memory-retention-config.ts` fallbacks (MemoryRetentionService);
   // pinned by memory-retention.service.spec.ts. The numeric retention and

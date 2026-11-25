@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import type {
   ConfigGetScopesResult,
   RpcMethodName,
+  WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService, RpcResult } from './claude-rpc.service';
 import { EffortStateService } from './effort-state.service';
@@ -14,6 +15,7 @@ import {
 import type {
   ProvidersEditContext,
   ProvidersSettingsSection,
+  ProvidersSetupRowState,
   SaveOperation,
   SaveStage,
 } from './providers-settings.types';
@@ -107,6 +109,124 @@ describe('ProvidersCommitService', () => {
     };
   });
   afterEach(() => TestBed.resetTestingModule());
+
+  describe('Setup pair', () => {
+    const original = { provider: 'openrouter', model: 'original-model' };
+    const olderPair = { provider: 'openrouter', model: 'older-model' };
+    const newerPair = { provider: 'openrouter', model: 'newer-model' };
+    const unset = { kind: 'unset', effective: original } as const;
+    const setReceipt = (
+      pair: typeof original,
+      commitSeq: number,
+    ): WizardSetSetupModelResult => ({
+      committed: pair,
+      state: { kind: 'set', pair },
+      commitSeq,
+    });
+
+    it('sets and clears with one atomic call per change', async () => {
+      const set = setReceipt(newerPair, 1);
+      const cleared = { committed: null, state: unset, commitSeq: 2 };
+      call.mockResolvedValueOnce(success(set)).mockResolvedValueOnce(success(cleared));
+      const applyReceipt = jest.fn<void, [ProvidersSetupRowState]>();
+
+      await expect(service.commitSetupPair(newerPair, null, applyReceipt)).resolves.toBe(true);
+      await expect(service.commitSetupPair(null, null, applyReceipt)).resolves.toBe(true);
+
+      expect(call.mock.calls).toEqual([
+        ['wizard:set-setup-model', newerPair],
+        ['wizard:set-setup-model', { provider: '', model: '' }],
+      ]);
+      expect(applyReceipt.mock.calls).toEqual([[set], [cleared]]);
+      expect(service.setupReceipt()?.committed).toBeNull();
+      expect(service.setupUndoEntry()?.targetPair).toEqual(newerPair);
+    });
+
+    it('out-of-order RPC completion preserves latest effective state and Undo target', async () => {
+      let resolveOlder!: (result: RpcResult<WizardSetSetupModelResult>) => void;
+      call.mockReturnValueOnce(new Promise((resolve) => { resolveOlder = resolve; }));
+      const newer = setReceipt(newerPair, 2);
+      call.mockResolvedValueOnce(success(newer));
+      const applyReceipt = jest.fn<void, [ProvidersSetupRowState]>();
+
+      const olderSave = service.commitSetupPair(olderPair, original, applyReceipt);
+      await expect(service.commitSetupPair(newerPair, original, applyReceipt)).resolves.toBe(true);
+      expect(service.setupCommit().status).toBe('saving');
+      resolveOlder(success(setReceipt(olderPair, 1)));
+      await expect(olderSave).resolves.toBe(false);
+
+      expect(applyReceipt.mock.calls).toEqual([[newer]]);
+      expect(service.setupReceipt()).toEqual(newer);
+      expect(service.setupCommit()).toEqual({
+        status: 'saved',
+        message: 'Saved newer-model from openrouter for Setup.',
+      });
+      expect(service.setupUndoEntry()).toEqual({
+        targetPair: original,
+        committedReceipt: newerPair,
+        commitSeq: 2,
+      });
+
+      call.mockResolvedValueOnce(success(setReceipt(original, 3)));
+      await expect(service.undoSetupPair(applyReceipt)).resolves.toBe(true);
+      expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', original);
+      expect(service.setupReceipt()).toEqual(setReceipt(original, 3));
+      expect(service.setupUndoEntry()).toBeNull();
+    });
+
+    it('reports the latest rejection when an older overlapping Setup save commits first', async () => {
+      let resolveOlder!: (result: RpcResult<WizardSetSetupModelResult>) => void;
+      let rejectNewer!: (result: RpcResult<unknown>) => void;
+      call
+        .mockReturnValueOnce(new Promise((resolve) => { resolveOlder = resolve; }))
+        .mockReturnValueOnce(new Promise((resolve) => { rejectNewer = resolve; }));
+      const applyReceipt = jest.fn<void, [ProvidersSetupRowState]>();
+
+      const olderSave = service.commitSetupPair(olderPair, original, applyReceipt);
+      const newerSave = service.commitSetupPair(newerPair, original, applyReceipt);
+      const saved = setReceipt(olderPair, 1);
+      resolveOlder(success(saved));
+      await expect(olderSave).resolves.toBe(true);
+      expect(service.setupCommit().status).toBe('saving');
+
+      rejectNewer(new RpcResult(false, undefined, 'private detail', 'SETUP_MODEL_INVALID'));
+      await expect(newerSave).resolves.toBe(false);
+      expect(service.setupCommit()).toEqual({
+        status: 'invalid',
+        message: 'Choose an available provider and model for Setup.',
+      });
+      expect(applyReceipt.mock.calls).toEqual([[saved]]);
+    });
+
+    it('Undo restores prior pair and clears back to unset (committed === null)', async () => {
+      const cleared = { committed: null, state: unset, commitSeq: 2 };
+      call
+        .mockResolvedValueOnce(success(setReceipt(newerPair, 1)))
+        .mockResolvedValueOnce(success(cleared));
+      const applyReceipt = jest.fn<void, [ProvidersSetupRowState]>();
+
+      await service.commitSetupPair(newerPair, null, applyReceipt);
+      await expect(service.undoSetupPair(applyReceipt)).resolves.toBe(true);
+
+      expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', { provider: '', model: '' });
+      expect(applyReceipt).toHaveBeenLastCalledWith(cleared);
+      expect(service.setupReceipt()?.committed).toBeNull();
+      expect(service.setupUndoEntry()).toBeNull();
+    });
+
+    it('does not confirm Undo when the committed receipt differs from the target', async () => {
+      call
+        .mockResolvedValueOnce(success(setReceipt(newerPair, 1)))
+        .mockResolvedValueOnce(success(setReceipt(olderPair, 2)));
+      const applyReceipt = jest.fn<void, [ProvidersSetupRowState]>();
+      await service.commitSetupPair(newerPair, null, applyReceipt);
+
+      await expect(service.undoSetupPair(applyReceipt)).resolves.toBe(false);
+
+      expect(service.setupCommit().status).toBe('failed');
+      expect(service.setupReceipt()?.committed).toEqual(olderPair);
+    });
+  });
 
   it('starts idle and reports a block without writing', () => {
     expect(service.commit()).toMatchObject({

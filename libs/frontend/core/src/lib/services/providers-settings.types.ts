@@ -3,12 +3,14 @@ import type {
   AuthSaveSettingsParams,
   AuthVerifyDraftConnectionParams,
   KimiCodeCredentialSource,
+  ModelPair,
   PtahCliConfig,
   PtahCliSummary,
   RpcMethodParams,
   RpcMethodResult,
   ScopedSettingEntry,
   SettingScope,
+  SetupPairState,
 } from '@ptah-extension/shared';
 
 /**
@@ -246,3 +248,27 @@ export type SaveOutcome = 'saved' | 'unsaved' | 'unconfirmed' | 'conflict';
 
 /** List-compatible summaries with boundary validation failures for the lanes matrix. */
 export type ProvidersCliAgents = PtahCliSummary[] & { readonly missingFields?: readonly string[] };
+
+/**
+ * The Setup row of Settings "Background models": the effective pair state read from
+ * `wizard:get-setup-model`, plus the last `wizard:set-setup-model` receipt the UI applied.
+ * `ModelPair` and `SetupPairState` come from `@ptah-extension/shared`; they are never redefined here.
+ */
+export interface ProvidersSetupRowState {
+  /** Effective Setup pair: unset (workspace fallback), set, invalid, or unavailable. */
+  readonly state: SetupPairState;
+  /** Pair committed by the last applied receipt; null when the Setup pair is cleared. */
+  readonly committed: ModelPair | null;
+  /** Monotonic receipt sequence; a slower older save never overwrites a newer commit. */
+  readonly commitSeq: number;
+}
+
+/**
+ * Undo target captured before one Setup write. `targetPair` is null when the prior state was
+ * Unset, so Undo sends the explicit empty pair and verifies `committed === null`.
+ */
+export interface ProvidersSetupUndoEntry {
+  readonly targetPair: ModelPair | null;
+  readonly committedReceipt: ModelPair | null;
+  readonly commitSeq: number;
+}

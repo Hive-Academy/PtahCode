@@ -26,7 +26,9 @@ import { SecretsFileStore } from '@ptah-extension/settings-core';
 function makeMockFileSettingsManager(): jest.Mocked<PtahFileSettingsManager> {
   return {
     get: jest.fn(),
+    getMany: jest.fn(),
     set: jest.fn().mockResolvedValue(undefined),
+    setMany: jest.fn(),
     watch: jest.fn().mockReturnValue({ dispose: jest.fn() }),
     flushSync: jest.fn(),
     getFilePath: jest.fn().mockReturnValue('/mock/.ptah/settings.json'),
@@ -81,6 +83,55 @@ describe('FileSettingsStore — global settings', () => {
     );
     await store.writeGlobal('some.key', 'new-value');
     expect(mgr.set).toHaveBeenCalledWith('some.key', 'new-value');
+  });
+
+  it('readGlobalMany delegates to fileSettings.getMany and returns its result', () => {
+    const mgr = makeMockFileSettingsManager();
+    const values = { 'setup.provider': 'anthropic', 'setup.model': 'claude' };
+    mgr.getMany.mockReturnValue(values);
+    const store = new FileSettingsStore(
+      mgr,
+      mockMasterKeyProvider,
+      makeStubSecretsStore(),
+    );
+    const keys = ['setup.provider', 'setup.model'];
+
+    const result = store.readGlobalMany(keys);
+
+    expect(mgr.getMany).toHaveBeenCalledWith(keys);
+    expect(result).toBe(values);
+  });
+
+  it('writeGlobalBatch delegates to fileSettings.setMany and returns the committed slice', async () => {
+    const mgr = makeMockFileSettingsManager();
+    const entries = { 'setup.provider': 'anthropic', 'setup.model': 'claude' };
+    const committedSlice = Object.freeze({ ...entries });
+    mgr.setMany.mockResolvedValue(committedSlice);
+    const store = new FileSettingsStore(
+      mgr,
+      mockMasterKeyProvider,
+      makeStubSecretsStore(),
+    );
+
+    const result = await store.writeGlobalBatch(entries);
+
+    expect(mgr.setMany).toHaveBeenCalledWith(entries);
+    expect(result).toBe(committedSlice);
+  });
+
+  it('writeGlobalBatch propagates a fileSettings.setMany rejection', async () => {
+    const mgr = makeMockFileSettingsManager();
+    const error = new Error('persist failed');
+    mgr.setMany.mockRejectedValue(error);
+    const store = new FileSettingsStore(
+      mgr,
+      mockMasterKeyProvider,
+      makeStubSecretsStore(),
+    );
+
+    await expect(
+      store.writeGlobalBatch({ 'setup.provider': 'anthropic' }),
+    ).rejects.toBe(error);
   });
 
   it('flushSync delegates to fileSettings.flushSync', () => {

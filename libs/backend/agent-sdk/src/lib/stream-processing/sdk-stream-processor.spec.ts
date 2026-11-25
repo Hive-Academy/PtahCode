@@ -186,11 +186,11 @@ function successResultMessage(
   } as unknown as SDKMessage;
 }
 
-function errorResultMessage(subtype = 'error_during_execution'): SDKMessage {
+function errorResultMessage(subtype: string, errors?: string[]): SDKMessage {
   return {
     type: 'result',
     subtype,
-    errors: ['boom'],
+    errors,
   } as unknown as SDKMessage;
 }
 
@@ -355,34 +355,95 @@ describe('SdkStreamProcessor', () => {
 
     it('falls back to JSON-parsing the result text when structured_output is absent', async () => {
       const h = makeProcessor();
+      const resultText = ' {"fallback":true}\n';
       const stream = createFakeAsyncGenerator<SDKMessage>([
-        successResultMessage({ resultText: '{"fallback":true}' }),
+        successResultMessage({ resultText }),
       ]);
 
       const result = await h.processor.process(stream);
       expect(result.structuredOutput).toEqual({ fallback: true });
+      expect(result.resultText).toBe(resultText);
+      expect(result.terminal).toEqual({ kind: 'success' });
+    });
+
+    it('preserves raw text and success status when the result text is not JSON', async () => {
+      const h = makeProcessor();
+      const resultText = '\n```json\n{"items":[]}\n```\n';
+      const stream = createFakeAsyncGenerator<SDKMessage>([
+        successResultMessage({ resultText }),
+      ]);
+
+      const result = await h.processor.process(stream);
+      expect(result.structuredOutput).toBeNull();
+      expect(result.resultText).toBe(resultText);
+      expect(result.terminal).toEqual({ kind: 'success' });
+    });
+
+    it('preserves structured output with malformed sibling fields', async () => {
+      const h = makeProcessor();
+      const structuredOutput = {
+        items: [
+          { itemId: 'valid', outcomes: [{ verdict: 'no-skill', reason: 'Already covered' }] },
+          { itemId: 123, rejections: [{ reason: false }] },
+        ],
+      };
+      const resultText = '{"items":[]}';
+      const stream = createFakeAsyncGenerator<SDKMessage>([
+        successResultMessage({ structuredOutput, resultText }),
+      ]);
+
+      const result = await h.processor.process(stream);
+      expect(result.structuredOutput).toEqual(structuredOutput);
+      expect(result.resultText).toBe(resultText);
+      expect(result.terminal).toEqual({ kind: 'success' });
     });
 
     it('returns null when skipStructuredOutput is set (markdown pipeline)', async () => {
       const h = makeProcessor({ skipStructuredOutput: true });
+      const resultText = '# Draft\n';
       const stream = createFakeAsyncGenerator<SDKMessage>([
-        successResultMessage({ structuredOutput: { would: 'use' } }),
+        successResultMessage({ structuredOutput: { would: 'use' }, resultText }),
       ]);
 
       const result = await h.processor.process(stream);
       expect(result.structuredOutput).toBeNull();
       expect(result.resultMeta).toBeDefined();
+      expect(result.resultText).toBe(resultText);
+      expect(result.terminal).toEqual({ kind: 'success' });
     });
 
-    it('returns null structuredOutput for error result messages', async () => {
+    it('SDK error result returns provider-error terminal and logs only subtype and errorCount without raw errors', async () => {
       const h = makeProcessor();
       const stream = createFakeAsyncGenerator<SDKMessage>([
-        errorResultMessage('error_max_turns'),
+        errorResultMessage('error_max_turns', [
+          'Authorization: Bearer test-token',
+          'Raw upstream response',
+        ]),
       ]);
 
       const result = await h.processor.process(stream);
-      expect(result.structuredOutput).toBeNull();
-      expect(h.logger.error).toHaveBeenCalled();
+      expect(result).toEqual({
+        structuredOutput: null,
+        terminal: { kind: 'provider-error', subtype: 'error_max_turns' },
+      });
+      expect(h.logger.error.mock.calls).toEqual([
+        ['[TestProcessor] Query failed', { subtype: 'error_max_turns', errorCount: 2 }],
+      ]);
+      expect(h.emit).not.toHaveBeenCalled();
+    });
+
+    it('logs a zero errorCount when the SDK error result omits errors', async () => {
+      const h = makeProcessor();
+      const stream = createFakeAsyncGenerator<SDKMessage>([
+        errorResultMessage('error_during_execution'),
+      ]);
+
+      await h.processor.process(stream);
+
+      expect(h.logger.error).toHaveBeenCalledWith('[TestProcessor] Query failed', {
+        subtype: 'error_during_execution',
+        errorCount: 0,
+      });
     });
   });
 
@@ -578,6 +639,7 @@ describe('SdkStreamProcessor', () => {
       await expect(h.processor.process(stream)).resolves.toEqual({
         structuredOutput: { ok: true },
         resultMeta: expect.any(Object),
+        terminal: { kind: 'success' },
       });
     });
   });
