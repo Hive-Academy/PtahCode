@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B17, B19 COMPLETE. B18 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B17, B19, B21 COMPLETE. B18 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -524,8 +524,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B21 - WU8a matrix store pair resolve (absorbs WU8b)
 
-- **Status**: PENDING
-- **Shape / weight**: logic / est. 11,700. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 0b7993a3; decisions 28, 31; MatrixLoadInput.choice forwarded by B23)
+- **Shape / weight**: logic / est. 11,700. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.ts` (whole, 738 lines); `.../matrix/capability-matrix.store.spec.ts:1-140` + the `resolve` describe; `.../matrix/choice-evidence.ts` exports; `.../matrix/matrix.types.ts` (after B3); PLAN:886-892, PLAN:914-927, PLAN:774-778
 - **Write set**: `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.ts`; `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.spec.ts`

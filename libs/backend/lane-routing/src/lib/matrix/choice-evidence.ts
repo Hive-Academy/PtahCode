@@ -13,7 +13,7 @@ import {
   deriveLocalCell,
   isCapacityFailure,
 } from './local-derivation';
-import { FAMILY_PROFILE_MODEL, type ValueMatrixCell } from './matrix.types';
+import { FAMILY_PROFILE_MODEL, type MatrixProfile, type ValueMatrixCell } from './matrix.types';
 import { buildSeedMatrix } from './seed-matrix';
 
 export const ANY_EFFORT = '*';
@@ -231,6 +231,7 @@ function addDecisionRun(
 export function deriveChoiceEvidence(
   summaries: readonly LaneOutcomeSummary[],
   nowMs: number,
+  seedProfiles?: readonly MatrixProfile[],
 ): ChoiceEvidence {
   assertFiniteNow(nowMs);
   const sinceMs = nowMs - OUTCOME_WINDOW_MS;
@@ -263,11 +264,16 @@ export function deriveChoiceEvidence(
     addDecisionRun(decisions, row, capacity);
   }
 
-  const seedProfiles = buildSeedMatrix(nowMs).profiles;
+  const profiles = seedProfiles ?? buildSeedMatrix(nowMs).profiles;
   const byKey = new Map<string, ChoiceCell>();
   for (const [id, draft] of drafts) {
     const { key, funnel, aggregates, effortNotSent, scoringRuns } = draft;
-    const local = deriveLocalCell(key, scoringRuns, nowMs, seedProfiles);
+    const local = deriveLocalCell(
+      { ...key, effort: key.effort === ANY_EFFORT ? undefined : key.effort },
+      scoringRuns,
+      nowMs,
+      profiles,
+    );
     byKey.set(id, {
       key,
       funnel,

@@ -4,6 +4,7 @@ import { ANY_EFFORT, deriveChoiceEvidence, type ChoiceKey } from './choice-evide
 import { AUTOMATIC_MATRIX_MODEL, deriveLocalMatrix } from './local-derivation';
 import { FAMILY_PROFILE_MODEL } from './matrix.types';
 import { outcomeFiguresFrom } from './outcome-figures';
+import { buildSeedMatrix } from './seed-matrix';
 
 const NOW = Date.parse('2026-10-15T00:00:00.000Z');
 const KEY: ChoiceKey = {
@@ -146,6 +147,23 @@ describe('deriveChoiceEvidence', () => {
     ], NOW);
     expect(withoutRates.cell(KEY)?.funnel.spawned).toBe(2);
     expect(withoutRates.cell(KEY)?.local).toBeUndefined();
+  });
+
+  it('uses a matching effort seed and falls back to the model-wide seed', () => {
+    const [modelSeed] = buildSeedMatrix(NOW).profiles;
+    const implement = modelSeed?.cells.implement;
+    if (implement?.kind !== 'value') throw new Error('expected an implementation seed');
+    const evidence = deriveChoiceEvidence([
+      row('high', { verdict: 'failed', effort: 'high' }),
+      row('medium', { verdict: 'failed', effort: 'medium' }),
+    ], NOW, [
+      { ...modelSeed, effort: 'high', cells: { ...modelSeed.cells, implement: { ...implement, score: 20 } } },
+      modelSeed,
+    ]);
+
+    expect(evidence.cell({ ...KEY, effort: 'high' })?.local?.score).toBe(18);
+    expect(evidence.cell({ ...KEY, effort: 'medium' })?.local?.score).toBe(73);
+    expect(evidence.cell(KEY)?.local?.score).toBe(67);
   });
 
   it('uses the same window and dedupe for cells and counts routed runs once', () => {

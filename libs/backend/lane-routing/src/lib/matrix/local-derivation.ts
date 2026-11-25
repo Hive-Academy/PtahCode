@@ -149,6 +149,7 @@ function bucketFor(
 }
 
 type RateKey = Pick<RateBucket, 'family' | 'model' | 'taskKind'>;
+type ChoiceRateKey = RateKey & Pick<MatrixProfile, 'effort'>;
 
 function emptyRateBucket(key: RateKey): RateBucket {
   return {
@@ -166,7 +167,7 @@ function emptyRateBucket(key: RateKey): RateBucket {
 
 /** Score the deduplicated, non-capacity runs assigned to one choice key. */
 export function deriveLocalCell(
-  key: RateKey,
+  key: ChoiceRateKey,
   summaries: readonly LaneOutcomeSummary[],
   nowMs: number,
   seedProfiles: readonly MatrixProfile[],
@@ -278,18 +279,21 @@ function unknownCells(): Record<OutcomeTaskKind, MatrixCell> {
 }
 
 /**
- * The blend prior: the score of the seed value cell for the same family,
- * model and task kind (an exact profile match), else `NEUTRAL_SCORE`.
+ * The blend prior uses the effort-specific seed profile when present,
+ * then the effort-agnostic profile for the same family and model.
  */
 function priorScore(
-  bucket: RateKey,
+  key: ChoiceRateKey,
   seedProfiles: readonly MatrixProfile[],
 ): number {
-  const profile = seedProfiles.find(
+  const profileFor = (effort: MatrixProfile['effort']) => seedProfiles.find(
     (candidate) =>
-      candidate.family === bucket.family && candidate.model === bucket.model,
+      candidate.family === key.family &&
+      candidate.model === key.model &&
+      candidate.effort === effort,
   );
-  const cell = profile?.cells[bucket.taskKind];
+  const exact = key.effort === undefined ? undefined : profileFor(key.effort);
+  const cell = (exact ?? profileFor(undefined))?.cells[key.taskKind];
   return cell?.kind === 'value' ? cell.score : NEUTRAL_SCORE;
 }
 
