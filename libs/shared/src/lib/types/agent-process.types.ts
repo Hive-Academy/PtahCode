@@ -14,9 +14,16 @@ import type {
   ProviderAccountSelection,
 } from './provider-account.types';
 import type {
+  OutcomeEffortSource,
+  OutcomeModelSource,
   OutcomeRoutingSource,
   OutcomeTaskKind,
 } from './lane-outcome.types';
+import type {
+  EffortDisposition,
+  LaneReportedSession,
+  ValueProvenance,
+} from './lane-native-values.types';
 import type { AgentMessagingCapability } from './agent-messaging.types';
 
 /**
@@ -332,6 +339,17 @@ export interface AgentProcessInfo {
   reasoningEffort?: string;
   /** Model the provider reported it actually used on the latest turn. */
   observedModel?: string;
+  readonly modelSource?: OutcomeModelSource;
+  readonly spawnEffort?: {
+    readonly requested: string | null;
+    readonly sent: string | null;
+    readonly source: OutcomeEffortSource;
+    readonly provenance: ValueProvenance;
+    readonly disposition: EffortDisposition;
+  };
+  /** Latest native session values (2.12.3). Absent: the handle reports none. */
+  reportedSession?: LaneReportedSession;
+  readonly routeFacts?: RouteSpawnFacts;
   /** Display name of the Ptah CLI agent (only set when cli === 'ptah-cli') */
   readonly ptahCliName?: string;
   /** Ptah CLI agent registry ID (only set when cli === 'ptah-cli'). Needed for resume. */
@@ -482,7 +500,22 @@ export interface LaneRequestContext {
   readonly source: LaneRequestContextSource;
 }
 
+export interface RouteSpawnFacts {
+  readonly routeId: string;
+  readonly phaseId: string;
+  readonly laneId: string;
+  readonly model: string;
+  readonly effort: string;
+  readonly source: Exclude<OutcomeRoutingSource, 'not-routed'>;
+  readonly decisionModel: string | null;
+  readonly proposalConfidence: number | null;
+}
+
 export interface SpawnAgentRequest {
+  /** Route the coordinator spawns from. Caller-set. Unknown ids are ignored. */
+  readonly route?: { readonly routeId: string; readonly phaseId: string };
+  /** Resolved by the MCP entry from `route`. NOT set by callers. */
+  readonly routeFacts?: RouteSpawnFacts;
   /** Validated phase handoff for lane delivery. */
   readonly phase?: import('./phase-contract.types').PhaseDispatchV1;
   /** Host-resolved skills, including standalone skills without a phase. */
