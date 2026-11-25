@@ -35,6 +35,7 @@ import { RotationStore } from '../ranking/rotation.store';
 import { RouteDecideService } from '../route-decide.service';
 import { HostRoutingSetting } from '../scope/host-routing-setting';
 import { LaneRotationSetting } from '../scope/lane-rotation-setting';
+import { RoutingRulesSetting } from '../scope/routing-rules-setting';
 import { PreflightReuseCache } from '../scope/preflight-reuse-cache';
 import { ScopeCheckService } from '../scope/scope-check.service';
 import { DecisionModelTaskKindClassifier } from '../task-kind/decision-model-task-kind-classifier';
@@ -216,9 +217,18 @@ export function registerLaneRoutingServices(
         c,
         LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
       );
+      const workspace = c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       return new RouteDecideService({
+        readPrefillTokensPerSecond: () => workspace.getConfiguration<unknown>(
+          'ptah',
+          'agentOrchestration.decisionModelPrefillTokensPerSecond',
+        ),
+        routingRulesSetting: new RoutingRulesSetting(
+          workspace,
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ),
         rotationSetting: new LaneRotationSetting(
-          c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+          workspace,
           c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
         ),
         config: c.resolve<DecisionModelConfig>(

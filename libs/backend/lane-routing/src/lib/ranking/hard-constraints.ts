@@ -20,13 +20,16 @@
  */
 import { PHASE_KINDS } from '../contracts/route-decide-args.schema';
 import { capabilitiesFromTools, type MachineCapability } from './capability';
-import { EXCLUSION_RULES } from '../contracts/route-decide-result.schema';
+import {
+  EXCLUSION_RULES,
+  type UserRuleExclusion,
+} from '../contracts/route-decide-result.schema';
 import { EXCLUDED_LIMIT_STATE } from '../routing-constants';
 import type { RoutingCandidate } from './candidate.types';
 
 export type PhaseKind = (typeof PHASE_KINDS)[number];
 
-export type ExclusionRule = (typeof EXCLUSION_RULES)[number];
+export type ExclusionRule = (typeof EXCLUSION_RULES)[number] | UserRuleExclusion;
 
 /** Rules this filter can emit. `pruned` is intentionally absent. */
 export const HARD_CONSTRAINT_RULES = [
@@ -88,6 +91,11 @@ export interface ConstrainPhaseInput {
    * The review pass omits it and supplies `knownExecutors`.
    */
   readonly deferReviewerFamily?: boolean;
+  /**
+   * User routing-rule exclusions (candidate id -> `user-rule:<ruleId>`).
+   * Evaluated after hard constraints; an accepted pin beats a user exclusion.
+   */
+  readonly userExclusions?: ReadonlyMap<string, UserRuleExclusion>;
 }
 
 export interface EligiblePhase {
@@ -105,7 +113,7 @@ export interface UnavailablePhase {
   readonly exclusionReason: PhaseExclusionReason;
   readonly excluded: readonly CandidateExclusion[];
   /** Set only when `exclusionReason` is `pin-unavailable`. */
-  readonly pinRule: ExclusionRule | null;
+  readonly pinRule: HardConstraintRule | null;
   /** True only for exclusion reason `reviewer-family` (Req 2.3). */
   readonly needsDisclosedFallback: boolean;
 }
@@ -140,7 +148,7 @@ function exclusionRule(
   required: readonly MachineCapability[],
   toolNames: ReadonlyMap<string, readonly string[] | null> | undefined,
   forbiddenFamilies: ReadonlySet<string> | null,
-): ExclusionRule | null {
+): HardConstraintRule | null {
   if (candidate.kind === 'lane') {
     if (candidate.limitState === EXCLUDED_LIMIT_STATE) {
       return 'at-limit';
@@ -213,7 +221,7 @@ function unavailable(
   phaseId: string,
   exclusionReason: PhaseExclusionReason,
   excluded: readonly CandidateExclusion[],
-  pinRule: ExclusionRule | null,
+  pinRule: HardConstraintRule | null,
 ): UnavailablePhase {
   return {
     phaseId,
@@ -230,6 +238,8 @@ function classify(
   required: readonly MachineCapability[],
   toolNames: ReadonlyMap<string, readonly string[] | null> | undefined,
   forbiddenFamilies: ReadonlySet<string> | null,
+  userExclusions: ReadonlyMap<string, UserRuleExclusion> | undefined,
+  acceptedPinId?: string,
 ): {
   readonly eligible: readonly RoutingCandidate[];
   readonly excluded: readonly CandidateExclusion[];
@@ -238,14 +248,25 @@ function classify(
   const excluded: CandidateExclusion[] = [];
   for (const candidate of candidates) {
     const rule = exclusionRule(candidate, required, toolNames, forbiddenFamilies);
-    if (rule === null) {
-      eligible.push(candidate);
-    } else {
-      excluded.push({ candidate: candidate.id, rule,
+    if (rule !== null) {
+      excluded.push({
+        candidate: candidate.id,
+        rule,
         ...(rule === 'missing-capability' || rule === 'capability-unknown'
-          ? { capability: required[0] } : {}),
+          ? { capability: required[0] }
+          : {}),
       });
+      continue;
     }
+    const userRule =
+      acceptedPinId !== undefined && candidate.id === acceptedPinId
+        ? undefined
+        : userExclusions?.get(candidate.id);
+    if (userRule !== undefined) {
+      excluded.push({ candidate: candidate.id, rule: userRule });
+      continue;
+    }
+    eligible.push(candidate);
   }
   return { eligible, excluded };
 }
@@ -259,17 +280,18 @@ export function constrainPhase(
     input.knownExecutors ?? [],
     input.deferReviewerFamily === true,
   );
-  const classified = classify(
-    input.candidates,
-    required,
-    input.toolNames,
-    forbiddenFamilies,
-  );
 
   const pin = input.pin;
   if (pin) {
     const target = resolvePin(input.candidates, pin.executor);
     if (!target) {
+      const classified = classify(
+        input.candidates,
+        required,
+        input.toolNames,
+        forbiddenFamilies,
+        input.userExclusions,
+      );
       return unavailable(
         input.phase.id,
         'pin-unavailable',
@@ -279,6 +301,13 @@ export function constrainPhase(
     }
     const pinRule = exclusionRule(target, required, input.toolNames, forbiddenFamilies);
     if (pinRule) {
+      const classified = classify(
+        input.candidates,
+        required,
+        input.toolNames,
+        forbiddenFamilies,
+        input.userExclusions,
+      );
       return unavailable(
         input.phase.id,
         'pin-unavailable',
@@ -286,6 +315,14 @@ export function constrainPhase(
         pinRule,
       );
     }
+    const classified = classify(
+      input.candidates,
+      required,
+      input.toolNames,
+      forbiddenFamilies,
+      input.userExclusions,
+      target.id,
+    );
     return {
       phaseId: input.phase.id,
       status: 'eligible',
@@ -294,6 +331,14 @@ export function constrainPhase(
       pinAccepted: true,
     };
   }
+
+  const classified = classify(
+    input.candidates,
+    required,
+    input.toolNames,
+    forbiddenFamilies,
+    input.userExclusions,
+  );
 
   if (classified.eligible.length === 0) {
     if (classified.excluded.some((entry) => entry.rule === 'missing-capability' || entry.rule === 'capability-unknown')) {

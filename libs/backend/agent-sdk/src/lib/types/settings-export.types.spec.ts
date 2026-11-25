@@ -102,6 +102,15 @@ describe('KNOWN_CONFIG_KEYS', () => {
       expect(KNOWN_CONFIG_KEYS).toContain('agentOrchestration.laneRotation');
     });
 
+    it('exports routingRules and decisionModelPrefillTokensPerSecond', () => {
+      expect(KNOWN_CONFIG_KEYS).toEqual(
+        expect.arrayContaining([
+          'agentOrchestration.routingRules',
+          'agentOrchestration.decisionModelPrefillTokensPerSecond',
+        ]),
+      );
+    });
+
     it('exports the subagent prompt-cache TTL key (TASK_2026_597 N1)', () => {
       expect(KNOWN_CONFIG_KEYS).toContain(
         'agentOrchestration.subagentPromptCacheTtl',

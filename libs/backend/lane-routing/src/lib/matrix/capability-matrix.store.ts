@@ -21,6 +21,7 @@ import {
   type MatrixCell,
   type MatrixCellSource,
   type MatrixProfile,
+  type ValueMatrixCell,
 } from './matrix.types';
 import { AUTOMATIC_MATRIX_MODEL, deriveLocalMatrix } from './local-derivation';
 import {
@@ -94,7 +95,15 @@ export interface MatrixLoadInput {
   readonly outcomeQueries: readonly MatrixOutcomeQuery[];
 }
 
+/** Value cells for the same resolved profile and task kind. */
+export interface ScoreLayers {
+  readonly user?: ValueMatrixCell;
+  readonly seed?: ValueMatrixCell;
+  readonly local?: ValueMatrixCell;
+}
+
 export interface ResolvedMatrixCell {
+  readonly layers?: ScoreLayers;
   readonly family: string;
   readonly model: string;
   /** `*` when the lookup used the family profile. */
@@ -214,7 +223,7 @@ export class CapabilityMatrixStore {
       indexMatrix(userLoad.matrix),
       indexMatrix(localLoad.matrix),
       indexMatrix(buildSeedMatrix(input.nowMs)),
-    ];
+    ] as const;
     await this.writeViewIfChanged(layers, input.nowMs);
     return {
       reasons: [...userLoad.reasons, ...localLoad.reasons],
@@ -466,7 +475,7 @@ function profileKey(family: string, model: string): string {
 }
 
 function resolveIndexed(
-  layers: readonly ProfileIndex[],
+  layers: readonly [user: ProfileIndex, local: ProfileIndex, seed: ProfileIndex],
   family: string,
   model: string,
   taskKind: OutcomeTaskKind,
@@ -476,12 +485,23 @@ function resolveIndexed(
     model,
     hasProfile(layers, family, model),
   );
-  const cell = mergedCell(layers, family, profileModel, taskKind, nowMs);
+  const key = profileKey(family, profileModel);
+  const [userIndex, localIndex, seedIndex] = layers;
+  const user = valueAt(userIndex, key, taskKind, nowMs);
+  const local = valueAt(localIndex, key, taskKind, nowMs);
+  const seed = valueAt(seedIndex, key, taskKind, nowMs);
+  const cell = user ?? local ?? seed ?? { kind: 'unknown' };
+  const scoreLayers: ScoreLayers = {
+    ...(user === undefined ? {} : { user }),
+    ...(local === undefined ? {} : { local }),
+    ...(seed === undefined ? {} : { seed }),
+  };
   return {
     family,
     model,
     profileModel,
     taskKind,
+    layers: scoreLayers,
     cell,
     score: cell.kind === 'value' ? cell.score : NEUTRAL_SCORE,
     noProfile: cell.kind === 'unknown',
@@ -522,12 +542,20 @@ function mergedCell(
 ): MatrixCell {
   const key = profileKey(family, model);
   for (const layer of layers) {
-    const cell = layer.byKey.get(key)?.cells[taskKind];
-    if (cell?.kind === 'value') {
-      return { ...cell, stale: isStale(cell.asOf, nowMs) };
-    }
+    const cell = valueAt(layer, key, taskKind, nowMs);
+    if (cell !== undefined) return cell;
   }
   return { kind: 'unknown' };
+}
+
+function valueAt(
+  index: ProfileIndex,
+  key: string,
+  taskKind: OutcomeTaskKind,
+  nowMs: number,
+): ValueMatrixCell | undefined {
+  const cell = index.byKey.get(key)?.cells[taskKind];
+  return cell?.kind === 'value' ? { ...cell, stale: isStale(cell.asOf, nowMs) } : undefined;
 }
 
 function viewDocument(

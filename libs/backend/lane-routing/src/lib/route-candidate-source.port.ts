@@ -1,4 +1,5 @@
 import type { CliDetectionResult, LaneLimitState } from '@ptah-extension/shared';
+import type { LimitEvidence } from './contracts/route-decide-result.schema';
 import type { RoutingCandidate } from './ranking/candidate.types';
 
 /** Host adapter that reads the current candidate rows, limits, and subagent roles. */
@@ -9,6 +10,10 @@ export interface RouteCandidateSource {
   limits(
     rows: readonly CliDetectionResult[],
   ): Promise<ReadonlyMap<string, LaneLimitState> | null>;
+  /** Read limit state together with its lookup status and freshness. */
+  limitEvidence?(
+    rows: readonly CliDetectionResult[],
+  ): Promise<ReadonlyMap<string, LimitEvidence> | null>;
   roles(): Promise<readonly string[]>;
   /** Null means the effective list cannot be read. Called only at gate stage. */
   tools?(candidate: RoutingCandidate, phase: {

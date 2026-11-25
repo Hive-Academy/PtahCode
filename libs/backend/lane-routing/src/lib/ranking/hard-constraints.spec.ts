@@ -661,6 +661,143 @@ describe('constrainPhase requirement 3.6', () => {
   });
 });
 
+describe('constrainPhase userExclusions', () => {
+  it('excludes a user-excluded candidate with its user-rule tag and keeps remaining candidates', () => {
+    const result = constrainPhase({
+      phase: { id: 'implement', kind: 'implement' },
+      candidates: [
+        lane({ id: 'codex', cli: 'codex' }),
+        lane({ id: 'grok', cli: 'grok' }),
+      ],
+      userExclusions: new Map([['codex', 'user-rule:no-codex']]),
+    });
+
+    expect(result.status).toBe('eligible');
+    expect(ids(result)).toEqual(['grok']);
+    expect(result.excluded).toEqual([
+      { candidate: 'codex', rule: 'user-rule:no-codex' },
+    ]);
+  });
+
+  it('lets a pin beat a user exclusion while keeping user exclusions on non-pinned candidates', () => {
+    const result = constrainPhase({
+      phase: { id: 'implement', kind: 'implement' },
+      pin: { executor: 'codex' },
+      candidates: [
+        lane({ id: 'codex', cli: 'codex' }),
+        lane({ id: 'grok', cli: 'grok' }),
+      ],
+      userExclusions: new Map([
+        ['codex', 'user-rule:no-codex'],
+        ['grok', 'user-rule:no-grok'],
+      ]),
+    });
+
+    expect(result).toEqual({
+      phaseId: 'implement',
+      status: 'eligible',
+      eligible: [lane({ id: 'codex', cli: 'codex' })],
+      excluded: [{ candidate: 'grok', rule: 'user-rule:no-grok' }],
+      pinAccepted: true,
+    });
+  });
+
+  it('lets at-limit beat both a pin and a user exclusion without duplicating the exclusion', () => {
+    const result = constrainPhase({
+      phase: { id: 'implement', kind: 'implement' },
+      pin: { executor: 'codex' },
+      candidates: [
+        lane({ id: 'codex', cli: 'codex', limitState: 'at-limit' }),
+        lane({ id: 'grok', cli: 'grok' }),
+      ],
+      userExclusions: new Map([['codex', 'user-rule:no-codex']]),
+    });
+
+    expect(result).toEqual({
+      phaseId: 'implement',
+      status: 'unavailable',
+      exclusionReason: 'pin-unavailable',
+      excluded: [{ candidate: 'codex', rule: 'at-limit' }],
+      pinRule: 'at-limit',
+      needsDisclosedFallback: false,
+    });
+  });
+
+  it('uses the existing unavailable path when every candidate is excluded by user rules', () => {
+    const result = constrainPhase({
+      phase: { id: 'implement', kind: 'implement' },
+      candidates: [
+        lane({ id: 'codex', cli: 'codex' }),
+        lane({ id: 'grok', cli: 'grok' }),
+      ],
+      userExclusions: new Map([
+        ['codex', 'user-rule:block-all'],
+        ['grok', 'user-rule:block-all'],
+      ]),
+    });
+
+    expect(result).toEqual({
+      phaseId: 'implement',
+      status: 'unavailable',
+      exclusionReason: 'no-eligible-candidate',
+      excluded: [
+        { candidate: 'codex', rule: 'user-rule:block-all' },
+        { candidate: 'grok', rule: 'user-rule:block-all' },
+      ],
+      pinRule: null,
+      needsDisclosedFallback: false,
+    });
+    if (result.status !== 'unavailable') {
+      return;
+    }
+    expect(
+      UnavailableEntrySchema.safeParse({
+        phaseId: result.phaseId,
+        status: 'unavailable',
+        executor: 'unavailable',
+        exclusionReason: result.exclusionReason,
+        excludedBy: result.excluded,
+        pinRule: result.pinRule,
+        needsDisclosedFallback: result.needsDisclosedFallback,
+        source: 'ranking',
+        model: null,
+        tier: 'sonnet',
+        effort: 'medium',
+        provenance: null,
+        score: null,
+        confidence: null,
+        fallbackCause: null,
+        reason: 'every candidate excluded by user rule',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('keeps the reviewer-family fallback cause when the other family is user-excluded', () => {
+    const result = constrainPhase({
+      ...reviewOf('codex', [
+        lane({ id: 'codex', cli: 'codex', family: 'codex' }),
+        lane({ id: 'grok', cli: 'grok', family: 'grok' }),
+      ]),
+      userExclusions: new Map([
+        ['codex', 'user-rule:no-codex'],
+        ['grok', 'user-rule:no-grok'],
+      ]),
+    });
+
+    expect(result).toEqual({
+      phaseId: 'review',
+      status: 'unavailable',
+      exclusionReason: 'reviewer-family',
+      excluded: [
+        { candidate: 'codex', rule: 'reviewer-family' },
+        { candidate: 'grok', rule: 'user-rule:no-grok' },
+      ],
+      pinRule: null,
+      needsDisclosedFallback: true,
+    });
+  });
+});
+
 describe('constrainPhase determinism', () => {
   it('returns the same result for the same input without mutating candidates', () => {
     const candidates = [

@@ -69,6 +69,7 @@ afterAll(() => {
 import { expectNormalizedPath } from '@ptah-extension/shared/testing';
 import { PtahFileSettingsManager } from './file-settings-manager';
 import {
+  FILE_BASED_OBJECT_SETTINGS_KEYS,
   FILE_BASED_SETTINGS_KEYS,
   FILE_BASED_SETTINGS_DEFAULTS,
   isFileBasedSettingKey,
@@ -140,6 +141,91 @@ describe('PtahFileSettingsManager', () => {
     expect(mgr.getRoutingConfigurationGeneration()).toBe(1);
     await write;
     expect(mgr.get<boolean>('agentOrchestration.laneRotation')).toBe(false);
+  });
+
+  it('defaults routingRules to [], keeps prefill rate absent, and bumps routing generation on write', async () => {
+    const rulesKey = 'agentOrchestration.routingRules';
+    const prefillKey = 'agentOrchestration.decisionModelPrefillTokensPerSecond';
+
+    expect(isFileBasedSettingKey(rulesKey)).toBe(true);
+    expect(FILE_BASED_SETTINGS_KEYS.has(rulesKey)).toBe(true);
+    expect(FILE_BASED_OBJECT_SETTINGS_KEYS.has(rulesKey)).toBe(true);
+    expect(isFileBasedSettingKey(prefillKey)).toBe(true);
+    expect(FILE_BASED_SETTINGS_KEYS.has(prefillKey)).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        FILE_BASED_SETTINGS_DEFAULTS,
+        prefillKey,
+      ),
+    ).toBe(false);
+
+    const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+    expect(mgr.get(rulesKey)).toEqual([]);
+    expect(mgr.get(prefillKey)).toBeUndefined();
+    expect(mgr.has(prefillKey)).toBe(false);
+    expect(mgr.getRoutingConfigurationGeneration()).toBe(0);
+
+    const rulesWrite = mgr.set(rulesKey, [
+      {
+        id: 'ui-review',
+        match: { kind: 'review', shape: 'ui' },
+        set: { maxTier: 'sonnet', effort: 'high' },
+      },
+    ]);
+    expect(mgr.getRoutingConfigurationGeneration()).toBe(1);
+    await rulesWrite;
+
+    const prefillWrite = mgr.set(prefillKey, 125.5);
+    expect(mgr.getRoutingConfigurationGeneration()).toBe(2);
+    await prefillWrite;
+
+    const reopened = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+    expect(reopened.get<number>(prefillKey)).toBe(125.5);
+  });
+
+  it('round-trips routingRules arrays with invalid object entries and invalid top-level objects unchanged', async () => {
+    const key = 'agentOrchestration.routingRules';
+    const mixedRules = [
+      {
+        id: 'valid-rule',
+        match: { kind: 'implement' },
+        set: { minTier: 'sonnet', prefer: ['codex'] },
+      },
+      {
+        id: 42,
+        match: { unknownField: { nested: true } },
+        set: { effort: 'extreme' },
+      },
+    ];
+
+    const writer = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+    await writer.set(key, mixedRules);
+
+    const reader = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+    expect(reader.get(key)).toEqual(mixedRules);
+    expect(reader.get(`${key}.0`)).toBeUndefined();
+    expect(reader.get(`${key}.0.id`)).toBeUndefined();
+
+    // Malformed top-level plain object in settings.json stays whole so the
+    // router can diagnose it instead of silently reading the [] default.
+    const invalidObject = {
+      id: 'not-an-array',
+      match: { kind: 'review' },
+      set: { effort: 'high' },
+    };
+    writeSettingsFile(
+      JSON.stringify({
+        $schema: 'https://ptah.live/schemas/settings.json',
+        version: 1,
+        agentOrchestration: { routingRules: invalidObject },
+      }),
+    );
+    const invalidReader = new PtahFileSettingsManager(
+      FILE_BASED_SETTINGS_DEFAULTS,
+    );
+    expect(invalidReader.get(key)).toEqual(invalidObject);
+    expect(invalidReader.get(`${key}.id`)).toBeUndefined();
+    expect(invalidReader.get(`${key}.set.effort`)).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -817,6 +903,43 @@ describe('PtahFileSettingsManager', () => {
 
       expect(receivedX).toContain('xval');
       expect(receivedY).toContain('yval');
+    });
+
+    it('increments routing generation on cross-process watch updates to routingRules and prefill rate', async () => {
+      const rulesKey = 'agentOrchestration.routingRules';
+      const prefillKey =
+        'agentOrchestration.decisionModelPrefillTokensPerSecond';
+
+      const instanceA = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      activeInstances.push(instanceA);
+      instanceA.enableCrossProcessWatch();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      const receivedRules: unknown[] = [];
+      const receivedPrefill: unknown[] = [];
+      instanceA.watch(rulesKey, (v) => receivedRules.push(v));
+      instanceA.watch(prefillKey, (v) => receivedPrefill.push(v));
+      expect(instanceA.getRoutingConfigurationGeneration()).toBe(0);
+
+      const instanceB = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      const rules = [
+        { id: 'r1', match: { kind: 'review' }, set: { maxTier: 'sonnet' } },
+      ];
+      await instanceB.set(rulesKey, rules);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(receivedRules).toEqual([rules]);
+      expect(instanceA.getRoutingConfigurationGeneration()).toBe(1);
+
+      await instanceB.set(prefillKey, 90);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(receivedPrefill).toEqual([90]);
+      expect(instanceA.getRoutingConfigurationGeneration()).toBe(2);
     });
   });
 

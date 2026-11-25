@@ -386,6 +386,30 @@ describe('CapabilityMatrixStore', () => {
     });
   });
 
+  it('exposes independent score layers for the resolved profile without changing the effective cell', async () => {
+    const { store, files } = harness({
+      reader: outcomeReader({ summaries: deliveredRuns(5) }).reader,
+    });
+    writeUser(files, [
+      profile('z-ai', 'glm-5', { implement: userCell(42, '2026-10-01') }),
+      profile('z-ai', FAMILY_PROFILE_MODEL, { implement: userCell(70) }),
+    ]);
+    const snapshot = await load(store, [{ laneId: 'codex', subagent: false }]);
+    const exact = snapshot.resolve('z-ai', 'glm-5', 'implement');
+    expect(exact.layers).toEqual({
+      user: expect.objectContaining({ source: 'user', score: 42 }),
+      local: expect.objectContaining({ source: 'local', score: 87, sampleCount: 5 }),
+      seed: expect.objectContaining({ source: 'seed', score: 80 }),
+    });
+    expect(exact.cell).toEqual(exact.layers?.user);
+    expect(snapshot.resolve('z-ai', 'missing', 'implement')).toMatchObject({
+      profileModel: FAMILY_PROFILE_MODEL,
+      layers: { user: expect.objectContaining({ score: 70 }) },
+    });
+    expect(snapshot.resolve('z-ai', 'missing', 'implement').layers?.seed).toBeUndefined();
+    expect(snapshot.resolve('z-ai', 'glm-5', 'plan').layers).toEqual({});
+  });
+
   it('replaces the seed with blended local cells (Req 6.6, Req 8)', async () => {
     const four = harness({
       reader: outcomeReader({ summaries: deliveredRuns(4) }).reader,

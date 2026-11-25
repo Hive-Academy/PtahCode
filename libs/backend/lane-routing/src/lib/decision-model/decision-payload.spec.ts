@@ -1,10 +1,11 @@
 import {
   buildDecisionPayload,
-  formatDecisionOptionLabel,
   REQUEST_TEXT_MAX_CHARS,
   type DecisionPayloadInput,
 } from './decision-payload';
 import { SystemOneRequestBodySchema } from './system-one.schema';
+import { SystemOneClient } from './system-one.client';
+import { runLaneRequest, type LaneQuestion } from '../pipeline/model-refine';
 
 const codex = {
   laneId: 'codex',
@@ -28,6 +29,7 @@ const input: DecisionPayloadInput = {
     {
       kind: 'lane-choice',
       phaseId: 'implement',
+      taskKind: 'implement',
       instructions:
         'Which executor should implement? Choose only from these options.',
       options: [codex, glm],
@@ -38,90 +40,150 @@ const input: DecisionPayloadInput = {
   ],
 };
 
+// Reconstructed from the FEATURE/Full incident in the task context.
+const incidentOptions = [
+  { laneId: 'kimi', family: 'moonshot', model: 'kimi-for-coding', limitState: 'confirmed-room', score: 75 },
+  { laneId: 'codex', family: 'openai', model: 'gpt-5', limitState: 'unknown', score: 72 },
+  { laneId: 'ollama-code', family: 'ollama', model: 'qwen3-coder', limitState: 'unknown', score: 69 },
+  { laneId: 'antigravity', family: 'google', model: 'gemini-3-pro', limitState: 'unknown', score: 67 },
+] as const;
+
+const incidentPhases: readonly LaneQuestion[] = ([
+  ['impl-backend', 'implement'],
+  ['impl-frontend', 'implement'],
+  ['code-review', 'review'],
+  ['tests', 'tests'],
+] as const).map(([phaseId, taskKind]) => {
+  const options = phaseId === 'code-review' ? incidentOptions.slice(1) : incidentOptions;
+  return {
+    phaseId, taskKind, primaryCount: options.length, options,
+    instructions: 'Choose the executor for this phase. Each score already includes past outcomes; pastOutcomes lists the delivered and failed run counts behind it. No entry means no verified runs were available for that executor in the outcome window.',
+  };
+});
+
 describe('decision payload', () => {
-  it('emits the pinned key set and nothing else (NFR Security)', () => {
+  it('emits the allowlisted fields and short option labels in ranked order', () => {
     const payload = buildDecisionPayload(input);
-
-    expect(Object.keys(payload).sort()).toEqual(['questions', 'state']);
-    expect(Object.keys(payload.state).sort()).toEqual([
-      'availableExecutors',
-      'pastOutcomes',
-      'request',
-    ]);
-    expect(
-      Object.keys(payload.state.availableExecutors['codex']).sort(),
-    ).toEqual(['family', 'limitState', 'model', 'score']);
-    expect(
-      Object.keys(payload.state.pastOutcomes['codex/implement']).sort(),
-    ).toEqual(['delivered', 'failed']);
-    expect(Object.keys(payload.questions['implement']).sort()).toEqual([
-      'criteria',
-      'instructions',
-      'type',
-    ]);
+    expect(payload).toEqual({
+      state: {
+        request: input.request,
+        legend: expect.any(String),
+        availableExecutors: {
+          e1: ['codex', 'openai', 'gpt-5'],
+          e2: ['glm', 'zhipu', 'glm-5.3'],
+        },
+        pastOutcomes: { 'codex/implement': [92, 13] },
+      },
+      questions: {
+        implement: {
+          type: 'choice',
+          instructions: input.questions[0].instructions,
+          criteria: { o1: 'e1 80 unknown 13', o2: 'e2 75 unknown 0' },
+        },
+      },
+    });
   });
 
-  it('labels lane options o1..oN in the given order and pins the label text', () => {
-    const payload = buildDecisionPayload(input);
-
-    expect(Object.keys(payload.questions['implement'].criteria)).toEqual([
-      'o1',
-      'o2',
-    ]);
-    expect(payload.questions['implement'].type).toBe('choice');
-    expect(payload.questions['implement'].instructions).toBe(
-      'Which executor should implement? Choose only from these options.',
-    );
-    expect(payload.questions['implement'].criteria['o1']).toBe(
-      'lane codex, family openai, model gpt-5, limit state unknown, score 80',
-    );
-    expect(payload.questions['implement'].criteria['o2']).toBe(
-      formatDecisionOptionLabel(glm),
-    );
+  it('retains figures and totals samples for offered lanes when taskKind is omitted', () => {
+    const payload = buildDecisionPayload({
+      ...input,
+      questions: [{
+        kind: 'lane-choice', phaseId: 'legacy', instructions: 'Choose a lane',
+        options: [codex, glm],
+      }],
+      outcomeFigures: [
+        ...input.outcomeFigures,
+        { laneId: 'codex', taskKind: 'review', delivered: 2, failed: 3 },
+        { laneId: 'codex-other', taskKind: 'review', delivered: 4, failed: 0 },
+      ],
+    });
+    expect(payload.state.pastOutcomes).toEqual({
+      'codex/implement': [92, 13],
+      'codex/review': [40, 5],
+    });
+    expect(payload.questions['legacy'].criteria).toEqual({
+      o1: 'e1 80 unknown 18', o2: 'e2 75 unknown 0',
+    });
   });
 
-  it('adds a roster entry on first appearance and keeps the criteria authoritative', () => {
+  it('reuses a roster entry across phases and indexes an alternate model separately', () => {
     const payload = buildDecisionPayload({
       ...input,
       questions: [
-        {
-          kind: 'lane-choice',
-          phaseId: 'implement',
-          instructions: 'Implement?',
-          options: [codex],
-        },
+        ...input.questions,
         {
           kind: 'lane-choice',
           phaseId: 'docs',
+          taskKind: 'docs',
           instructions: 'Document?',
-          options: [{ ...codex, score: 65 }],
+          options: [{ ...codex, score: 65 }, { ...codex, model: 'gpt-5-mini' }],
         },
       ],
     });
-
-    expect(payload.state.availableExecutors['codex'].score).toBe(80);
-    expect(payload.questions['docs'].criteria['o1']).toBe(
-      'lane codex, family openai, model gpt-5, limit state unknown, score 65',
-    );
+    expect(payload.state.availableExecutors).toMatchObject({
+      e1: ['codex', 'openai', 'gpt-5'],
+      e3: ['codex', 'openai', 'gpt-5-mini'],
+    });
+    expect(payload.questions['docs'].criteria).toEqual({
+      o1: 'e1 65 unknown 0', o2: 'e3 80 unknown 0',
+    });
   });
 
-  it('keys outcome figures by lane id and task kind', () => {
-    const payload = buildDecisionPayload(input);
-
-    expect(payload.state.pastOutcomes['codex/implement']).toEqual({
-      delivered: 12,
-      failed: 1,
+  it('cuts estimated input tokens for the four-phase incident by at least 50% and validates answers', async () => {
+    // Captured with the unchanged builder and serializer before the B13 edits.
+    const baselineBytes = 3057;
+    const model = 'nimble';
+    const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    const posted: string[] = [];
+    const client = new SystemOneClient({ baseUrl: 'https://example.test', model }, {
+      fetch: async (_url, init) => {
+        const body = String(init?.body);
+        posted.push(body);
+        expect(SystemOneRequestBodySchema.parse(JSON.parse(body)).state).toMatchObject({
+          taskType: 'FEATURE', depth: 'Full',
+        });
+        return new Response(JSON.stringify({
+          model,
+          answers: {
+            'impl-backend': { type: 'choice', choice: 'o1', confidence: 0.9 },
+            'impl-frontend': { type: 'choice', choice: 'o2', confidence: 0.9 },
+          },
+        }));
+      },
     });
-    expect(Object.keys(payload.state.pastOutcomes)).toEqual([
-      'codex/implement',
-    ]);
-    expect(Object.keys(payload.state.pastOutcomes['codex/implement']).sort()).toEqual([
-      'delivered',
-      'failed',
-    ]);
-    expect(JSON.stringify(payload.state.pastOutcomes)).toBe(
-      '{"codex/implement":{"delivered":12,"failed":1}}',
-    );
+    const outcome = await runLaneRequest({
+      provider: 'ollama',
+      request: 'Investigate and fix the issue, review the change, and run regression tests.',
+      taskType: 'FEATURE',
+      depth: 'Full',
+      phases: incidentPhases,
+      outcomes: (laneId, taskKind) => laneId === 'codex' && taskKind === 'implement'
+        ? { laneId, taskKind, delivered: 15, failed: 3 }
+        : null,
+      maxRequestBytes: 100_000,
+      dispatch: { kind: 'system-one', caller: client, model },
+      logger,
+    });
+
+    expect(posted).toHaveLength(1);
+    const inputTokens = Buffer.byteLength(posted[0]) / 4;
+    expect(inputTokens).toBeLessThanOrEqual(baselineBytes / 8);
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens, inputTokensSource: 'bytes/4' });
+    expect(outcome.answers.get('impl-backend')).toMatchObject({ choice: 'o1', cause: null });
+    expect(outcome.answers.get('impl-frontend')).toMatchObject({ choice: 'o2', cause: null });
+  });
+
+  it('still accepts the historical request state with raw counts', () => {
+    expect(SystemOneRequestBodySchema.safeParse({
+      model: 'nimble',
+      state: {
+        request: 'Build it',
+        availableExecutors: { codex: { family: 'openai', model: 'gpt-5', limitState: 'unknown', score: 80 } },
+        pastOutcomes: { 'codex/implement': { delivered: 12, failed: 1 } },
+      },
+      questions: {},
+    }).success).toBe(true);
   });
 
   it('passes fixed criteria through unchanged (pre-flight task type and depth)', () => {

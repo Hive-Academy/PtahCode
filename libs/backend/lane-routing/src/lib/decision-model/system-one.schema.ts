@@ -52,13 +52,35 @@ export const SystemOneOutcomeCountsSchema = z
   .strict();
 
 /** The shared state every question of one request sees. */
-export const SystemOneStateSchema = z
+const HistoricalSystemOneStateSchema = z
   .object({
     request: z.string(),
     availableExecutors: z.record(z.string(), SystemOneOptionFactsSchema),
     pastOutcomes: z.record(z.string(), SystemOneOutcomeCountsSchema),
   })
   .strict();
+
+const CompactSystemOneStateSchema = z
+  .object({
+    request: z.string(),
+    taskType: z.string().optional(),
+    depth: z.string().optional(),
+    legend: z.string(),
+    availableExecutors: z.record(
+      z.string(),
+      z.tuple([z.string(), z.string(), z.string()]),
+    ),
+    pastOutcomes: z.record(z.string(), z.tuple([z.number(), z.number()])),
+  })
+  .strict();
+
+/** Compact routing state and the historical fixture format. */
+export const SystemOneStateSchema = z.union([
+  CompactSystemOneStateSchema,
+  HistoricalSystemOneStateSchema,
+]);
+
+export type CompactSystemOneState = z.infer<typeof CompactSystemOneStateSchema>;
 
 /** Request body of `POST /v1/systemone`. Ptah builds every field it sends. */
 export const SystemOneRequestBodySchema = z

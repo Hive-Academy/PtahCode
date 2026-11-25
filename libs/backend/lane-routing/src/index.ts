@@ -8,7 +8,12 @@
  * matrix diagnostics and the failure classifier stay inside the library.
  */
 export { LANE_ROUTING_TOKENS, type LaneRoutingDIToken } from './lib/di/tokens';
-export { DECISION_REQUEST_TIMEOUT_MS } from './lib/routing-constants';
+export {
+  DECISION_QUESTIONS_PER_CALL,
+  DECISION_REQUEST_TIMEOUT_MS,
+  ROUTE_DEADLINE_MS,
+  ROUTE_RETURN_RESERVE_MS,
+} from './lib/routing-constants';
 export { skillRankingText } from './lib/decision-model/skill-ranking-caller.types';
 export { SkillRankingCallerService } from './lib/decision-model/skill-ranking-caller.service';
 export type {
@@ -89,7 +94,14 @@ export {
   PreflightResultSchema,
   PROVENANCE,
   RouteDecideResultSchema,
+  type CandidateTrace,
   type ChosenEntry,
+  type LimitEvidence,
+  type ModelListStatus,
+  type PreferenceSource,
+  type PrunedCause,
+  type ScoreParts,
+  type UserRuleExclusion,
   type GateResult,
   type PreflightResult,
   type RouteDecideResult,

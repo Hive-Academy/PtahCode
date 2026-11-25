@@ -7,8 +7,10 @@
  * the caller to re-check; this module never persists a mark.
  */
 import { SUBAGENT_LANE_ID, type OutcomeTaskKind } from '@ptah-extension/shared';
+import type { PrunedCause } from '../contracts/route-decide-result.schema';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import {
+  DECISION_QUESTIONS_PER_CALL,
   MIN_OPTIONS_PER_PHASE,
   OPTIONS_PER_PHASE_CAP,
   PROVIDER_OPTION_LIMIT,
@@ -42,13 +44,14 @@ import {
   callStructured,
   callSystemOne,
   emptyOutcome,
+  type SystemOneAdmission,
 } from './model-call';
 
 const encoder = new TextEncoder();
 
 /** What the pipeline needs from a System One client. Tests stub this. */
 export interface SystemOneCaller {
-  decide(payload: DecisionPayload): Promise<SystemOneCallResult>;
+  decide(payload: DecisionPayload, timeoutCapMs?: number): Promise<SystemOneCallResult>;
 }
 
 export interface LaneQuestion {
@@ -72,11 +75,17 @@ export interface ModelRequestOutcome {
   readonly succeeded: boolean;
   /** Shared cause when the request was not sent or the whole response failed. */
   readonly requestCause: FallbackCause | null;
+  readonly requestReason?: string;
+  readonly questionCap?: ReadonlySet<string>;
   /** Set only for a live HTTP 404/405. The pipeline re-checks; it does not mark. */
   readonly notFoundDetail: string | null;
   readonly answers: ReadonlyMap<string, ChoiceValidation>;
   /** Options actually offered, in label order. Empty when the request was not sent. */
   readonly offered: ReadonlyMap<string, readonly DecisionOption[]>;
+  /** Options that fit at full option-cap width before payload shrinking, keyed by phase id. */
+  readonly optionCapOffered?: ReadonlyMap<string, readonly DecisionOption[]>;
+  /** Per-phase, per-executor prune cause for primary lanes dropped by option-cap or payload-fit. */
+  readonly prunedLanes?: ReadonlyMap<string, ReadonlyMap<string, PrunedCause>>;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly outcomeFigures: number;
@@ -86,6 +95,7 @@ export type ModelDispatch =
   | {
       readonly kind: 'system-one';
       readonly caller: SystemOneCaller;
+      readonly admission?: SystemOneAdmission;
       readonly model: string;
       /**
        * Ollama `keep_alive` this caller will send. The fit measures the same
@@ -154,25 +164,45 @@ export function openSystemOne(
 export async function runLaneRequest(input: {
   readonly provider: DecisionOptionProvider;
   readonly request: string;
+  readonly taskType?: string;
+  readonly depth?: string;
   readonly phases: readonly LaneQuestion[];
   readonly outcomes: OutcomeFigureLookup;
   readonly maxRequestBytes: number;
   readonly dispatch: ModelDispatch;
   readonly logger: LaneRoutingLogger;
 }): Promise<ModelRequestOutcome> {
-  const fitted = fitLane(input);
+  const sendable = input.dispatch.kind === 'system-one'
+    ? input.phases.filter((phase) => phase.options.length >= MIN_OPTIONS_PER_PHASE)
+    : input.phases;
+  const phases = input.dispatch.kind === 'system-one'
+    ? sendable.slice(0, DECISION_QUESTIONS_PER_CALL)
+    : sendable;
+  const questionCap = new Set(sendable.slice(phases.length).map((phase) => phase.phaseId));
+  const fitted = fitLane({ ...input, phases });
   if (fitted === null) {
-    return emptyOutcome('payload-too-large');
+    return { ...emptyOutcome('payload-too-large'), questionCap };
   }
-  const asked = askedFromLane(input.phases, fitted.offered);
+  const asked = askedFromLane(phases, fitted.offered);
   if (input.dispatch.kind === 'system-one') {
     const outcome = await callSystemOne(
       input.dispatch.caller,
       fitted.payload,
       fitted.offered,
       asked,
+      {
+        promptTokens: fitted.bytes / 4,
+        logger: input.logger,
+        admission: input.dispatch.admission,
+      },
     );
-    return { ...outcome, outcomeFigures: fitted.figureCount };
+    return {
+      ...outcome,
+      questionCap,
+      optionCapOffered: fitted.optionCapOffered,
+      prunedLanes: fitted.prunedLanes,
+      outcomeFigures: outcome.sent ? fitted.figureCount : 0,
+    };
   }
   const outcome = await callStructured(
     input.dispatch,
@@ -182,7 +212,12 @@ export async function runLaneRequest(input: {
     asked,
     input.logger,
   );
-  return { ...outcome, outcomeFigures: fitted.figureCount };
+  return {
+    ...outcome,
+    optionCapOffered: fitted.optionCapOffered,
+    prunedLanes: fitted.prunedLanes,
+    outcomeFigures: fitted.figureCount,
+  };
 }
 
 export async function runFixedRequest(input: {
@@ -192,9 +227,14 @@ export async function runFixedRequest(input: {
   readonly dispatch: ModelDispatch;
   readonly logger: LaneRoutingLogger;
 }): Promise<ModelRequestOutcome> {
+  // AM6 caps lane questions only: they fall back to ranking. Fixed-criteria
+  // questions (pre-flight, task kind, scope, skills) have no ranking fallback,
+  // so a cap would drop their answers. They are small, so send them all.
+  const questions = input.questions;
+  const questionCap = new Set<string>();
   const payload = buildDecisionPayload({
     request: input.request,
-    questions: input.questions.map((question) => ({
+    questions: questions.map((question) => ({
       kind: 'fixed-criteria',
       phaseId: question.key,
       instructions: question.instructions,
@@ -203,20 +243,25 @@ export async function runFixedRequest(input: {
     // Pre-flight, task-kind and scope questions choose no lane.
     outcomeFigures: [],
   });
-  const prompt = renderPrompt(input.request, input.questions);
-  const schema = fixedSchema(input.questions);
+  const prompt = renderPrompt(input.request, questions);
+  const schema = fixedSchema(questions);
   const model = input.dispatch.model;
   const bytes =
     input.dispatch.kind === 'system-one'
       ? bodyBytes(model, payload, input.dispatch.keepAlive)
       : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
   if (bytes > input.maxRequestBytes) {
-    return emptyOutcome('payload-too-large');
+    return { ...emptyOutcome('payload-too-large'), questionCap };
   }
   const offered = new Map<string, readonly DecisionOption[]>();
-  const asked = askedFromFixed(input.questions);
+  const asked = askedFromFixed(questions);
   if (input.dispatch.kind === 'system-one') {
-    return callSystemOne(input.dispatch.caller, payload, offered, asked);
+    const outcome = await callSystemOne(input.dispatch.caller, payload, offered, asked, {
+      promptTokens: bytes / 4,
+      logger: input.logger,
+      admission: input.dispatch.admission,
+    });
+    return { ...outcome, questionCap };
   }
   return callStructured(
     input.dispatch,
@@ -247,16 +292,21 @@ export function criterionLabels(
 }
 
 interface FittedLane {
+  readonly bytes: number;
   readonly payload: DecisionPayload;
   readonly prompt: string;
   readonly schema: Record<string, unknown>;
   readonly offered: ReadonlyMap<string, readonly DecisionOption[]>;
+  readonly optionCapOffered: ReadonlyMap<string, readonly DecisionOption[]>;
+  readonly prunedLanes: ReadonlyMap<string, ReadonlyMap<string, PrunedCause>>;
   readonly figureCount: number;
 }
 
 function fitLane(input: {
   readonly provider: DecisionOptionProvider;
   readonly request: string;
+  readonly taskType?: string;
+  readonly depth?: string;
   readonly phases: readonly LaneQuestion[];
   readonly outcomes: OutcomeFigureLookup;
   readonly maxRequestBytes: number;
@@ -266,35 +316,87 @@ function fitLane(input: {
     OPTIONS_PER_PHASE_CAP,
     PROVIDER_OPTION_LIMIT[input.provider],
   );
+  const optionCapOffered = sliceOptions(input.phases, cap, false);
   for (let width = cap; width >= MIN_OPTIONS_PER_PHASE; width -= 1) {
     for (const primariesOnly of fitPasses(input.phases, width)) {
-    const offered = sliceOptions(input.phases, width, primariesOnly);
-    const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
-    if (sent.length === 0) continue;
-    const figures = offeredFigures(sent, offered, input.outcomes);
-    const payload = buildDecisionPayload({
-      request: input.request,
-      questions: sent.map((phase) => ({
-        kind: 'lane-choice' as const,
-        phaseId: phase.phaseId,
-        instructions: phase.instructions,
-        options: offered.get(phase.phaseId) ?? [],
-      })),
-      outcomeFigures: figures,
-    });
-    const questions = laneQuestions(sent, offered);
-    const prompt = renderLanePrompt(input.request, questions, figures);
-    const schema = choiceSchema(questions);
-    const bytes =
-      input.dispatch.kind === 'system-one'
-        ? bodyBytes(input.dispatch.model, payload, input.dispatch.keepAlive)
-        : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
-    if (bytes <= input.maxRequestBytes) {
-      return { payload, prompt, schema, offered, figureCount: figures.length };
-    }
+      const offered = sliceOptions(input.phases, width, primariesOnly);
+      const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
+      if (sent.length === 0) continue;
+      const figures = offeredFigures(sent, offered, input.outcomes);
+      const payload = buildDecisionPayload({
+        request: input.request,
+        taskType: input.taskType,
+        depth: input.depth,
+        questions: sent.map((phase) => ({
+          kind: 'lane-choice' as const,
+          phaseId: phase.phaseId,
+          taskKind: phase.taskKind,
+          instructions: `Choose the executor for ${phase.taskKind}.`,
+          options: offered.get(phase.phaseId) ?? [],
+        })),
+        outcomeFigures: figures,
+      });
+      const questions = laneQuestions(sent, offered);
+      const prompt = renderLanePrompt(input.request, questions, figures);
+      const schema = choiceSchema(questions);
+      const bytes =
+        input.dispatch.kind === 'system-one'
+          ? bodyBytes(input.dispatch.model, payload, input.dispatch.keepAlive)
+          : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
+      if (bytes <= input.maxRequestBytes) {
+        return {
+          bytes,
+          payload,
+          prompt,
+          schema,
+          offered,
+          optionCapOffered,
+          prunedLanes: computePrunedLanes(
+            input.phases,
+            optionCapOffered,
+            offered,
+          ),
+          figureCount: figures.length,
+        };
+      }
     }
   }
   return null;
+}
+
+/**
+ * Classify primary lanes dropped by the model-request fit.
+ * Dropping only an alternate model never prunes its lane because the primary
+ * option remains in `finalOffered`.
+ */
+function computePrunedLanes(
+  phases: readonly LaneQuestion[],
+  optionCapOffered: ReadonlyMap<string, readonly DecisionOption[]>,
+  finalOffered: ReadonlyMap<string, readonly DecisionOption[]>,
+): ReadonlyMap<string, ReadonlyMap<string, PrunedCause>> {
+  const byPhase = new Map<string, ReadonlyMap<string, PrunedCause>>();
+  for (const phase of phases) {
+    const kept = finalOffered.get(phase.phaseId);
+    if (kept === undefined) continue;
+    const keptLaneIds = new Set(kept.map((option) => option.laneId));
+    const capLaneIds = new Set(
+      (optionCapOffered.get(phase.phaseId) ?? []).map(
+        (option) => option.laneId,
+      ),
+    );
+    const pruned = new Map<string, PrunedCause>();
+    for (const option of phase.options.slice(0, phase.primaryCount)) {
+      if (keptLaneIds.has(option.laneId) || pruned.has(option.laneId)) {
+        continue;
+      }
+      pruned.set(
+        option.laneId,
+        capLaneIds.has(option.laneId) ? 'payload-fit' : 'option-cap',
+      );
+    }
+    byPhase.set(phase.phaseId, pruned);
+  }
+  return byPhase;
 }
 
 /**
@@ -341,8 +443,12 @@ function sliceOptions(
 ): Map<string, readonly DecisionOption[]> {
   const offered = new Map<string, readonly DecisionOption[]>();
   for (const phase of phases) {
-    const options = phase.options.slice(0, primariesOnly ? Math.min(width, phase.primaryCount) : width);
-    if (options.length >= MIN_OPTIONS_PER_PHASE) offered.set(phase.phaseId, options);
+    const options = phase.options.slice(
+      0,
+      primariesOnly ? Math.min(width, phase.primaryCount) : width,
+    );
+    if (options.length >= MIN_OPTIONS_PER_PHASE)
+      offered.set(phase.phaseId, options);
   }
   return offered;
 }

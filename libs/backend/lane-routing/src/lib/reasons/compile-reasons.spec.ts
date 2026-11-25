@@ -12,11 +12,14 @@ import {
   MISSING_INPUT_REASON,
   MISSING_INPUTS,
   NO_CONFIDENCE_REPORTED,
+  compileChosenExplanation,
   compileChosenReason,
   compileGateReasons,
   compilePreflightReasons,
   compileResultReasons,
+  compileUnavailableExplanation,
   compileUnavailableReason,
+  formatLimitAge,
   type ChosenExecutor,
   type ChosenReasonInput,
   type UnavailableReasonInput,
@@ -1033,5 +1036,302 @@ describe('requirement 13.4', () => {
     ).toThrow(
       'disclosed fallback is set only for exclusion reason reviewer-family',
     );
+  });
+});
+
+describe('B08 one-sentence explanations and per-lane reason deduplication', () => {
+  it('formats limit age cleanly and renders age unknown when timestamp is absent', () => {
+    expect(formatLimitAge(null, 10_000)).toBe('age unknown');
+    expect(formatLimitAge(undefined, 10_000)).toBe('age unknown');
+    expect(formatLimitAge(9_500, 10_000)).toBe('age 500ms');
+    expect(formatLimitAge(10_000 - 45_000, 10_000)).toBe('age 45s');
+    expect(formatLimitAge(10_000 - 180_000, 10_000)).toBe('age 3m');
+    expect(formatLimitAge(10_000 - 7_200_000, 10_000)).toBe('age 2h');
+  });
+
+  it('renders a chosen one-sentence explanation with parts, signed gap, deciding factor, preference diagnostics, policy rule note, and limit age', () => {
+    const explanation = compileChosenExplanation({
+      candidateId: 'kimi-cli',
+      displayName: 'Kimi Code',
+      model: 'kimi-k2',
+      total: 87,
+      parts: {
+        prior: 70,
+        priorSource: 'seed',
+        learned: 5,
+        exploration: 5,
+        sampleCount: 0,
+        preference: 12,
+        limit: 0,
+      },
+      strongestAlternative: {
+        id: 'codex',
+        displayName: 'codex',
+        total: 85,
+        parts: {
+          prior: 80,
+          priorSource: 'seed',
+          learned: 5,
+          exploration: 5,
+          sampleCount: 0,
+          preference: 0,
+          limit: 0,
+        },
+      },
+      decidingFactor: 'rule ui-review',
+      preferenceSource: 'rule',
+      overriddenPreferenceSources: ['call', 'configured'],
+      preferenceMatches: [
+        {
+          entry: 'Kimi Code',
+          rank: 1,
+          ids: ['kimi-cli'],
+          via: 'displayName',
+          status: 'matched',
+        },
+      ],
+      policyCondition: 'R3 shape=logic weight>=8000',
+      tier: 'sonnet',
+      effort: 'xhigh',
+      matchedRuleId: 'ui-review',
+      policyRuleNote: 'rule ui-review capped tier opus->sonnet',
+      limitState: 'confirmed-room',
+      limitEvidence: {
+        state: 'confirmed-room',
+        lookup: 'ok',
+        status: 'available',
+        readAt: 1_000_000 - 30_000,
+      },
+      nowMs: 1_000_000,
+    });
+
+    expect(explanation).not.toContain('\n');
+    expect(explanation.endsWith('.')).toBe(true);
+    expect(explanation).toContain(
+      'Selected Kimi Code (kimi-cli) (model kimi-k2) with total 87 [prior 70 (seed), learned +5 (exploration +5, n=0), preference +12, limit +0]',
+    );
+    expect(explanation).toContain('over runner-up codex at total 85');
+    expect(explanation).toContain('(gap +2)');
+    expect(explanation).toContain('decided by rule ui-review');
+    expect(explanation).toContain('preferences from rule (overridden: call, configured, Kimi Code->kimi-cli via displayName (#1))');
+    expect(explanation).toContain(
+      'policy R3 shape=logic weight>=8000, sonnet/xhigh after rule ui-review capped tier opus->sonnet',
+    );
+    expect(explanation).toContain('limit confirmed-room (age 30s)');
+  });
+
+  it('renders an unavailable one-sentence explanation naming the blocking constraint', () => {
+    const explanation = compileUnavailableExplanation({
+      phaseId: 'review',
+      exclusionReason: 'reviewer-family',
+      pinRule: null,
+      needsDisclosedFallback: true,
+      excludedBy: [{ candidate: 'codex', rule: 'reviewer-family' }],
+      policyCondition: 'R2 kind=review weight omitted',
+      tier: 'opus',
+      effort: 'high',
+    });
+    expect(explanation).toBe(
+      'Phase review is unavailable due to blocking constraint reviewer-family (disclosed fallback required, excluded: codex by reviewer-family), policy R2 kind=review weight omitted, opus/high.',
+    );
+  });
+
+  it('removes generic models unknown when per-lane model status is supplied and deduplicates extraReasons', () => {
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: ['limits', 'model-lists'],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [
+        'models unknown for codex (timeout)',
+        'models unknown for codex (timeout)',
+        'routing rule bad: ignored',
+        'routing rule bad: ignored',
+      ],
+    });
+    expect(gate.reasons).toEqual([
+      'limits unavailable',
+      'models unknown for codex (timeout)',
+      'routing rule bad: ignored',
+    ]);
+  });
+
+  it.each([10, 100])('fits exactly 4000 characters when omitted diagnostics grow to %i', (omitted) => {
+    const marker = `and ${omitted} more diagnostic entries omitted`;
+    const prefix = [
+      ...Array.from({ length: 16 }, (_, index) => String(index).padEnd(240, 'x')),
+      'last'.padEnd(4000 - marker.length - 16 * 240, 'x'),
+    ];
+    const tail = ['xx', ...Array.from({ length: omitted - 1 }, (_, index) =>
+      `tail ${index}`.padEnd(240, 'x'),
+    )];
+    const result = compileGateReasons({
+      chosen: [], unavailable: [], excluded: [], missingInputs: [], inputRowIds: [],
+      extraReasons: [...prefix, ...tail],
+    });
+
+    expect(result.reasons).toEqual([...prefix, marker]);
+    expect(result.reasons.join('')).toHaveLength(4000);
+  });
+
+  it('uses the full diagnostic budget when every entry fits without an omission marker', () => {
+    const extraReasons = [
+      ...Array.from({ length: 16 }, (_, index) => String(index).padEnd(240, 'x')),
+      'last'.padEnd(159, 'x'),
+      'x',
+    ];
+    const result = compileGateReasons({
+      chosen: [], unavailable: [], excluded: [], missingInputs: [], inputRowIds: [],
+      extraReasons,
+    });
+
+    expect(result.reasons).toEqual(extraReasons);
+    expect(result.reasons.join('')).toHaveLength(4000);
+  });
+
+  it('bounds selector snippets, ambiguous samples, preference diagnostics, and aggregate extraReasons characters', () => {
+    const longSelector = 'unknown-selector-'.repeat(12);
+    const explanation = compileChosenExplanation({
+      candidateId: 'codex',
+      displayName: 'codex',
+      model: 'gpt-5',
+      total: 85,
+      decidingFactor: 'call preference',
+      preferenceSource: 'call',
+      preferenceMatches: [
+        { entry: longSelector, rank: 1, ids: [], status: 'unknown' },
+        { entry: longSelector, rank: 2, ids: [], status: 'unknown' },
+        {
+          entry: 'shared-family',
+          rank: 3,
+          ids: ['a', 'b', 'c', 'd', 'e', 'f'],
+          via: 'family',
+          status: 'ambiguous',
+        },
+        ...Array.from({ length: 10 }, (_, idx) => ({
+          entry: `missing-${idx}`,
+          rank: idx + 4,
+          ids: [],
+          status: 'unknown' as const,
+        })),
+      ],
+      policyCondition: 'R5 shape=unset weight omitted',
+      tier: 'sonnet',
+      effort: 'medium',
+      limitState: 'confirmed-room',
+    });
+    expect(explanation).toContain('decided by call preference');
+    expect(explanation).toContain(`${longSelector.slice(0, 45)}...: unknown`);
+    expect(explanation).not.toContain(longSelector);
+    expect(explanation).toContain('shared-family: ambiguous (a/b/c and 3 more)');
+    expect(explanation).toContain('and 4 more');
+
+    const manyExtras = Array.from(
+      { length: 200 },
+      (_, idx) => `routing rule r-${idx}: exclude selector "${'z'.repeat(180)}" matched no candidate`,
+    );
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: ['model-lists'],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: ['models unknown for codex (timeout)', ...manyExtras],
+    });
+    expect(gate.reasons).toContain('models unknown for codex (timeout)');
+    expect(gate.reasons).not.toContain('models unknown');
+    const last = gate.reasons[gate.reasons.length - 1];
+    expect(last).toMatch(/^and \d+ more diagnostic entries omitted$/);
+    const aggregateChars = gate.reasons.reduce((sum, line) => sum + line.length, 0);
+    expect(aggregateChars).toBeLessThanOrEqual(4000);
+  });
+
+  it('reports pin or rotation on preference loss regardless of negative deficit', () => {
+    const base = {
+      candidateId: 'grok',
+      displayName: 'grok',
+      model: 'grok-4',
+      total: 90,
+      preferenceSource: 'call' as const,
+      preferenceLoss: {
+        candidateDisplayName: 'codex',
+        candidateTotal: 77,
+        boost: 12,
+      },
+      policyCondition: 'R5 shape=unset weight omitted',
+      tier: 'sonnet' as const,
+      effort: 'medium' as const,
+      limitState: 'confirmed-room' as const,
+    };
+
+    const pinExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'pin',
+    });
+    expect(pinExplanation).toContain('boost +12 on codex total 77 lost under pin');
+    expect(pinExplanation).not.toContain('lost to total 90');
+
+    const rotExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'rotation',
+    });
+    expect(rotExplanation).toContain('boost +12 on codex total 77 lost under rotation');
+    expect(rotExplanation).not.toContain('lost to total 90');
+
+    const scoreExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'score',
+    });
+    expect(scoreExplanation).toContain('boost +12 on codex total 77 lost to total 90 (gap -13)');
+  });
+
+  it('deduplicates by original identity across phases and counts display collisions from truncated selectors in the omission marker', () => {
+    const sharedPrefix = 'a'.repeat(45);
+    const distinct32 = Array.from(
+      { length: 32 },
+      (_, idx) =>
+        `routing rule same-prefix: exclude selector "${sharedPrefix}-suffix-${idx}" matched no candidate`,
+    );
+    // Simulate two phases matching the same rule (32 distinct identities repeated twice).
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: [],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [...distinct32, ...distinct32],
+    });
+
+    expect(gate.reasons).toEqual([
+      `routing rule same-prefix: exclude selector "${sharedPrefix}..." matched no candidate`,
+      'and 31 more diagnostic entries omitted',
+    ]);
+
+    // Also verify mixed display collisions + character cap keep total chars <= 4000 and exact total count.
+    const manyRules = Array.from({ length: 60 }, (_, idx) => ({
+      identity: `id-rule-${idx}`,
+      display: `routing rule cap-${idx}: exclude selector "${'b'.repeat(60)}" matched no candidate`,
+    }));
+    const collidingExplicit = Array.from({ length: 5 }, (_, idx) => ({
+      identity: `explicit-collision-${idx}`,
+      display: 'routing rule shared-explicit: repeated bounded display',
+    }));
+    const combined = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: [],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [...collidingExplicit, ...manyRules],
+    });
+    const omittedLine = combined.reasons[combined.reasons.length - 1];
+    const match = /^and (\d+) more diagnostic entries omitted$/.exec(omittedLine);
+    expect(match).not.toBeNull();
+    const emittedCount = combined.reasons.length - 1;
+    const omittedCount = Number(match?.[1]);
+    expect(emittedCount + omittedCount).toBe(65);
+    const totalChars = combined.reasons.reduce((sum, line) => sum + line.length, 0);
+    expect(totalChars).toBeLessThanOrEqual(4000);
   });
 });
