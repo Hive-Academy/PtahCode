@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2321_rvusg
-status: in_progress
+status: in_review
 type: FEATURE
 title: Review run usage and cost, plus #1492 lane record and blocked-model gaps
 depends_on: []
