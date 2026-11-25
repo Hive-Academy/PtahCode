@@ -125,6 +125,7 @@ describe('InternalQueryService', () => {
     it('forwards every InternalQueryConfig field with mode set to "oneShot"', async () => {
       const h = makeRunnerHarness();
       const abortController = new AbortController();
+      const onProviderSubmit = jest.fn();
       const outputFormat = {
         type: 'json_schema',
         schema: { type: 'object', properties: {} },
@@ -140,6 +141,7 @@ describe('InternalQueryService', () => {
         maxTurns: 12,
         outputFormat,
         abortController,
+        onProviderSubmit,
       };
 
       await h.service.execute(config);
@@ -156,7 +158,9 @@ describe('InternalQueryService', () => {
         maxTurns: 12,
         outputFormat,
         abortController,
+        onProviderSubmit,
       });
+      expect(onProviderSubmit).not.toHaveBeenCalled();
     });
 
     it('forwards toolAccess so a deny-all caller reaches the runner', async () => {
@@ -393,6 +397,27 @@ describe('InternalQueryService — concurrency gate (TASK_2026_323 B6)', () => {
     expect(h.started()).toBe(0);
   });
 
+  it('releases a slot granted to an aborted waiter without invoking runOneShot', async () => {
+    const h = makeGatedHarness();
+    const first = await h.service.execute(makeConfig());
+    const abortController = new AbortController();
+    const onProviderSubmit = jest.fn();
+    const queued = h.service.execute(
+      makeConfig({ abortController, onProviderSubmit }),
+    );
+
+    // Grant the slot, then abort before execute resumes from its await.
+    first.close();
+    abortController.abort();
+
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(h.started()).toBe(1);
+    expect(onProviderSubmit).not.toHaveBeenCalled();
+    const next = await h.service.execute(makeConfig({ queueTimeoutMs: 20 }));
+    expect(h.started()).toBe(2);
+    next.close();
+  });
+
   /**
    * TASK_2026_328 — the gate has a wait ceiling. A one-shot query queued
    * behind a long-running one cannot block indefinitely: once
@@ -405,13 +430,17 @@ describe('InternalQueryService — concurrency gate (TASK_2026_323 B6)', () => {
     const h = makeGatedHarness();
 
     const first = await h.service.execute(makeConfig());
-    const queued = h.service.execute(makeConfig({ queueTimeoutMs: 20 }));
+    const onProviderSubmit = jest.fn();
+    const queued = h.service.execute(
+      makeConfig({ queueTimeoutMs: 20, onProviderSubmit }),
+    );
 
     await settle();
     expect(h.started()).toBe(1);
 
     await expect(queued).rejects.toThrow(InternalQueryQueueTimeoutError);
     await expect(queued).rejects.toMatchObject({ queueTimeoutMs: 20 });
+    expect(onProviderSubmit).not.toHaveBeenCalled();
 
     // Releasing the first slot must NOT hand it to the departed waiter: a third
     // caller takes it instead, which is the observable form of "left the queue,

@@ -12,6 +12,7 @@ import {
   type AuthEnv,
   type EffectiveCapabilitySet,
   type ICapabilityResolver,
+  type ModelPair,
 } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -24,7 +25,10 @@ import type {
   ModelDispatchRoute,
 } from '../curator-llm-adapter/model-dispatch-provenance';
 import { getActiveProviderId } from './sdk-query-options-builder';
-import { SdkQueryRunner } from './sdk-query-runner.service';
+import {
+  SdkQueryRunner,
+  type OneShotRunInput,
+} from './sdk-query-runner.service';
 import type { OffThreadProcessSpawner } from './off-thread-process-spawner';
 import { SdkError } from '../errors';
 import { PTAH_CORE_SYSTEM_PROMPT } from '../prompt-harness';
@@ -1287,6 +1291,108 @@ describe('SdkQueryRunner', () => {
   });
 });
 
+describe('SdkQueryRunner — one-shot provider submission', () => {
+  const input: OneShotRunInput = {
+    mode: 'oneShot',
+    cwd: '/work',
+    model: 'haiku',
+    prompt: 'judge',
+    mcpServerRunning: false,
+    auth: {
+      env: {
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:4141',
+        ANTHROPIC_AUTH_TOKEN: OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'openai/gpt-5-mini',
+      },
+    },
+  };
+
+  it('reports the effective resolved model immediately before queryFn', async () => {
+    const h = makeRunner({
+      resolveModelId: (model, env) =>
+        env?.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? model,
+    });
+    const onProviderSubmit = jest.fn(() => {
+      expect(h.queryFn).not.toHaveBeenCalled();
+    });
+
+    const handle = await h.runner.runOneShot({ ...input, onProviderSubmit });
+
+    expect(onProviderSubmit).toHaveBeenCalledTimes(1);
+    expect(onProviderSubmit).toHaveBeenCalledWith({
+      provider: 'openrouter',
+      model: 'openai/gpt-5-mini',
+    });
+    expect(h.queryFn).toHaveBeenCalledTimes(1);
+    expect(h.queryFn).toHaveBeenCalledWith({
+      prompt: input.prompt,
+      options: expect.objectContaining({ model: 'openai/gpt-5-mini' }),
+    });
+    handle.close();
+  });
+
+  it('submits a concrete model unchanged and keeps the pair after a caller timeout', async () => {
+    const h = makeRunner();
+    const model = 'openai/gpt-5-mini';
+    const abortController = new AbortController();
+    const trace: { pairAttempted?: ModelPair } = {};
+    const handle = await h.runner.runOneShot({
+      ...input,
+      model,
+      abortController,
+      onProviderSubmit: (submitted) => {
+        trace.pairAttempted = submitted;
+      },
+    });
+    await new Promise<void>((resolve) => {
+      setTimeout(() => {
+        abortController.abort();
+        resolve();
+      }, 0);
+    });
+
+    expect(h.queryFn).toHaveBeenCalledWith({
+      prompt: input.prompt,
+      options: expect.objectContaining({ model }),
+    });
+    expect(trace.pairAttempted).toEqual({ provider: 'openrouter', model });
+    handle.close();
+  });
+
+  it('does not mark submission if buildOneShotOptions fails', async () => {
+    const failure = new Error('Model options could not be resolved');
+    const h = makeRunner({
+      resolveModelId: () => {
+        throw failure;
+      },
+    });
+    const onProviderSubmit = jest.fn();
+
+    await expect(
+      h.runner.runOneShot({ ...input, onProviderSubmit }),
+    ).rejects.toBe(failure);
+    expect(onProviderSubmit).not.toHaveBeenCalled();
+    expect(h.queryFn).not.toHaveBeenCalled();
+  });
+
+  it('suppresses queryFn and onProviderSubmit when aborted before launch', async () => {
+    const abortController = new AbortController();
+    const h = makeRunner({
+      resolveModelId: (model) => {
+        abortController.abort();
+        return model;
+      },
+    });
+    const onProviderSubmit = jest.fn();
+
+    await expect(
+      h.runner.runOneShot({ ...input, abortController, onProviderSubmit }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(onProviderSubmit).not.toHaveBeenCalled();
+    expect(h.queryFn).not.toHaveBeenCalled();
+  });
+});
+
 describe('SdkQueryRunner — concrete dispatch provenance', () => {
   const order: string[] = [];
   const tap: ModelDispatchProvenanceTap & { onModelDispatched: jest.Mock } = {
@@ -1425,6 +1531,7 @@ describe('SdkQueryRunner — concrete dispatch provenance', () => {
       });
     }, authEnv);
 
+    const onProviderSubmit = jest.fn();
     expect(providerOf(authEnv)).toBe('openai-codex');
     await expect(
       h.runner.runOneShot({
@@ -1434,6 +1541,7 @@ describe('SdkQueryRunner — concrete dispatch provenance', () => {
         prompt: 'curate',
         mcpServerRunning: false,
         dispatch: ride('memory-curator', 'memory-curator'),
+        onProviderSubmit,
       }),
     ).rejects.toMatchObject({
       name: 'AuthRequiredError',
@@ -1442,6 +1550,7 @@ describe('SdkQueryRunner — concrete dispatch provenance', () => {
     });
     await Promise.resolve();
     expect(h.queryFn).not.toHaveBeenCalled();
+    expect(onProviderSubmit).not.toHaveBeenCalled();
     expect(seen).toEqual([]);
   });
 

@@ -14,6 +14,7 @@
  * @module @ptah-extension/agent-sdk
  */
 
+import type { ModelPair } from '@ptah-extension/shared';
 import type {
   SDKMessage,
   OutputFormat,
@@ -99,6 +100,9 @@ export interface InternalQueryConfig {
    * Omitted by callers that are not recorded.
    */
   dispatch?: ModelDispatchRoute;
+
+  /** Called synchronously at SDK submission with the effective provider and model. */
+  onProviderSubmit?: (submitted: ModelPair) => void;
 
   /**
    * Which tools the model may call. Omitted means `'claude-code'`: the Claude
