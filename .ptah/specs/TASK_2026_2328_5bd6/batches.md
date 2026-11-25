@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B15 COMPLETE. B16 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B15, B17 COMPLETE. B16 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -432,7 +432,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B16 - WU3b-a APM capture + WU13b Claude composer + WU18 OpenCode native model
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 78795f48, one lane for A+B+C)
 - **Shape / weight**: logic / lane A (WU3b-a) est. 11,900; lane B (WU13b) est. 7,200; lane C (WU18) est. 8,100. **Actual tokens**: pending
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/`):
@@ -453,8 +453,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B17 - WU7 pair scoring + WU6b figures test
 
-- **Status**: PENDING
-- **Shape / weight**: logic / lane A (WU7) est. 12,400; lane B (WU6b) est. 4,300. **Actual tokens**: pending
+- **Status**: COMPLETE (lane A codex b10957b0, lane B antigravity 43e5a42e; decisions 30, 31)
+- **Shape / weight**: logic / lane A (WU7) est. 12,400; lane B (WU6b) est. 4,300. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: A: `W/libs/backend/lane-routing/src/lib/ranking/score.ts` (whole); `W/libs/backend/lane-routing/src/lib/ranking/score.spec.ts:1-80`; `W/libs/backend/lane-routing/src/lib/contracts/route-decide-result.schema.ts` (whole); `.../matrix/choice-evidence.ts` (exports, after B15); PLAN:462-509, PLAN:912-980, PLAN:1006-1033. B: `.../matrix/outcome-figures.ts`, `.../matrix/outcome-figures.spec.ts` (whole); PLAN:1035-1039
 - **Write set**: A: `.../ranking/score.ts`; `.../ranking/choice.types.ts` (new); `.../ranking/score-choice.spec.ts` (new); `.../contracts/route-decide-result.schema.ts`. B: `.../matrix/outcome-figures.spec.ts` (all under `W/libs/backend/lane-routing/src/lib/`)
@@ -531,6 +531,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Write set**: `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.ts`; `W/libs/backend/lane-routing/src/lib/matrix/capability-matrix.store.spec.ts`
 - **Contract excerpt**: `load({ nowMs, outcomeQueries, choice?: boolean })`; with `choice: true` the snapshot also carries `evidence: ChoiceEvidence` from the same `summaries`; new pair resolve reads `user`/`seed` from (m,e) then (m,*); today's `resolve(family, model, taskKind)` and the view ignore effort profiles; without `choice` the snapshot equals today's.
 - **Added by decision 28 (FA7.2)**: at `capability-matrix.store.ts:353` pass `{ byModelEffort: <performanceRouting on> }` to `outcomeFiguresFrom`; off mode passes `false` and its decision payload bytes stay unchanged. Spec pins both modes. Read `.../matrix/outcome-figures.ts` (after B15).
+- **Added by decision 31 (PLAN 4.1)**: write-set addition `.../matrix/choice-evidence.ts`, `.../matrix/local-derivation.ts`: the seed prior for a choice key looks up (model, effort) first, then (model, `*`). The family/model prior for today's cells is unchanged and `local-derivation.spec.ts` stays unedited. Also use the optional `ScoreMatrix.resolvePair(family, model, taskKind, effort)` from B17.
 - **Depends on**: B19 (project serialization), B15, B3
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, balanced tier. **Fallback**: Task subagent `backend-developer`
