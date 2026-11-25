@@ -80,7 +80,7 @@ interface Mocks {
     getCurrentWorkspaceInfo: jest.Mock;
   };
   internalQueryService: { execute: jest.Mock };
-  workspaceLlm: { resolveForPath: jest.Mock };
+  workspaceLlm: { resolveForPath: jest.Mock; resolveSetup: jest.Mock };
   analysisStorage: {
     writeEnhancedPromptTrace: jest.Mock;
     resolveAuthorizedAnalysisDir: jest.Mock;
@@ -132,6 +132,14 @@ function createMocks(): Mocks {
       execute: jest.fn(),
     },
     workspaceLlm: {
+      resolveSetup: jest.fn().mockResolvedValue({
+        kind: 'set',
+        snapshot: {
+          providerId: 'anthropic',
+          model: 'setup-model',
+          auth: { env: { ANTHROPIC_API_KEY: 'setup-key' } },
+        },
+      }),
       resolveForPath: jest.fn(
         async (_root: string, opts?: { requestedModel?: string }) => ({
           providerId: 'anthropic',
@@ -608,10 +616,7 @@ describe('EnhancedPromptsService', () => {
         error: 'Generation already in progress',
       });
       const controller = new AbortController();
-      const route = await service.resolveGuidanceRoute(
-        testWorkspacePath,
-        'requested',
-      );
+      const route = await service.resolveGuidanceRoute(testWorkspacePath);
       const result = await service.runWizard(
         testWorkspacePath,
         undefined,
@@ -633,11 +638,40 @@ describe('EnhancedPromptsService', () => {
       service.releaseBoundGeneration(reservation!);
       expect(service.generationInProgress).toBe(false);
       expect(mocks.freshness.getStatus).not.toHaveBeenCalled();
-      expect(mocks.workspaceLlm.resolveForPath).toHaveBeenCalledWith(
+      expect(mocks.workspaceLlm.resolveSetup).toHaveBeenCalledWith(
         testWorkspacePath,
-        { requestedModel: 'requested' },
+      );
+      expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mocks.internalQueryService.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: 'setup-model',
+          auth: { env: { ANTHROPIC_API_KEY: 'setup-key' } },
+        }),
       );
     });
+
+    it.each([
+      ['invalid', 'model-stale'],
+      ['unavailable', 'provider-unavailable'],
+    ])(
+      'rejects %s Setup routes without a workspace fallback',
+      async (kind, cause) => {
+        mocks.workspaceLlm.resolveSetup.mockResolvedValue({
+          kind,
+          cause,
+          source: 'setup',
+          provider: 'anthropic',
+          model: 'setup-model',
+        });
+        await expect(
+          service.resolveGuidanceRoute(testWorkspacePath),
+        ).rejects.toThrow(
+          `Setup model for guidance could not be resolved (${cause})`,
+        );
+        expect(mocks.workspaceLlm.resolveForPath).not.toHaveBeenCalled();
+        expect(mocks.internalQueryService.execute).not.toHaveBeenCalled();
+      },
+    );
 
     it('stops before trace and state commit when cancelled during preparation', async () => {
       primeSuccessfulSdk();

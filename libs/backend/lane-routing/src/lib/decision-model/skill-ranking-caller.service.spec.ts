@@ -307,14 +307,10 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
     },
   );
 
-  it('rejects a case-insensitive ID collision and blank or missing project evidence', async () => {
+  it('rejects a case-insensitive ID collision', async () => {
     const { service, complete } = setup();
     complete.mockResolvedValue({
-      items: [
-        { ...install, candidateId: 'a' },
-        { ...install, itemId: 'i2' },
-        { ...install, itemId: 'i3' },
-      ],
+      items: [{ ...install, candidateId: 'a' }],
     });
     const result = await service.rankSkillCandidates([
       {
@@ -324,8 +320,6 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
           { label: ' A ', name: 'Other package' },
         ],
       },
-      { ...item, key: 'blank', evidence: 'https://private.invalid' },
-      { ...item, key: 'missing', evidence: undefined },
     ]);
     expect(result).toMatchObject({
       ...failed,
@@ -333,11 +327,51 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       pairAttempted: attempted,
       itemRejections: {
         angular: expect.stringMatching(/ambiguous/i),
-        blank: expect.stringMatching(/evidence/i),
-        missing: expect.stringMatching(/evidence/i),
       },
     });
     expect(result).not.toHaveProperty('pairUsed');
+  });
+
+  it('omits items with no usable project evidence from a mixed request', async () => {
+    const { service, complete } = setup();
+    complete.mockResolvedValue({
+      items: [
+        { ...install, itemId: 'i1' },
+        { ...install, itemId: 'i2' },
+        { ...install, itemId: 'i3' },
+      ],
+    });
+    const result = await service.rankSkillCandidates([
+      { ...item, key: 'blank', evidence: 'https://private.invalid' },
+      item,
+      { ...item, key: 'missing', evidence: undefined },
+    ]);
+    const { prompt } = complete.mock.calls[0][0];
+    expect(prompt).toContain('"itemId":"i2"');
+    expect(prompt).not.toMatch(/"itemId":"i[13]"/);
+    expect(result).toMatchObject({
+      status: 'used',
+      itemRejections: {},
+    });
+    expect(Object.keys(result.items)).toEqual(['angular']);
+  });
+
+  it('skips dispatch when every item lacks project evidence', async () => {
+    const { service, openCaller, dispatchFor, complete } = setup();
+    expect(
+      await service.rankSkillCandidates([
+        { ...item, evidence: '' },
+        { ...item, key: 'missing', evidence: undefined },
+      ]),
+    ).toEqual({
+      status: 'skipped',
+      category: 'no-work',
+      items: {},
+      itemRejections: {},
+    });
+    expect(openCaller).not.toHaveBeenCalled();
+    expect(dispatchFor).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
   });
 
   it('leaves none, low-confidence, and omitted items unresolved', async () => {
@@ -413,11 +447,12 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       caller: { decide },
     });
     expect(await service.rankSkillCandidates([item])).toEqual({
-      ...failed,
-      category: 'invalid-output',
+      status: 'used',
       pairConfigured: { provider: 'ollama', model: configured.model },
       pairAttempted: { provider: 'ollama', model: attempted.model },
-      itemRejections: { angular: expect.stringMatching(/reason/i) },
+      pairUsed: { provider: 'ollama', model: attempted.model },
+      items: {},
+      itemRejections: {},
     });
     expect(decide).toHaveBeenCalledTimes(1);
   });

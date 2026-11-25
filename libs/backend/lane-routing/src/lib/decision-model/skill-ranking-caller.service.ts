@@ -201,28 +201,11 @@ export class SkillRankingCallerService {
         return fail(providerCategory(outcome.requestCause));
       }
 
+      // System One choices carry no reasons, so all items go to Normal.
       const answers =
         dispatch.kind === 'structured'
           ? readStructuredItems(structuredAnswer)
-          : // System One's choice protocol cannot carry a reason. Let reasonless
-            // picks fall through to Normal and keep explicit none/low confidence unresolved.
-            prepared.flatMap(({ itemId, eligible }) => {
-              const answer = outcome.answers.get(itemId);
-              if (answer?.choice == null || answer.cause === 'low-confidence')
-                return [];
-              if (answer.choice === 'none')
-                return [{ itemId, verdict: 'none' }];
-              const candidate = eligible.find(
-                (_, index) => answer.choice === `c${index + 1}`,
-              );
-              return [
-                {
-                  itemId,
-                  verdict: 'install',
-                  candidateId: candidate?.candidateId,
-                },
-              ];
-            });
+          : [];
       if (answers === undefined) return fail('invalid-output');
       const validated = validateItems(prepared, answers);
       if (
@@ -289,10 +272,9 @@ function prepareItem(item: SkillRankingCallerItem, index: number) {
   return {
     item,
     itemId,
-    evidence,
     candidates,
     eligible:
-      registry === 'matched'
+      registry === 'matched' && evidence
         ? candidates.filter((candidate) => !candidate.deprecated)
         : [],
     instructions: JSON.stringify({
@@ -373,7 +355,7 @@ function validateItem(
   const selected = candidates[0];
   if (selected.deprecated) return 'Decision candidate is deprecated';
   const explanation = readReason(reason);
-  if (!input.evidence || explanation === undefined) {
+  if (explanation === undefined) {
     return 'Decision Install requires project evidence and a concise reason';
   }
   return {

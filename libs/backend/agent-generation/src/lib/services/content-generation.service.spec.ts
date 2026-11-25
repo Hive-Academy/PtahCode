@@ -99,6 +99,9 @@ function makeStream(structuredOutput: unknown): AsyncIterable<never> {
   } as AsyncIterable<never>;
 }
 
+const MISSING_SETUP_WARNING =
+  'Content generation is using the workspace model resolver without a Setup snapshot';
+
 const mockContext: AgentProjectContext = {
   projectType: 'Node' as never,
   frameworks: ['Express' as never],
@@ -514,8 +517,7 @@ Fallback content A
        * An empty section is what the prompt ASKS for when the evidence cannot
        * carry one — the model abstaining rather than padding to a length. The
        * authored fallback is exactly what would have shipped anyway, so this
-       * must not read as a failure: no warning to the caller, no warn-level
-       * log, and nothing in the wizard's generation summary.
+       * must not read as a failure in the logs or the generation summary.
        */
       it('treats an empty section as an honest abstention, not a rejection', async () => {
         SdkStreamProcessorMock.mockImplementation(
@@ -541,7 +543,7 @@ Default content
         expect(result.isOk()).toBe(true);
         expect(result.value!.content).toContain('Default content');
         expect(result.value!.warnings).toEqual([]);
-        expect(mockLogger.warn).not.toHaveBeenCalled();
+        expect(mockLogger.warn.mock.calls).toEqual([[MISSING_SETUP_WARNING]]);
         expect(mockLogger.debug).toHaveBeenCalledWith(
           expect.stringContaining('shipping the authored fallback'),
           expect.objectContaining({ templateName: expect.any(String) }),
@@ -1069,7 +1071,7 @@ Default
       );
     });
 
-    it('runs on the provider and model of the snapshot for the generation root', async () => {
+    it('warns and uses the workspace model when no Setup snapshot is supplied', async () => {
       const template = {
         ...baseTemplate,
         content: `<!-- LLM:SECTION_A -->
@@ -1079,6 +1081,7 @@ Default
 
       await service.generateContent(template, mockContext);
 
+      expect(mockLogger.warn).toHaveBeenCalledWith(MISSING_SETUP_WARNING);
       expect(mockWorkspaceLlm.resolveForPath).toHaveBeenCalledWith(
         mockContext.rootPath,
         { requestedModel: undefined },
@@ -1149,6 +1152,7 @@ Default authored fallback
       });
 
       expect(mockWorkspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mockLogger.warn).not.toHaveBeenCalledWith(MISSING_SETUP_WARNING);
       expect(mockInternalQueryService.execute).toHaveBeenCalledTimes(1);
       const callArgs = mockInternalQueryService.execute.mock.calls[0][0];
       expect(callArgs.model).toBe(setupSnapshot.model);

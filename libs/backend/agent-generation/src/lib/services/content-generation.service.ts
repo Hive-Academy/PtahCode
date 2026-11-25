@@ -385,8 +385,14 @@ export class ContentGenerationService implements IContentGenerationService {
       // exact model and isolated auth directly — never re-resolve via
       // workspaceLlm, never honour sdkConfig.model, and never fall back to
       // process-wide auth. Non-setup callers keep resolveForPath.
+      const setupSnapshot = sdkConfig?.setupSnapshot;
+      if (!setupSnapshot) {
+        this.logger.warn(
+          'Content generation is using the workspace model resolver without a Setup snapshot',
+        );
+      }
       const { model, auth } =
-        sdkConfig?.setupSnapshot ??
+        setupSnapshot ??
         (await this.workspaceLlm.resolveForPath(context.rootPath, {
           requestedModel: sdkConfig?.model,
         }));

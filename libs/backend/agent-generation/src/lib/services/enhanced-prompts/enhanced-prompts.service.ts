@@ -35,6 +35,7 @@ import {
 import type {
   InternalQueryService,
   IWorkspaceLlmResolver,
+  ResolvedSetupSnapshot,
   WorkspaceLlmSnapshot,
   SDKMessage,
   StreamEventEmitter,
@@ -395,9 +396,14 @@ export class EnhancedPromptsService {
 
   async resolveGuidanceRoute(
     workspacePath: string,
-    requestedModel?: string,
-  ): Promise<WorkspaceLlmSnapshot> {
-    return this.workspaceLlm.resolveForPath(workspacePath, { requestedModel });
+  ): Promise<ResolvedSetupSnapshot> {
+    const resolution = await this.workspaceLlm.resolveSetup(workspacePath);
+    if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+      throw new Error(
+        `Setup model for guidance could not be resolved (${resolution.cause})`,
+      );
+    }
+    return resolution.snapshot;
   }
 
   async resolveGuidanceSource(workspacePath: string, analysisDir?: string) {
