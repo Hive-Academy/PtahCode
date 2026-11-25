@@ -58,7 +58,7 @@ const outcomes = (laneId: string, taskKind: LaneQuestion['taskKind']) => ({
 });
 
 describe('runLaneRequest outcome figures', () => {
-  it('drops alternates across phases before pruning primary lanes and omits unsendable phases', async () => {
+  it('drops alternates across phases before pruning primary lanes', async () => {
     const primary = [
       { ...phases[0], phaseId: 'first', primaryCount: 2, options: [lanes[0], lanes[1]] },
       { ...phases[0], phaseId: 'second' },
@@ -69,9 +69,7 @@ describe('runLaneRequest outcome figures', () => {
     const cap = requestBytes('nimble', baseline.payloads[0]);
     const withAlternates: LaneQuestion[] = [
       { ...primary[0], options: [...primary[0].options, { ...lanes[0], model: 'alternate' }] },
-      primary[1],
-      { ...phases[0], phaseId: 'third', primaryCount: 1,
-        options: [lanes[0], { ...lanes[0], model: 'alternate' }] },
+      { ...primary[1], options: [...primary[1].options, { ...lanes[0], model: 'alternate' }] },
     ];
     const captured = capture();
     const result = await runLaneRequest({ provider: 'ollama', request: 'ship',
@@ -81,9 +79,28 @@ describe('runLaneRequest outcome figures', () => {
     expect(Object.keys(captured.payloads[0].questions)).toEqual(['first', 'second']);
     expect(result.offered.get('first')).toEqual(primary[0].options);
     expect(result.offered.get('second')).toEqual(primary[1].options);
-    expect(result.offered.has('third')).toBe(false);
     expect(Object.keys(captured.payloads[0].questions['first'].criteria)).toEqual(['o1', 'o2']);
   });
+  it('omits an alternates-only phase during fitting inside the question cap', async () => {
+    const first = { ...phases[0], phaseId: 'first' };
+    const baseline = capture();
+    await runLaneRequest({ provider: 'ollama', request: 'ship', phases: [first],
+      outcomes: () => null, maxRequestBytes: 100_000, dispatch: baseline.dispatch, logger });
+
+    const captured = capture();
+    const result = await runLaneRequest({ provider: 'ollama', request: 'ship',
+      phases: [first, { ...first, phaseId: 'second', primaryCount: 1,
+        options: [lanes[0], { ...lanes[0], model: 'alternate' }] }],
+      outcomes: () => null, maxRequestBytes: requestBytes('nimble', baseline.payloads[0]),
+      dispatch: captured.dispatch, logger });
+
+    expect(result.sent).toBe(true);
+    expect(result.questionCap).toEqual(new Set());
+    expect(result.offered.get('first')).toEqual(first.options);
+    expect(result.offered.has('second')).toBe(false);
+    expect(Object.keys(captured.payloads[0].questions)).toEqual(['first']);
+  });
+
   it('keeps the third question capped even when the model pass fails', async () => {
     const captured = capture();
     const result = await runLaneRequest({

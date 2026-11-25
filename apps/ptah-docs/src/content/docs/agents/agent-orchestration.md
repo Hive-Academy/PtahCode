@@ -73,7 +73,7 @@ The `ptah_route_decide` tool assigns each phase to an executor. It scores every 
 The router adds score parts into one total:
 
 ```
-total = prior + learned + preference + limit
+total = prior + learned + preference + limit + (override if present, else 0)
 ```
 
 | Part          | Meaning                             | Value                                                                  |
@@ -84,7 +84,7 @@ total = prior + learned + preference + limit
 | `preference`  | Boost from a matched `prefer` entry | `+12`, `+8`, `+4`, `+2` for rank 1, 2, 3, 4+                           |
 | `limit`       | Lane limit state                    | `confirmed-room` `0`, `unknown` `-5`, `near-limit` `-10`               |
 
-A lane at its limit is excluded before scoring. Matrix cells hold integers from 0 to 100. The additive total is not clamped. A listed model is used only when its own cell beats the family cell by more than 5 points. Otherwise the lane uses its configured model, or `lane-default`. For the built-in `visual-review` and `design` policy, a subagent candidate takes an `override` part that lifts its total to 100.
+A lane at its limit is excluded before scoring. Matrix cells hold integers from 0 to 100. The additive total is not clamped. On a non-system-CLI lane, a listed model can be promoted when it has its own profile and its total beats the family baseline by more than 5 points. Otherwise the lane uses its configured model or `lane-default`. System CLI lanes use their configured model or `lane-default` for ranking. They can offer reported model IDs within the closeness band as alternatives for the decision model. For the built-in `visual-review` and `design` policy, a subagent candidate gets an `override` that lifts its total to 100 when the phase has neither a pin nor a matching routing rule.
 
 ### Preferences
 
@@ -94,7 +94,7 @@ Preference sources have an order. A routing rule wins over the call. The call wi
 
 ### Explanations and candidate traces
 
-Each chosen row explains the choice in one sentence. The sentence names the executor, the model, the total with its score parts, the runner-up with the gap, the deciding factor, the preferences, the policy, and the limit state. The `reason` field ends with the policy clause. Example of one chosen row:
+Each chosen row explains the choice in one sentence. The sentence names the executor, the model, the total with its score parts, the runner-up with the gap, the deciding factor, the preferences, the policy, and the limit state. The `reason` field ends with the policy clause. The following example shows one chosen row.
 
 ```json
 {
@@ -102,7 +102,7 @@ Each chosen row explains the choice in one sentence. The sentence names the exec
   "status": "chosen",
   "executor": { "kind": "lane", "id": "codex", "cli": "codex", "family": "codex" },
   "model": "lane-default",
-  "tier": "sonnet",
+  "tier": "opus",
   "effort": "high",
   "provenance": "lane-default",
   "score": 50,
@@ -111,15 +111,16 @@ Each chosen row explains the choice in one sentence. The sentence names the exec
   "confidence": null,
   "fallbackCause": null,
   "modelProposal": null,
-  "reason": "phase review; executor lane codex; model lane-default; score 50; no profile; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability not applicable; fallback cause none; policy R2; tier sonnet, effort high, shape review, weight unset",
-  "explanation": "Selected codex (model lane-default) with total 45 [prior 50 (neutral), learned +0, preference +0, limit -5] with no eligible alternative, decided by ranking, no preferences active, policy R2, sonnet/high, limit unknown (age unknown).",
+  "reason": "phase review; executor lane codex; model lane-default; score 50; no profile; limit state unknown; rotation did not change the choice; preference did not change the choice; model probability not applicable; fallback cause none; only eligible candidate; policy R2; tier opus, effort high, shape review, weight unset",
+  "explanation": "Selected codex (model lane-default) with total 50 [prior 50 (neutral), learned +5 (exploration +5, n=0), preference +0, limit -5] with no eligible alternative, decided by score, no preferences active, policy R2 kind=review weight omitted, opus/high, limit unknown (age unknown).",
   "candidates": [
     {
       "candidate": "codex",
       "displayName": "codex",
-      "total": 45,
-      "parts": { "prior": 50, "learned": 0, "preference": 0, "limit": -5, "priorSource": "neutral" },
-      "disposition": "chosen"
+      "total": 50,
+      "parts": { "prior": 50, "learned": 5, "preference": 0, "limit": -5, "priorSource": "neutral", "exploration": 5, "sampleCount": 0 },
+      "disposition": "chosen",
+      "modelListStatus": "ok"
     }
   ]
 }
@@ -153,24 +154,24 @@ Two more settings shape the decision model. `agentOrchestration.decisionModelPre
 
 ### Deadline and fallback causes
 
-Each call has a hard deadline, measured at tool entry. The `gate-0.1` stage has 8 seconds. The `pre-flight` stage has 4 seconds. The router reserves 250 ms to return the result. When time runs out, the deterministic ranking decides.
+The tool measures the deadline from entry. The `gate-0.1` stage has 8 seconds and `pre-flight` has 4 seconds. The router reserves 250 ms to return the result. Gate phases that run out of model time use deterministic ranking. If the deadline expires during compaction, the tool makes one final size check on the legacy roster shape.
 
-A System One decision-model call takes at most 2 questions. The router ranks the remaining phases and marks them `question-cap`. Before each call the router estimates the cost from the prompt size and the prefill rate, when a rate is known. A call that will not fit is skipped as `deadline`. Each target takes one request at a time. A second concurrent request returns `model-busy`. A local model that a residency probe shows as not loaded returns `model-cold`.
+A System One lane-choice request takes at most two questions. The router ranks the remaining phases and marks them `question-cap`. When a prefill rate is known, the router estimates the cost from the prompt size and the prefill rate. It skips the call with `deadline` when the estimate exceeds the smaller of the remaining route budget and the target timeout. Each target takes one router request at a time. An overlapping request returns `model-busy`. For a local daemon target, the router requires a positive residency probe. A model that is unloaded or of unknown residency, including after a failed probe, returns `model-cold`.
 
-| `fallbackCause`     | Meaning                                                       |
-| ------------------- | ------------------------------------------------------------- |
-| `timeout`           | The request exceeded its per-request timeout.                 |
-| `unreachable`       | The target could not be resolved or reached.                  |
-| `auth`              | The target needs an API key that is missing.                  |
-| `provider-error`    | The provider failed in another way.                           |
-| `bad-output`        | The answer failed validation.                                 |
-| `low-confidence`    | The reported confidence was below 0.5.                        |
-| `payload-too-large` | The request did not fit under the byte cap at two options.    |
-| `question-limit`    | The phase stayed outside the structured question budget.      |
-| `question-cap`      | The phase stayed outside the two-question budget of one call. |
-| `deadline`          | The route deadline ran out before or during the call.         |
-| `model-cold`        | A residency probe showed the local model is not loaded.       |
-| `model-busy`        | Another request was in flight for the same target.            |
+| `fallbackCause`     | Meaning                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `timeout`           | The request exceeded its per-request timeout.                                                                           |
+| `unreachable`       | The target could not be resolved or reached.                                                                            |
+| `auth`              | The target needs an API key that is missing.                                                                            |
+| `provider-error`    | The provider failed in another way.                                                                                     |
+| `bad-output`        | The answer failed validation.                                                                                           |
+| `low-confidence`    | The reported confidence was below 0.5.                                                                                  |
+| `payload-too-large` | The lane-choice request exceeded the byte cap even at two options, or the fixed-criteria request exceeded the same cap. |
+| `question-limit`    | The phase stayed outside the structured question budget.                                                                |
+| `question-cap`      | The phase stayed outside the two-question budget of one call.                                                           |
+| `deadline`          | The route ran out of time, or the estimated model cost exceeded the available request budget.                           |
+| `model-cold`        | A local daemon probe reported the model as unloaded or left residency unknown, including when the probe failed.         |
+| `model-busy`        | Another request was in flight for the same target.                                                                      |
 
 ### Capability matrix
 

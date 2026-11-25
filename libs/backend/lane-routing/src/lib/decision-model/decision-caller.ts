@@ -136,6 +136,7 @@ export class DecisionCaller {
         admission: {
           ...budget,
           remainingMs: () => validBudgetMs(budget.remainingMs()),
+          maxTimeoutMs: caller.target.timeoutMs,
           targetKey: keyOf(caller.selection, caller.target.baseUrl),
           rates: this.rates,
           configuredRate: this.configuredPrefillRate(),

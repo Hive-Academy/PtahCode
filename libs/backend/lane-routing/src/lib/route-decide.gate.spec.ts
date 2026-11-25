@@ -212,6 +212,7 @@ function harness(options: {
   readonly config?: DecisionModelConfig;
   readonly realSystemOne?: boolean;
   readonly seams?: RouteDecideSeams;
+  readonly readPrefillTokensPerSecond?: () => unknown;
   readonly reply?: (
     payload: DecisionPayload,
     index: number,
@@ -237,6 +238,7 @@ function harness(options: {
     tools,
   };
   const service = new RouteDecideService({
+    readPrefillTokensPerSecond: options.readPrefillTokensPerSecond,
     rotationSetting: { isEnabled: () => options.rotate ?? true },
     config: options.config ?? configFor(
       options.selection === undefined ? OLLAMA : options.selection,
@@ -302,6 +304,58 @@ describe('gate route budget', () => {
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
     expect(result.roster[0].fallbackCause).toBe(offset === 0 ? null : 'deadline');
     if (offset === 0) expect(run.seen[0]?.timeoutMs).toBe(DECISION_MODEL_TIMEOUT_MIN_MS);
+  });
+
+  it('skips an estimate above the target timeout and keeps cost off question-cap rows', async () => {
+    const run = harness({
+      readPrefillTokensPerSecond: () => 100,
+      seams: { monotonicNow: () => 100 },
+    });
+    const result = await run.service.decide({
+      ...implement(),
+      request: 'route '.repeat(300),
+      phases: [...implement().phases, { id: 'second', kind: 'implement' }, { id: 'third', kind: 'implement' }],
+    }, run.source);
+
+    expect(run.seen).toHaveLength(0);
+    if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+    expect(result.usage.requests).toBe(0);
+    for (const row of result.roster.slice(0, 2)) {
+      expect(row.fallbackCause).toBe('deadline');
+      expect(row.reason).toMatch(/estimated decision model cost \d+ ms exceeds 3000 ms remaining/);
+    }
+    expect(result.roster[2].fallbackCause).toBe('question-cap');
+    expect(result.roster[2].reason).not.toContain('estimated decision model cost');
+  });
+
+  it('returns model-busy for an overlapping gate and dispatches after the first aborts', async () => {
+    jest.useFakeTimers();
+    try {
+      const decide = jest.fn((payload: DecisionPayload) =>
+        Promise.resolve(answersFor(payload, () => ({ choice: 'o1', confidence: 0.9 }))));
+      decide.mockImplementationOnce(() => new Promise(() => undefined));
+      const run = harness({
+        readPrefillTokensPerSecond: () => 1000,
+        seams: { systemOne: () => ({ decide }) },
+      });
+      const pending = run.service.decide(implement(), run.source, {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1800,
+      });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(decide).toHaveBeenCalledTimes(1);
+
+      const overlapping = await run.service.decide(implement(), run.source);
+      expect(overlapping).toMatchObject({ roster: [{ source: 'ranking', fallbackCause: 'model-busy' }] });
+      expect(decide).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1800);
+      expect(await pending).toMatchObject({ roster: [{ fallbackCause: 'deadline' }] });
+
+      const recovered = await run.service.decide(implement(), run.source);
+      expect(recovered).toMatchObject({ roster: [{ source: 'model', fallbackCause: null }] });
+      expect(decide).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('skips the review pass when the first pass consumes its remaining budget', async () => {
@@ -372,6 +426,27 @@ describe('gate route budget', () => {
       });
       expect(result.roster[1].status).toBe('chosen');
       expect(result.roster[1].reason).not.toContain('route deadline reached');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('attributes reviewer-family unavailability to the timed-out rows read', async () => {
+    jest.useFakeTimers();
+    try {
+      const run = harness({ selection: { kind: 'unset' } });
+      const pending = run.service.decide({
+        ...implement(),
+        phases: [...implement().phases, { id: 'check', kind: 'review', reviews: ['build'] }],
+      }, { ...run.source, rows: () => new Promise(() => undefined) });
+      await jest.advanceTimersByTimeAsync(GATHER_BUDGET_MS);
+
+      expect(await pending).toMatchObject({ roster: [
+        { phaseId: 'build', status: 'chosen', executor: { id: 'subagent:implement' } },
+        { phaseId: 'check', status: 'unavailable', exclusionReason: 'reviewer-family',
+          reason: expect.stringMatching(/; route deadline reached$/),
+          explanation: expect.stringMatching(/; route deadline reached$/) },
+      ] });
     } finally {
       jest.useRealTimers();
     }
@@ -612,6 +687,35 @@ describe('gate route budget', () => {
     expect(result).toMatchObject({ roster: [{ source: 'model', fallbackCause: null }] });
   });
 
+  it('uses the DI prefill setting for a fixed-criteria request and discloses the cost', async () => {
+    const workspace = createMockWorkspaceProvider({
+      config: {
+        [SELECTION_KEY]: { kind: 'custom', baseUrl: 'https://example.test', model: 'nimble' },
+        'ptah.agentOrchestration.decisionModelPrefillTokensPerSecond': 1,
+      },
+    });
+    const child = container.createChildContainer();
+    child.registerInstance(PLATFORM_TOKENS.FILE_SYSTEM_PROVIDER, createMockFileSystemProvider());
+    child.registerInstance(PLATFORM_TOKENS.STATE_STORAGE, createMockStateStorage());
+    child.registerInstance(PLATFORM_TOKENS.SECRET_STORAGE, createMockSecretStorage());
+    child.registerInstance(PLATFORM_TOKENS.WORKSPACE_PROVIDER, workspace);
+    registerLaneRoutingServices(child, testLogger());
+    const service = child.resolve<RouteDecideService>(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE);
+    const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 500 }));
+    try {
+      const result = await service.decide({ stage: 'pre-flight', request: 'describe the change' }, candidateSource([]));
+      expect(fetch).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        taskType: { fallbackCause: 'deadline' },
+        depth: { fallbackCause: 'deadline' },
+        reasons: expect.arrayContaining([expect.stringContaining('estimated decision model cost')]),
+        usage: { requests: 0 },
+      });
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
   it('reads the DI routing rules once and applies them in both plans', async () => {
     const workspace = createMockWorkspaceProvider({
       config: {
@@ -775,6 +879,21 @@ describe('gate phase policy roster', () => {
     expect(result.roster[0].reason).toMatch(
       /; policy R5; tier sonnet, effort medium, shape unset, weight unset$/,
     );
+  });
+
+  it('produces the documented R2 review ranking and deciding factor', async () => {
+    const run = harness({ rows: [lane('codex')], rotate: false, selection: { kind: 'unset' } });
+    const result = await run.service.decide({
+      ...implement(),
+      phases: [{ id: 'review', kind: 'review', shape: 'review', role: 'unlisted-role' }],
+    }, run.source);
+    const docs = await readFile(resolve(
+      __dirname, '../../../../../apps/ptah-docs/src/content/docs/agents/agent-orchestration.md',
+    ), 'utf8');
+    const example = /### Explanations and candidate traces[\s\S]*?```json\r?\n([\s\S]*?)\r?\n```/.exec(docs)?.[1];
+    if (example === undefined) throw new Error('expected a documented chosen-row example');
+    if (result.stage !== 'gate-0.1') throw new Error('expected gate');
+    expect(result.roster).toEqual([JSON.parse(example)]);
   });
 
   it('applies weighted policy without changing executor eligibility or choice', async () => {

@@ -32,6 +32,7 @@ export interface SystemOneAdmission {
   readonly targetKey: string;
   readonly rates: PrefillRateStore;
   readonly configuredRate?: number;
+  readonly maxTimeoutMs: number;
   readonly remainingMs: () => number;
   readonly now: () => number;
   readonly signal: AbortSignal;
@@ -95,57 +96,73 @@ export async function callSystemOne(
   metrics?: SystemOneMetrics,
 ): Promise<ModelRequestOutcome> {
   const admission = metrics?.admission;
-  let timeoutCapMs: number | undefined;
-  if (admission !== undefined && metrics !== undefined) {
-    const remainingMs = admission.remainingMs();
-    timeoutCapMs = Math.floor(remainingMs);
-    if (admission.signal.aborted || timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) {
-      return emptyOutcome('deadline');
-    }
-    const { rates, targetKey } = admission;
-    if (!rates.tryStart(targetKey)) return emptyOutcome('model-busy');
-    const rate = admission.configuredRate ?? rates.rate(targetKey);
-    if (rate !== undefined) {
-      const costMs = metrics.promptTokens * 1000 / rate + DECISION_RETURN_MARGIN_MS;
-      if (costMs > remainingMs) {
-        rates.finish(targetKey);
-        return emptyOutcome(
-          'deadline',
-          `estimated decision model cost ${Math.ceil(costMs)} ms exceeds ${timeoutCapMs} ms remaining`,
-        );
-      }
-    }
-  }
-
-  const started = admission?.now();
-  let measured = false;
-  const measure = (usage: number | null, aborted: boolean, completed: boolean): void => {
-    if (measured || metrics === undefined) return;
-    measured = true;
-    const inputTokens = usage ?? metrics.promptTokens;
-    if (admission !== undefined && started !== undefined) {
-      const elapsedMs = admission.now() - started;
-      if (aborted) {
-        admission.rates.recordAbort(admission.targetKey, metrics.promptTokens, elapsedMs);
-      } else if (completed) {
-        admission.rates.recordCompleted(admission.targetKey, inputTokens, elapsedMs);
-      }
-    }
-    logInputTokens(metrics.logger, inputTokens, usage === null ? 'bytes/4' : 'usage');
+  let acquired = false;
+  const release = (): void => {
+    if (admission === undefined || !acquired) return;
+    acquired = false;
+    admission.rates.finish(admission.targetKey);
   };
-  const onAbort = (): void => measure(null, true, false);
-  admission?.signal.addEventListener('abort', onAbort, { once: true });
   let result: SystemOneCallResult | undefined;
+  let timeoutCapMs: number | undefined;
+
   try {
-    result = await caller.decide(payload, timeoutCapMs);
+    if (admission !== undefined && metrics !== undefined) {
+      const remainingMs = admission.remainingMs();
+      timeoutCapMs = Math.floor(remainingMs);
+      if (admission.signal.aborted || timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) {
+        return emptyOutcome('deadline');
+      }
+      const { rates, targetKey } = admission;
+      acquired = rates.tryStart(targetKey);
+      if (!acquired) return emptyOutcome('model-busy');
+      const rate = admission.configuredRate ?? rates.rate(targetKey);
+      if (rate !== undefined) {
+        const costMs = metrics.promptTokens * 1000 / rate + DECISION_RETURN_MARGIN_MS;
+        const effectiveBudgetMs = Math.min(remainingMs, admission.maxTimeoutMs);
+        if (costMs > effectiveBudgetMs) {
+          return emptyOutcome(
+            'deadline',
+            `estimated decision model cost ${Math.ceil(costMs)} ms exceeds ${Math.floor(effectiveBudgetMs)} ms remaining`,
+          );
+        }
+      }
+    }
+
+    const started = admission?.now();
+    if (admission?.signal.aborted) return emptyOutcome('deadline');
+    let measured = false;
+    const measure = (usage: number | null, aborted: boolean, completed: boolean): void => {
+      if (measured || metrics === undefined) return;
+      measured = true;
+      const inputTokens = usage ?? metrics.promptTokens;
+      if (admission !== undefined && started !== undefined) {
+        const elapsedMs = admission.now() - started;
+        if (aborted) {
+          admission.rates.recordAbort(admission.targetKey, metrics.promptTokens, elapsedMs);
+        } else if (completed) {
+          admission.rates.recordCompleted(admission.targetKey, inputTokens, elapsedMs);
+        }
+      }
+      logInputTokens(metrics.logger, inputTokens, usage === null ? 'bytes/4' : 'usage');
+    };
+    const onAbort = (): void => {
+      release();
+      measure(null, true, false);
+    };
+    admission?.signal.addEventListener('abort', onAbort, { once: true });
+    try {
+      result = await caller.decide(payload, timeoutCapMs);
+    } finally {
+      admission?.signal.removeEventListener('abort', onAbort);
+      release();
+      measure(
+        result?.ok ? tokenCount(result.result.usage?.input_tokens) : null,
+        admission?.signal.aborted === true || result?.ok === false && result.cause === 'timeout',
+        result?.ok === true,
+      );
+    }
   } finally {
-    admission?.signal.removeEventListener('abort', onAbort);
-    admission?.rates.finish(admission.targetKey);
-    measure(
-      result?.ok ? tokenCount(result.result.usage?.input_tokens) : null,
-      admission?.signal.aborted === true || result?.ok === false && result.cause === 'timeout',
-      result?.ok === true,
-    );
+    release();
   }
   if (!result.ok) {
     return {

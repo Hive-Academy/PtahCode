@@ -645,9 +645,8 @@ function unavailableReadTimedOut(
   inventory: readonly RoutingCandidate[],
   reads: NonNullable<GatheredCall['deadlineReads']>,
 ): boolean {
-  if (reads.rows && (pin === undefined
-    ? row.exclusionReason !== 'reviewer-family'
-    : row.pinRule === 'not-listed' && pin !== 'child-session' && !pin.startsWith('subagent:'))) {
+  if (reads.rows && (pin === undefined ||
+    row.pinRule === 'not-listed' && pin !== 'child-session' && !pin.startsWith('subagent:'))) {
     return true;
   }
   if (reads.roles && role !== undefined && !isRetiredRole(role) &&

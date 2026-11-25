@@ -134,26 +134,47 @@ function tryRoster(result: GateResult, roster: GateResult['roster']): string | n
   return returnedWhole(text) ? text : null;
 }
 
-function compactRouteResult(result: RouteDecideResult): string | null {
+function compactRouteResult(
+  result: RouteDecideResult,
+  deadlineAtMs: number,
+  now: () => number,
+): string | null {
+  const expired = (): boolean => now() >= deadlineAtMs;
+  if (result.stage !== 'gate-0.1') {
+    const text = JSON.stringify(result);
+    return returnedWhole(text) ? text : null;
+  }
+  const legacy = (): string | null => tryRoster(result, result.roster.map((row) => ({
+    ...row, candidates: undefined, explanation: undefined, traceOmitted: undefined,
+  })));
+
   const full = JSON.stringify(result);
+  // A full result that already fits costs nothing more to return, even past the deadline.
   if (returnedWhole(full)) return full;
-  if (result.stage !== 'gate-0.1' || !result.roster.some((row) =>
+  const hasTrace = result.roster.some((row) =>
     row.candidates !== undefined || row.traceOmitted !== undefined || row.explanation !== undefined,
-  )) return null;
+  );
+  if (!hasTrace) return null;
+  if (expired()) return legacy();
 
   const roster = result.roster.map(shortlistTrace);
+  if (expired()) return legacy();
   const shortlisted = tryRoster(result, roster);
+  if (expired()) return legacy();
   if (shortlisted !== null) return shortlisted;
 
   // Visit each row once per round, largest serialized trace first. Check in
   // batches to bound repeat serialization and tokenization across 100 phases.
   const maxChecksPerRound = 4;
   for (let round = 0; round < 2; round++) {
-    const largest = roster.flatMap((row, index) =>
-      row.candidates?.length
-        ? [{ index, size: JSON.stringify(row.candidates).length }]
-        : [],
-    ).sort((a, b) => b.size - a.size);
+    const largest: { index: number; size: number }[] = [];
+    for (const [index, row] of roster.entries()) {
+      if (expired()) return legacy();
+      if (row.candidates?.length) {
+        largest.push({ index, size: JSON.stringify(row.candidates).length });
+      }
+    }
+    largest.sort((a, b) => b.size - a.size);
     const batchSize = Math.ceil(largest.length / maxChecksPerRound);
     for (const [position, { index }] of largest.entries()) {
       const row = roster[index];
@@ -164,28 +185,31 @@ function compactRouteResult(result: RouteDecideResult): string | null {
         traceOmitted: (row.traceOmitted ?? 0) + 1,
       };
       if ((position + 1) % batchSize === 0 || position + 1 === largest.length) {
+        if (expired()) return legacy();
         const compacted = tryRoster(result, roster);
+        if (expired()) return legacy();
         if (compacted !== null) return compacted;
       }
     }
   }
 
+  if (expired()) return legacy();
   const maxExplanationChars = 96;
   const shortened = tryRoster(result, roster.map((row) => ({
     ...row,
     explanation: shortenExplanation(row.explanation, maxExplanationChars),
   })));
+  if (expired()) return legacy();
   if (shortened !== null) return shortened;
 
   const countsOnly = tryRoster(result, roster.map((row) => ({
     ...row, candidates: undefined, explanation: undefined,
   })));
+  if (expired()) return legacy();
   if (countsOnly !== null) return countsOnly;
 
   // The legacy payload gets the entire budget when even omission counts overflow.
-  return tryRoster(result, roster.map((row) => ({
-    ...row, candidates: undefined, explanation: undefined, traceOmitted: undefined,
-  })));
+  return legacy();
 }
 
 function invalidArguments(error: ZodError): RouteToolReply {
@@ -206,17 +230,16 @@ export async function handleRouteToolCall(
   route: RouteNamespace,
   logger: RouteToolLogger,
   context?: { readonly sessionKey?: string },
+  now: () => number = () => performance.now(),
 ): Promise<RouteToolReply> {
-  const enteredAt = performance.now();
+  const enteredAt = now();
   const parsed = RouteDecideArgsSchema.safeParse(args);
   if (!parsed.success) return invalidArguments(parsed.error);
 
   try {
-    const result = await route.decide(parsed.data, {
-      ...context,
-      deadlineAtMs: enteredAt + ROUTE_DEADLINE_MS[parsed.data.stage],
-    });
-    const text = compactRouteResult(result);
+    const deadlineAtMs = enteredAt + ROUTE_DEADLINE_MS[parsed.data.stage];
+    const result = await route.decide(parsed.data, { ...context, deadlineAtMs });
+    const text = compactRouteResult(result, deadlineAtMs, now);
     if (text === null) {
       const { chars, tokens } = ROUTE_DECIDE_RESULT_BUDGET;
       return {

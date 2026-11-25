@@ -847,27 +847,22 @@ function boundAggregateDiagnostics(
 
   const emitted: string[] = [];
   let usedChars = 0;
-  let cappedCount = 0;
-  for (let index = 0; index < uniqueDisplays.length; index += 1) {
-    const line = uniqueDisplays[index];
-    const remainingDisplaysAfter = uniqueDisplays.length - (index + 1);
-    const omittedIfEmitted = displayCollisions + remainingDisplaysAfter;
-    const reserve =
-      omittedIfEmitted > 0
-        ? omittedDiagnosticsLine(omittedIfEmitted).length
-        : 0;
-    if (usedChars + line.length + reserve <= AGGREGATE_DIAGNOSTIC_MAX_CHARS) {
-      emitted.push(line);
-      usedChars += line.length;
-      continue;
-    }
-    cappedCount = uniqueDisplays.length - index;
-    break;
+  for (const line of uniqueDisplays) {
+    if (usedChars + line.length > AGGREGATE_DIAGNOSTIC_MAX_CHARS) break;
+    emitted.push(line);
+    usedChars += line.length;
   }
 
-  const totalOmitted = displayCollisions + cappedCount;
-  if (totalOmitted > 0) {
-    emitted.push(omittedDiagnosticsLine(totalOmitted));
+  let omitted = displayCollisions + uniqueDisplays.length - emitted.length;
+  if (omitted > 0) {
+    let marker = omittedDiagnosticsLine(omitted);
+    while (usedChars + marker.length > AGGREGATE_DIAGNOSTIC_MAX_CHARS) {
+      const removed = emitted.pop();
+      if (removed === undefined) break;
+      usedChars -= removed.length;
+      marker = omittedDiagnosticsLine(++omitted);
+    }
+    emitted.push(marker);
   }
   return emitted;
 }

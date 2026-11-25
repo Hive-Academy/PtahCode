@@ -1157,6 +1157,39 @@ describe('B08 one-sentence explanations and per-lane reason deduplication', () =
     ]);
   });
 
+  it.each([10, 100])('fits exactly 4000 characters when omitted diagnostics grow to %i', (omitted) => {
+    const marker = `and ${omitted} more diagnostic entries omitted`;
+    const prefix = [
+      ...Array.from({ length: 16 }, (_, index) => String(index).padEnd(240, 'x')),
+      'last'.padEnd(4000 - marker.length - 16 * 240, 'x'),
+    ];
+    const tail = ['xx', ...Array.from({ length: omitted - 1 }, (_, index) =>
+      `tail ${index}`.padEnd(240, 'x'),
+    )];
+    const result = compileGateReasons({
+      chosen: [], unavailable: [], excluded: [], missingInputs: [], inputRowIds: [],
+      extraReasons: [...prefix, ...tail],
+    });
+
+    expect(result.reasons).toEqual([...prefix, marker]);
+    expect(result.reasons.join('')).toHaveLength(4000);
+  });
+
+  it('uses the full diagnostic budget when every entry fits without an omission marker', () => {
+    const extraReasons = [
+      ...Array.from({ length: 16 }, (_, index) => String(index).padEnd(240, 'x')),
+      'last'.padEnd(159, 'x'),
+      'x',
+    ];
+    const result = compileGateReasons({
+      chosen: [], unavailable: [], excluded: [], missingInputs: [], inputRowIds: [],
+      extraReasons,
+    });
+
+    expect(result.reasons).toEqual(extraReasons);
+    expect(result.reasons.join('')).toHaveLength(4000);
+  });
+
   it('bounds selector snippets, ambiguous samples, preference diagnostics, and aggregate extraReasons characters', () => {
     const longSelector = 'unknown-selector-'.repeat(12);
     const explanation = compileChosenExplanation({

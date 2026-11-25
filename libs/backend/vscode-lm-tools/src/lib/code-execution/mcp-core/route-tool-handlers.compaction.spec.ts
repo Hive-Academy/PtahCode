@@ -1,6 +1,11 @@
 import 'reflect-metadata';
-import type { CandidateTrace, GateResult } from '@ptah-extension/lane-routing';
+import {
+  RouteDecideResultSchema,
+  type CandidateTrace,
+  type GateResult,
+} from '@ptah-extension/lane-routing';
 import { handleRouteToolCall } from './route-tool-handlers';
+import type { RouteNamespace } from '../namespace-builders/route-namespace.builder';
 import { ROUTE_DECIDE_RESULT_BUDGET } from './tool-result-budget';
 
 const row: GateResult['roster'][number] = {
@@ -83,4 +88,60 @@ it('keeps the ranked runner-up ahead of an equally scored pruned candidate', asy
   };
   const original = { ...expected, candidates: [chosen, ranked, pruned], traceOmitted: undefined };
   await expect(compact(original, expected)).resolves.toEqual(expected);
+});
+
+it('returns a fitting full result with its trace after the deadline passed', async () => {
+  const result = resultWith({ ...row, explanation: 'No eligible candidate', candidates: [excluded] });
+  let time = 100;
+  const reply = await handleRouteToolCall({
+    stage: 'gate-0.1', request: 'staff it', taskType: 'FEATURE', depth: 'Full',
+    phases: [{ id: 'build', kind: 'implement' }],
+  }, {
+    decide: async () => {
+      time = 9000;
+      return result;
+    },
+  }, { warn: jest.fn() }, undefined, () => time);
+
+  expect(reply.isError).toBe(false);
+  expect(JSON.parse(reply.text)).toEqual(result);
+});
+
+it.each([
+  { timeLeft: 0, overflow: false, attempts: 2 },
+  { timeLeft: 2, overflow: false, attempts: 3 },
+  { timeLeft: 2, overflow: true, attempts: 3 },
+])('uses only $attempts serialization attempts with $timeLeft ms left (legacy overflow: $overflow)', async ({
+  timeLeft, overflow, attempts,
+}) => {
+  const legacy = resultWith(row);
+  const padding = ROUTE_DECIDE_RESULT_BUDGET.chars - JSON.stringify(legacy).length + Number(overflow);
+  legacy.reasons[0] = ' routing'.repeat(Math.ceil(padding / 8)).slice(0, padding);
+  let time = 100;
+  const serializeReasons = jest.fn(() => {
+    time += 1;
+    return legacy.reasons;
+  });
+  const original = resultWith({ ...row, explanation: 'No eligible candidate', candidates: [excluded] });
+  const result = { ...original, reasons: Object.assign([...legacy.reasons], { toJSON: serializeReasons }) };
+  const route: RouteNamespace = {
+    decide: async (_args, context) => {
+      expect(context?.deadlineAtMs).toBe(8100);
+      time = 8100 - timeLeft;
+      return result;
+    },
+  };
+
+  const reply = await handleRouteToolCall({
+    stage: 'gate-0.1', request: 'staff it', taskType: 'FEATURE', depth: 'Full',
+    phases: [{ id: 'build', kind: 'implement' }],
+  }, route, { warn: jest.fn() }, undefined, () => time);
+
+  expect(serializeReasons).toHaveBeenCalledTimes(attempts);
+  expect(reply.isError).toBe(overflow);
+  if (overflow) {
+    expect(reply.text).toContain('result exceeds the');
+  } else {
+    expect(RouteDecideResultSchema.parse(JSON.parse(reply.text))).toEqual(legacy);
+  }
 });

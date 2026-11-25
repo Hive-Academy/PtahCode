@@ -63,6 +63,11 @@ for a routing rule), the top-level `excluded` list, and `fallbackCause`
 (`deadline`, `model-cold`, `model-busy`, `question-cap` and others). A `fallbackCause`
 on a chosen row says why deterministic ranking, not the model, decided. Record
 `explanation` and `reason` with the decision.
+When the result exceeds the tool budget, compaction first keeps the chosen candidate and
+best available alternative per row. It can then drop the alternative and the chosen trace
+entry before shortening or dropping explanations. If needed, or if the route deadline
+expires during compaction, the result falls back to the legacy roster without explanations,
+candidate traces, or omission counts.
 When a `Routing:` system reminder is present, reuse its taskType, depth and executor
 suggestions; do not repeat host pre-flight routing. Gate 0.1 still applies.
 

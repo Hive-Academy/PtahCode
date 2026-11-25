@@ -232,7 +232,7 @@ describe('route-decide results', () => {
     expect(RouteDecideResultSchema.parse(result)).toEqual(result);
   });
 
-  it('accepts an override label of at most 120 characters', () => {
+  it('accepts override labels from 1 to 120 characters', () => {
     const withLabel = (overrideLabel: string) => gateOf([{
       ...chosen,
       candidates: [{
@@ -243,6 +243,8 @@ describe('route-decide results', () => {
         disposition: 'chosen',
       }],
     }]);
+    expect(RouteDecideResultSchema.safeParse(withLabel('')).success).toBe(false);
+    expect(RouteDecideResultSchema.safeParse(withLabel('builtin design/visual-review subagent')).success).toBe(true);
     expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(120))).success).toBe(true);
     expect(RouteDecideResultSchema.safeParse(withLabel('a'.repeat(121))).success).toBe(false);
   });

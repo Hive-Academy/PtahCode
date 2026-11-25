@@ -108,7 +108,7 @@ const ScorePartsSchema = z.object({
   priorSource: z.enum(['user', 'seed', 'neutral']).optional(),
   sampleCount: z.number().int().nonnegative().optional(),
   override: z.number().optional(),
-  overrideLabel: z.string().max(120).optional(),
+  overrideLabel: z.string().min(1).max(120).optional(),
 }).strict();
 
 const CandidateTraceSchema = z.object({

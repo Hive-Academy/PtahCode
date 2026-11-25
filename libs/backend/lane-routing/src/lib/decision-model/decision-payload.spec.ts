@@ -84,6 +84,28 @@ describe('decision payload', () => {
     });
   });
 
+  it('retains figures and totals samples for offered lanes when taskKind is omitted', () => {
+    const payload = buildDecisionPayload({
+      ...input,
+      questions: [{
+        kind: 'lane-choice', phaseId: 'legacy', instructions: 'Choose a lane',
+        options: [codex, glm],
+      }],
+      outcomeFigures: [
+        ...input.outcomeFigures,
+        { laneId: 'codex', taskKind: 'review', delivered: 2, failed: 3 },
+        { laneId: 'codex-other', taskKind: 'review', delivered: 4, failed: 0 },
+      ],
+    });
+    expect(payload.state.pastOutcomes).toEqual({
+      'codex/implement': [92, 13],
+      'codex/review': [40, 5],
+    });
+    expect(payload.questions['legacy'].criteria).toEqual({
+      o1: 'e1 80 unknown 18', o2: 'e2 75 unknown 0',
+    });
+  });
+
   it('reuses a roster entry across phases and indexes an alternate model separately', () => {
     const payload = buildDecisionPayload({
       ...input,

@@ -84,11 +84,16 @@ export function buildDecisionPayload(input: DecisionPayloadInput): DecisionPaylo
   };
   const questions: SystemOneQuestions = {};
   const executorIndices = new Map<string, string>();
-  const figuresByKey = new Map<string, [number, number]>();
+  const figuresByLane = new Map<string, Map<string, [number, number]>>();
   for (const figures of input.outcomeFigures) {
     const samples = figures.delivered + figures.failed;
     if (samples > 0) {
-      figuresByKey.set(`${figures.laneId}/${figures.taskKind}`, [
+      let byTask = figuresByLane.get(figures.laneId);
+      if (byTask === undefined) {
+        byTask = new Map();
+        figuresByLane.set(figures.laneId, byTask);
+      }
+      byTask.set(figures.taskKind, [
         Math.round(100 * figures.delivered / samples),
         samples,
       ]);
@@ -106,10 +111,21 @@ export function buildDecisionPayload(input: DecisionPayloadInput): DecisionPaylo
           executorIndices.set(pair, executor);
           state.availableExecutors[executor] = [option.laneId, option.family, option.model];
         }
-        const key = `${option.laneId}/${question.taskKind}`;
-        const outcome = figuresByKey.get(key);
-        if (outcome !== undefined) state.pastOutcomes[key] = outcome;
-        criteria[`o${index + 1}`] = `${executor} ${option.score} ${option.limitState} ${outcome?.[1] ?? 0}`;
+        const byTask = figuresByLane.get(option.laneId);
+        let samples = 0;
+        if (question.taskKind === undefined) {
+          for (const [taskKind, outcome] of byTask ?? []) {
+            state.pastOutcomes[`${option.laneId}/${taskKind}`] = outcome;
+            samples += outcome[1];
+          }
+        } else {
+          const outcome = byTask?.get(question.taskKind);
+          if (outcome !== undefined) {
+            state.pastOutcomes[`${option.laneId}/${question.taskKind}`] = outcome;
+            samples = outcome[1];
+          }
+        }
+        criteria[`o${index + 1}`] = `${executor} ${option.score} ${option.limitState} ${samples}`;
       });
     } else {
       Object.assign(criteria, question.criteria);

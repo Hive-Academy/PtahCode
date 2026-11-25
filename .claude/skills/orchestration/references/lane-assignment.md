@@ -37,9 +37,12 @@ a boost of 12, 8, 4 or 2 points to the total. A boost never pins a lane. Each ch
 row carries a one-sentence `explanation` — selected executor, total with its score
 parts, runner-up with gap, deciding factor, preference diagnostics — and `candidates[]`
 where every candidate is `chosen`, `ranked` or `excluded` with a named rule
-(`user-rule:<id>` for a routing rule). When the result text exceeds the tool budget,
-the trace compacts: each row keeps the chosen and the best alternative first, then
-explanations shorten, then drop.
+(`user-rule:<id>` for a routing rule).
+When the result exceeds the tool budget, compaction first keeps the chosen candidate and
+best available alternative per row. It can then drop the alternative and the chosen trace
+entry before shortening or dropping explanations. If needed, or if the route deadline
+expires during compaction, the result falls back to the legacy roster without explanations,
+candidate traces, or omission counts.
 
 Each chosen roster row returns `executor`, `model`, `tier`
 (`haiku|sonnet|opus`), `effort` (`low|medium|high|xhigh|max`) and a `reason` ending

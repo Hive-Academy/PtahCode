@@ -260,7 +260,7 @@ describe('System One admission and token measurement', () => {
     const metrics = {
       promptTokens: 100,
       logger,
-      admission: { targetKey: 'target', rates, remainingMs: () => remainingMs, now: () => now, signal: abort.signal },
+      admission: { targetKey: 'target', rates, maxTimeoutMs: 3000, remainingMs: () => remainingMs, now: () => now, signal: abort.signal },
     };
     return { metrics, rates, abort, logger, advance: (ms: number) => { now += ms; } };
   }
@@ -293,12 +293,69 @@ describe('System One admission and token measurement', () => {
     expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 80, inputTokensSource: 'usage' });
   });
 
+  it('skips estimates that fit the route deadline but exceed the target timeout', async () => {
+    const { metrics } = admissionTest(7750);
+    const decide = jest.fn(async () => reply);
+    const configured = {
+      ...metrics,
+      admission: { ...metrics.admission, configuredRate: 25 },
+    };
+
+    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], configured))
+      .resolves.toMatchObject({
+        sent: false, requestCause: 'deadline',
+        requestReason: 'estimated decision model cost 4250 ms exceeds 3000 ms remaining',
+      });
+    expect(decide).not.toHaveBeenCalled();
+  });
+
+  it('releases admission if setup throws after reserving the target', async () => {
+    const { metrics } = admissionTest();
+    const decide = jest.fn(async () => reply);
+    const broken = {
+      ...metrics,
+      admission: { ...metrics.admission, now: () => { throw new Error('clock failed'); } },
+    };
+
+    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], broken)).rejects.toThrow('clock failed');
+    expect(decide).not.toHaveBeenCalled();
+    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics)).resolves.toMatchObject({ sent: true });
+  });
+
+  it('releases an aborted target before transport settles and preserves the next reservation', async () => {
+    const { metrics, abort, rates, advance } = admissionTest(3000);
+    let finishFirst: (value: SystemOneCallResult) => void = () => undefined;
+    const first = callSystemOne({
+      decide: () => new Promise<SystemOneCallResult>((resolve) => { finishFirst = resolve; }),
+    }, PAYLOAD, new Map(), [], metrics);
+
+    advance(1000);
+    abort.abort();
+    const next = {
+      ...metrics,
+      admission: { ...metrics.admission, signal: new AbortController().signal },
+    };
+    let finishSecond: (value: SystemOneCallResult) => void = () => undefined;
+    const decide = jest.fn(() => new Promise<SystemOneCallResult>((resolve) => { finishSecond = resolve; }));
+    const second = callSystemOne({ decide }, PAYLOAD, new Map(), [], next);
+    expect(decide).toHaveBeenCalledTimes(1);
+
+    finishFirst(reply);
+    await first;
+    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], next))
+      .resolves.toMatchObject({ sent: false, requestCause: 'model-busy' });
+
+    finishSecond(reply);
+    await second;
+    expect(rates.tryStart('target')).toBe(true);
+  });
+
   it('reads the configured override and caps the actual client timeout after fitting', async () => {
     const readRate = jest.fn((): number | undefined => undefined);
     let now = 0;
     let remaining = 3000;
     const workspace = createMockWorkspaceProvider();
-    const logger = quietLogger();
+    const logger = { ...quietLogger(), warn: jest.fn() };
     const seen: SystemOneClientOptions[] = [];
     const caller = new DecisionCaller({
       config: new DecisionModelConfig(workspace, createMockSecretStorage(), createMockStateStorage(), logger),
@@ -339,10 +396,18 @@ describe('System One admission and token measurement', () => {
       sent: false, requestCause: 'deadline', requestReason: expect.stringContaining('estimated decision model cost'),
     });
     expect(seen).toHaveLength(1);
+    readRate.mockReturnValueOnce(0);
+    expect((await run()).sent).toBe(false);
+    readRate.mockImplementationOnce(() => { throw new Error('private details'); });
+    expect((await run()).sent).toBe(false);
     readRate.mockReturnValue(1000);
     remaining = 1500;
     expect((await run()).sent).toBe(true);
     expect(seen[1].timeoutMs).toBe(1500);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[lane-routing] decision model prefill setting could not be read', { name: 'Error' },
+    );
   });
 
   it('skips overlapping requests for the same target and keeps other targets independent', async () => {
