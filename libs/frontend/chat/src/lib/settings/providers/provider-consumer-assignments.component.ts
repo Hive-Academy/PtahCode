@@ -196,7 +196,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                     size="sm"
                     type="button"
                     [class]="cell + (row.followsMain ? ' font-medium' : '')"
-                    [attr.aria-disabled]="busy() ? 'true' : null"
+                    [attr.aria-disabled]="(row.id === 'setup' ? setupActionsDisabled() : busy()) ? 'true' : null"
                     [attr.aria-label]="
                       row.name + ': ' + row.resolvedSummary + '. Reassign'
                     "
@@ -417,7 +417,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       >
                         {{ setupCommit.status === 'saving' ? 'Saving Setup model…' : setupCommit.message }}
                       </span>
-                      @if (state.setupUndoEntry()) {
+                      @if (setupCommit.status === 'saved' && state.setupUndoEntry()) {
                         <button
                           type="button"
                           [class]="action"
@@ -718,7 +718,7 @@ export class ProviderConsumerAssignmentsComponent {
         // Waits for the row's data and for a running save to end (no popover opens while a save runs).
         if (
           !this.rows().find((row) => row.id === deepLinkId)?.loaded ||
-          this.busy()
+          (deepLinkId === 'setup' ? this.setupActionsDisabled() : this.busy())
         )
           return;
         this.appliedDeepLinkId = deepLinkId;
@@ -830,6 +830,7 @@ export class ProviderConsumerAssignmentsComponent {
     );
   }
   protected toggleEdit(id: ProviderConsumerId): void {
+    if (id === 'setup' && this.setupActionsDisabled()) return;
     if (this.activeEditId() === id) {
       this.cancelEdit();
       return;
@@ -837,12 +838,14 @@ export class ProviderConsumerAssignmentsComponent {
     const row = this.rows().find((r) => r.id === id);
     // While a save runs the cell is only aria-disabled (so it can keep and take focus): the click is refused here (D3).
     if (!row || !row.loaded || this.busy()) return;
+    if (this.activeEditId() === 'setup') this.state.clearSetupDraftFeedback();
     this.context = this.state.reviewContext();
     this.currentDraft.set({ provider: row.provider, model: row.model });
     this.activeEditId.set(id);
   }
   protected cancelEdit(): void {
     const id = this.activeEditId();
+    if (id === 'setup') this.state.clearSetupDraftFeedback();
     this.setupFocusTarget = null;
     this.activeEditId.set(null);
     if (!id) return;

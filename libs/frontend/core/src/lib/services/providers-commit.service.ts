@@ -1,10 +1,11 @@
-import { Injectable, Injector, inject, signal } from '@angular/core';
+import { Injectable, Injector, computed, inject, signal } from '@angular/core';
 import type {
   ConfigGetScopesResult,
   ModelPair,
   RpcMethodName,
   RpcMethodParams,
   RpcMethodResult,
+  SetupPairState,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService, type RpcResult } from './claude-rpc.service';
 import { EffortStateService } from './effort-state.service';
@@ -46,6 +47,23 @@ const EMPTY_COMMIT: ProvidersSettingsCommit = {
   message: null,
 };
 
+function sameSetupPair(a: ModelPair | null, b: ModelPair | null): boolean {
+  return a === b || (a !== null && b !== null && a.provider === b.provider && a.model === b.model);
+}
+
+function sameSetupState(a: SetupPairState, b: SetupPairState): boolean {
+  switch (a.kind) {
+    case 'set':
+      return b.kind === 'set' && sameSetupPair(a.pair, b.pair);
+    case 'unset':
+      return b.kind === 'unset' && sameSetupPair(a.effective, b.effective);
+    case 'invalid':
+    case 'unavailable':
+      return b.kind === a.kind && a.source === b.source && a.provider === b.provider &&
+        a.model === b.model && a.cause === b.cause;
+  }
+}
+
 /**
  * What a commit needs from the page state that owns the sections. Called in this order:
  * `refreshScopes` before any write, `scopes` whenever the edit context is checked, `refresh`
@@ -86,10 +104,39 @@ export class ProvidersCommitService {
     status: 'idle',
     message: null,
   });
+  private readonly setupWrites = signal(0);
   private setupRequest = 0;
+  private latestSetupCommitSeq = 0;
   readonly setupReceipt = this.setupReceiptState.asReadonly();
   readonly setupUndoEntry = this.setupUndoState.asReadonly();
-  readonly setupCommit = this.setupCommitState.asReadonly();
+  readonly setupCommit = computed<ProvidersSetupCommitState>(() =>
+    this.setupWrites() > 0 ? { status: 'saving', message: null } : this.setupCommitState(),
+  );
+
+  get setupCommitSeq(): number {
+    return this.latestSetupCommitSeq;
+  }
+
+  syncSetupBaseline(read: ProvidersSetupRowState): void {
+    const receipt = this.setupReceipt();
+    if (
+      this.setupWrites() > 0 ||
+      !receipt ||
+      (sameSetupPair(receipt.committed, read.committed) && sameSetupState(receipt.state, read.state))
+    ) return;
+
+    // The next save takes its prior pair from the loaded row after an external change.
+    this.setupReceiptState.set(null);
+    this.setupUndoState.set(null);
+    this.setupCommitState.set({ status: 'idle', message: null });
+  }
+
+  clearSetupDraftFeedback(): void {
+    const status = this.setupCommit().status;
+    if (status === 'invalid' || status === 'failed') {
+      this.setupCommitState.set({ status: 'idle', message: null });
+    }
+  }
 
   commitSetupPair(
     pair: ModelPair | null,
@@ -119,13 +166,8 @@ export class ProvidersCommitService {
     undo: boolean,
   ): Promise<boolean> {
     const request = ++this.setupRequest;
-    const startSeq = this.setupReceipt()?.commitSeq ?? 0;
-    this.setupCommitState.set({ status: 'saving', message: null });
     const reportFailure = (state: ProvidersSetupCommitState): false => {
-      if (
-        request === this.setupRequest &&
-        (this.setupReceipt()?.commitSeq ?? 0) === startSeq
-      ) {
+      if (request === this.setupRequest) {
         this.setupCommitState.set(state);
       }
       return false;
@@ -138,6 +180,7 @@ export class ProvidersCommitService {
     };
 
     let result: RpcResult<RpcMethodResult<'wizard:set-setup-model'>>;
+    this.setupWrites.update((count) => count + 1);
     try {
       result = await this.rpc.call(
         'wizard:set-setup-model',
@@ -145,6 +188,8 @@ export class ProvidersCommitService {
       );
     } catch {
       return reportFailure(failed);
+    } finally {
+      this.setupWrites.update((count) => count - 1);
     }
     if (!result.isSuccess()) {
       return reportFailure(
@@ -155,19 +200,16 @@ export class ProvidersCommitService {
     }
 
     const receipt = result.data;
-    if (receipt.commitSeq < (this.setupReceipt()?.commitSeq ?? 0)) return false;
+    if (receipt.commitSeq < this.latestSetupCommitSeq) return false;
     const { committed, commitSeq } = receipt;
+    this.latestSetupCommitSeq = commitSeq;
     this.setupReceiptState.set(receipt);
     this.setupUndoState.set(
       undo ? null : { targetPair: priorPair, committedReceipt: committed, commitSeq },
     );
     applyReceipt(receipt);
 
-    const undoMatches =
-      pair === null
-        ? committed === null
-        : committed?.provider === pair.provider && committed.model === pair.model;
-    if (undo && !undoMatches) {
+    if (undo && !sameSetupPair(committed, pair)) {
       this.setupCommitState.set(failed);
       return false;
     }

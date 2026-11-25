@@ -261,13 +261,13 @@ export class ProvidersSettingsStateService {
     ]);
   }
 
-  refreshSetupModel(): Promise<void> {
-    return readSection(this.setupModelStore, this.workspace, async () => {
+  async refreshSetupModel(): Promise<void> {
+    const store = this.setupModelStore;
+    const generation = store.generation + 1;
+    const scopeKey = this.workspace.scopeKey();
+    await readSection(store, this.workspace, async () => {
       const { state } = await this.require('wizard:get-setup-model', {});
-      const receipt = this.commits.setupReceipt();
-      if (receipt) return { ...receipt, state };
 
-      // Seed Undo from the stored Setup pair before the first local receipt.
       let committed: ModelPair | null = null;
       if (state.kind === 'set') {
         committed = state.pair;
@@ -277,8 +277,16 @@ export class ProvidersSettingsStateService {
       ) {
         committed = { provider: state.provider ?? '', model: state.model ?? '' };
       }
-      return { state, committed, commitSeq: 0 };
+      return { state, committed, commitSeq: this.commits.setupCommitSeq };
     });
+    if (store.generation === generation && this.workspace.scopeKey() === scopeKey) {
+      const loaded = store.value();
+      if (loaded.status === 'ready' && loaded.data) this.commits.syncSetupBaseline(loaded.data);
+    }
+  }
+
+  clearSetupDraftFeedback(): void {
+    this.commits.clearSetupDraftFeedback();
   }
 
   commitSetupPair(pair: ModelPair | null): Promise<boolean> {
@@ -1106,6 +1114,7 @@ export class ProvidersSettingsStateService {
         this.effort(),
         this.memory(),
         this.enhancement(),
+        this.setupModel(),
         this.cliAgents(),
         this.cliModels(),
         this.orchestration(),

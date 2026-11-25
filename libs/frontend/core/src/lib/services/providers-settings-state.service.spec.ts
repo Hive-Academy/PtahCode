@@ -277,6 +277,55 @@ describe('ProvidersSettingsStateService', () => {
     });
   });
 
+  it('uses an external Setup clear as the baseline for the next save and Undo', async () => {
+    const first = { provider: 'openrouter', model: 'first-model' };
+    const second = { provider: 'openrouter', model: 'second-model' };
+    const unset: SetupPairState = { kind: 'unset', effective: first };
+    const firstReceipt = {
+      state: { kind: 'set', pair: first },
+      committed: first,
+      commitSeq: 7,
+    };
+    handlers.set('wizard:set-setup-model', async () => success(firstReceipt));
+    await expect(service.commitSetupPair(first)).resolves.toBe(true);
+
+    handlers.set('wizard:get-setup-model', async () =>
+      success({ state: { kind: 'set', pair: { ...first } } }),
+    );
+    await service.refreshSetupModel();
+    expect(service.setupCommit().status).toBe('saved');
+    expect(service.setupUndoEntry()?.committedReceipt).toEqual(first);
+
+    handlers.set('wizard:get-setup-model', async () => success({ state: unset }));
+    await service.refreshSetupModel();
+    expect(service.setupModel()).toEqual({
+      status: 'ready',
+      data: { state: unset, committed: null, commitSeq: 7 },
+      error: null,
+    });
+    expect(service.setupCommit().status).toBe('idle');
+    expect(service.setupUndoEntry()).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ ...firstReceipt, commitSeq: 6 }),
+    );
+    await expect(service.commitSetupPair(first)).resolves.toBe(false);
+    expect(service.setupModel().data?.committed).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ state: { kind: 'set', pair: second }, committed: second, commitSeq: 9 }),
+    );
+    await expect(service.commitSetupPair(second)).resolves.toBe(true);
+    expect(service.setupUndoEntry()?.targetPair).toBeNull();
+
+    handlers.set('wizard:set-setup-model', async () =>
+      success({ state: unset, committed: null, commitSeq: 10 }),
+    );
+    await expect(service.undoSetupPair()).resolves.toBe(true);
+    expect(call).toHaveBeenLastCalledWith('wizard:set-setup-model', { provider: '', model: '' });
+    expect(service.setupModel().data?.committed).toBeNull();
+  });
+
   it('loads typed invalid Setup state and maps a rejected pair to safe commit feedback', async () => {
     const state: SetupPairState = {
       kind: 'invalid',
@@ -1918,6 +1967,22 @@ describe('ProvidersSettingsStateService', () => {
       refreshFailed: true,
     });
     expect(service.activeProviderId()).toBeNull();
+  });
+
+  it('includes a failed Setup read in the post-commit refresh warning', async () => {
+    const reviewed = await context();
+    handlers.set('auth:saveSettings', async () => success({ success: true }));
+    handlers.set(
+      'wizard:get-setup-model',
+      async () => new RpcResult(false, undefined, 'raw failure'),
+    );
+    await service.saveSettings({ auth: { authMethod: 'apiKey' } }, reviewed);
+
+    expect(service.setupModel().status).toBe('error');
+    expect(service.commit()).toMatchObject({
+      saved: ['authMethod'],
+      refreshFailed: true,
+    });
   });
 
   it('uses draft verification without saving, aborts superseded work and discards late results', async () => {
