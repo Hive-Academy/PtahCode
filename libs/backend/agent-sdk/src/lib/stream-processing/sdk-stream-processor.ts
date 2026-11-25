@@ -46,10 +46,10 @@ export class SdkStreamProcessor {
   }
 
   /**
-   * Process an SDK message stream and return the structured output.
+   * Process an SDK message stream and return the terminal outcome and output.
    *
    * Iterates the async iterable, emitting events for live UI updates,
-   * and returns the structured_output from the result message.
+   * and captures the SDK result when one arrives.
    */
   async process(
     stream: AsyncIterable<SDKMessage>,
@@ -93,13 +93,18 @@ export class SdkStreamProcessor {
               inputTokens: message.usage.input_tokens,
               outputTokens: message.usage.output_tokens,
             };
+            const successResult = {
+              resultMeta,
+              resultText: message.result,
+              terminal: { kind: 'success' as const },
+            };
             if (this.config.skipStructuredOutput) {
-              return { structuredOutput: null, resultMeta };
+              return { structuredOutput: null, ...successResult };
             }
             if (message.structured_output) {
               return {
                 structuredOutput: message.structured_output,
-                resultMeta,
+                ...successResult,
               };
             }
             if (message.result) {
@@ -109,7 +114,7 @@ export class SdkStreamProcessor {
               try {
                 return {
                   structuredOutput: JSON.parse(message.result),
-                  resultMeta,
+                  ...successResult,
                 };
               } catch {
                 logger.warn(
@@ -118,17 +123,16 @@ export class SdkStreamProcessor {
               }
             }
 
-            return { structuredOutput: null, resultMeta };
+            return { structuredOutput: null, ...successResult };
           }
-          const errorResult = message as {
-            subtype: string;
-            errors?: string[];
-          };
           logger.error(`${serviceTag} Query failed`, {
-            subtype: errorResult.subtype,
-            errors: errorResult.errors,
+            subtype: message.subtype,
+            errorCount: message.errors?.length ?? 0,
           });
-          return { structuredOutput: null };
+          return {
+            structuredOutput: null,
+            terminal: { kind: 'provider-error', subtype: message.subtype },
+          };
         }
         if (message.type === 'stream_event') {
           const event = message.event;

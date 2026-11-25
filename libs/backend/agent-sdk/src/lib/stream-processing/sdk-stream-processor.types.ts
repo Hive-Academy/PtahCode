@@ -71,8 +71,7 @@ export interface SdkStreamProcessorConfig {
 
   /**
    * Skip structured_output extraction from the result message.
-   * When true, the processor returns { structuredOutput: null, resultMeta }
-   * without attempting to parse structured_output or JSON from result text.
+   * When true, structuredOutput is null and the raw result text is still available.
    * Use for pipelines that produce free-form markdown (e.g., MultiPhaseAnalysisService).
    */
   skipStructuredOutput?: boolean;
@@ -90,6 +89,12 @@ export interface SdkStreamProcessorConfig {
 export interface StreamProcessorResult {
   /** Structured output from the SDK result message, or null */
   structuredOutput: unknown | null;
+
+  /** Raw text from a successful SDK result message */
+  resultText?: string;
+
+  /** Outcome reported by the SDK, when the stream yields a result message */
+  terminal?: { kind: 'success' } | { kind: 'provider-error'; subtype: string };
 
   /** Metadata from the result message */
   resultMeta?: {
