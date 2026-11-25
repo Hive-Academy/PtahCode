@@ -19,6 +19,7 @@ import type {
   GenerationStreamPayload,
   ProjectAnalysisResult,
 } from '@ptah-extension/shared';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import type { AgentWriteGuard } from '../interfaces/agent-file-writer.interface';
 
 /**
@@ -617,6 +618,16 @@ export interface OrchestratorGenerationOptions {
   mcpServerRunning?: boolean;
   mcpPort?: number;
   model?: string;
+  /**
+   * Ephemeral per-launch Setup provider/model/auth snapshot resolved once at
+   * the RPC launch boundary. When supplied, every agent in this run dispatches
+   * with this snapshot's exact model and isolated auth, bypassing
+   * `workspaceLlm.resolveForPath` and ignoring `model`.
+   *
+   * Never persist this field or its `auth` payload in checkpoints, logs, or
+   * cached retry options.
+   */
+  setupSnapshot?: ResolvedSetupSnapshot;
   onStreamEvent?: (event: GenerationStreamPayload) => void;
   analysisDir?: string;
   pluginPaths?: string[];

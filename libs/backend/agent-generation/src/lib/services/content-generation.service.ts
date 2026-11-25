@@ -266,13 +266,23 @@ export class ContentGenerationService implements IContentGenerationService {
       }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
+      const launchSnapshot = sdkConfig?.setupSnapshot;
+      const pairSuffix = launchSnapshot
+        ? ` (${launchSnapshot.providerId}/${launchSnapshot.model})`
+        : '';
       this.logger.error('Content generation failed', {
         templateId: template.id,
         error: errorMessage,
+        ...(launchSnapshot
+          ? {
+              provider: launchSnapshot.providerId,
+              model: launchSnapshot.model,
+            }
+          : {}),
       });
       return Result.err(
         new ContentGenerationError(
-          `Failed to generate content: ${errorMessage}`,
+          `Failed to generate content${pairSuffix}: ${errorMessage}`,
           'content',
           template.name,
           {
@@ -371,13 +381,15 @@ export class ContentGenerationService implements IContentGenerationService {
         },
         required: ['sections'],
       };
-      // Provider and model of ONE snapshot for the workspace being generated
-      // for — never the active workspace's model or the process-wide auth.
-      // A configured model is kept only when that provider offers it.
-      const { model, auth } = await this.workspaceLlm.resolveForPath(
-        context.rootPath,
-        { requestedModel: sdkConfig?.model },
-      );
+      // When a launch-pinned Setup snapshot is supplied, dispatch with its
+      // exact model and isolated auth directly — never re-resolve via
+      // workspaceLlm, never honour sdkConfig.model, and never fall back to
+      // process-wide auth. Non-setup callers keep resolveForPath.
+      const { model, auth } =
+        sdkConfig?.setupSnapshot ??
+        (await this.workspaceLlm.resolveForPath(context.rootPath, {
+          requestedModel: sdkConfig?.model,
+        }));
       let systemPrompt = `You write the repository-specific half of a subagent instruction file. The other half — role, method, output contract — is already authored and stack-agnostic. Your sections tell the agent HOW THIS REPOSITORY DOES THINGS.
 
 WHAT A SECTION IS
@@ -533,6 +545,12 @@ OUTPUT FORMAT
         'SDK content generation failed, using template fallback for all sections',
         {
           error: error instanceof Error ? error.message : String(error),
+          ...(sdkConfig?.setupSnapshot
+            ? {
+                provider: sdkConfig.setupSnapshot.providerId,
+                model: sdkConfig.setupSnapshot.model,
+              }
+            : {}),
         },
       );
     } finally {

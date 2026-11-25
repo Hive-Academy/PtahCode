@@ -96,6 +96,13 @@ function guardFor(
   return CREATE_ONLY;
 }
 
+/** Non-secret launch pair suffix for run-level errors when Setup snapshot is pinned. */
+function formatLaunchPairSuffix(
+  snapshot: OrchestratorGenerationOptions['setupSnapshot'],
+): string {
+  return snapshot ? ` (${snapshot.providerId}/${snapshot.model})` : '';
+}
+
 /** Render an `AbortSignal.reason` (string, Error, DOMException, ...) as text. */
 function describeAbortReason(reason: unknown): string {
   if (reason === undefined || reason === null) return 'aborted';
@@ -501,11 +508,16 @@ export class AgentGenerationOrchestratorService {
       // a run that kept every file completed.
       const settled = successful + leftAlone;
 
+      const pairSuffix = formatLaunchPairSuffix(options.setupSnapshot);
       if (!aborted && renderedAgents.length === 0 && leftAlone === 0) {
-        return Result.err(new Error('No agents were successfully rendered'));
+        return Result.err(
+          new Error(`No agents were successfully rendered${pairSuffix}`),
+        );
       }
       if (!aborted && settled === 0) {
-        return Result.err(new Error('All agent file writes failed'));
+        return Result.err(
+          new Error(`All agent file writes failed${pairSuffix}`),
+        );
       }
       // There is no Phase 5. Distributing agents to rival CLIs used to happen
       // here, through `MultiCliAgentWriterService` and a caller-supplied list of
@@ -580,8 +592,11 @@ export class AgentGenerationOrchestratorService {
         'Agent generation failed with unexpected error',
         error as Error,
       );
+      const pairSuffix = formatLaunchPairSuffix(options.setupSnapshot);
       return Result.err(
-        new Error(`Agent generation failed: ${(error as Error).message}`),
+        new Error(
+          `Agent generation failed${pairSuffix}: ${(error as Error).message}`,
+        ),
       );
     }
   }
@@ -799,7 +814,9 @@ export class AgentGenerationOrchestratorService {
       mcpPort: options.mcpPort,
       onStreamEvent: options.onStreamEvent,
       enhancedPromptContent: options.enhancedPromptContent,
-      model: options.model,
+      ...(options.setupSnapshot
+        ? { setupSnapshot: options.setupSnapshot }
+        : { model: options.model }),
       pluginPaths: options.pluginPaths,
       abortSignal: signal,
     };

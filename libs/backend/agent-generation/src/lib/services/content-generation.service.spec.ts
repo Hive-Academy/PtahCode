@@ -66,6 +66,7 @@ import {
   discoverPluginSkills,
   formatSkillsForPrompt,
 } from '@ptah-extension/agent-sdk';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import { readFileSync } from 'fs';
 import { join, resolve } from 'path';
 import { createMockFileSystemProvider } from '@ptah-extension/platform-core/testing';
@@ -1102,6 +1103,262 @@ Default
 
       const callArgs = mockInternalQueryService.execute.mock.calls[0][0];
       expect(callArgs.model).toBe('claude-opus-explicit');
+    });
+  });
+
+  describe('setupSnapshot dispatch (Set and Unset Setup pair)', () => {
+    const dynamicTemplate: AgentTemplate = {
+      ...baseTemplate,
+      content: `<!-- LLM:SECTION_A -->
+Default authored fallback
+<!-- /LLM:SECTION_A -->`,
+    };
+
+    it('Set fixture: dispatches launch setupSnapshot provider/model/auth directly, bypassing resolveForPath and ignoring conflicting picker/tab model', async () => {
+      const workspaceModel = 'claude-sonnet-4-workspace';
+      const pickerModel = 'claude-opus-4-chat-picker';
+      const tabOverrideModel = 'claude-haiku-4-tab-override';
+
+      mockWorkspaceLlm.resolveForPath.mockResolvedValue({
+        providerId: 'anthropic',
+        model: workspaceModel,
+        auth: { env: { ANTHROPIC_API_KEY: 'workspace-key-must-not-be-used' } },
+      });
+
+      const setupSnapshot: ResolvedSetupSnapshot = {
+        providerId: 'openrouter',
+        model: 'anthropic/claude-sonnet-4-setup',
+        auth: {
+          env: {
+            ANTHROPIC_API_KEY: '',
+            ANTHROPIC_AUTH_TOKEN: 'setup-openrouter-secret',
+            ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+          },
+          baseUrl: 'https://openrouter.ai/api',
+        },
+      };
+
+      expect(setupSnapshot.model).not.toBe(workspaceModel);
+      expect(pickerModel).not.toBe(setupSnapshot.model);
+      expect(tabOverrideModel).not.toBe(setupSnapshot.model);
+
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        model: tabOverrideModel,
+        setupSnapshot,
+      });
+
+      expect(mockWorkspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mockInternalQueryService.execute).toHaveBeenCalledTimes(1);
+      const callArgs = mockInternalQueryService.execute.mock.calls[0][0];
+      expect(callArgs.model).toBe(setupSnapshot.model);
+      expect(callArgs.auth).toEqual(setupSnapshot.auth);
+      expect(callArgs.model).not.toBe(workspaceModel);
+      expect(callArgs.model).not.toBe(pickerModel);
+      expect(callArgs.model).not.toBe(tabOverrideModel);
+    });
+
+    it('Unset fixture (TD 2.5): dispatches concrete workspace (provider, model, auth) and ignores conflicting chat-picker currentModel AND conflicting chat-tab overrideModel', async () => {
+      const wsProvider = 'anthropic';
+      const wsModel = 'claude-sonnet-4-20250514';
+      const pickerModel = 'claude-opus-4-picker-conflict';
+      const tabOverrideModel = 'claude-haiku-4-tab-override-conflict';
+
+      expect(pickerModel).not.toBe(wsModel);
+      expect(tabOverrideModel).not.toBe(wsModel);
+      expect(tabOverrideModel).not.toBe(pickerModel);
+
+      // Even if resolveForPath would return the conflicting picker model,
+      // setupSnapshot must bypass it completely.
+      mockWorkspaceLlm.resolveForPath.mockResolvedValue({
+        providerId: wsProvider,
+        model: pickerModel,
+        auth: { env: { ANTHROPIC_API_KEY: 'picker-key-must-not-be-used' } },
+      });
+
+      const unsetWorkspaceSnapshot: ResolvedSetupSnapshot = {
+        providerId: wsProvider,
+        model: wsModel,
+        auth: {
+          env: {
+            ANTHROPIC_API_KEY: 'ws-isolated-secret',
+            ANTHROPIC_AUTH_TOKEN: '',
+            ANTHROPIC_BASE_URL: '',
+          },
+        },
+      };
+
+      // Dispatch with conflicting chat-picker model in sdkConfig.model
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        model: pickerModel,
+        setupSnapshot: unsetWorkspaceSnapshot,
+      });
+
+      // Dispatch with conflicting chat-tab overrideModel in sdkConfig.model
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        model: tabOverrideModel,
+        setupSnapshot: unsetWorkspaceSnapshot,
+      });
+
+      expect(mockWorkspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mockInternalQueryService.execute).toHaveBeenCalledTimes(2);
+      for (const call of mockInternalQueryService.execute.mock.calls) {
+        const callArgs = call[0];
+        expect(callArgs.model).toBe(wsModel);
+        expect(callArgs.auth).toEqual(unsetWorkspaceSnapshot.auth);
+        expect(callArgs.auth).toBeDefined();
+        expect(callArgs.model).not.toBe(pickerModel);
+        expect(callArgs.model).not.toBe(tabOverrideModel);
+      }
+    });
+
+    it('keeps launch snapshot stable across in-flight calls and isolates auth between launches', async () => {
+      const snapshotA: ResolvedSetupSnapshot = {
+        providerId: 'openrouter',
+        model: 'anthropic/claude-sonnet-4-launch-a',
+        auth: {
+          env: {
+            ANTHROPIC_AUTH_TOKEN: 'launch-a-secret',
+            ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+          },
+          baseUrl: 'https://openrouter.ai/api',
+        },
+      };
+      const snapshotB: ResolvedSetupSnapshot = {
+        providerId: 'anthropic',
+        model: 'claude-opus-4-launch-b',
+        auth: {
+          env: {
+            ANTHROPIC_API_KEY: 'launch-b-secret',
+            ANTHROPIC_AUTH_TOKEN: '',
+            ANTHROPIC_BASE_URL: '',
+          },
+        },
+      };
+
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        setupSnapshot: snapshotA,
+      });
+
+      // Simulate workspace settings changing mid-run; second agent in same run
+      // still receives snapshotA.
+      mockWorkspaceLlm.resolveForPath.mockResolvedValue({
+        providerId: 'vertex',
+        model: 'claude-3-7-changed-mid-run',
+        auth: { env: { ANTHROPIC_API_KEY: 'changed-mid-run-key' } },
+      });
+
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        setupSnapshot: snapshotA,
+      });
+
+      // Next launch pins snapshotB; no auth from snapshotA leaks.
+      await service.generateContent(dynamicTemplate, mockContext, {
+        mcpServerRunning: false,
+        setupSnapshot: snapshotB,
+      });
+
+      expect(mockWorkspaceLlm.resolveForPath).not.toHaveBeenCalled();
+      expect(mockInternalQueryService.execute).toHaveBeenCalledTimes(3);
+      expect(mockInternalQueryService.execute.mock.calls[0][0].model).toBe(
+        snapshotA.model,
+      );
+      expect(mockInternalQueryService.execute.mock.calls[0][0].auth).toEqual(
+        snapshotA.auth,
+      );
+      expect(mockInternalQueryService.execute.mock.calls[1][0].model).toBe(
+        snapshotA.model,
+      );
+      expect(mockInternalQueryService.execute.mock.calls[1][0].auth).toEqual(
+        snapshotA.auth,
+      );
+      expect(mockInternalQueryService.execute.mock.calls[2][0].model).toBe(
+        snapshotB.model,
+      );
+      expect(mockInternalQueryService.execute.mock.calls[2][0].auth).toEqual(
+        snapshotB.auth,
+      );
+    });
+
+    it('records launch pair without leaking auth credentials when SDK or content generation fails', async () => {
+      const secretToken = 'super-secret-setup-token-do-not-log';
+      const setupSnapshot: ResolvedSetupSnapshot = {
+        providerId: 'openrouter',
+        model: 'anthropic/claude-sonnet-4-failing',
+        auth: {
+          env: {
+            ANTHROPIC_AUTH_TOKEN: secretToken,
+            ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+          },
+          baseUrl: 'https://openrouter.ai/api',
+        },
+      };
+
+      mockInternalQueryService.execute.mockRejectedValueOnce(
+        new Error('upstream 503'),
+      );
+
+      const fallbackResult = await service.generateContent(
+        dynamicTemplate,
+        mockContext,
+        {
+          mcpServerRunning: false,
+          setupSnapshot,
+        },
+      );
+
+      expect(fallbackResult.isOk()).toBe(true);
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('SDK content generation failed'),
+        expect.objectContaining({
+          provider: setupSnapshot.providerId,
+          model: setupSnapshot.model,
+        }),
+      );
+
+      // Unexpected error escaping generateContent names launch pair without auth.
+      const throwingValidator = {
+        buildPathIndex: jest.fn(() => {
+          throw new Error('path index explosion');
+        }),
+        validate: jest.fn(),
+      } as unknown as GeneratedSectionValidator;
+      const throwingService = new ContentGenerationService(
+        mockLogger as never,
+        mockInternalQueryService as never,
+        mockWorkspaceLlm as never,
+        null,
+        throwingValidator,
+        mockFreshness as never,
+        mockAnalysisStorage as never,
+      );
+
+      const errResult = await throwingService.generateContent(
+        dynamicTemplate,
+        mockContext,
+        {
+          mcpServerRunning: false,
+          setupSnapshot,
+        },
+      );
+
+      expect(errResult.isErr()).toBe(true);
+      expect(errResult.error?.message).toContain(
+        `${setupSnapshot.providerId}/${setupSnapshot.model}`,
+      );
+      expect(errResult.error?.message).not.toContain(secretToken);
+
+      const serializedLogs = JSON.stringify([
+        mockLogger.debug.mock.calls,
+        mockLogger.info.mock.calls,
+        mockLogger.warn.mock.calls,
+        mockLogger.error.mock.calls,
+      ]);
+      expect(serializedLogs).not.toContain(secretToken);
     });
   });
 

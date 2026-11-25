@@ -9,6 +9,7 @@
 
 import { Result } from '@ptah-extension/shared';
 import type { GenerationStreamPayload } from '@ptah-extension/shared';
+import type { ResolvedSetupSnapshot } from '@ptah-extension/agent-sdk';
 import {
   AgentTemplate,
   AgentProjectContext,
@@ -22,6 +23,13 @@ export interface ContentGenerationSdkConfig {
   mcpServerRunning: boolean;
   mcpPort?: number;
   model?: string;
+  /**
+   * Ephemeral per-launch Setup provider/model/auth snapshot. When present,
+   * content generation dispatches directly with this snapshot's exact model
+   * and isolated auth, skipping `workspaceLlm.resolveForPath` and ignoring
+   * `model`. Never persisted or logged.
+   */
+  setupSnapshot?: ResolvedSetupSnapshot;
   /** Callback for real-time stream events (text, tool calls, thinking) */
   onStreamEvent?: (event: GenerationStreamPayload) => void;
   /** Enhanced prompt content to include in the generation system prompt */
