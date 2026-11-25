@@ -291,7 +291,7 @@ interface SdkSpawnOptions {
   readonly roleChannel: AgentRoleChannel;
   readonly binaryPath?: string;
   readonly mcpPort?: number;
-  /** Detected CLI version, for the `Lane policy` log line only (never passed to the adapter, F2). */
+  /** Detected CLI version, used for diagnostics and transport capability probes. */
   readonly cliVersion?: string;
   /** The resume gate's outcome, for a spawn that asked to resume. */
   readonly resumeDecision?: AgentResumeOutcome;
@@ -1582,6 +1582,7 @@ export class AgentProcessManager {
         model: resolvedModel,
         modelSource: laneModel.source,
         binaryPath,
+        cliVersion,
         mcpPort,
         mcpToken,
         onMcpConfigRestored:
@@ -1592,6 +1593,7 @@ export class AgentProcessManager {
         resumeSessionId: request.resumeSessionId,
         projectGuidance: request.projectGuidance,
         reasoningEffort: laneEffort.effort,
+        reasoningEffortResolved: true,
         phaseKind,
         autoApprove: this.spawnEnvironment.resolveAutoApprove(cli),
         permission: request.permission,

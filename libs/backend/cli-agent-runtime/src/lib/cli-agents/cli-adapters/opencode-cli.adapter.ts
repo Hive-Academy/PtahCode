@@ -426,6 +426,10 @@ export class OpencodeCliAdapter implements CliAdapter {
     return stripAnsiCodes(raw);
   }
 
+  laneEfforts(): readonly string[] {
+    return [];
+  }
+
   /**
    * List available models by parsing `opencode models` stdout. Each non-empty
    * line is treated as a `provider/model` id (the exact value opencode expects

@@ -550,9 +550,10 @@ class RuntimeContext implements CodexContext {
         this.translator.setThreadModel(threadId, threadSettings.model);
         if (threadId === this.identity.threadId) {
           this.reportedModel = threadSettings.model;
-          this.reportedEffort = threadSettings.effort === undefined
-            ? threadSettings.reasoningEffort ?? null
-            : threadSettings.effort;
+          if ('effort' in threadSettings || 'reasoningEffort' in threadSettings) {
+            this.reportedEffort =
+              threadSettings.effort?.trim() || threadSettings.reasoningEffort?.trim() || null;
+          }
         }
       }
     }

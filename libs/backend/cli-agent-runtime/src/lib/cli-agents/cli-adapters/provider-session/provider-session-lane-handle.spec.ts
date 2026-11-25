@@ -2170,6 +2170,12 @@ describe('createProviderSessionLaneHandle — reported session settings', () => 
     });
   });
 
+  it('reports unknown effort support when neither the agent nor the profile has values', async () => {
+    const h = start({ profile: { ...profile, sessionConfig: undefined } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.reportedSession?.()?.efforts).toEqual({ provenance: 'unknown' });
+  });
+
   it('reports the session effort after a refused setup hint without overriding spawn delivery', async () => {
     const h = start({
       profile,

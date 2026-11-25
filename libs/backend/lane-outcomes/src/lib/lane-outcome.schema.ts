@@ -108,7 +108,9 @@ export const LaneOutcomeRowSchema = z.object({
     .default(null),
   routedModel: outcomeModelId,
   routedEffort: outcomeEffort,
-  decisionModel: z.string().max(128).nullable().default(null),
+  // Older rows can contain a blank model. Keep them readable as unattributed.
+  decisionModel: z.string().max(128).nullable().default(null)
+    .transform((model) => model?.trim() || null),
   proposalConfidence: z
     .number()
     .finite()

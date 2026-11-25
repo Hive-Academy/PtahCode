@@ -23,6 +23,7 @@ describe('probeCopilotEffortFlag', () => {
     expect(mockProbeCliStdout).toHaveBeenCalledWith('/bin/preferred/copilot', ['--help'], {
       spawner: undefined,
       timeoutMs: 5000,
+      requireSuccess: true,
     });
   });
 
@@ -31,21 +32,22 @@ describe('probeCopilotEffortFlag', () => {
     await expect(probeCopilotEffortFlag('/bin/fallback/copilot', '1.0')).resolves.toBe('--effort');
   });
 
-  it('returns no flag when only similarly named options are listed', async () => {
+  it('caches successful help output containing no effort flag', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     mockProbeCliStdout.mockResolvedValue('  --effort-mode <mode>\n  --no-reasoning-effort');
     await expect(probeCopilotEffortFlag('/bin/unsupported/copilot', '1.0')).resolves.toBeUndefined();
+    await expect(probeCopilotEffortFlag('/bin/unsupported/copilot', '1.0')).resolves.toBeUndefined();
+    expect(mockProbeCliStdout).toHaveBeenCalledTimes(1);
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('caches a failed probe and emits one warning', async () => {
+  it('evicts a failed probe so the next call can discover support', async () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    mockProbeCliStdout.mockResolvedValue(undefined);
+    mockProbeCliStdout.mockResolvedValueOnce(undefined).mockResolvedValueOnce('  --effort <level>');
 
     await expect(probeCopilotEffortFlag('/bin/unavailable/copilot', '1.0')).resolves.toBeUndefined();
-    await expect(probeCopilotEffortFlag('/bin/unavailable/copilot', '1.0')).resolves.toBeUndefined();
-
-    expect(mockProbeCliStdout).toHaveBeenCalledTimes(1);
+    await expect(probeCopilotEffortFlag('/bin/unavailable/copilot', '1.0')).resolves.toBe('--effort');
+    expect(mockProbeCliStdout).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls).toEqual([['[Copilot CLI] Could not probe effort flag support.']]);
   });
 

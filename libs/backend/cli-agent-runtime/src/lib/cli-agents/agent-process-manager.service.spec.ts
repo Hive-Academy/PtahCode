@@ -2031,7 +2031,11 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
       const runSdkCall = await spawnCodex();
 
-      expect(runSdkCall.reasoningEffort).toBeUndefined();
+      expect(runSdkCall).toMatchObject({
+        reasoningEffort: undefined,
+        reasoningEffortResolved: true,
+        cliVersion: '1.0.0',
+      });
     });
 
     const spawnPi = async () => {

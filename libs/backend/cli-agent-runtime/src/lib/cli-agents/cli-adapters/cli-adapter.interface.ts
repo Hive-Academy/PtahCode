@@ -196,6 +196,8 @@ export interface CliCommandOptions extends LaneAccountBindingFields {
   readonly model?: string;
   /** Resolved absolute binary path from CLI detection. SDK adapters that spawn child processes should use this instead of bare binary names (avoids ENOENT on Windows). */
   readonly binaryPath?: string;
+  /** Version from the same CLI detection as binaryPath. */
+  readonly cliVersion?: string;
   /** Port of the running Ptah HTTP MCP server. When provided, adapters that support it will configure a direct MCP connection (bypassing VS Code's IDE bridge which blocks headless permissions). */
   readonly mcpPort?: number;
   /** Privileged in-memory credential for this agent and working directory. */
@@ -208,6 +210,8 @@ export interface CliCommandOptions extends LaneAccountBindingFields {
   readonly projectGuidance?: string;
   /** Reasoning effort level for the CLI agent (adapter-specific values) */
   readonly reasoningEffort?: string;
+  /** The spawn policy selected reasoningEffort, including an intentional omission. */
+  readonly reasoningEffortResolved?: boolean;
   /** Auto-approve all tool calls without user prompt (default: true). Maps to adapter-specific approval policies. */
   readonly autoApprove?: boolean;
   /** Explicit per-spawn permission policy. Omitted preserves existing defaults. */

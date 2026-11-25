@@ -894,6 +894,16 @@ describe('CodexContext thread frame boundary', () => {
       });
       settingsUpdate('root', { model: 'server/new-model', reasoningEffort: 'another-effort' });
       expect(context.reportedSettings().effort).toBe('another-effort');
+      settingsUpdate('root', { model: 'server/model-only' });
+      expect(context.reportedSettings()).toEqual({
+        model: 'server/model-only', effort: 'another-effort',
+      });
+      settingsUpdate('root', { model: 'server/model-only', effort: null, reasoningEffort: ' high ' });
+      expect(context.reportedSettings().effort).toBe('high');
+      settingsUpdate('root', { model: 'server/model-only', effort: '  ', reasoningEffort: 'low' });
+      expect(context.reportedSettings().effort).toBe('low');
+      settingsUpdate('root', { model: 'server/model-only', effort: '' });
+      expect(context.reportedSettings().effort).toBeNull();
       settingsUpdate('root', { model: 'server/new-model', effort: null });
       expect(context.reportedSettings().effort).toBeNull();
     },

@@ -15,7 +15,11 @@ export function probeCopilotEffortFlag(
   const cached = effortFlagProbes.get(key);
   if (cached) return cached;
 
-  const probe = readEffortFlag(binaryPath, spawner);
+  const probe = readEffortFlag(binaryPath, spawner).catch(() => {
+    effortFlagProbes.delete(key);
+    console.warn('[Copilot CLI] Could not probe effort flag support.');
+    return undefined;
+  });
   effortFlagProbes.set(key, probe);
   return probe;
 }
@@ -27,11 +31,9 @@ async function readEffortFlag(
   const help = await probeCliStdout(binaryPath, ['--help'], {
     spawner,
     timeoutMs: COPILOT_HELP_TIMEOUT_MS,
-  }).catch(() => undefined);
-  if (help === undefined) {
-    console.warn('[Copilot CLI] Could not probe effort flag support.');
-    return undefined;
-  }
+    requireSuccess: true,
+  });
+  if (help === undefined) throw new Error('Copilot help probe failed');
 
   if (/(?:^|[\s,|([])--reasoning-effort(?=$|[\s=,|)\]])/.test(help)) {
     return '--reasoning-effort';

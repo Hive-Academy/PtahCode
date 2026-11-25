@@ -299,6 +299,11 @@ describe('SqliteLaneOutcomeStore', () => {
     }
   });
 
+  it.each(['', '  '])('reads a blank decision model %j as unattributed', (decisionModel) => {
+    const row = LaneOutcomeRowSchema.parse({ ...outcomeRow('blank-decision-model'), decisionModel });
+    expect(row.decisionModel).toBeNull();
+  });
+
   it('round-trips provenance and guards classification', async () => {
     const { db, store } = fixture();
     try {

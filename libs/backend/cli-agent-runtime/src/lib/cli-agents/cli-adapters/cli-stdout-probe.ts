@@ -15,6 +15,8 @@ export interface ProbeCliStdoutOptions {
   readonly spawner?: IProcessSpawner;
   /** The process tree is killed and the probe yields undefined after this long. */
   readonly timeoutMs: number;
+  /** Discard stdout unless the command exits successfully. */
+  readonly requireSuccess?: boolean;
   /** Told when the command could not start; receives the command and the error message only. */
   readonly logger?: Logger;
 }
@@ -67,8 +69,12 @@ export function probeCliStdout(
     child.stdout?.on('data', (data: string) => {
       stdout += data;
     });
-    child.on('close', () => {
+    child.on('close', (exitCode) => {
       clearTimeout(timer);
+      if (options.requireSuccess && exitCode !== 0) {
+        resolve(undefined);
+        return;
+      }
       resolve(stdout.trim() || undefined);
     });
     child.on('error', (error: Error) => {

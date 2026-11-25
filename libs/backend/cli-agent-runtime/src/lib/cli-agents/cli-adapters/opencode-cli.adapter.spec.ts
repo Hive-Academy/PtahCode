@@ -191,6 +191,10 @@ describe('OpencodeCliAdapter', () => {
     adapter = new OpencodeCliAdapter();
   });
 
+  it('advertises an empty effort list for routing', () => {
+    expect(adapter.laneEfforts()).toEqual([]);
+  });
+
   describe('detect()', () => {
     it('reports installed when resolveCliPath finds the binary', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/opencode');

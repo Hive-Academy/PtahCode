@@ -628,11 +628,13 @@ export function createProviderSessionLaneHandle(
   const reportedSession = (): LaneReportedSession => {
     const reported = session.getReportedState();
     if (reported.efforts.provenance === 'native') return reported;
+    const supported = profileEfforts();
+    if (supported.length === 0) return reported;
     return {
       ...reported,
       efforts: {
         provenance: 'ptah-fallback',
-        supported: profileEfforts(),
+        supported,
         default: null,
       },
     };

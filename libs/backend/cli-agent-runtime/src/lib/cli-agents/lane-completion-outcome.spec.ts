@@ -71,6 +71,43 @@ describe('enqueueLaneCompletionOutcome routing facts', () => {
     });
   });
 
+  it('stores an outcome even when model and effort values exceed the row bounds', async () => {
+    expect(await writeOutcome({
+      reportedSession: {
+        model: ` ${'m'.repeat(205)} `,
+        effort: ` ${'e'.repeat(38)} `,
+        efforts: { provenance: 'unknown' },
+      },
+      spawnEffort: {
+        requested: 'r'.repeat(33), sent: 's'.repeat(34), source: 'request',
+        provenance: 'native', disposition: 'native-match',
+      },
+      routeFacts: { ...routeFacts, model: 'n'.repeat(201), effort: 't'.repeat(33) },
+    })).toMatchObject({
+      resolvedModel: 'm'.repeat(200),
+      resolvedModelProvenance: 'native',
+      resolvedEffort: 'e'.repeat(32),
+      resolvedEffortProvenance: 'native',
+      requestedEffort: 'r'.repeat(32),
+      effort: 's'.repeat(32),
+      routedModel: 'n'.repeat(200),
+      routedEffort: 't'.repeat(32),
+    });
+  });
+
+  it('records blank reported model, effort and decision model as absent', async () => {
+    expect(await writeOutcome({
+      reportedSession: { model: '', effort: '  ', efforts: { provenance: 'unknown' } },
+      routeFacts: { ...routeFacts, decisionModel: '  ' },
+    })).toMatchObject({
+      resolvedModel: null,
+      resolvedModelProvenance: 'unknown',
+      resolvedEffort: null,
+      resolvedEffortProvenance: 'unknown',
+      decisionModel: null,
+    });
+  });
+
   it('uses telemetry only when the adapter has no session state', async () => {
     expect(await writeOutcome({ observedModel: 'telemetry-model', routeFacts })).toMatchObject({
       resolvedModel: 'telemetry-model',

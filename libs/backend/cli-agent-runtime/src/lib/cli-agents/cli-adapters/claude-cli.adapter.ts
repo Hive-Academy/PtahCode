@@ -226,13 +226,16 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       const defaults = this.deps.defaults();
       const model = input.model?.trim() || defaults.model || '';
       const candidates = [input.reasoningEffort];
-      if (defaults.effort && defaults.effort !== 'inherit')
-        candidates.push(defaults.effort);
-      if (defaults.effort === 'inherit') candidates.push(defaults.chatEffort);
-      if (isReviewerOrTester(input.role?.name, input.phaseKind)) candidates.push('medium');
-      candidates.push(defaults.chatEffort);
-      const hasCandidates = candidates.some(Boolean);
-      const effort = hasCandidates ? await this.resolveEffort(candidates, model) : undefined;
+      if (!input.reasoningEffortResolved) {
+        if (defaults.effort && defaults.effort !== 'inherit')
+          candidates.push(defaults.effort);
+        if (defaults.effort === 'inherit') candidates.push(defaults.chatEffort);
+        if (isReviewerOrTester(input.role?.name, input.phaseKind)) candidates.push('medium');
+        candidates.push(defaults.chatEffort);
+      }
+      const effort = candidates.some(Boolean)
+        ? await this.resolveEffort(candidates, model)
+        : undefined;
       const policy = await this.deps.policy(input.workingDirectory);
       await this.deps.syncHarness(policy);
       const assembly = await this.deps.assembly.assembleSpawnOptions(
@@ -396,7 +399,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         }).handle;
         return {
           ...handle,
-          ...(hasCandidates && effort === undefined && {
+          ...(input.reasoningEffort !== undefined && effort === undefined && {
             effortDelivery: { sent: null, disposition: 'lane-refused' },
           }),
           // The shared builder gated every tool path of this lane: the

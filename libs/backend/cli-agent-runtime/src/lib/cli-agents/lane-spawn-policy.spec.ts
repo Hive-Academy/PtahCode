@@ -146,6 +146,14 @@ describe('lane spawn policy', () => {
       });
     });
 
+    it.each(['cursor', 'opencode'] as const)('reports that %s has no effort transport', (cli) => {
+      expect(resolveLaneEffort({ cli, spawnEffort: 'high' })).toMatchObject({
+        effort: undefined,
+        disposition: 'lane-takes-no-effort',
+        ignored: [{ step: 1, value: 'high', reason: 'lane-takes-no-effort' }],
+      });
+    });
+
     it.each([
       ['max', 'xhigh', 'fallback-mapped'],
       ['minimal', 'low', 'fallback-mapped'],

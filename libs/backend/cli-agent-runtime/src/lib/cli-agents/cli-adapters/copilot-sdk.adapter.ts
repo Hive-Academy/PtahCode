@@ -312,13 +312,11 @@ export class CopilotSdkAdapter implements CliAdapter {
 
     const resolvedBinaryPath = binaryPath;
     const spawnDescriptor = await resolveDirectSpawn(resolvedBinaryPath);
-    const { version } = await probeCliVersionDetailed(
+    const effortFlag = await probeCopilotEffortFlag(
       resolvedBinaryPath,
-      undefined,
-      undefined,
+      options.cliVersion,
       this.spawner,
-    ).catch(() => ({ version: undefined }));
-    const effortFlag = await probeCopilotEffortFlag(resolvedBinaryPath, version, this.spawner);
+    );
     let capturedSessionId: string | undefined;
     let turnSequence = 0;
     let activeChild: ReturnType<typeof spawnCli> | undefined;

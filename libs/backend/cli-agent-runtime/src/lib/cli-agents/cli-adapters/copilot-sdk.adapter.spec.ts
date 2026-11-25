@@ -1040,6 +1040,17 @@ describe('CopilotSdkAdapter', () => {
       await handle.done;
     });
 
+    it('reuses the detected version across spawns and reprobes help on a version change', async () => {
+      const binaryPath = '/opt/detected/copilot';
+      for (const cliVersion of ['1.0', '1.0', '2.0']) {
+        const handle = await adapter.runSdk({ ...options, binaryPath, cliVersion });
+        currentChild?.emitClose(0);
+        await handle.done;
+      }
+      expect(mockProbeCliVersionDetailed).not.toHaveBeenCalled();
+      expect(mockProbeCliStdout).toHaveBeenCalledTimes(2);
+    });
+
     it('omits effort from argv and reports when the CLI has no effort flag', async () => {
       mockProbeCliStdout.mockResolvedValue('  --model <model>');
       const handle = await adapter.runSdk({ ...options, binaryPath: '/opt/unsupported/copilot' });

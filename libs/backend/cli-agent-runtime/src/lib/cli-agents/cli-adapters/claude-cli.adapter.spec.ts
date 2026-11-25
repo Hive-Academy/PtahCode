@@ -413,6 +413,34 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     },
   );
 
+  it.each(['native-model', 'future-model'])(
+    'keeps the spawn policy omission for %s even when adapter defaults are configured',
+    async (model) => {
+      const f = fixture();
+      const handle = await f.adapter.runSdk({
+        ...f.input,
+        model,
+        reasoningEffortResolved: true,
+        phaseKind: 'review',
+      });
+      expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+      expect(handle).not.toHaveProperty('effortDelivery');
+      f.finish(0);
+    },
+  );
+
+  it('reports when the Claude transport refuses the only effort selected by spawn policy', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({
+      ...f.input,
+      reasoningEffort: 'unsupported',
+      reasoningEffortResolved: true,
+    });
+    expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'lane-refused' });
+    f.finish(0);
+  });
+
   it('does not infer reviewer effort from a name in an implement phase', async () => {
     const f = fixture();
     f.defaults.mockReturnValue({});

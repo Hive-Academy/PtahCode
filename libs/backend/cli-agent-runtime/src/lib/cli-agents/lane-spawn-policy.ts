@@ -414,8 +414,11 @@ export function resolveLaneEffort(
       }
     } else {
       sent = mapEffort?.(value);
-      if (sent === undefined) reason = 'fallback-refused';
-      else if (sent === value) reason = 'fallback-allowlist';
+      if (sent === undefined) {
+        reason = input.cli === 'cursor' || input.cli === 'opencode'
+          ? 'lane-takes-no-effort'
+          : 'fallback-refused';
+      } else if (sent === value) reason = 'fallback-allowlist';
       else reason = 'fallback-mapped';
     }
     if (requested === undefined) {
