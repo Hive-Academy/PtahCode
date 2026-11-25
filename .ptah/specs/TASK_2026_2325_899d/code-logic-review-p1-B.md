@@ -1,0 +1,74 @@
+# P1 code-logic review — slice B
+Reviewer family: claude (CLI lane). Implementer families of this slice: codex (G-Lane-Routing-Dispatch 37988eda, G-Lane-Routing-SkillCaller 2ede7c29, merge resolution f67f38e3), antigravity (G-Analysis-Service c2a20fe1, G-Generation-Service 1a43c85b), kimi (G-Guidance-Backend a22924d5).
+
+Scope: `git diff main...HEAD -- libs/backend/lane-routing libs/backend/agent-generation` (22 files). I read the whole changed functions, the callers in `rpc-handlers` for the Setup snapshot, D25 and D26 in `decisions.md`, and the two lane-routing batch reports.
+
+## Verdict: REVISE   Score: 7/10
+
+The lane-routing seams (blocked `configuredPair`, overloads, `onProviderSubmit` order, slot release, deadline, discriminated result) are correct. The agent-generation Setup pinning is correct on all live wizard paths. One Major defect remains: every successful System One Decision call reports `failed / invalid-output`. The score is not 8 because of that defect, which every System One user sees. The score is not 6 because the defect is narrow and has a local fix, and no other path loses data or leaks secrets.
+
+## Findings
+
+1. [Major] `libs/backend/lane-routing/src/lib/decision-model/skill-ranking-caller.service.ts:207-233` with `:376-378`. Problem: on the System One path, an Install pick never has a reason, so `validateItem` rejects it with "Decision Install requires project evidence and a concise reason". If all picks are Install picks (the normal case), `items` is empty, `hasUnresolvedAnswer` is false and `itemRejections` is not empty. The result is then `fail('invalid-output', ...)` with `pairAttempted`. The spec at `skill-ranking-caller.service.spec.ts:395-421` confirms this outcome. Why it matters: D26 accepts that System One Install picks go to Normal. D26 does not say that the stage blames a healthy model. The UI gets `invalid-output` for a correct protocol answer, and valid answers go into `itemRejections`, which the judge maps to stage `invalidItemIds` (batch report, "Open items"). The call also uses up to `DECISION_REQUEST_TIMEOUT_MS` (3 s) of the 31 s RPC budget, and no Install outcome is possible from it. Suggested fix: when `dispatch.kind === 'system-one'`, either do not dispatch (return `skipped` with a dedicated category, or `used` with no items), or treat a reasonless pick as unresolved (`hasUnresolvedAnswer = true`, no entry in `itemRejections`). Then update the spec.
+
+2. [Minor] `libs/backend/lane-routing/src/lib/decision-model/skill-ranking-caller.service.ts:376-378` with `:274-305`. Problem: an item with empty or missing `evidence` is still sent to the model. Then each Install answer for it becomes a model rejection. If all items lack evidence, the result is `failed / invalid-output` with `pairAttempted`. Why it matters: the defect is in the caller input, but the category blames the provider, and one request is spent. Suggested fix: in `prepareItem`, set `eligible = []` when `evidence` is empty, so the item is filtered out before dispatch and goes to Normal.
+
+3. [Minor] `libs/backend/lane-routing/src/lib/decision-model/skill-ranking-caller.service.ts:285-287`. Problem: `/\bdeprecated\b/i` on the free-text registry description marks a candidate as deprecated when the text only mentions the word, for example "replaces the deprecated tslint rules". That candidate is removed from `eligible` without a reason, and an Install of it is rejected as "Decision candidate is deprecated". Why it matters: valid candidates can be lost from the Decision stage with no trace. Suggested fix: use only the explicit `candidate.deprecated` flag, or a narrow pattern such as a leading `deprecated:` or `[deprecated]` marker.
+
+4. [Minor] `libs/backend/agent-generation/src/lib/services/enhanced-prompts/enhanced-prompts.service.ts:396-401`. Problem: `resolveGuidanceRoute` still resolves the chat or workspace pair through `workspaceLlm.resolveForPath(workspacePath, { requestedModel })`. A search of `libs/backend` finds no caller now. Why it matters: it is a public entry to the non-Setup pair on the guidance service, and a later caller can use it by mistake and run guidance on the chat model. Suggested fix: remove the method, or make it delegate to `resolveSetup`.
+
+5. [Minor] `libs/backend/agent-generation/src/lib/services/content-generation.service.ts:388-392` with `orchestrator.service.ts:817-819`. Problem: when `setupSnapshot` is absent, generation silently resolves through `resolveForPath` with `options.model`, which is the non-Setup pair. No log records which path ran. Why it matters: all current wizard callers pass the snapshot (`rpc-handlers/.../wizard-generation-rpc.handlers.ts:541,645,675`, retry re-resolves at `:1293`), so no live defect exists. But the requirement "no silent fallback to chat models" depends on the caller only. Suggested fix: make `setupSnapshot` required on the wizard generation option type, or log at `warn` when the non-Setup path runs.
+
+## Write-path trace
+
+- `analysisPair` (agent-generation, `analysis-run-checkpoint.ts:177-181`): the checkpoint writes `{ provider, model }` into the v4 manifest with `model` kept equal to `analysisPair.model`. The schema accepts it (`multi-phase.types.ts:120-123,178`, strict, trimmed, non-empty). Runtime readers: (a) `isResumableForPair` (`analysis-run-checkpoint.ts:38-45`) requires the same provider and model, so a pair change or a legacy pair-less manifest starts fresh. (b) `input()` (`:198-207`) stamps `provider` into each phase input, and phase reuse (`:223-228`) requires a non-empty equal provider, so phases from legacy runs are not reused. (c) `analysis-storage.service.ts:750-762` returns `analysisPair` for v4 manifests, and `null` otherwise. The behavior is as intended. No auth or secret is written: `auth` comes from the snapshot and goes only to `internalQueryService.execute` (`multi-phase-analysis.service.ts:816-823`).
+- Phase failure text (`multi-phase-analysis.service.ts:396-404,869-874`) appends `(provider/model)` and goes through `markFailed` into the manifest. The pair is not secret. The raw `resultError` text was persisted before this change too (not new).
+- Slice B has no settings writes. `setMany` and Setup storage are in other slices.
+
+## Checked and OK
+
+- `decision-caller.ts:43-85`: each `blocked` return (structured port missing, target null, JEV without key, resolve throw) carries `configuredPair` from the selection. `dispatchFor` now sets `provider: caller.provider` (`:143`). `noteLive` accepts the narrowed `Pick` (`:174-177`).
+- `model-call.ts:120-215` (`callSystemOne`): `onProviderSubmit` fires at `:184`, after the deadline check, `tryStart`, the rate-cost check and the caller-signal check, and just before `caller.decide`. Every early return after `tryStart` (cost gate, `cancelled`, `onProviderSubmit` throw, `decide` reject) passes through the outer `finally release()`. `release` is idempotent through `acquired`. `onAbort` releases the slot when the signal aborts during `decide`. In the skill caller, `admission.signal` is the same controller signal as `submission.signal`, so the `deadline` check wins over `cancelled`. Both map to `pre-dispatch-error`, so the result is the same.
+- `model-call.ts:258-282` (`callStructured`): the combined signal includes the dispatch signal (an already-aborted `AbortSignal.abort()` from a zero budget is caught). `onProviderSubmit` fires only when the request is actually submitted.
+- Overloads in `model-refine.ts:243-251` and `model-call.ts:103-118,240-257`: callers without a signal keep the narrow `FallbackCause`. Callers with a signal get `ModelRequestCause`, which includes `cancelled`. `runFixedRequest` checks the size before cancellation (`:275-280`), as D25 requires.
+- Merge resolution beac0b1b8 (lane-routing): admission, budget, `questionCap`, `requestReason`, timeout cap and token measurement from PR #1511 are kept. `provider`, `signal`, `onProviderSubmit` and `cancelled` are re-applied in the D25 order.
+- `SkillRankingCallerService` deadline (`:54-58,72-108`): `min(now + 3000, rpcEntry + 31000)` is calculated once with one clock (`Date.now`). The timer uses `Math.max(0, …)`, so no negative delay. `clearTimeout` and `controller.abort()` run in `finally`. A late completion skips `structuredAnswer` capture (`:163`) and skips `noteLive` (`:197-199`). Promise.race subscribes to `rank()`, so a later rejection is handled.
+- Attribution: `pairConfigured` is set before dispatch. `pairAttempted` is set only from `onProviderSubmit`. `pairUsed` is set only on `used`. `fail` drops `pairAttempted` for `pre-dispatch-error` (`:90-93`). The `catch` returns a category only, with no provider text (spec `:238`).
+- Per-item validation: duplicate answers for one item are rejected as conflicting. Case-insensitive ID collisions are ambiguous. Deprecated, unknown, proposal and Build fields are rejected per item. `none`, low confidence and omitted items stay unresolved. Valid sibling installs are kept. Unknown `itemId` values are ignored.
+- Agent-generation analysis (`multi-phase-analysis.service.ts:214-253`): it uses the handler snapshot, or else strict `resolveSetup`. `invalid` and `unavailable` return an error with no fallback. `options.model` is ignored. `auth` is now required and always passed.
+- Guidance: `bound?.route ?? sdkConfig?.route` (`enhanced-prompts.service.ts:670`). Both values come from `resolveSetupRoute` (`enhanced-prompts-rpc.handlers.ts:411,567,723`), which throws `SETUP_MODEL_INVALID` on `invalid` or `unavailable`.
+- Generation: `setupSnapshot` overrides `model` (`orchestrator.service.ts:817-819`), and content generation uses the snapshot's `model` and `auth` (`content-generation.service.ts:388`). Error text adds only `provider/model`.
+- `AgenticAnalysisService.analyzeWorkspace` still uses `resolveForPath` (`agentic-analysis.service.ts:150`), but nothing calls it. Only `cancelAnalysis` is called (`setup-rpc.handlers.ts:721-728`).
+- Focused tests passed: lane-routing `skill-ranking-caller.service.spec.ts`, `model-call.spec.ts`, `decision-caller.spec.ts` (3 suites, 46 tests). Agent-generation `analysis-storage`, `content-generation`, `enhanced-prompts`, `orchestrator`, `multi-phase-analysis` specs (5 suites, 364 tests). Logs: `.ptah/tmp/rvB-lr.log`, `.ptah/tmp/rvB-ag.log`.
+
+## Not checked
+
+- I did not run `tsc` or `eslint` for the two projects. The jest runs compiled the specs and their imports only.
+- I did not check how `SkillJudgeService` (rpc-handlers, another slice) maps `itemRejections` and absent items, or whether it passes `rpcEntry` and `evidence`. Findings 1 and 2 depend on that mapping.
+- I did not check `orchestrator.analyzeWorkspace` (`orchestrator.service.ts:405,615`) for model use.
+- I did not check the template fallback of guidance after an SDK failure (`generateGuidanceViaSdk` returns `null`). That behavior was there before this change.
+- I did not check the agent-sdk side of beac0b1b8 (other slice).
+
+## Re-review round 1
+
+Scope: `git show a441db2ad` (6 files), the triage in `code-logic-review.md` and `batch-fix-r1-F2-report.md`. I read the changed functions in full, as they are at HEAD. Focused tests passed: `skill-ranking-caller.service.spec.ts` 24 of 24, and `enhanced-prompts.service.spec.ts` with `content-generation.service.spec.ts` 169 of 169 (`.ptah/tmp/rr-B-*.log`). I did not run `tsc` or `eslint`. The lane report states that both passed.
+
+| Finding | Status | Evidence |
+| --- | --- | --- |
+| B1 [Major] System One success reported as `failed / invalid-output` | Closed | `skill-ranking-caller.service.ts:204-208`: the System One path now gives `answers = []`. `validateItems` then returns empty `items` and empty `itemRejections`, so the `fail('invalid-output')` guard at `:210-215` cannot trigger. The result is `used` with `pairConfigured`, `pairAttempted` and `pairUsed` (`:216-223`). Provider failures still go first (`:200-202`). The spec at `skill-ranking-caller.service.spec.ts:429` asserts the full result. |
+| B2 [Minor] Items with no evidence sent to the model | Closed | `:280`: `eligible` is `[]` when the sanitized `evidence` is empty. The pre-dispatch filter at `:61` removes the item, so no request is spent. `skillRankingText` trims (`skill-ranking-caller.types.ts:83`), so whitespace-only or URL-only evidence also counts as empty. The `!input.evidence` check in `validateItem` (`:358`) is now unnecessary, and its removal is correct, because only items with evidence reach that function. |
+| B3 [Minor] `/\bdeprecated\b/i` on the description | Disputed (no change) | `:269-271` is unchanged. I accept the coordinator triage: plan requirement 3.4 specifies this pattern, so the code matches the contract. My view: the false-positive risk stays (for example, "replaces the deprecated tslint rules"), and the candidate is removed with no trace. I recommend a later plan change to a marker pattern or the explicit flag only. This finding does not block. |
+| B4 [Minor] `resolveGuidanceRoute` resolves the chat pair | Closed | `enhanced-prompts.service.ts:397-407`: the method calls `resolveSetup` and throws on `invalid` or `unavailable`. The `requestedModel` override is gone. `set` and `unset` return the Setup snapshot (`workspace-llm-resolver.port.ts:64-65`), the same handling as the other Setup callers. A search of `libs` and `apps` finds no runtime caller, only spec callers. |
+| B5 [Minor] Silent non-Setup path in content generation | Closed | `content-generation.service.ts:388-393`: a `warn` log runs before `resolveForPath` when `setupSnapshot` is absent. The message contains no model, path or auth data. Specs check that the warning occurs and that it does not occur (`content-generation.service.spec.ts:522`, `:1074`, `:1120`). |
+
+### New defects from the fixes
+
+None found. Observations (no action necessary):
+
+- After B1, a System One Decision call still spends one request and up to 3 s (`DECISION_REQUEST_TIMEOUT_MS`), and it cannot give an Install. The lane kept the dispatch so that the pair attribution stays (report, decision B1). This agrees with D26. A later change can skip the dispatch for System One if the attribution is not needed.
+- After B1, an explicit System One `none` choice is no longer read. This does not change behavior: `validateItem` returned `undefined` for `none` before, which already left the item for Normal.
+- The B5 warning fires on each non-Setup generation call. No current non-wizard caller exists, so the log volume is not a risk now.
+
+## Verdict (round 1): APPROVED   Score: 8/10
+
+B1, B2, B4 and B5 are closed with spec coverage. B3 is disputed and follows the plan contract. The score is not 9 because the B3 false-positive risk stays and the System One Decision call still uses time with no possible Install. The score is not 7 because no Major defect remains and the fixes add no new defect.
