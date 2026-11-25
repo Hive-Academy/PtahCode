@@ -61,6 +61,7 @@ export class LaneCatalogStore implements LaneCatalogSnapshotReader, LaneCatalogR
     try {
       raw = this.storage.get<unknown>(CATALOG_STORAGE_KEY);
     } catch (error: unknown) {
+      // degradation-audit: reported - the failed read is logged; the catalog starts empty and refetches.
       this.logger.warn('[lane-routing] catalog snapshot read failed', {
         status: 'error',
         errorClass: errorClass(error),

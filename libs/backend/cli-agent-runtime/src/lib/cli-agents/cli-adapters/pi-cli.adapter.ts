@@ -161,13 +161,19 @@ interface PiEvent {
   readonly message?: unknown;
 }
 
+// Zod `.catch(undefined)` below is a schema default, not a promise handler:
+// a malformed field reads as unknown and the rest of the state stays usable.
 const piSessionStateSchema = z.object({
+  // degradation-audit: optional-capability - Zod fallback, a bad field reads as unknown.
   sessionId: z.string().optional().catch(undefined),
+  // degradation-audit: optional-capability - Zod fallback, a bad field reads as unknown.
   sessionFile: z.string().optional().catch(undefined),
+  // degradation-audit: optional-capability - Zod fallback, a bad field reads as unknown.
   model: z.object({
     provider: z.string().min(1),
     id: z.string().min(1),
   }).optional().catch(undefined),
+  // degradation-audit: optional-capability - Zod fallback, a bad field reads as unknown.
   thinkingLevel: z.string().min(1).optional().catch(undefined),
 });
 
