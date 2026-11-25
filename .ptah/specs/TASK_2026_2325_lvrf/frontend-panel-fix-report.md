@@ -562,3 +562,23 @@ The backend now emits host notices as `CliOutputSegment` `{ type: 'info', conten
 - eslint on the 17 changed or new frontend files: 0 errors, 6 warnings (existing).
 - ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
 - Not run (excluded): typecheck-templates and the Electron check.
+
+## CI fix: rail-board spec timeouts (head 424713a08)
+
+- Symptom: 13 tests in `canvas-rail-board.component.spec.ts` that await `fixture.whenStable()` hit the 5 s timeout, and the suite took about 110 s.
+- Bisect, using a detached scratch worktree `.claude-worktrees/rb-bisect`:
+  - fce4aa49d passes;
+  - d10a7cc70 (round 6) fails;
+  - d10a7cc70 with only `session-stats-source.ts` reverted to fce4aa49d passes.
+- Cause: round 6 made `injectSessionStatsSource` inject `ModelStateService` to read the global model pick. The rail board's stats host had never built that root service. Its constructor starts the `config:models-list` RPC, which in that spec never answers, and the RPC's timeout timer keeps the zone unstable until it fires, so `whenStable()` waited past the test timeout.
+- Fix (`session-stats-source.ts`):
+  - `currentModel` is now the session's own model by the pill's rule without the global pick: `resolveTabModel(tab, null)`, meaning the tab override, then the session model.
+  - The source no longer touches `ModelStateService`.
+  - With no own model, the inspector falls back to the latest turn's model, as before round 6.
+- Spec: `session-stats-source.spec.ts` checks the override and that a tab with no own model gives `null`. The `ModelStateService` providers were removed.
+- Verification:
+  - full `canvas-rail-board.component.spec.ts`: 137/137 in 14.6 s (was 13 failed, 106 s);
+  - other canvas specs (all canvas-detail specs, focus-area, inspector-dock, orchestra-canvas): 191/191;
+  - `session-stats-source.spec.ts`: 19/19;
+  - `tsc` on the chat lib: 0 errors; eslint: clean.
+- Housekeeping: the scratch worktree `.claude-worktrees/rb-bisect` (detached, with a `node_modules` junction) is left for the coordinator to remove.
