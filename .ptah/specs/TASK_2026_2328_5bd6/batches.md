@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B21, B23 COMPLETE. B22, B24 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B21, B23, B24 COMPLETE. B22, B25 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -543,7 +543,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B22 - WU20a Codex native effort list for the composer (decisions.md row 20)
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 76d257a7)
 - **Shape / weight**: logic / est. 11,300. **Actual tokens**: pending
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/`): `cli-adapters/codex/codex-app-server-lane-models.ts` (whole, after B18); `cli-adapters/codex/codex-app-server-lane-models.spec.ts` (whole, after B18); `cli-adapters/codex/codex-app-server-lane-rejection.ts:1-25`; `cli-adapters/codex/codex-app-server-lane.adapter.ts:285-300,880-930`; `cli-adapters/cli-adapter.interface.ts:78-87,405-412`; `messaging/agent-message-coordinator.service.ts:100-145,520-600`; `messaging/agent-message-coordinator.service.spec.ts` (describe that covers turn options, find by `rg -n "turnOptions" ...spec.ts`)
@@ -577,8 +577,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B24 - WU8d phase plan, assemble, route-choice spec
 
-- **Status**: IN_PROGRESS (codex ef65abef; decision 32)
-- **Shape / weight**: logic / est. 13,500. **Actual tokens**: pending
+- **Status**: COMPLETE (codex ef65abef)
+- **Shape / weight**: logic / est. 13,500. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/pipeline/phase-plan.ts` (ranges that build `ScoreInput` and call `score()`, find by `rg -n "score\(" ...phase-plan.ts`, about 250 lines); `.../pipeline/assemble-gate.ts:600-734`; `.../pipeline/assemble-gate.spec.ts:1-80`; `.../pipeline/tier-effort-policy.ts:140-195`; `.../ranking/choice.types.ts`; `.../pipeline/route-off-golden.spec.ts` (read only, harness reuse); PLAN:893-901, PLAN:502-509, PLAN:982-997
 - **Write set**: `W/libs/backend/lane-routing/src/lib/pipeline/phase-plan.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/assemble-gate.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/route-choice.spec.ts` (new)
