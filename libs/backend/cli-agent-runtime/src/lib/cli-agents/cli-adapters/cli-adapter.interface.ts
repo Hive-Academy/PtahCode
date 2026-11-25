@@ -14,9 +14,12 @@ import type {
   CliType,
   CliDetectionResult,
   CliOutputSegment,
+  EffortDisposition,
+  EffortSupport,
   FlatStreamEventUnion,
   LaneComposerCommandOption,
   LaneNetworkMode,
+  LaneReportedSession,
   LaneTurnContent,
   LaneTurnInputCapabilities,
   LaneTurnSettings,
@@ -69,6 +72,10 @@ export interface LaneAccountBindingPort {
 export interface CliModelInfo {
   readonly id: string;
   readonly name: string;
+  /** True when the lane marks this model as its default. */
+  readonly isDefault?: boolean;
+  /** Per-model efforts reported by the lane. Omitted when unknown. */
+  readonly efforts?: Extract<EffortSupport, { provenance: 'native' }>;
   /**
    * Set by classification when no account source confirmed the CLI's id.
    * Adapters never set it; no adapter carries a hardcoded list.
@@ -237,6 +244,13 @@ export interface CliCommandOptions extends LaneAccountBindingFields {
  * AgentProcessManager uses this instead of ChildProcess when present.
  */
 export interface SdkHandle extends LaneAccountBindingFields {
+  /** Native session values, when the adapter has a native source. */
+  reportedSession?(): LaneReportedSession;
+  /** Set when the adapter's transport changes or drops the policy effort. */
+  readonly effortDelivery?: {
+    readonly sent: string | null;
+    readonly disposition: EffortDisposition;
+  };
   /** Actual policy after a supported adapter fallback. */
   readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
   /** Provider configured for a Ptah CLI handle at spawn. */
@@ -468,10 +482,9 @@ export interface CliAdapter {
   listModels?(): Promise<CliModelInfo[]>;
 
   /**
-   * Optional: the reasoning effort levels this CLI's lanes accept, when the
-   * list is known without a running lane. Served to the composer of a
-   * stopped or restored lane that has no cached catalog. `model` is the lane
-   * record's model, for a CLI whose levels depend on it; others ignore it.
+   * Optional Ptah fallback effort levels for the composer of a stopped or
+   * restored lane without native effort data. `model` is the lane record's
+   * model, for a CLI whose fallback levels depend on it.
    */
   laneEfforts?(model?: string): readonly string[];
 

@@ -13,10 +13,13 @@ import type {
   CliAdapterManifest,
   CliType,
   EffectiveLanePolicy,
+  EffortDisposition,
+  EffortSupport,
   LaneNetworkMode,
   LanePermissionMode,
   LaneSpawnPolicyRefusal,
   PhaseKind,
+  ValueProvenance,
 } from '@ptah-extension/shared';
 import type { LaneModelSource } from './cli-adapters/cli-adapter.interface';
 
@@ -314,6 +317,7 @@ export type LaneEffortStep = 1 | 2 | 3 | 4 | 5 | 6;
 export interface IgnoredLaneEffort {
   readonly step: LaneEffortStep;
   readonly value: string;
+  readonly reason: EffortDisposition;
 }
 
 export interface LaneEffortInput {
@@ -328,14 +332,19 @@ export interface LaneEffortInput {
   readonly roleName?: string;
   /** From the validated spawn request's optional `phase.kind`. */
   readonly phaseKind?: PhaseKind;
+  readonly nativeEfforts?: EffortSupport;
 }
 
 export interface LaneEffortResolution {
-  /** The value for the CLI, already mapped onto its scale. */
+  /** The value for the CLI. */
   readonly effort: string | undefined;
   readonly step: LaneEffortStep;
   /** Values skipped because the CLI does not accept them, for the log. */
   readonly ignored: readonly IgnoredLaneEffort[];
+  /** First offered value, even when a later step supplies the sent effort. */
+  readonly requested: string | undefined;
+  readonly provenance: ValueProvenance;
+  readonly disposition: EffortDisposition;
 }
 
 /**
@@ -373,32 +382,67 @@ export function isReviewerOrTester(
  * no usable in-chat effort also continues to step 4; step 5 then has nothing
  * new to offer, so a non-reviewer ends at step 6.
  *
- * A CLI whose effort Ptah does not resolve always ends at step 6, with any
- * offered spawn effort recorded as ignored.
+ * Without a native list or fallback mapper, only a spawn effort is checked.
  */
 export function resolveLaneEffort(
   input: LaneEffortInput,
 ): LaneEffortResolution {
   const ignored: IgnoredLaneEffort[] = [];
+  const native =
+    input.nativeEfforts?.provenance === 'native'
+      ? input.nativeEfforts
+      : undefined;
   const mapEffort = effortMapperFor(input.cli);
+  let requested: string | undefined;
+  let disposition: EffortDisposition = 'none-requested';
 
   const offer = (
     step: LaneEffortStep,
     value: string | undefined,
   ): string | undefined => {
     if (!value) return undefined;
-    const mapped = mapEffort?.(value);
-    if (mapped === undefined) ignored.push({ step, value });
-    return mapped;
+    let sent: string | undefined;
+    let reason: EffortDisposition;
+    if (native) {
+      if (native.supported.length === 0) {
+        reason = 'lane-takes-no-effort';
+      } else if (native.supported.includes(value)) {
+        sent = value;
+        reason = 'native-match';
+      } else {
+        reason = 'not-in-native-list';
+      }
+    } else {
+      sent = mapEffort?.(value);
+      if (sent === undefined) reason = 'fallback-refused';
+      else if (sent === value) reason = 'fallback-allowlist';
+      else reason = 'fallback-mapped';
+    }
+    if (requested === undefined) {
+      requested = value;
+      disposition = reason;
+    }
+    if (sent === undefined) ignored.push({ step, value, reason });
+    return sent;
   };
   const result = (
     effort: string | undefined,
     step: LaneEffortStep,
-  ): LaneEffortResolution => ({ effort, step, ignored });
+  ): LaneEffortResolution => ({
+    effort,
+    step,
+    ignored,
+    requested,
+    provenance:
+      requested === undefined
+        ? 'unknown'
+        : (native?.provenance ?? 'ptah-fallback'),
+    disposition,
+  });
 
   const fromSpawn = offer(1, input.spawnEffort);
   if (fromSpawn) return result(fromSpawn, 1);
-  if (!mapEffort) return result(undefined, 6);
+  if (!native && !mapEffort) return result(undefined, 6);
 
   const setting = input.setting ?? '';
   if (setting === INHERIT) {
@@ -410,7 +454,8 @@ export function resolveLaneEffort(
   }
 
   if (isReviewerOrTester(input.roleName, input.phaseKind)) {
-    return result(mapEffort(REVIEWER_DEFAULT_EFFORT), 4);
+    const reviewerDefault = offer(4, REVIEWER_DEFAULT_EFFORT);
+    if (reviewerDefault) return result(reviewerDefault, 4);
   }
   if (setting !== INHERIT) {
     const fromChat = offer(5, input.chatEffort);

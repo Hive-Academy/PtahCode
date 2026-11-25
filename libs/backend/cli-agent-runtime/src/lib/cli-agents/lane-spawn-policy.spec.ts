@@ -75,6 +75,120 @@ describe('lane spawn policy', () => {
       ).toMatchObject({ effort: 'medium', step: 4 });
     },
   );
+
+  describe('effort provenance', () => {
+    it('sends a lane-reported value unchanged', () => {
+      expect(resolveLaneEffort({
+        cli: 'codex',
+        spawnEffort: 'max',
+        nativeEfforts: { provenance: 'native', supported: ['max'], default: null },
+      })).toEqual({
+        effort: 'max',
+        step: 1,
+        ignored: [],
+        requested: 'max',
+        provenance: 'native',
+        disposition: 'native-match',
+      });
+    });
+
+    it('skips a value absent from the native list and checks the next step', () => {
+      expect(resolveLaneEffort({
+        cli: 'codex',
+        spawnEffort: 'max',
+        setting: 'high',
+        nativeEfforts: { provenance: 'native', supported: ['xhigh', 'high'], default: 'high' },
+      })).toEqual({
+        effort: 'high',
+        step: 2,
+        ignored: [{ step: 1, value: 'max', reason: 'not-in-native-list' }],
+        requested: 'max',
+        provenance: 'native',
+        disposition: 'not-in-native-list',
+      });
+    });
+
+    it.each([
+      { phaseKind: 'review' },
+      { roleName: 'code-logic-reviewer' },
+    ] as const)('checks the reviewer default for %j before offering chat effort', (reviewer) => {
+      expect(resolveLaneEffort({
+        cli: 'codex',
+        ...reviewer,
+        chatEffort: 'high',
+        nativeEfforts: { provenance: 'native', supported: ['high'], default: 'high' },
+      })).toEqual({
+        effort: 'high',
+        step: 5,
+        ignored: [{ step: 4, value: 'medium', reason: 'not-in-native-list' }],
+        requested: 'medium',
+        provenance: 'native',
+        disposition: 'not-in-native-list',
+      });
+    });
+
+    it('sends nothing when the lane reports it takes no effort', () => {
+      expect(resolveLaneEffort({
+        cli: 'claude',
+        spawnEffort: 'max',
+        setting: 'high',
+        nativeEfforts: { provenance: 'native', supported: [], default: null },
+      })).toEqual({
+        effort: undefined,
+        step: 6,
+        ignored: [
+          { step: 1, value: 'max', reason: 'lane-takes-no-effort' },
+          { step: 2, value: 'high', reason: 'lane-takes-no-effort' },
+        ],
+        requested: 'max',
+        provenance: 'native',
+        disposition: 'lane-takes-no-effort',
+      });
+    });
+
+    it.each([
+      ['max', 'xhigh', 'fallback-mapped'],
+      ['minimal', 'low', 'fallback-mapped'],
+      ['high', 'high', 'fallback-allowlist'],
+      ['vendor-level', undefined, 'fallback-refused'],
+    ] as const)('checks unknown-list effort %s with the fallback mapper', (
+      spawnEffort,
+      effort,
+      disposition,
+    ) => {
+      expect(resolveLaneEffort({
+        cli: 'codex',
+        spawnEffort,
+        nativeEfforts: { provenance: 'unknown' },
+      })).toMatchObject({ effort, disposition, requested: spawnEffort, provenance: 'ptah-fallback' });
+    });
+
+    it('uses the mapper for a supplied Ptah fallback list', () => {
+      expect(resolveLaneEffort({
+        cli: 'codex',
+        spawnEffort: 'max',
+        nativeEfforts: { provenance: 'ptah-fallback', supported: [], default: null },
+      })).toMatchObject({
+        effort: 'xhigh',
+        step: 1,
+        requested: 'max',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-mapped',
+      });
+    });
+
+    it('records no request when no step offers an effort', () => {
+      expect(resolveLaneEffort({ cli: 'codex' })).toEqual({
+        effort: undefined,
+        step: 6,
+        ignored: [],
+        requested: undefined,
+        provenance: 'unknown',
+        disposition: 'none-requested',
+      });
+    });
+  });
+
   it('maps Codex workspace writes with native network denial', () => {
     expect(
       translateLaneSpawnPolicy('codex', codex, {

@@ -644,7 +644,14 @@ describe('Batch 26 typed Claude runtime policy', () => {
     expect(environment({ 'agentOrchestration.codexReasoningEffort': 'max' }).resolveReasoningEffort('codex'))
       .toMatchObject({ effort: 'xhigh', step: 2 });
     expect(environment({ 'agentOrchestration.claudeReasoningEffort': 'minimal' }).resolveReasoningEffort(CLAUDE))
-      .toEqual({ effort: undefined, step: 6, ignored: [{ step: 2, value: 'minimal' }] });
+      .toEqual({
+        effort: undefined,
+        step: 6,
+        ignored: [{ step: 2, value: 'minimal', reason: 'fallback-refused' }],
+        requested: 'minimal',
+        provenance: 'ptah-fallback',
+        disposition: 'fallback-refused',
+      });
     expect(environment({ 'agentOrchestration.claudeReasoningEffort': 'inherit' }, SYSTEM_CLI_TYPES, 'high').resolveReasoningEffort(CLAUDE))
       .toMatchObject({ effort: 'high', step: 3 });
     expect(environment({}).resolveReasoningEffort(CLAUDE, { effort: 'xhigh' })).toMatchObject({ effort: 'xhigh', step: 1 });
