@@ -25,6 +25,10 @@ export interface SkillDraftSubmission extends SkillDraftValue {
   slug: string;
 }
 
+export function normalizeSkillDraft({ name, description, body }: SkillDraftValue): SkillDraftValue {
+  return { name: name.trim(), description: description.trim(), body };
+}
+
 export type SkillDraftMode = 'preview' | 'edit';
 
 @Component({
@@ -156,7 +160,8 @@ export class SkillDraftPreviewComponent {
   public readonly cancelRequested = output<void>();
   public readonly retryRequested = output<void>();
 
-  protected readonly document = computed(() => serializeSkillDocument(this.draft()));
+  private readonly normalizedDraft = computed(() => normalizeSkillDraft(this.draft()));
+  protected readonly document = computed(() => serializeSkillDocument(this.normalizedDraft()));
   protected readonly duplicateSlug = computed(() => {
     const { slug } = this.document();
     return this.usedSlugs().includes(slug) ? slug : null;
@@ -185,6 +190,6 @@ export class SkillDraftPreviewComponent {
   protected submit(): void {
     if (!this.canCreate()) return;
     this.duplicateConfirmed.set(false);
-    this.createRequested.emit({ ...this.draft(), slug: this.document().slug });
+    this.createRequested.emit({ ...this.normalizedDraft(), slug: this.document().slug });
   }
 }

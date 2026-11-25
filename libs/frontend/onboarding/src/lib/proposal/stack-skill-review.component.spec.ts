@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { serializeSkillDocument } from '@ptah-extension/shared';
 import type {
   SkillJudgeCandidate,
   SkillJudgeItem,
@@ -374,7 +375,33 @@ describe('StackSkillReviewComponent judged review', () => {
       .toBe(true);
   });
 
-  it('binds used slugs, snapshots Create, and returns focus to the row opener', () => {
+  it.each(['Routing', 'Forms', 'Jest'])(
+    'keeps the manual draft opener for %s focusable and disabled after Create',
+    (itemName) => {
+      const { fixture, root, store } = setup();
+      const opener = root.querySelector<HTMLButtonElement>(
+        `[aria-label="Write a skill by hand for ${itemName}"]`,
+      );
+      if (!opener) throw new Error('Expected a manual draft opener');
+      const draftOpened = jest.spyOn(store, 'openManualDraft');
+      opener.click();
+      fixture.detectChanges();
+      button(root, 'Create skill').click();
+      const draft = store.openDraft();
+      if (!draft?.submitted) throw new Error('Expected a submitted draft');
+      store.completeCreateDraft(draft.revision, '/workspace/manual/SKILL.md');
+      fixture.detectChanges();
+
+      expect(opener.getAttribute('aria-disabled')).toBe('true');
+      expect(opener.disabled).toBe(false);
+      expect(document.activeElement).toBe(opener);
+      opener.click();
+      expect(draftOpened).toHaveBeenCalledTimes(1);
+      expect(store.openDraft()).toBeNull();
+    },
+  );
+
+  it('binds used slugs, creates the previewed bytes, and returns focus to the row opener', () => {
     const { fixture, root, store } = setup();
     const create = jest.fn();
     fixture.componentInstance.draftCreateRequested.subscribe(create);
@@ -382,15 +409,27 @@ describe('StackSkillReviewComponent judged review', () => {
     const opener = button(root, 'Preview draft');
     opener.click();
     applyPreview(store);
+    store.updateDraftFields({
+      name: '  routing  ',
+      description: '  Project routing  ',
+      body: '---\nname: keep-user-text\n---\nEdited draft',
+    });
     fixture.detectChanges();
     expect(renderDraft(fixture).usedSlugs()).toEqual(['already-used']);
+    const preview = root.querySelector('ptah-skill-draft-preview pre')?.textContent;
     button(root, 'Create skill').click();
-    const revision = store.openDraft()?.revision;
+    const draft = store.openDraft();
+    if (!draft?.submitted) throw new Error('Expected the submitted draft');
+    const { revision, submitted } = draft;
     expect(create).toHaveBeenCalledWith({
       revision,
-      submitted: expect.objectContaining({ name: 'routing', slug: 'routing' }),
+      submitted: expect.objectContaining({
+        name: 'routing',
+        description: 'Project routing',
+        slug: 'routing',
+      }),
     });
-    if (revision === undefined) throw new Error('Expected the submitted draft');
+    expect(serializeSkillDocument(submitted).content).toBe(preview);
     store.completeCreateDraft(revision, '/workspace/routing/SKILL.md');
     fixture.detectChanges();
     expect(root.querySelector('ptah-skill-draft-preview')).toBeNull();

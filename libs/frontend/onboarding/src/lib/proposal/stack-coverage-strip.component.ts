@@ -9,6 +9,7 @@ import {
   effect,
   inject,
   input,
+  linkedSignal,
   output,
   signal,
   untracked,
@@ -46,7 +47,13 @@ export class StackCoverageStripComponent {
     () => this.items().filter((item) => item.state === 'covered').length,
   );
 
-  private readonly expandedState = signal(false);
+  private readonly itemKeySignature = computed(() =>
+    JSON.stringify(this.items().map((item) => this.itemKey(item))),
+  );
+  private readonly expandedState = linkedSignal({
+    source: this.itemKeySignature,
+    computation: () => false,
+  });
   protected readonly expanded = this.expandedState.asReadonly();
 
   /** Measured chip limit for at most 2 lines; null falls back to 12-chip parity rule. */
@@ -92,7 +99,6 @@ export class StackCoverageStripComponent {
     effect(() => {
       this.items();
       untracked(() => {
-        this.expandedState.set(false);
         this.measuredLimitState.set(null);
         this.measuringAllState.set(false);
         this.lastMeasuredWidth = -1;

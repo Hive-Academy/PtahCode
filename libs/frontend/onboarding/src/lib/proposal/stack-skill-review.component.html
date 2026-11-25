@@ -200,6 +200,7 @@
             }
             <ptah-unmatched-stack-list
               [judgedItems]="judgedUnmatchedItems()"
+              [createdManualItemIds]="createdManualItemIds()"
               [searching]="searching() || !!reviewStore.openDraft()?.busy"
               [draftBlockedReason]="draftDisabledReason()"
               (searchRequested)="searchUnmatchedItem(reviewStore, $event)"
@@ -228,6 +229,7 @@
                       <fieldset #notJudgedRow [disabled]="!!draftDisabledReason()" class="min-w-0">
                         <ptah-skill-not-judged-row
                           [item]="item"
+                          [manualSkillCreated]="!!manualPath"
                           (manualDraftRequested)="openNotJudgedDraft(reviewStore, item, notJudgedRow)"
                         />
                       </fieldset>

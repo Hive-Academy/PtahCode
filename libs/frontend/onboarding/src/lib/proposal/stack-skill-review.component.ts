@@ -204,6 +204,14 @@ export class StackSkillReviewComponent {
         : [];
     });
   });
+  protected readonly createdManualItemIds = computed(() => {
+    const store = this.store();
+    return new Set(
+      this.judgedUnmatchedItems()
+        .filter(({ itemId }) => store?.createdPathFor('manual:' + itemId))
+        .map(({ itemId }) => itemId),
+    );
+  });
   protected readonly draftDisabledReason = computed(() =>
     this.store()?.draftBlockedReason() ??
     (this.store()?.openDraft()?.busy ? 'Wait for skill creation to finish.' : null),

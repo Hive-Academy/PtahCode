@@ -42,6 +42,7 @@ export class UnmatchedStackListComponent {
   public readonly items = input<StackSummaryItem[]>([]);
   /** Judge items of the run; `null` keeps the unjudged behavior. */
   public readonly judgedItems = input<readonly SkillJudgeItem[] | null>(null);
+  public readonly createdManualItemIds = input<ReadonlySet<string>>(new Set());
   public readonly searching = input(false);
   /** Disables the manual draft openers, with the reason shown to the user. */
   public readonly draftBlockedReason = input<string | null>(null);
@@ -80,11 +81,16 @@ export class UnmatchedStackListComponent {
       });
   });
 
+  protected isManualDraftDisabled(row: UnmatchedRow): boolean {
+    return !!this.draftBlockedReason() ||
+      (row.itemId !== null && this.createdManualItemIds().has(row.itemId));
+  }
+
   protected requestManualDraft(
     row: UnmatchedRow,
     opener: HTMLButtonElement,
   ): void {
-    if (this.draftBlockedReason()) return;
+    if (this.isManualDraftDisabled(row)) return;
     this.manualDraftRequested.emit({
       itemId: row.itemId,
       item: row.item,

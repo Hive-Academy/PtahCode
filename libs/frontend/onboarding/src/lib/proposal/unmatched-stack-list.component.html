@@ -60,7 +60,7 @@
                 variant="ghost"
                 size="sm"
                 [attr.aria-label]="'Write a skill by hand for ' + row.item.name"
-                [attr.aria-disabled]="draftBlockedReason() ? 'true' : null"
+                [attr.aria-disabled]="isManualDraftDisabled(row) ? 'true' : null"
                 (click)="requestManualDraft(row, opener)"
               >
                 Write a skill by hand

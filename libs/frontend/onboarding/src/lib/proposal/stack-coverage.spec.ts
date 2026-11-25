@@ -524,8 +524,42 @@ describe('StackSkillStore', () => {
     expect(store.selectedCandidateIds().size).toBe(0);
   });
 
+  it('clears prior-run search cards, totals, and available counts on Re-run', () => {
+    const result = makeRecommendResult();
+    const itemId = 'library:tailwind';
+    store.applyRecommendationResult(result);
+    const initialTotal = store.selectionKeyByCandidateId().size;
+    const currentSearchSkill = { ...manualSkill, skillId: 'current-result' };
+    const generalSearchSkill = { ...manualSkill, skillId: 'general-result' };
+    store.setItemSearchResults(itemId, [manualSkill]);
+    store.setSearchResults([generalSearchSkill]);
+    store.setSelectedIds(new Set([
+      'Manual/Org/Jest-Tips',
+      'Manual/Org/general-result',
+      'Manual/Org/custom',
+    ]));
+    store.setSearchResults([]);
+    store.setItemSearchResults(itemId, [currentSearchSkill]);
+    store.setSelectedCandidateIds(new Set());
+
+    const itemRow = () => store.visibleItemRows().find((row) => row.itemId === itemId);
+    const coverage = () => store.stackCoverage().find((item) => item.itemId === itemId);
+    expect(itemRow()?.manualCandidates).toEqual([manualSkill, currentSearchSkill]);
+    expect(store.selectionKeyByCandidateId().size).toBe(initialTotal + 4);
+    expect(coverage()).toMatchObject({ state: 'available', totalCount: 2 });
+
+    expect(store.applyRecommendationResult(result)).toEqual({ status: 'ok' });
+    expect(store.itemSearchResultsByItemId().size).toBe(0);
+    expect(store.retainedItemSearchResultsByItemId().size).toBe(0);
+    expect(store.retainedSearchResults()).toEqual([]);
+    expect(store.selectionKeyByCandidateId().size).toBe(initialTotal);
+    expect(itemRow()?.manualCandidates).toEqual([]);
+    expect(coverage()).toMatchObject({ state: 'none', totalCount: 0 });
+  });
+
   it('keeps the current recommendation and dirty draft until discard is confirmed', () => {
     store.applyRecommendationResult(makeRecommendResult());
+    store.setItemSearchResults('library:tailwind', [manualSkill]);
     store.openManualDraft('library:tailwind');
     store.updateDraftFields({ body: '# Keep these edits' });
     store.setVerdictFilter('no-skill');
@@ -541,6 +575,7 @@ describe('StackSkillStore', () => {
     expect(store.judge()).toBe(judge);
     expect(store.recommendations()).toBe(recommendations);
     expect(store.selectedCandidateIds()).toBe(selection);
+    expect(store.itemSearchResultsByItemId().get('library:tailwind')).toEqual([manualSkill]);
     expect(store.verdictFilter()).toBe('no-skill');
     expect(store.activeItemId()).toBe('library:tailwind');
 
@@ -861,6 +896,31 @@ describe('StackSkillStore', () => {
     expect(store.createdSkillSlugs()).toEqual([]);
     expect(store.judge()).toBeNull();
     expect(store.analysisPair()).toBeNull();
+  });
+
+  it('restores the proposal defaults when a retry fails after confirming Discard edits', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+    const opened = store.openProposalDraft('prop-angular-app');
+    if (opened.status !== 'ok') throw new Error('Expected the proposal draft to open');
+    const failure = { ok: false, category: 'timed-out', message: 'Draft timed out' } as const;
+    expect(store.applyDraftPreviewResult(opened.draft, failure)).toBe(true);
+    const fallbackBody = store.openDraft()?.body;
+    expect(fallbackBody).toContain('Add repo-specific conventions');
+    const edits = { name: 'my-name', description: 'My description', body: 'My custom guide' };
+    store.updateDraftFields(edits);
+
+    expect(store.beginRetryDraftGeneration()).toEqual({
+      status: 'confirm-dirty',
+      trigger: 'retry-generation',
+    });
+    expect(store.openDraft()).toMatchObject({ ...edits, dirty: true });
+
+    const retried = store.beginRetryDraftGeneration({ forceDiscardDirty: true });
+    if (retried.status !== 'ok') throw new Error('Expected draft generation to retry');
+    const defaults = { name: opened.draft.name, description: opened.draft.description };
+    expect(retried.draft).toMatchObject({ ...defaults, body: '', dirty: false });
+    expect(store.applyDraftPreviewResult(retried.draft, failure)).toBe(true);
+    expect(store.openDraft()).toMatchObject({ ...defaults, body: fallbackBody, dirty: false, mode: 'edit' });
   });
 
   it.each([undefined, '   '])('keeps edits when the Create receipt path is %p', (path) => {

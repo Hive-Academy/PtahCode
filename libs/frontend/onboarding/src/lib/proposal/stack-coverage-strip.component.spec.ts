@@ -78,17 +78,18 @@ describe('StackCoverageStripComponent', () => {
 
   it('collapses more than twelve stack chips behind "Show N more" and focuses the first newly shown chip (GAP 28)', () => {
     const fixture = TestBed.createComponent(StackCoverageStripComponent);
-    fixture.componentRef.setInput(
-      'items',
-      Array.from({ length: 14 }, (_, index): StackCoverageItem => ({
+    const items = Array.from(
+      { length: 14 },
+      (_, index): StackCoverageItem => ({
         name: `Framework ${index}`,
         kind: 'framework',
         evidence: 'package.json',
         state: 'none',
         selectedCount: 0,
         totalCount: 0,
-      })),
+      }),
     );
+    fixture.componentRef.setInput('items', items);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
     expect(root.querySelectorAll('button[aria-label]')).toHaveLength(11);
@@ -105,6 +106,22 @@ describe('StackCoverageStripComponent', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toContain(
       'Framework 11',
     );
+
+    const withSelection = items.map(
+      (item, index): StackCoverageItem =>
+        index === 0
+          ? { ...item, state: 'covered', selectedCount: 1, totalCount: 1 }
+          : item,
+    );
+    fixture.componentRef.setInput('items', withSelection);
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(14);
+    expect(root.textContent).toContain('1 of 14 stack items covered');
+
+    fixture.componentRef.setInput('items', [...withSelection].reverse());
+    fixture.detectChanges();
+    expect(root.querySelectorAll('[data-strip-chip]')).toHaveLength(11);
+    expect(root.textContent).toContain('Show 3 more');
   });
 
   it('distinguishes filter keys and description IDs for equal names of different kinds (GAP 29)', () => {

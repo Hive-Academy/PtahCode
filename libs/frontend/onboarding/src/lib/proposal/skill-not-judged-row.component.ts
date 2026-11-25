@@ -47,7 +47,8 @@ import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
         size="xs"
         class="shrink-0"
         [attr.aria-label]="'Write a skill by hand for ' + item().item.name"
-        (click)="manualDraftRequested.emit()"
+        [attr.aria-disabled]="manualSkillCreated() ? 'true' : null"
+        (click)="!manualSkillCreated() && manualDraftRequested.emit()"
       >
         Write a skill by hand
       </button>
@@ -56,6 +57,7 @@ import { PtahBadgeDirective, PtahButtonDirective } from '@ptah-extension/ui';
 })
 export class SkillNotJudgedRowComponent {
   public readonly item = input.required<SkillJudgeItem>();
+  public readonly manualSkillCreated = input(false);
   public readonly manualDraftRequested = output<void>();
 
   protected readonly searchFailed = computed(

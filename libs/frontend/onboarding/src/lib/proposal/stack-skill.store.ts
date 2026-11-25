@@ -44,7 +44,7 @@ import type {
   SkillVerdictFilterOption,
   SkillVerdictFilterValue,
 } from './skill-verdict-filter.component';
-import type { SkillDraftMode } from './skill-draft-preview.component';
+import { normalizeSkillDraft, type SkillDraftMode } from './skill-draft-preview.component';
 
 export {
   buildManualDraftEvidenceBody,
@@ -599,6 +599,10 @@ export class StackSkillStore {
       }
     }
     this.selectedCandidateIdsState.set(preselected);
+    this.itemSearchResultsState.set(new Map());
+    this.retainedItemSearchResultsState.set(new Map());
+    this.retainedSearchResultsState.set([]);
+    this.customSelectionKeysState.set(new Map());
     this.previewState.set([]);
     this.approvedIdsState.set(new Set());
     if (this.stageState() === 'consent') this.stageState.set('review');
@@ -839,9 +843,16 @@ export class StackSkillStore {
       Boolean(options?.forceDiscardDirty),
     );
     if (guard) return guard;
+    const proposal = this.judge()?.proposals.find(
+      (p) => p.proposalId === current.proposalId,
+    );
+    if (!proposal) return { status: 'blocked', reason: 'Build proposal not found.' };
     const next: OpenSkillDraft = {
       ...current,
       mode: 'preview',
+      name: skillDocumentSlug(proposal.name) || proposal.name,
+      description: proposal.description,
+      body: '',
       dirty: false,
       previewLoading: true,
       revision: ++this.draftRevision,
@@ -994,11 +1005,10 @@ export class StackSkillStore {
     ) {
       return null;
     }
+    const draft = normalizeSkillDraft(current);
     const submitted: SkillDraftSubmittedSnapshot = Object.freeze({
-      name: current.name.trim(),
-      description: current.description.trim(),
-      body: current.body,
-      slug: skillDocumentSlug(current.name),
+      ...draft,
+      slug: skillDocumentSlug(draft.name),
     });
     this.openDraftState.set({
       ...current,

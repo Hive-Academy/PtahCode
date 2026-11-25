@@ -46,6 +46,9 @@ describe('ProjectSkillDraftComponent', () => {
     call.mockResolvedValue({ isSuccess: () => true, data: { skillPath } });
     const { fixture, root, button } = render();
     await fixture.whenStable();
+    edit(root.querySelector('input'), '  angular  ');
+    edit(root.querySelectorAll('input')[1], '  Project guidance for Angular  ');
+    fixture.detectChanges();
     const body = root.querySelector('textarea')?.value;
 
     expect(call).not.toHaveBeenCalled();
@@ -85,6 +88,9 @@ describe('ProjectSkillDraftComponent', () => {
   it.each([
     ['RPC failure response', () => ({ isSuccess: () => false })],
     ['RPC rejection', () => { throw new Error('Private provider detail'); }],
+    ['missing skill path', () => ({ isSuccess: () => true, data: {} })],
+    ['empty skill path', () => ({ isSuccess: () => true, data: { skillPath: '' } })],
+    ['whitespace-only skill path', () => ({ isSuccess: () => true, data: { skillPath: '   ' } })],
   ])('clears busy and retains edits after a %s', async (_, fail) => {
     call.mockImplementation(async () => fail());
     const { fixture, root, button } = render();
@@ -110,6 +116,7 @@ describe('ProjectSkillDraftComponent', () => {
       content: '---\nname: keep-user-text\n---\nEdited draft',
     });
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('Could not create this skill. Your draft is still here.');
+    expect(root.textContent).not.toContain('Created:');
     expect(root.textContent).not.toContain('Private provider detail');
     expect(root.querySelector('input')?.value).toBe('local-angular');
     expect(root.querySelector('textarea')?.value).toBe('---\nname: keep-user-text\n---\nEdited draft');

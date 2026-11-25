@@ -85,14 +85,12 @@ export class ProjectSkillDraftComponent {
         content: submitted.body,
       });
       if (this.draft() !== draft) return;
-      if (!response.isSuccess()) {
+      const skillPath = response.isSuccess() ? response.data?.skillPath : undefined;
+      if (typeof skillPath !== 'string' || !skillPath.trim()) {
         this.error.set('Could not create this skill. Your draft is still here.');
         return;
       }
-      this.createdPath.set(
-        response.data.skillPath ||
-          `~/.ptah/plugins/ptah-harness-${submitted.slug}/skills/${submitted.slug}/SKILL.md`,
-      );
+      this.createdPath.set(skillPath);
     } catch {
       if (this.draft() === draft) {
         this.error.set('Could not create this skill. Your draft is still here.');
