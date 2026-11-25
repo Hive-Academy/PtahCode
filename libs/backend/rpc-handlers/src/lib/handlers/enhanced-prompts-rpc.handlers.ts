@@ -12,9 +12,18 @@
 
 import { injectable, inject } from 'tsyringe';
 import { z } from 'zod';
-import { Logger, RpcHandler, TOKENS } from '@ptah-extension/vscode-core';
+import {
+  Logger,
+  RpcHandler,
+  RpcUserError,
+  TOKENS,
+} from '@ptah-extension/vscode-core';
 import type { SentryService } from '@ptah-extension/vscode-core';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
+import type {
+  IWorkspaceLlmResolver,
+  ResolvedSetupSnapshot,
+} from '@ptah-extension/agent-sdk';
 import {
   EnhancedPromptsService,
   AnalysisStorageService,
@@ -110,6 +119,8 @@ export class EnhancedPromptsRpcHandlers {
     private readonly analysisStorage: AnalysisStorageService,
     @inject(SDK_TOKENS.SDK_PLUGIN_LOADER)
     private readonly pluginLoader: PluginLoaderService,
+    @inject(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER)
+    private readonly workspaceLlm: IWorkspaceLlmResolver,
     @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
     private readonly workspaceProvider: IWorkspaceProvider,
     @inject(TOKENS.SAVE_DIALOG_PROVIDER)
@@ -397,7 +408,8 @@ export class EnhancedPromptsRpcHandlers {
           );
         }
         const onStreamEvent = this.createEnhanceStreamBroadcaster();
-        const sdkConfig = this.resolveSdkConfig(onStreamEvent, params.model);
+        const route = await this.resolveSetupRoute(workspacePath);
+        const sdkConfig = this.resolveSdkConfig(onStreamEvent, route);
         const result = await this.enhancedPromptsService.runWizard(
           workspacePath,
           params.config,
@@ -426,6 +438,7 @@ export class EnhancedPromptsRpcHandlers {
           error: result.error || 'Failed to generate enhanced prompt',
         };
       } catch (error) {
+        if (error instanceof RpcUserError) throw error;
         this.logger.error(
           'RPC: enhancedPrompts:runWizard failed',
           error instanceof Error ? error : new Error(String(error)),
@@ -551,7 +564,8 @@ export class EnhancedPromptsRpcHandlers {
             force: params.force,
           });
           const onStreamEvent = this.createEnhanceStreamBroadcaster();
-          const sdkConfig = this.resolveSdkConfig(onStreamEvent);
+          const route = await this.resolveSetupRoute(workspacePath);
+          const sdkConfig = this.resolveSdkConfig(onStreamEvent, route);
           const result = await this.enhancedPromptsService.regenerate(
             workspacePath,
             {
@@ -583,6 +597,7 @@ export class EnhancedPromptsRpcHandlers {
           }
         }
       } catch (error) {
+        if (error instanceof RpcUserError) throw error;
         this.logger.error(
           'RPC: enhancedPrompts:regenerate failed',
           error instanceof Error ? error : new Error(String(error)),
@@ -705,8 +720,7 @@ export class EnhancedPromptsRpcHandlers {
     }
     try {
       const source = await this.resolveBoundSource(workspacePath, analysisDir);
-      const requestedModel = 'model' in params ? params.model : undefined;
-      const route = await this.resolveBoundRoute(workspacePath, requestedModel);
+      const route = await this.resolveSetupRoute(workspacePath);
       const { binding: runBinding, controller } = this.guidanceRuns.start(
         binding,
         source,
@@ -733,6 +747,7 @@ export class EnhancedPromptsRpcHandlers {
       return { success: true, accepted };
     } catch (error: unknown) {
       this.enhancedPromptsService.releaseBoundGeneration(reservation);
+      if (error instanceof RpcUserError) throw error;
       this.logger.error(
         'Guidance start preparation failed',
         error instanceof Error ? error : new Error(String(error)),
@@ -770,25 +785,37 @@ export class EnhancedPromptsRpcHandlers {
     }
   }
 
-  private async resolveBoundRoute(
-    workspacePath: string,
-    requestedModel?: string,
-  ) {
+  private async resolveSetupRoute(
+    workspaceRoot: string | undefined,
+  ): Promise<ResolvedSetupSnapshot> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    return Promise.race([
-      this.enhancedPromptsService.resolveGuidanceRoute(
-        workspacePath,
-        requestedModel,
-      ),
-      new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('Guidance provider resolution timed out')),
-          15_000,
+    try {
+      const resolution = await Promise.race([
+        this.workspaceLlm.resolveSetup(workspaceRoot),
+        new Promise<never>((_resolve, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error('Setup provider resolution timed out')),
+            15_000,
+          );
+        }),
+      ]);
+      if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
+        const source = resolution.source === 'setup' ? 'Setup' : 'Workspace';
+        throw new RpcUserError(
+          `${source} model cannot run guidance (${resolution.cause}). Update Background models and retry.`,
+          'SETUP_MODEL_INVALID',
         );
-      }),
-    ]).finally(() => {
+      }
+      return resolution.snapshot;
+    } catch (error: unknown) {
+      if (error instanceof RpcUserError) throw error;
+      throw new RpcUserError(
+        'The Setup model could not be resolved. Update Background models and retry.',
+        'SETUP_MODEL_INVALID',
+      );
+    } finally {
       if (timeout) clearTimeout(timeout);
-    });
+    }
   }
 
   private async executeBoundGuidance(
@@ -798,16 +825,19 @@ export class EnhancedPromptsRpcHandlers {
     kind: 'wizard' | 'regenerate',
     workspacePath: string,
     source: GenerationContextSource,
-    route: Awaited<ReturnType<EnhancedPromptsService['resolveGuidanceRoute']>>,
+    route: ResolvedSetupSnapshot,
     runBinding: SetupGenerationRunBinding,
     controller: AbortController,
     reservation: object,
   ): Promise<void> {
     const broadcaster = this.createEnhanceStreamBroadcaster();
-    const sdkConfig = this.resolveSdkConfig((event) => {
-      if (!controller.signal.aborted)
-        broadcaster({ ...event, tabBinding: runBinding, lifecycle: 'running' });
-    }, route.model);
+    const sdkConfig = this.resolveSdkConfig(
+      (event) => {
+        if (!controller.signal.aborted)
+          broadcaster({ ...event, tabBinding: runBinding, lifecycle: 'running' });
+      },
+      route,
+    );
     const onProgress = (): void => {
       if (!controller.signal.aborted) this.guidanceRuns.running(runBinding);
     };
@@ -1130,7 +1160,7 @@ export class EnhancedPromptsRpcHandlers {
    */
   private resolveSdkConfig(
     onStreamEvent?: (event: AnalysisStreamPayload) => void,
-    model?: string,
+    route?: ResolvedSetupSnapshot,
   ): EnhancedPromptsSdkConfig {
     let mcpServerRunning = false;
     let mcpPort: number | undefined;
@@ -1163,7 +1193,7 @@ export class EnhancedPromptsRpcHandlers {
       mcpServerRunning,
       mcpPort,
       onStreamEvent,
-      model: model || undefined,
+      route,
       pluginPaths,
     };
   }

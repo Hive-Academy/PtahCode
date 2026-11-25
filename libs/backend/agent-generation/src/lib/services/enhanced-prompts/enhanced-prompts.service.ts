@@ -129,8 +129,10 @@ type EnhancedPromptTraceWriter = Pick<
 export interface EnhancedPromptsSdkConfig {
   mcpServerRunning: boolean;
   mcpPort?: number;
-  /** Model to use for generation. Overrides the `model.selected` config when provided. */
+  /** Model for non-setup callers. Setup calls dispatch through `route` instead. */
   model?: string;
+  /** Launch-pinned Setup provider, model and isolated auth, kept in memory only. */
+  route?: WorkspaceLlmSnapshot;
   /** Callback for real-time stream events (text, tool calls, thinking) */
   onStreamEvent?: (event: AnalysisStreamPayload) => void;
   /** Absolute paths to plugin directories */
@@ -665,7 +667,7 @@ export class EnhancedPromptsService {
           });
         },
         runAbort.signal,
-        bound?.route,
+        bound?.route ?? sdkConfig?.route,
       );
       ensureActive();
 
