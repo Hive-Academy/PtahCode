@@ -110,7 +110,7 @@ describe('HarnessLlmRunner — workspace provider and model', () => {
     });
     const config = execute.mock.calls[0][0];
     expect(config.model).toBe('kimi-k2.5');
-    expect(config.auth).toBe(auth);
+    expect(config.auth).toEqual({ ...auth, providerId: 'kimi-code' });
     expect(config.cwd).toBe('/ws/project-a');
     expect(result.structuredOutput).toEqual({ ok: true });
   });
@@ -190,7 +190,7 @@ describe('HarnessLlmRunner SDK outcomes and attribution', () => {
     });
     execute.mockImplementationOnce(async (config) => {
       expect(stageTrace).toEqual({ pairConfigured: configured });
-      expect(config.auth).toBe(resolved.auth);
+      expect(config.auth).toEqual({ ...resolved.auth, providerId: resolved.providerId });
       expect(config.model).toBe(resolved.model);
       config.onProviderSubmit?.(submitted);
       expect(stageTrace).toEqual({ pairConfigured: configured, pairAttempted: submitted });
@@ -272,7 +272,10 @@ describe('HarnessLlmRunner SDK outcomes and attribution', () => {
     expect(logger.warn.mock.calls).toEqual([[`[Test] ${message}`, { category }]]);
   });
 
-  it.each([false, true])('classifies the deadline as timed-out with submission %p', async (didSubmit) => {
+  it.each([
+    { didSubmit: false, category: 'pre-dispatch-error', message: 'Could not start the AI request' },
+    { didSubmit: true, category: 'timed-out', message: 'The AI request timed out' },
+  ])('classifies the deadline as $category with submission $didSubmit', async ({ didSubmit, category, message }) => {
     jest.useFakeTimers();
     try {
       const { runner, execute, handle, broadcaster, logger } = makeRunner(snapshot);
@@ -302,10 +305,13 @@ describe('HarnessLlmRunner SDK outcomes and attribution', () => {
 
       expect(stageTrace).toEqual(expectedTrace);
       expect(logger.warn.mock.calls).toEqual([
-        ['[Test] The AI request timed out', { category: 'timed-out' }],
+        [`[Test] ${message}`, { category }],
+      ]);
+      expect(broadcaster.broadcastComplete.mock.calls).toEqual([
+        ['design-agents', 'op-1', false, message],
       ]);
       expect(broadcaster.broadcastFlatComplete.mock.calls).toEqual([
-        ['op-1', false, 'The AI request timed out'],
+        ['op-1', false, message],
       ]);
       expect(handle.close).toHaveBeenCalledTimes(1);
     } finally {

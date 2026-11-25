@@ -172,6 +172,8 @@ function clearLeakedProviderIdentity(
 export interface OneShotAuthOverride {
   readonly env: AuthEnv;
   readonly baseUrl?: string;
+  /** Canonical provider ID for the isolated credentials, when known. */
+  readonly providerId?: string;
 }
 
 /**
@@ -503,7 +505,9 @@ export class SdkQueryRunner {
       const conversation = this.launch('oneShot', options, () => {
         input.onProviderSubmit?.({
           provider:
-            getActiveProviderId(options.env ?? {}) ?? ANTHROPIC_DIRECT_PROVIDER_ID,
+            input.auth?.providerId ??
+            getActiveProviderId(options.env ?? {}) ??
+            ANTHROPIC_DIRECT_PROVIDER_ID,
           model: options.model,
         });
         return queryFn({

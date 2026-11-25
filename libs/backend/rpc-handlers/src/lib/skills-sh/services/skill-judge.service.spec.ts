@@ -272,8 +272,13 @@ describe('SkillJudgeService', () => {
     expect(
       execute.mock.calls.map(([config]) => [config.model, config.auth]),
     ).toEqual([
-      [workspace.model, workspace.auth],
-      [next.model, next.auth],
+      // The runner attaches the snapshot provider id to the auth override so
+      // the SDK reports the canonical submitted provider (review A1).
+      [
+        workspace.model,
+        { ...workspace.auth, providerId: workspace.providerId },
+      ],
+      [next.model, { ...next.auth, providerId: next.providerId }],
     ]);
     expect(workspaceLlm.resolveForPath).not.toHaveBeenCalled();
     expect(first.stages[1].pairUsed).toEqual({

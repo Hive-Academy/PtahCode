@@ -1331,6 +1331,33 @@ describe('SdkQueryRunner — one-shot provider submission', () => {
     handle.close();
   });
 
+  it.each([
+    ['ollama-cloud', 'http://127.0.0.1:11434'],
+    ['ollama-cloud', 'https://ollama.com'],
+    ['kimi-code', 'https://custom-models.example.test'],
+  ])('reports %s from the auth override at %s', async (providerId, baseUrl) => {
+    const h = makeRunner();
+    const model = 'configured-model';
+    const onProviderSubmit = jest.fn();
+    const handle = await h.runner.runOneShot({
+      ...input,
+      model,
+      auth: { providerId, env: { ANTHROPIC_BASE_URL: baseUrl } },
+      onProviderSubmit,
+    });
+
+    expect(onProviderSubmit).toHaveBeenCalledTimes(1);
+    expect(onProviderSubmit).toHaveBeenCalledWith({ provider: providerId, model });
+    expect(h.queryFn).toHaveBeenCalledWith({
+      prompt: input.prompt,
+      options: expect.objectContaining({
+        model,
+        env: expect.objectContaining({ ANTHROPIC_BASE_URL: baseUrl }),
+      }),
+    });
+    handle.close();
+  });
+
   it('submits a concrete model unchanged and keeps the pair after a caller timeout', async () => {
     const h = makeRunner();
     const model = 'openai/gpt-5-mini';

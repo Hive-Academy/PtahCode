@@ -173,7 +173,7 @@ export class HarnessLlmRunner {
           ? { toolAccess: args.execute.toolAccess }
           : {}),
         abortController,
-        ...(auth ? { auth } : {}),
+        ...(auth ? { auth: { ...auth, providerId } } : {}),
         onProviderSubmit: (pair) => {
           submitted = pair;
           if (stageTrace) stageTrace.pairAttempted = pair;
@@ -216,7 +216,7 @@ export class HarnessLlmRunner {
       let category: keyof typeof FAILURE_MESSAGES = submitted
         ? 'provider-error'
         : 'pre-dispatch-error';
-      if (abortController.signal.aborted) {
+      if (submitted && abortController.signal.aborted) {
         category = 'timed-out';
       } else if (!submitted && error instanceof InternalQueryQueueTimeoutError) {
         category = 'queue-timed-out';
