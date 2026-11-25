@@ -679,6 +679,28 @@ describe('LaneComposerComponent', () => {
     expect(chip.textContent).toContain('Auto');
   });
 
+  it('keeps Codex effort order and labels the unsendable level in the menu', async () => {
+    rpcCall.mockResolvedValue(rpcSuccess({
+      models: [],
+      efforts: ['high', 'future-effort', 'low'],
+      unsendableEfforts: ['future-effort'],
+      commands: [],
+    }));
+    const fixture = await mount();
+    const pill = root(fixture).querySelector<HTMLButtonElement>('[data-testid="composer-effort-pill"]');
+    pill?.click();
+    await settle(fixture);
+
+    const rows = root(fixture).querySelectorAll('ptah-composer-effort-picker [role="option"]');
+    expect(Array.from(rows, (row) => Array.from(row.querySelectorAll('span'), (span) => span.textContent?.trim())))
+      .toEqual([
+        ['Default', 'SDK default reasoning effort'],
+        ['High', 'More thorough reasoning'],
+        ['Future-effort', 'Codex reports this level; this lane cannot send it'],
+        ['Low', 'Faster responses, less reasoning'],
+      ]);
+  });
+
   it('replaces the preview error with "Could not load lane options." and Retry', async () => {
     store.composerState.mockReturnValue({});
     previewMessage.mockRejectedValue(new Error('offline'));

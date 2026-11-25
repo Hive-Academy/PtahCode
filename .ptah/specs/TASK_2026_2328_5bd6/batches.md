@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B30 COMPLETE. B31 IN_PROGRESS. All others PENDING. Manifest red fixed by B27 |
+| Status | B1-B31 COMPLETE. Manifest red fixed by B27 |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | See the Status row above |
@@ -700,8 +700,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B31 - WU20c composer label for unsendable Codex efforts
 
-- **Status**: PENDING
-- **Shape / weight**: logic (UI) / est. 8,600. **Actual tokens**: pending
+- **Status**: COMPLETE (codex cbf8301a)
+- **Shape / weight**: logic (UI) / est. 8,600. **Actual tokens**: unavailable
 - **Projects**: chat (1)
 - **Read set**: `W/libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.ts:110-130,340-365,795-820`; `.../lane-composer/lane-composer.component.spec.ts:1-120` + the effort options describe; `W/libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-effort-picker.component.ts:40-80` + template range that shows `description`; `W/libs/shared/src/lib/types/rpc/rpc-agents.types.ts:84-100` (after B29)
 - **Write set**: `W/libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.ts`; `W/libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.spec.ts`

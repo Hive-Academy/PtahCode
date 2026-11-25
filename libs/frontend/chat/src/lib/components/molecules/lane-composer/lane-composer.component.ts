@@ -346,10 +346,17 @@ export class LaneComposerComponent {
     if (status === 'idle' || status === 'loading' || this.checking()) return MODELS_LOADING_LABEL;
     return `${this.cli()} default`;
   });
-  protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => [
-    COMPOSER_EFFORT_OPTIONS[0],
-    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '').map(effortOption),
-  ]);
+  protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => {
+    const options = this.catalog().options;
+    const efforts = options?.efforts ?? [];
+    const rows = efforts.map((id) => {
+      const option = effortOption(id);
+      return options?.unsendableEfforts?.includes(id)
+        ? { ...option, description: 'Codex reports this level; this lane cannot send it' }
+        : option;
+    });
+    return efforts.includes('') ? rows : [COMPOSER_EFFORT_OPTIONS[0], ...rows];
+  });
   protected readonly selectedEffort = computed(
     () => (this.pending().reasoningEffort ?? this.record()?.reasoningEffort ?? this.catalog().options?.currentEffort ?? '') as EffortLevel | '',
   );
