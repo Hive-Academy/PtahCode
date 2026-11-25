@@ -12,26 +12,46 @@ import 'reflect-metadata';
 jest.mock('@ptah-extension/agent-sdk', () => ({
   ...jest.requireActual('@ptah-extension/agent-sdk'),
   SdkStreamProcessor: jest.fn().mockImplementation(() => ({
-    process: jest.fn().mockResolvedValue({ structuredOutput: { ok: true } }),
+    process: () => mockProcess(),
   })),
 }));
 
 import type { Logger } from '@ptah-extension/vscode-core';
+import { InternalQueryQueueTimeoutError } from '@ptah-extension/agent-sdk';
 import type {
+  InternalQueryConfig,
+  InternalQueryHandle,
   InternalQueryService,
   IWorkspaceLlmResolver,
+  StreamProcessorResult,
   WorkspaceLlmSnapshot,
 } from '@ptah-extension/agent-sdk';
 import { HarnessLlmRunner } from './harness-llm-runner.service';
+import type {
+  HarnessLlmExecuteParams,
+  HarnessLlmRunArgs,
+} from './harness-llm-runner.service';
 import type { HarnessStreamBroadcaster } from '../streaming/harness-stream-broadcaster.service';
 
+const mockProcess = jest.fn<Promise<StreamProcessorResult>, []>();
+
+beforeEach(() => {
+  mockProcess.mockReset().mockResolvedValue({
+    structuredOutput: { ok: true },
+    terminal: { kind: 'success' },
+  });
+});
+
 function makeRunner(snapshot: WorkspaceLlmSnapshot) {
-  const execute = jest.fn().mockResolvedValue({
+  const handle: InternalQueryHandle = {
     stream: (async function* () {
       /* no messages */
     })(),
+    abort: jest.fn(),
     close: jest.fn(),
-  });
+  };
+  const execute = jest.fn<Promise<InternalQueryHandle>, [InternalQueryConfig]>()
+    .mockResolvedValue(handle);
   const resolveForPath = jest.fn(async () => snapshot);
   const broadcaster = {
     createStreamEmitter: jest.fn(() => ({ emitter: {}, operationId: 'op-1' })),
@@ -44,14 +64,18 @@ function makeRunner(snapshot: WorkspaceLlmSnapshot) {
     warn: jest.fn(),
     error: jest.fn(),
     debug: jest.fn(),
-  } as unknown as Logger;
+  };
+  const workspaceLlm: IWorkspaceLlmResolver = {
+    resolveForPath,
+    resolveSetup: jest.fn().mockRejectedValue(new Error('Unexpected Setup resolution')),
+  };
   const runner = new HarnessLlmRunner(
-    logger,
+    logger as unknown as Logger,
     { execute } as unknown as InternalQueryService,
     broadcaster as unknown as HarnessStreamBroadcaster,
-    { resolveForPath } as IWorkspaceLlmResolver,
+    workspaceLlm,
   );
-  return { runner, execute, resolveForPath, broadcaster };
+  return { runner, execute, resolveForPath, broadcaster, logger, handle };
 }
 
 const ARGS = {
@@ -65,7 +89,7 @@ const ARGS = {
     mcpServerRunning: false,
     maxTurns: 1,
   },
-} as unknown as Parameters<HarnessLlmRunner['run']>[0];
+} satisfies HarnessLlmRunArgs;
 
 describe('HarnessLlmRunner — workspace provider and model', () => {
   it('runs on the provider and model of ONE snapshot resolved for its cwd', async () => {
@@ -138,14 +162,155 @@ describe('HarnessLlmRunner — workspace provider and model', () => {
       'design-agents',
       'op-1',
       false,
-      'settings unreadable',
+      'Could not start the AI request',
     );
     expect(broadcaster.broadcastFlatComplete).toHaveBeenCalledWith(
       'op-1',
       false,
-      'settings unreadable',
+      'Could not start the AI request',
     );
     clearSpy.mockRestore();
+  });
+});
+
+describe('HarnessLlmRunner SDK outcomes and attribution', () => {
+  const snapshot = { providerId: 'kimi-code', model: 'configured-model' };
+  const configured = { provider: snapshot.providerId, model: snapshot.model };
+  const submitted = { provider: 'kimi-code', model: 'effective-model' };
+
+  it('uses the supplied snapshot and returns raw result text and the SDK success terminal', async () => {
+    const { runner, execute, resolveForPath, handle, broadcaster } = makeRunner(snapshot);
+    const resolved = { ...snapshot, auth: { env: {} } };
+    const stageTrace: NonNullable<HarnessLlmExecuteParams['stageTrace']> = {};
+    const resultText = ' ```json\n{"items":[]}\n``` ';
+    mockProcess.mockResolvedValueOnce({
+      resultText,
+      structuredOutput: null,
+      terminal: { kind: 'success' },
+    });
+    execute.mockImplementationOnce(async (config) => {
+      expect(stageTrace).toEqual({ pairConfigured: configured });
+      expect(config.auth).toBe(resolved.auth);
+      expect(config.model).toBe(resolved.model);
+      config.onProviderSubmit?.(submitted);
+      expect(stageTrace).toEqual({ pairConfigured: configured, pairAttempted: submitted });
+      return handle;
+    });
+
+    expect(await runner.run({
+      ...ARGS,
+      execute: { ...ARGS.execute, resolved, stageTrace },
+    })).toEqual({
+      structuredOutput: null,
+      postProcessed: undefined,
+      resultText,
+      terminal: { kind: 'success' },
+    });
+
+    expect(resolveForPath).not.toHaveBeenCalled();
+    expect(stageTrace).toEqual({
+      pairConfigured: configured,
+      pairAttempted: submitted,
+      pairUsed: submitted,
+    });
+    expect(broadcaster.broadcastFlatComplete).toHaveBeenCalledWith('op-1', true);
+    expect(handle.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { kind: 'provider-error', subtype: 'private provider detail' },
+    undefined,
+  ] satisfies StreamProcessorResult['terminal'][])(
+    'reports failure and leaves pairUsed unset for terminal %p',
+    async (terminal) => {
+      const { runner, execute, handle, broadcaster, logger } = makeRunner(snapshot);
+      const stageTrace = {};
+      const postProcess = jest.fn(() => 'processed');
+      mockProcess.mockResolvedValueOnce({ structuredOutput: null, terminal });
+      execute.mockImplementationOnce(async ({ onProviderSubmit }) => {
+        onProviderSubmit?.(submitted);
+        return handle;
+      });
+
+      const result = await runner.run({
+        ...ARGS,
+        execute: { ...ARGS.execute, stageTrace },
+        postProcess,
+      });
+
+      expect(result.terminal).toEqual(terminal);
+      expect(postProcess).toHaveBeenCalledWith(null);
+      expect(result.postProcessed).toBe('processed');
+      expect(stageTrace).toEqual({ pairConfigured: configured, pairAttempted: submitted });
+      expect(broadcaster.broadcastComplete.mock.calls).toEqual([
+        ['design-agents', 'op-1', false, 'The AI request did not complete successfully'],
+      ]);
+      expect(broadcaster.broadcastFlatComplete.mock.calls).toEqual([
+        ['op-1', false, 'The AI request did not complete successfully'],
+      ]);
+      expect(logger.warn.mock.calls).toEqual([
+        ['[Test] The AI request did not complete successfully', { category: 'provider-error' }],
+      ]);
+    },
+  );
+
+  it.each([
+    [new InternalQueryQueueTimeoutError(50), 'queue-timed-out', 'Timed out waiting for an AI provider slot'],
+    [new Error('private startup error'), 'pre-dispatch-error', 'Could not start the AI request'],
+  ])('classifies %p before submission and rethrows it to the caller', async (error, category, message) => {
+    const { runner, execute, broadcaster, logger } = makeRunner(snapshot);
+    const stageTrace = {};
+    execute.mockRejectedValueOnce(error);
+
+    await expect(runner.run({
+      ...ARGS,
+      execute: { ...ARGS.execute, stageTrace },
+    })).rejects.toBe(error);
+
+    expect(stageTrace).toEqual({ pairConfigured: configured });
+    expect(broadcaster.broadcastFlatComplete.mock.calls).toEqual([['op-1', false, message]]);
+    expect(logger.warn.mock.calls).toEqual([[`[Test] ${message}`, { category }]]);
+  });
+
+  it.each([false, true])('classifies the deadline as timed-out with submission %p', async (didSubmit) => {
+    jest.useFakeTimers();
+    try {
+      const { runner, execute, handle, broadcaster, logger } = makeRunner(snapshot);
+      const stageTrace = {};
+      execute.mockImplementationOnce(({ abortController, onProviderSubmit }) => {
+        if (didSubmit) onProviderSubmit?.(submitted);
+        // After cancellation, a late success from the SDK cannot mark the pair used.
+        return new Promise((resolve) => {
+          abortController?.signal.addEventListener('abort', () => resolve(handle), { once: true });
+        });
+      });
+
+      const run = runner.run({
+        ...ARGS,
+        timeoutMs: 50,
+        execute: { ...ARGS.execute, stageTrace },
+      });
+      const expectedTrace = {
+        pairConfigured: configured,
+        ...(didSubmit ? { pairAttempted: submitted } : {}),
+      };
+      const rejection = expect(run).rejects.toMatchObject({ name: 'AbortError' });
+      await Promise.resolve();
+      expect(stageTrace).toEqual(expectedTrace);
+      await jest.advanceTimersByTimeAsync(50);
+      await rejection;
+
+      expect(stageTrace).toEqual(expectedTrace);
+      expect(logger.warn.mock.calls).toEqual([
+        ['[Test] The AI request timed out', { category: 'timed-out' }],
+      ]);
+      expect(broadcaster.broadcastFlatComplete.mock.calls).toEqual([
+        ['op-1', false, 'The AI request timed out'],
+      ]);
+      expect(handle.close).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 

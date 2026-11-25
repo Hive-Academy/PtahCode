@@ -75,9 +75,13 @@ const motionPreferenceSchema = z.enum(['always', 'system', 'reduce']);
  * - `agentOrchestration.decisionModel`: saved by `agent:setConfig` through
  *   `DecisionModelConfig.setSelection`, which checks it against
  *   `DecisionModelSelectionSchema` (TASK_2026_646_136a).
+ * - `setup.provider` and `setup.model`: validated and saved together by
+ *   `wizard:set-setup-model`.
  */
 const SETTINGS_SET_DENIED_KEYS: ReadonlySet<string> = new Set([
   'agentOrchestration.decisionModel',
+  'setup.provider',
+  'setup.model',
 ]);
 
 @injectable()
