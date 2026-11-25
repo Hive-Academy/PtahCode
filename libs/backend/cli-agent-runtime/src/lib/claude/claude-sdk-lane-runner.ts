@@ -174,7 +174,8 @@ export function claudeLaneTurnContent(
   const text = withFileReferences(message, content?.files);
   const images = content?.images ?? [];
   if (images.length === 0) return text;
-  const blocks: Exclude<PromptTurnContent, string> = [{ type: 'text', text }];
+  // The API refuses an empty text block: an image-only turn sends images only.
+  const blocks: Exclude<PromptTurnContent, string> = text.trim() ? [{ type: 'text', text }] : [];
   for (const image of images) {
     const mediaType = resolveImageMediaType(image.mediaType, image.data);
     if (mediaType === null)

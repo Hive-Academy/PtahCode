@@ -35,15 +35,24 @@ export function segmentModel(cli: AgentProcessInfo['cli'], segment: CliOutputSeg
   return usage.slice(0, 128);
 }
 
+/** What a scan of the lane's persisted output found. */
+export interface LastRunModelScan {
+  /** The last reported model; undefined when the output names none or the scan was cut short. */
+  readonly model: string | undefined;
+  /** The page limit stopped the scan before the end of the output. */
+  readonly truncated: boolean;
+}
+
 /**
- * The model the lane's last persisted turn ran (F1), read forward through its
- * persisted output so the last reported model wins. Undefined when the
- * output names none.
+ * The model the lane's last persisted turn ran (F1). The store pages forward
+ * only, so the scan reads to the end and the last reported model wins. A
+ * scan cut short by the page limit has not seen the last turn: it reports
+ * no model rather than an older one.
  */
 export async function lastRunModelFromOutput(
   read: LaneOutputPageReader,
   info: Pick<AgentProcessInfo, 'agentId' | 'cli' | 'parentSessionId'>,
-): Promise<string | undefined> {
+): Promise<LastRunModelScan> {
   let model: string | undefined;
   let cursor: string | undefined;
   for (let page = 0; page < MAX_OUTPUT_PAGES; page++) {
@@ -53,10 +62,10 @@ export async function lastRunModelFromOutput(
       const found = segmentModel(info.cli, item.value);
       if (found) model = found;
     }
-    if (result.done || result.nextCursor === null) return model;
+    if (result.done || result.nextCursor === null) return { model, truncated: false };
     cursor = result.nextCursor;
   }
-  return model;
+  return { model: undefined, truncated: true };
 }
 
 /**
@@ -71,7 +80,11 @@ export function laneResumeModelLookup(
 ): (info: AgentProcessInfo) => Promise<string | undefined> {
   return async (info) => {
     try {
-      const model = await lastRunModelFromOutput(read, info);
+      const { model, truncated } = await lastRunModelFromOutput(read, info);
+      if (truncated)
+        logger.warn('[AgentLaneResume] Lane output exceeds the scan limit; its last model is unknown', {
+          agentId: info.agentId, pages: MAX_OUTPUT_PAGES,
+        });
       if (model) {
         logger.info('[AgentLaneResume] Resuming on the model the lane last ran', {
           agentId: info.agentId, cli: info.cli, model,

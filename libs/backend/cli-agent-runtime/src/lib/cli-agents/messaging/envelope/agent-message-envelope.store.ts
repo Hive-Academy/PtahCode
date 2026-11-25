@@ -17,6 +17,7 @@ import {
   AgentMessageBodySchema,
   AgentMessageEnvelopeIndexSchema,
   AgentMessageEnvelopeSchema,
+  hasStoredBody,
   type AgentMessageEnvelope,
   type EnvelopeAckPatch,
   type EnvelopePatch,
@@ -48,10 +49,11 @@ export function isSendTimeRefusal(envelope: {
   readonly state?: string;
   readonly mode?: string;
   readonly bodyBytes?: number;
+  readonly bodyStored?: true;
   readonly everDispatched?: boolean;
 }): boolean {
   return envelope.state === 'failed' && envelope.mode === 'unsupported' &&
-    (envelope.bodyBytes ?? 0) === 0 && envelope.everDispatched !== true;
+    !hasStoredBody(envelope) && envelope.everDispatched !== true;
 }
 
 /**
@@ -64,9 +66,10 @@ export function isSendTimeRefusal(envelope: {
 export function isBodylessTerminal(envelope: {
   readonly state?: string;
   readonly bodyBytes?: number;
+  readonly bodyStored?: true;
 }): boolean {
   return (envelope.state === 'failed' || envelope.state === 'expired') &&
-    (envelope.bodyBytes ?? 0) === 0;
+    !hasStoredBody(envelope);
 }
 
 export interface AgentMessagePersistence {
@@ -167,6 +170,7 @@ export class AgentMessageEnvelopeStore {
         updatedAt: input.updatedAt ?? now,
         attemptCount: input.attemptCount ?? 0,
         bodyBytes: body === undefined ? 0 : Buffer.byteLength(body, 'utf8'),
+        ...(body === '' ? { bodyStored: true } : {}),
       });
       if (body !== undefined) {
         try {
@@ -210,7 +214,7 @@ export class AgentMessageEnvelopeStore {
     return this.serialize(async () => {
       await this.pruneExpiredLocked();
       const envelope = this.envelopes.get(id);
-      if (!envelope || !envelope.bodyBytes) return undefined;
+      if (!envelope || !hasStoredBody(envelope)) return undefined;
       const parsed = AgentMessageBodySchema.safeParse(
         this.storage.get<unknown>(`${AGENT_MESSAGE_BODY_PREFIX}${id}`),
       );
@@ -400,6 +404,7 @@ export class AgentMessageEnvelopeStore {
         updatedAt: now,
         attemptCount: 0,
         bodyBytes: Buffer.byteLength(body.text, 'utf8'),
+        ...(body.text === '' ? { bodyStored: true } : {}),
       });
       this.envelopes.set(envelope.id, envelope);
     }
@@ -433,7 +438,7 @@ export class AgentMessageEnvelopeStore {
     }
     if (!hasBody) return;
     const bodies = [...this.envelopes.values()].filter((envelope) =>
-      (envelope.bodyBytes ?? 0) > 0 &&
+      hasStoredBody(envelope) &&
       (UNDELIVERED.has(envelope.state) || envelope.state === 'settled'));
     if (bodies.length < MAX_BODY_RECORDS) return;
     const nextCapacityAt = Math.min(...bodies.filter((envelope) =>
@@ -470,6 +475,8 @@ export class AgentMessageEnvelopeStore {
     const next = AgentMessageEnvelopeSchema.parse({
       ...existing,
       ...patch,
+      // A patch that drops the body (`bodyBytes: 0`) drops the empty-text marker too.
+      ...(patch.bodyBytes === 0 ? { bodyStored: undefined } : {}),
       updatedAt: now,
       ...((state === 'settled' || state === 'cancelled') && !patch.terminalAt
         ? { terminalAt: now } : {}),
@@ -491,10 +498,10 @@ export class AgentMessageEnvelopeStore {
         return existing;
       }
     }
-    if (next.state === 'cancelled' && (existing.bodyBytes ?? 0) > 0) {
+    if (next.state === 'cancelled' && hasStoredBody(existing)) {
       try {
         await this.storage.update(`${AGENT_MESSAGE_BODY_PREFIX}${id}`, undefined);
-        const withoutBody = { ...next, bodyBytes: 0 };
+        const withoutBody = { ...next, bodyBytes: 0, bodyStored: undefined };
         await this.persistReplacementLocked(withoutBody);
         this.emit(withoutBody);
         return withoutBody;
@@ -528,22 +535,22 @@ export class AgentMessageEnvelopeStore {
       // A body-less terminal record written without terminalAt expires from its last update.
       const terminalAt = envelope.terminalAt ?? (bodyless ? envelope.updatedAt : undefined);
       const expiry = terminalAt === undefined ? undefined : terminalAt + RETENTION_MS;
-      if (envelope.state === 'cancelled' && (envelope.bodyBytes ?? 0) > 0) {
+      if (envelope.state === 'cancelled' && hasStoredBody(envelope)) {
         if (!(await this.deleteBodyLocked(id))) continue;
-        this.envelopes.set(id, { ...envelope, bodyBytes: 0 });
+        this.envelopes.set(id, { ...envelope, bodyBytes: 0, bodyStored: undefined });
         changed = true;
       }
       if (expiry !== undefined && now >= expiry &&
         (envelope.state === 'settled' || envelope.state === 'cancelled' || bodyless)) {
         // A body-less failed record may still have an unreadable body key; drop it too.
-        if (((envelope.bodyBytes ?? 0) > 0 || (bodyless && !isSendTimeRefusal(envelope))) &&
+        if ((hasStoredBody(envelope) || (bodyless && !isSendTimeRefusal(envelope))) &&
           !(await this.deleteBodyLocked(id))) continue;
         this.envelopes.delete(id);
         changed = true;
       }
     }
     const bodyless = [...this.envelopes.values()].filter((envelope) =>
-      (envelope.bodyBytes ?? 0) === 0 &&
+      !hasStoredBody(envelope) &&
       (envelope.state === 'cancelled' || isBodylessTerminal(envelope)));
     const remove = new Set<string>();
     const global = bodyless.sort((a, b) => b.updatedAt - a.updatedAt);

@@ -8,6 +8,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   AGENT_MESSAGE_BODY_PREFIX,
   AGENT_MESSAGE_ENVELOPE_INDEX_KEY,
+  hasStoredBody,
   type AgentMessageBody,
   type AgentMessageEnvelope,
   type NewEnvelope,
@@ -16,6 +17,7 @@ import {
   AgentMessageEnvelopeStore,
   AgentMessageStorageError,
   AgentMessageValidationError,
+  isBodylessTerminal,
   type AgentMessagePersistence,
 } from './agent-message-envelope.store';
 import { LEGACY_RECEIPT_KEY } from './legacy-receipt-migration';
@@ -474,6 +476,30 @@ describe('AgentMessageEnvelopeStore', () => {
       state: 'not-started',
       attemptCount: 0,
     });
+  });
+
+  it('keeps the empty body of an image-only message as a stored body until it is dropped', async () => {
+    const envelopes = store();
+    const { envelope } = await envelopes.put(input({ turn: { imageCount: 1 } }), '');
+    expect(envelope).toMatchObject({ bodyBytes: 0, bodyStored: true });
+    expect(hasStoredBody(envelope)).toBe(true);
+    await expect(envelopes.getBody(envelope.id)).resolves.toBe('');
+    // A failed record that keeps its body stays undelivered work, not a body-less terminal.
+    const failed = await envelopes.transition(envelope.id, { state: 'failed', reason: 'delivery-refused' });
+    expect(failed && isBodylessTerminal(failed)).toBe(false);
+    // Dropping the body drops the marker with it.
+    const dropped = await envelopes.transition(envelope.id, { bodyBytes: 0, reason: 'body-unavailable' });
+    expect(dropped?.bodyStored).toBeUndefined();
+    await expect(envelopes.getBody(envelope.id)).resolves.toBeUndefined();
+  });
+
+  it('removes the empty body and its marker when an image-only message is cancelled', async () => {
+    const envelopes = store();
+    const { envelope } = await envelopes.put(input({ turn: { imageCount: 1 } }), '');
+    const cancelled = await envelopes.transition(envelope.id, { state: 'cancelled', reason: 'cancelled-by-user' });
+    expect(cancelled).toMatchObject({ state: 'cancelled', bodyBytes: 0 });
+    expect(cancelled?.bodyStored).toBeUndefined();
+    await expect(envelopes.getBody(envelope.id)).resolves.toBeUndefined();
   });
 
   it('rejects markDispatching as withdrawn when the envelope was decided elsewhere', async () => {

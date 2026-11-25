@@ -34,7 +34,7 @@ describe('lastRunModelFromOutput (F1)', () => {
       [telemetrySegment('claude-sonnet-4-5', 1), { type: 'text', content: 'hi' }],
       [telemetrySegment('claude-haiku-4-5-20251001', 2)],
     );
-    await expect(lastRunModelFromOutput(read, info)).resolves.toBe('claude-haiku-4-5-20251001');
+    await expect(lastRunModelFromOutput(read, info)).resolves.toEqual({ model: 'claude-haiku-4-5-20251001', truncated: false });
     expect(read).toHaveBeenCalledWith(String(info.agentId), undefined, 'parent-1');
     expect(read).toHaveBeenCalledWith(String(info.agentId), '1', 'parent-1');
   });
@@ -44,11 +44,22 @@ describe('lastRunModelFromOutput (F1)', () => {
       { type: 'info', content: 'usage', usage: { model: 'claude-haiku-4-5' } },
       { type: 'info', content: 'usage', usage: { model: 'claude/unknown' } },
     ]);
-    await expect(lastRunModelFromOutput(read, info)).resolves.toBe('claude-haiku-4-5');
+    await expect(lastRunModelFromOutput(read, info)).resolves.toEqual({ model: 'claude-haiku-4-5', truncated: false });
   });
 
   it('returns undefined when the output names no model', async () => {
-    await expect(lastRunModelFromOutput(pages([{ type: 'text', content: 'hi' }]), info)).resolves.toBeUndefined();
+    await expect(lastRunModelFromOutput(pages([{ type: 'text', content: 'hi' }]), info))
+      .resolves.toEqual({ model: undefined, truncated: false });
+  });
+
+  it('reports no model, not an older one, when the page limit cuts the scan short (CR)', async () => {
+    const read = jest.fn(async (_agentId: string, cursor: string | undefined, _sessionId: string | undefined) => ({
+      items: [{ tag: 'segment' as const, value: telemetrySegment('claude-sonnet-4-5', Number(cursor ?? 0)) }],
+      nextCursor: String(Number(cursor ?? 0) + 1),
+      done: false,
+    }));
+    await expect(lastRunModelFromOutput(read, info)).resolves.toEqual({ model: undefined, truncated: true });
+    expect(read).toHaveBeenCalledTimes(64);
   });
 });
 
@@ -71,6 +82,22 @@ describe('laneResumeModelLookup (F1)', () => {
     expect(log.warn).toHaveBeenCalledWith(
       '[AgentLaneResume] No stored or last-run model for the lane; it resumes on the CLI default',
       { agentId: info.agentId, cli: 'claude' },
+    );
+  });
+
+  it('warns about the scan limit and resolves undefined for an over-long output (CR)', async () => {
+    const log = logger();
+    const endless: LaneOutputPageReader = async (_agentId, cursor) => ({
+      items: [{ tag: 'segment', value: telemetrySegment('claude-sonnet-4-5') }],
+      nextCursor: String(Number(cursor ?? 0) + 1),
+      done: false,
+    });
+    const lookup = laneResumeModelLookup(endless, log);
+    await expect(lookup({ ...info, task: 't', workingDirectory: '.', status: 'stopped', startedAt: '' }))
+      .resolves.toBeUndefined();
+    expect(log.warn).toHaveBeenCalledWith(
+      '[AgentLaneResume] Lane output exceeds the scan limit; its last model is unknown',
+      { agentId: info.agentId, pages: 64 },
     );
   });
 

@@ -1490,6 +1490,12 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     f.finish(0);
   });
 
+  it('sends an image-only turn as image blocks with no empty text block', () => {
+    expect(claudeLaneTurnContent('', { images: [{ data: PNG, mediaType: 'image/png' }] })).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+  });
+
   it('rejects an unresolvable image and queues nothing', async () => {
     expect(() => claudeLaneTurnContent('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] }))
       .toThrow('An attached image is not a PNG, JPEG, GIF or WebP image.');

@@ -2147,6 +2147,29 @@ describe('createProviderSessionLaneHandle — raw command turns (F9)', () => {
     });
   });
 
+  it('adds no notice for a command turn that was interrupted (CR)', async () => {
+    let prompts = 0;
+    const h = start({
+      profile: { cancelBehavior: 'await-reply' },
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          if (++prompts === 1) {
+            await fake.sessionUpdate(String(params['sessionId']), COMMANDS);
+            return { result: { stopReason: 'end_turn' } };
+          }
+          return { hold: true };
+        }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const next = await h.handle.continue?.('/compact');
+    await settle();
+    await h.handle.interrupt?.();
+    // A Ptah interrupt resolves 0, like a completed turn: the guard reads the terminal status.
+    await expect(next?.done).resolves.toBe(0);
+    expect(h.infos().filter((text) => text.includes('returned no output'))).toEqual([]);
+    h.handle.abort.abort();
+  }, 20_000);
+
   it('shows the command output and adds no notice when the agent answers', async () => {
     const h = commandLane(async (fake, sessionId) => {
       await fake.sessionUpdate(sessionId, {

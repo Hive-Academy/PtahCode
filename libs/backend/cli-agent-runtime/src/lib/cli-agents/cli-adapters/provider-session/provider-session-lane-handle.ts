@@ -544,13 +544,16 @@ export function createProviderSessionLaneHandle(
   };
 
   /**
-   * Ends a command turn: one that returned nothing tells the lane so,
-   * instead of a silent empty turn (F9).
+   * Ends a command turn: one that completed and returned nothing tells the
+   * lane so, instead of a silent empty turn (F9). An interrupted or stopped
+   * turn also resolves 0, but it did not run to its end: no notice.
    */
   const endCommandTurn = (code: number): number => {
     const ended = commandTurn;
     commandTurn = undefined;
-    if (ended && !ended.output && code === 0)
+    const ranToEnd = lastTerminalStatus === 'completed' && !interruptRequested &&
+      !abort.signal.aborted && !session.isClosed();
+    if (ended && !ended.output && code === 0 && ranToEnd)
       segment.emit({
         type: 'info',
         content: `${name} ran /${ended.name} and returned no output.`,
