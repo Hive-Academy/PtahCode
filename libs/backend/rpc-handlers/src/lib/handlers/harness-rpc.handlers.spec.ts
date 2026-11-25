@@ -790,6 +790,65 @@ describe('HarnessRpcHandlers (thin facade)', () => {
     );
   });
 
+  interface MissingAiCase {
+    method: string;
+    params: Record<string, unknown>;
+    stub: (suite: Suite) => void;
+  }
+
+  it.each<MissingAiCase>([
+    {
+      method: 'harness:design-agents',
+      params: { persona, existingAgents: [] },
+      stub: (suite) =>
+        suite.subagentDesign.designSubagentFleet.mockResolvedValueOnce(
+          undefined as never,
+        ),
+    },
+    {
+      method: 'harness:generate-skills',
+      params: { persona, existingSkills: [], harnessSubagents: [] },
+      stub: (suite) =>
+        suite.skillGeneration.generateSkillSpecs.mockResolvedValueOnce(
+          undefined as never,
+        ),
+    },
+    {
+      method: 'harness:generate-document',
+      params: { config, workspaceContext: {} },
+      stub: (suite) =>
+        suite.documentGeneration.generateComprehensiveDocument.mockResolvedValueOnce(
+          undefined as never,
+        ),
+    },
+    {
+      method: 'harness:analyze-intent',
+      params: { input: 'a sufficiently detailed harness request' },
+      stub: (suite) =>
+        suite.suggestion.analyzeIntent.mockResolvedValueOnce(
+          undefined as never,
+        ),
+    },
+  ])('$method returns a failed RPC envelope for a missing AI response', async ({ method, params, stub }) => {
+    const suite = buildSuite();
+    stub(suite);
+    suite.handlers.register();
+
+    const response = await suite.rpc.handleMessage({
+      method,
+      params,
+      correlationId: `missing-${method}`,
+    });
+
+    expect(response).toMatchObject({
+      success: false,
+      error: 'The AI request did not complete successfully',
+    });
+    expect(suite.logger.debug).not.toHaveBeenCalledWith(
+      `RPC: ${method} success`,
+    );
+  });
+
   describe('harness:start-new-project', () => {
     const VALID_INTAKE = {
       what: 'A booking tool for physiotherapy clinics',

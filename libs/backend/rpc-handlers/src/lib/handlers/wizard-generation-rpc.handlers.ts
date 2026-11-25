@@ -200,6 +200,9 @@ export class WizardGenerationRpcHandlers {
   /** Reserves the submit slot while its checkpoint and runtime are prepared. */
   private submitReserved = false;
 
+  /** Reserves the retry slot from preparation through run settlement. */
+  private retryReserved = false;
+
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(TOKENS.RPC_HANDLER) private readonly rpcHandler: RpcHandler,
@@ -320,7 +323,7 @@ export class WizardGenerationRpcHandlers {
           error: 'No agents selected. Please select at least one agent.',
         };
       }
-      if (this.runs.isActive || this.submitReserved) {
+      if (this.runs.isActive || this.submitReserved || this.retryReserved) {
         this.logger.warn(
           'RPC: wizard:submit-selection rejected - generation already in progress',
         );
@@ -1258,213 +1261,237 @@ export class WizardGenerationRpcHandlers {
       )
         return { success: false, rejection: { reason: 'invalid-binding' } };
       const parsed = this.parse(WizardRetryItemParamsSchema, params);
-      if (this.runs.isActive || this.submitReserved) {
+      if (this.runs.isActive || this.submitReserved || this.retryReserved) {
         return {
           success: false,
           error:
             'Agent generation is already in progress. Please wait for it to complete before retrying.',
         };
       }
-      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-      if (!workspaceRoot) {
-        if (parsed.tabBinding)
+      this.retryReserved = true;
+      try {
+        const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+        if (!workspaceRoot) {
+          if (parsed.tabBinding)
+            return {
+              success: false,
+              rejection: { reason: 'workspace-mismatch' },
+            };
           return {
             success: false,
-            rejection: { reason: 'workspace-mismatch' },
+            error: 'No workspace folder open. Please open a folder first.',
           };
-        return {
-          success: false,
-          error: 'No workspace folder open. Please open a folder first.',
-        };
-      }
-      const canonicalWorkspace = parsed.tabBinding
-        ? await authorizeTabWorkspace(
-            workspaceRoot,
-            parsed.tabBinding,
-            this.logger,
-          )
-        : null;
-      if (parsed.tabBinding && !canonicalWorkspace)
-        return { success: false, rejection: { reason: 'workspace-mismatch' } };
-      const retryBinding =
-        parsed.tabBinding && canonicalWorkspace
-          ? { ...parsed.tabBinding, workspacePath: canonicalWorkspace }
-          : undefined;
-      const setupSnapshot = await this.resolveSetupSnapshot(
-        canonicalWorkspace ?? workspaceRoot,
-      );
-
-      try {
-        this.logger.info('RPC: wizard:retry-item started', {
-          itemId: parsed.itemId,
-          workspace: workspaceRoot,
-        });
-        const orchestrator = this.resolveService<GenerationOrchestrator>(
-          AGENT_GENERATION_TOKENS.AGENT_GENERATION_ORCHESTRATOR,
-          'AgentGenerationOrchestratorService',
-        );
-        const webviewManager = this.resolveWebviewManager();
-        const boundCheckpoint = retryBinding
-          ? await this.checkpoints.locateBound(
-              canonicalWorkspace!,
-              retryBinding,
-              retryBinding.runId,
+        }
+        const canonicalWorkspace = parsed.tabBinding
+          ? await authorizeTabWorkspace(
+              workspaceRoot,
+              parsed.tabBinding,
+              this.logger,
             )
           : null;
-        if (
-          retryBinding &&
-          (!boundCheckpoint ||
-            boundCheckpoint.manifest.runId !== retryBinding.runId ||
-            boundCheckpoint.manifest.tabBinding?.tabId !== retryBinding.tabId ||
-            !this.checkpoints.isTrusted(
-              boundCheckpoint.location,
-              boundCheckpoint.manifest,
-            ))
-        )
-          return { success: false, rejection: { reason: 'not-running' } };
-        const checkpoint = retryBinding
-          ? (boundCheckpoint?.location ?? null)
-          : this.lastCheckpoint;
-        const boundRuntime = retryBinding
-          ? await this.resolveRuntime(workspaceRoot)
-          : null;
-        // The retried item gets the decision its run recorded: a kept file
-        // stays kept (no generation), a replace keeps its baseline check, and
-        // a run without recorded guards is create-only.
-        const scope = boundCheckpoint
-          ? libraryScopeOf(canonicalWorkspace!, boundCheckpoint.manifest)
-          : (this.lastRunScope ?? libraryScopeOf(workspaceRoot, null));
-        const options: OrchestratorGenerationOptions = {
-          ...(retryBinding
-            ? {
-                threshold: boundCheckpoint?.manifest.input.threshold,
-                variableOverrides:
-                  boundCheckpoint?.manifest.input.variableOverrides,
-                enhancedPromptContent: boundCheckpoint?.manifest
-                  .enhancedPromptsUsed
-                  ? boundRuntime?.enhancedPromptContent
-                  : undefined,
-                analysisDir:
-                  boundCheckpoint?.manifest.source?.kind === 'verified-analysis'
-                    ? boundCheckpoint.manifest.source.analysisDir
-                    : undefined,
-                ...this.manifestWriteOptions(
-                  boundCheckpoint?.manifest ?? null,
-                  scope,
-                ),
-              }
-            : (this.lastGenerationInputs ?? {})),
-          workspacePath: workspaceRoot,
-          setupSnapshot,
-          userOverrides: [parsed.itemId],
-          onStreamEvent: this.createStreamBroadcaster(
-            webviewManager,
-            retryBinding,
-          ),
-          onAgentOutcome: checkpoint
-            ? (outcome) => this.checkpoints.recordOutcome(checkpoint, outcome)
-            : undefined,
-        };
+        if (parsed.tabBinding && !canonicalWorkspace)
+          return { success: false, rejection: { reason: 'workspace-mismatch' } };
+        const retryBinding =
+          parsed.tabBinding && canonicalWorkspace
+            ? { ...parsed.tabBinding, workspacePath: canonicalWorkspace }
+            : undefined;
+        const setupSnapshot = await this.resolveSetupSnapshot(
+          canonicalWorkspace ?? workspaceRoot,
+        );
 
-        if (checkpoint) {
-          await this.checkpoints.recordEffectivePair(checkpoint, {
+        try {
+          this.logger.info('RPC: wizard:retry-item started', {
+            itemId: parsed.itemId,
+            workspace: workspaceRoot,
+          });
+          const orchestrator = this.resolveService<GenerationOrchestrator>(
+            AGENT_GENERATION_TOKENS.AGENT_GENERATION_ORCHESTRATOR,
+            'AgentGenerationOrchestratorService',
+          );
+          const webviewManager = this.resolveWebviewManager();
+          const boundCheckpoint = retryBinding
+            ? await this.checkpoints.locateBound(
+                canonicalWorkspace!,
+                retryBinding,
+                retryBinding.runId,
+              )
+            : null;
+          if (
+            retryBinding &&
+            (!boundCheckpoint ||
+              boundCheckpoint.manifest.runId !== retryBinding.runId ||
+              boundCheckpoint.manifest.tabBinding?.tabId !== retryBinding.tabId ||
+              !this.checkpoints.isTrusted(
+                boundCheckpoint.location,
+                boundCheckpoint.manifest,
+              ))
+          )
+            return { success: false, rejection: { reason: 'not-running' } };
+          const checkpoint = retryBinding
+            ? (boundCheckpoint?.location ?? null)
+            : this.lastCheckpoint;
+          const boundRuntime = retryBinding
+            ? await this.resolveRuntime(workspaceRoot)
+            : null;
+          // The retried item gets the decision its run recorded: a kept file
+          // stays kept (no generation), a replace keeps its baseline check, and
+          // a run without recorded guards is create-only.
+          const scope = boundCheckpoint
+            ? libraryScopeOf(canonicalWorkspace!, boundCheckpoint.manifest)
+            : (this.lastRunScope ?? libraryScopeOf(workspaceRoot, null));
+          const options: OrchestratorGenerationOptions = {
+            ...(retryBinding
+              ? {
+                  threshold: boundCheckpoint?.manifest.input.threshold,
+                  variableOverrides:
+                    boundCheckpoint?.manifest.input.variableOverrides,
+                  enhancedPromptContent: boundCheckpoint?.manifest
+                    .enhancedPromptsUsed
+                    ? boundRuntime?.enhancedPromptContent
+                    : undefined,
+                  analysisDir:
+                    boundCheckpoint?.manifest.source?.kind ===
+                    'verified-analysis'
+                      ? boundCheckpoint.manifest.source.analysisDir
+                      : undefined,
+                  ...this.manifestWriteOptions(
+                    boundCheckpoint?.manifest ?? null,
+                    scope,
+                  ),
+                }
+              : (this.lastGenerationInputs ?? {})),
+            workspacePath: workspaceRoot,
+            setupSnapshot,
+            userOverrides: [parsed.itemId],
+            onStreamEvent: this.createStreamBroadcaster(
+              webviewManager,
+              retryBinding,
+            ),
+            onAgentOutcome: checkpoint
+              ? (outcome) => this.checkpoints.recordOutcome(checkpoint, outcome)
+              : undefined,
+          };
+
+          const settled = await this.runs.run({
+            orchestrator,
             effectiveProvider: setupSnapshot.providerId,
             effectiveModel: setupSnapshot.model,
+            ...(retryBinding
+              ? {
+                  tabBinding: retryBinding,
+                  source: boundCheckpoint?.manifest.source,
+                  enhancedPromptsUsed:
+                    boundCheckpoint?.manifest.enhancedPromptsUsed,
+                }
+              : {}),
+            options,
+            ...(retryBinding
+              ? {
+                  progressCallback: this.createProgressBroadcaster(
+                    webviewManager,
+                    retryBinding,
+                  ),
+                }
+              : {}),
+            broadcaster: webviewManager,
+            outputDirectory: this.checkpoints.outputDirectoryFor(
+              scope.outputRoot,
+            ),
+            carriedOver: [],
+            onSettled: async (result) => {
+              if (!checkpoint) {
+                await this.afterSettledWithoutCheckpoint(scope, result);
+                return;
+              }
+              let pairWriteError: unknown;
+              try {
+                await this.checkpoints.recordEffectivePair(checkpoint, {
+                  effectiveProvider: setupSnapshot.providerId,
+                  effectiveModel: setupSnapshot.model,
+                });
+              } catch (error: unknown) {
+                pairWriteError = error;
+                if (result.summary) {
+                  result.summary = { ...result.summary, lifecycle: 'failed' };
+                }
+                result.payload = {
+                  ...result.payload,
+                  success: false,
+                  errors: [
+                    ...(result.payload.errors ?? []),
+                    'Generation finalization failed. Please retry or resume.',
+                  ],
+                };
+              }
+              await this.afterSettled(
+                'wizard:retry-item',
+                checkpoint,
+                scope,
+                result,
+                !!retryBinding,
+              );
+              if (pairWriteError) throw pairWriteError;
+            },
           });
-        }
-        const settled = await this.runs.run({
-          orchestrator,
-          effectiveProvider: setupSnapshot.providerId,
-          effectiveModel: setupSnapshot.model,
-          ...(retryBinding
-            ? {
-                tabBinding: retryBinding,
-                source: boundCheckpoint?.manifest.source,
-                enhancedPromptsUsed:
-                  boundCheckpoint?.manifest.enhancedPromptsUsed,
-              }
-            : {}),
-          options,
-          ...(retryBinding
-            ? {
-                progressCallback: this.createProgressBroadcaster(
-                  webviewManager,
-                  retryBinding,
-                ),
-              }
-            : {}),
-          broadcaster: webviewManager,
-          outputDirectory: this.checkpoints.outputDirectoryFor(
-            scope.outputRoot,
-          ),
-          carriedOver: [],
-          onSettled: (result) =>
-            checkpoint
-              ? this.afterSettled(
-                  'wizard:retry-item',
-                  checkpoint,
-                  scope,
-                  result,
-                  !!retryBinding,
-                )
-              : this.afterSettledWithoutCheckpoint(scope, result),
-        });
 
-        if (settled.failure?.thrown) {
-          throw new Error(settled.failure.message);
-        }
-        const itemOutcome = settled.summary?.outcomes.find(
-          (outcome) => outcome.agentId === parsed.itemId,
-        );
-        if (itemOutcome?.status === 'changed-since-preview') {
-          this.logger.warn('RPC: wizard:retry-item kept a changed file', {
+          if (settled.failure?.thrown) {
+            throw new Error(settled.failure.message);
+          }
+          const itemOutcome = settled.summary?.outcomes.find(
+            (outcome) => outcome.agentId === parsed.itemId,
+          );
+          if (itemOutcome?.status === 'changed-since-preview') {
+            this.logger.warn('RPC: wizard:retry-item kept a changed file', {
+              itemId: parsed.itemId,
+            });
+            return { success: false, error: CHANGED_SINCE_PREVIEW_RETRY_ERROR };
+          }
+          if (
+            settled.payload.success ||
+            (retryBinding &&
+              settled.resultDetails?.finalizationFailed !== true &&
+              settled.abortReason === null &&
+              settled.failure === null &&
+              settled.summary?.lifecycle === 'completed' &&
+              settled.summary.outcomes.some(
+                (outcome) =>
+                  outcome.agentId === parsed.itemId &&
+                  (outcome.status === 'written' ||
+                    outcome.status === 'unchanged' ||
+                    outcome.status === 'kept'),
+              ))
+          ) {
+            return { success: true };
+          }
+          const errorMessage =
+            settled.failure?.message ??
+            settled.payload.errors?.[0] ??
+            `Failed to retry item ${parsed.itemId}`;
+          this.logger.error('RPC: wizard:retry-item failed', {
             itemId: parsed.itemId,
+            error: errorMessage,
           });
-          return { success: false, error: CHANGED_SINCE_PREVIEW_RETRY_ERROR };
+          return { success: false, error: errorMessage };
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            'RPC: wizard:retry-item unexpected error',
+            error instanceof Error ? error : new Error(errorMessage),
+          );
+          this.sentryService.captureException(
+            error instanceof Error ? error : new Error(errorMessage),
+            { errorSource: 'WizardGenerationRpcHandlers.registerRetryItem' },
+          );
+          return {
+            success: false,
+            error: parsed.tabBinding
+              ? 'Agent retry failed. Please retry or resume.'
+              : `Retry failed: ${errorMessage}`,
+          };
         }
-        if (
-          settled.payload.success ||
-          (retryBinding &&
-            settled.resultDetails?.finalizationFailed !== true &&
-            settled.abortReason === null &&
-            settled.failure === null &&
-            settled.summary?.lifecycle === 'completed' &&
-            settled.summary.outcomes.some(
-              (outcome) =>
-                outcome.agentId === parsed.itemId &&
-                (outcome.status === 'written' ||
-                  outcome.status === 'unchanged' ||
-                  outcome.status === 'kept'),
-            ))
-        ) {
-          return { success: true };
-        }
-        const errorMessage =
-          settled.failure?.message ??
-          settled.payload.errors?.[0] ??
-          `Failed to retry item ${parsed.itemId}`;
-        this.logger.error('RPC: wizard:retry-item failed', {
-          itemId: parsed.itemId,
-          error: errorMessage,
-        });
-        return { success: false, error: errorMessage };
-      } catch (error: unknown) {
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          'RPC: wizard:retry-item unexpected error',
-          error instanceof Error ? error : new Error(errorMessage),
-        );
-        this.sentryService.captureException(
-          error instanceof Error ? error : new Error(errorMessage),
-          { errorSource: 'WizardGenerationRpcHandlers.registerRetryItem' },
-        );
-        return {
-          success: false,
-          error: parsed.tabBinding
-            ? 'Agent retry failed. Please retry or resume.'
-            : `Retry failed: ${errorMessage}`,
-        };
+      } finally {
+        this.retryReserved = false;
       }
     });
   }

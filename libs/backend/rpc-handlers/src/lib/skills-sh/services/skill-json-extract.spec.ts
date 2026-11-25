@@ -16,6 +16,12 @@ describe('extractJsonObject', () => {
     expect(extractJsonObject('{"first":1} and {"second":2}')).toEqual({ first: 1 });
   });
 
+  it('continues after an invalid balanced object before a valid draft', () => {
+    expect(
+      extractJsonObject('Context: {workspace}\nDraft: {"items":[]}'),
+    ).toEqual({ items: [] });
+  });
+
   it.each(['{invalid}', '{"items":[}', '{"items":[]', '', '  ', 'no object'])(
     'returns null when the response has no usable JSON object (%p)',
     (text) => expect(extractJsonObject(text)).toBeNull(),

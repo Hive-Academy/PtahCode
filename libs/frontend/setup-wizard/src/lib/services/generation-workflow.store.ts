@@ -196,8 +196,16 @@ export class GenerationWorkflowStore {
       else if (response.rejection) this.reject(response.rejection);
       else if (response.success === false) this.failStart(response.error);
       else await this.refresh();
-    } catch {
+    } catch (error: unknown) {
       if (this.sameBinding(binding) && revision === this.bindingRevision) {
+        const message = error instanceof Error ? error.message : '';
+        if (
+          message.startsWith('SETUP_') ||
+          message.includes('Update Background models and retry.')
+        ) {
+          this.startError.set(message);
+          this.failStart();
+        }
         await this.refresh();
       }
     }

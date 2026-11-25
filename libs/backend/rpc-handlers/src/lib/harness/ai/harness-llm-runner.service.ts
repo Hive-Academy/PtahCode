@@ -193,7 +193,7 @@ export class HarnessLlmRunner {
       abortController.signal.throwIfAborted();
 
       let postProcessed: TPostProcessed | undefined;
-      if (args.postProcess) {
+      if (terminal?.kind === 'success' && args.postProcess) {
         postProcessed = await args.postProcess(structuredOutput);
       }
       abortController.signal.throwIfAborted();

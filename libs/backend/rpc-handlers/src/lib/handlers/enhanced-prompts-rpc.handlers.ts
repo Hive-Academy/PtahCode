@@ -801,8 +801,13 @@ export class EnhancedPromptsRpcHandlers {
       ]);
       if (resolution.kind === 'invalid' || resolution.kind === 'unavailable') {
         const source = resolution.source === 'setup' ? 'Setup' : 'Workspace';
+        const provider = resolution.provider;
+        const providerDetail =
+          provider && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(provider)
+            ? `; provider=${provider}`
+            : '';
         throw new RpcUserError(
-          `${source} model cannot run guidance (${resolution.cause}). Update Background models and retry.`,
+          `${source} model cannot run guidance (${resolution.cause}${providerDetail}). Update Background models and retry.`,
           'SETUP_MODEL_INVALID',
         );
       }

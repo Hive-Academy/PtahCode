@@ -57,10 +57,11 @@ describe('WizardRpcService', () => {
   });
 
   /** Factory for a failure-shape RPC result. */
-  const errResult = (error: string) => ({
+  const errResult = (error: string, errorCode?: string) => ({
     success: false,
     isSuccess: () => false,
     error,
+    ...(errorCode ? { errorCode } : {}),
   });
 
   it('gets the current workspace analysis status', async () => {
@@ -121,6 +122,30 @@ describe('WizardRpcService', () => {
       { timeout: 300_000 },
     );
   });
+
+  it.each(['start', 'regenerate'] as const)(
+    'preserves the Setup code and message for a bound guidance %s',
+    async (kind) => {
+      const message =
+        'Setup model cannot run guidance (not-signed-in; provider=openrouter). Update Background models and retry.';
+      rpcCall.mockResolvedValue(errResult(message, 'SETUP_MODEL_INVALID'));
+      const binding = {
+        tabId: 'guidance',
+        workflow: 'setup-project-prompt' as const,
+        workspacePath: '/ws',
+      };
+      const request =
+        kind === 'start'
+          ? service.startBoundGuidance(binding)
+          : service.regenerateBoundGuidance(binding);
+      await expect(request).rejects.toMatchObject({
+        code: 'SETUP_MODEL_INVALID',
+        reason: 'not-signed-in',
+        provider: 'openrouter',
+        message: `SETUP_MODEL_INVALID reason=not-signed-in provider=openrouter: ${message}`,
+      });
+    },
+  );
 
   it('sends no model for all bound starts despite conflicting tab override and picker models', async () => {
     rpcCall.mockResolvedValue(okResult({ accepted: { runId: 'r' } }));

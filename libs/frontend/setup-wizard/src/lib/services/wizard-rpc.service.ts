@@ -48,6 +48,42 @@ export type BoundAgentDecisions = Pick<
   'previewToken' | 'fileDecisions' | 'target'
 >;
 
+const SETUP_REFUSAL =
+  /\((provider-unknown|provider-unsupported|provider-missing|model-missing|model-stale|not-signed-in|provider-unavailable)(?:;\s*provider=([a-z0-9][a-z0-9._-]{0,63}))?\)/i;
+
+/** Transport failure with its stable code retained for fixed view copy. */
+export class WizardRpcError extends Error {
+  public constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly reason?: string,
+    public readonly provider?: string,
+  ) {
+    super(message);
+    this.name = 'WizardRpcError';
+  }
+}
+
+function guidanceFailure(
+  message: string | undefined,
+  code: string | undefined,
+  fallback: string,
+): WizardRpcError {
+  const text = message || fallback;
+  const setup = code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
+  const reason = setup?.[1].toLowerCase();
+  const provider = setup?.[2];
+  const detail = reason
+    ? ` reason=${reason}${provider ? ` provider=${provider}` : ''}`
+    : '';
+  return new WizardRpcError(
+    code?.startsWith('SETUP_') ? `${code}${detail}: ${text}` : text,
+    code,
+    reason,
+    provider,
+  );
+}
+
 /** Only the decision fields that are set, so absent ones keep server defaults. */
 function boundDecisionFields(
   decisions: BoundAgentDecisions | undefined,
@@ -178,8 +214,11 @@ export class WizardRpcService {
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
-    if (!result.isSuccess() || !result.data)
-      throw new Error('Start unconfirmed');
+    if (!result.isSuccess() || !result.data) {
+      const error = !result.isSuccess() ? result.error : undefined;
+      const code = !result.isSuccess() ? result.errorCode : undefined;
+      throw guidanceFailure(error, code, 'Start unconfirmed');
+    }
     return result.data;
   }
 
@@ -195,8 +234,11 @@ export class WizardRpcService {
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
-    if (!result.isSuccess() || !result.data)
-      throw new Error('Regeneration unconfirmed');
+    if (!result.isSuccess() || !result.data) {
+      const error = !result.isSuccess() ? result.error : undefined;
+      const code = !result.isSuccess() ? result.errorCode : undefined;
+      throw guidanceFailure(error, code, 'Regeneration unconfirmed');
+    }
     return result.data;
   }
 

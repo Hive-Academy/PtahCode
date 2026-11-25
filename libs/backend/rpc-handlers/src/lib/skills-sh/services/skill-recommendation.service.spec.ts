@@ -368,6 +368,74 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
     expect(result.unmatchedItems).toEqual([]);
   });
 
+  it('does not add coverage for a different candidate with the same name', async () => {
+    const result = await service.recommendAnalysis({
+      items: [
+        { ...item, name: 'React' },
+        { ...item, name: 'Vue' },
+      ],
+      summarySource: 'structured',
+      search: async (query) => [
+        {
+          ...entry,
+          source: query === 'react' ? 'org/react' : 'org/vue',
+          skillId: query === 'react' ? 'react-best' : 'vue-best',
+          name: 'Best practices',
+        },
+      ],
+    });
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0].evidence).toBe('React');
+  });
+
+  it('keeps generated duplicate IDs distinct from original suffixed names', async () => {
+    const items = ['React', 'React', 'React#2'].map((name) => ({
+      ...item,
+      name,
+    }));
+    const result = await service.recommendAnalysis({
+      items,
+      summarySource: 'structured',
+      search: async () => [{ ...entry, name: 'React', skillId: 'react' }],
+    });
+    expect(result.judge.items.map(({ itemId }) => itemId)).toEqual([
+      'framework:react',
+      'framework:react#3',
+      'framework:react#2',
+    ]);
+  });
+
+  it('limits description deprecation to explicit notices on heuristic fallback', async () => {
+    const result = await service.recommendAnalysis({
+      items: [item],
+      summarySource: 'structured',
+      search: async () => [
+        {
+          ...entry,
+          skillId: 'modern-react',
+          description: 'Migrate from deprecated React APIs to modern APIs',
+        },
+        {
+          ...entry,
+          skillId: 'legacy-react',
+          description: 'Deprecated: use the modern React skill instead',
+        },
+      ],
+    });
+    const assessments = new Map(
+      result.judge.items[0].candidateAssessments.map((assessment) => [
+        assessment.candidateId,
+        assessment,
+      ]),
+    );
+    expect(assessments.get('owner/repo/modern-react')).toMatchObject({
+      eligible: true,
+    });
+    expect(assessments.get('owner/repo/legacy-react')).toMatchObject({
+      eligible: false,
+    });
+  });
+
   it('separates a search failure from an unmatched term', async () => {
     const result = await service.recommendAnalysis({
       items: [item],
@@ -555,6 +623,37 @@ describe('SkillRecommendationService judge assembly, identity, and deadlines', (
     expect(result.skills.every((skill) => skill.rankedBy === 'heuristic')).toBe(
       true,
     );
+  });
+
+  it.each([
+    ['Deprecated Playwright helper', false],
+    ['This skill is now deprecated. Use the replacement.', false],
+    ['Marked deprecated APIs in React 19 and how to migrate them', true],
+  ])('classifies a deprecation description in heuristic fallback: %s', async (description, eligible) => {
+    const result = await service.recommendAnalysis({
+      items: [
+        {
+          kind: 'test-tool',
+          name: 'Playwright',
+          evidence: 'playwright.config.ts present',
+          sourcePhase: 'stack',
+        },
+      ],
+      summarySource: 'structured',
+      search: async () => [
+        {
+          ...entry,
+          skillId: 'playwright-helper',
+          name: 'Playwright',
+          description,
+        },
+      ],
+    });
+
+    expect(result.rankedBy).toBe('heuristic');
+    expect(result.judge.items[0].candidateAssessments[0]).toMatchObject({
+      eligible,
+    });
   });
 
   it('keeps full first-seen candidate pool and independent per-item assessments without cross-item truncation', async () => {

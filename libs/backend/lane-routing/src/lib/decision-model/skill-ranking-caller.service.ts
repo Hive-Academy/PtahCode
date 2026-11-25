@@ -167,6 +167,15 @@ export class SkillRankingCallerService {
             }
           : baseDispatch;
       if (expired()) return timeout();
+      if (dispatch.kind !== 'structured') {
+        return {
+          status: 'skipped',
+          category: 'no-work',
+          pairConfigured,
+          items: {},
+          itemRejections: {},
+        };
+      }
       const outcome = await runFixedRequest({
         request: REQUEST,
         questions: prepared.map(({ itemId, instructions, eligible }) => ({
@@ -201,11 +210,7 @@ export class SkillRankingCallerService {
         return fail(providerCategory(outcome.requestCause));
       }
 
-      // System One choices carry no reasons, so all items go to Normal.
-      const answers =
-        dispatch.kind === 'structured'
-          ? readStructuredItems(structuredAnswer)
-          : [];
+      const answers = readStructuredItems(structuredAnswer);
       if (answers === undefined) return fail('invalid-output');
       const validated = validateItems(prepared, answers);
       if (

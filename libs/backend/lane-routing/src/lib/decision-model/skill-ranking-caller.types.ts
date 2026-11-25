@@ -55,6 +55,7 @@ export type SkillRankingCallerResult = SkillRankingAnswers &
           SkillJudgeStageCategory,
           'not-configured' | 'no-work'
         >;
+        readonly pairConfigured?: ModelPair;
       }
     | {
         readonly status: 'failed';

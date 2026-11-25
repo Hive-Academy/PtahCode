@@ -277,6 +277,9 @@ export class HarnessRpcHandlers {
       this.logger.debug(`RPC: ${method} called`);
       try {
         const result = await fn(params);
+        if (result === undefined) {
+          throw new Error('The AI request did not complete successfully');
+        }
         this.logger.debug(`RPC: ${method} success`);
         return result;
       } catch (error) {

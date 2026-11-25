@@ -426,7 +426,7 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
     expect(prompt).not.toMatch(/bad-script|private|Angular legacy|x{201}/);
   });
 
-  it('leaves reasonless System One picks for Normal and retains the configured and submitted models', async () => {
+  it('skips System One before inference and leaves items for Normal', async () => {
     const { service, openCaller, dispatchFor } = setup();
     openCaller.mockResolvedValue({
       kind: 'system-one',
@@ -447,13 +447,12 @@ describe('SkillRankingCallerService.rankSkillCandidates', () => {
       caller: { decide },
     });
     expect(await service.rankSkillCandidates([item])).toEqual({
-      status: 'used',
+      status: 'skipped',
+      category: 'no-work',
       pairConfigured: { provider: 'ollama', model: configured.model },
-      pairAttempted: { provider: 'ollama', model: attempted.model },
-      pairUsed: { provider: 'ollama', model: attempted.model },
       items: {},
       itemRejections: {},
     });
-    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide).not.toHaveBeenCalled();
   });
 });

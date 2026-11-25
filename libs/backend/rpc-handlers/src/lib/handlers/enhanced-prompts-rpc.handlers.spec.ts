@@ -1576,6 +1576,7 @@ describe('EnhancedPromptsRpcHandlers', () => {
           errorCode: 'SETUP_MODEL_INVALID',
         });
         expect(response.error).toContain('not-signed-in');
+        expect(response.error).toContain('provider=openrouter');
         expect(h.enhancedPrompts.runWizard).not.toHaveBeenCalled();
         expect(h.enhancedPrompts.regenerate).not.toHaveBeenCalled();
         expect(h.sentry.captureException).not.toHaveBeenCalled();

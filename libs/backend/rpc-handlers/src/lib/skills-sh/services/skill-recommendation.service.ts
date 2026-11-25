@@ -15,7 +15,6 @@ import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   DeepProjectAnalysis,
   ModelPair,
-  SkillJudgeCandidate,
   SkillJudgeItem,
   SkillJudgeResult,
   SkillJudgeStageCategory,
@@ -27,6 +26,7 @@ import type {
 } from '@ptah-extension/shared';
 
 import { SKILL_JUDGE_SERVICE } from '../../di/tokens';
+import { prepareItems } from './skill-judge.service';
 import type { SkillJudgeService } from './skill-judge.service';
 import type { SkillJudgeInputItem } from './skill-judge.types';
 
@@ -171,13 +171,22 @@ function tokenize(value: string): string[] {
 function assignStableItemIds(
   items: readonly StackSummaryItem[],
 ): PreparedStackItem[] {
+  const baseIds = items.map(
+    (item) => `${item.kind}:${item.name.trim().toLowerCase()}`,
+  );
+  const reserved = new Set(baseIds);
   const occurrences = new Map<string, number>();
-  return items.map((item) => {
-    const baseId = `${item.kind}:${item.name.trim().toLowerCase()}`;
-    const count = (occurrences.get(baseId) ?? 0) + 1;
+  return items.map((item, index) => {
+    const baseId = baseIds[index];
+    let count = (occurrences.get(baseId) ?? 0) + 1;
+    let itemId = count === 1 ? baseId : `${baseId}#${count}`;
+    while (itemId !== baseId && reserved.has(itemId)) {
+      count++;
+      itemId = `${baseId}#${count}`;
+    }
     occurrences.set(baseId, count);
     return {
-      itemId: count === 1 ? baseId : `${baseId}#${count}`,
+      itemId,
       item,
       term: dependencyKeyword(technologyName(item.name)),
     };
@@ -205,44 +214,7 @@ function buildFallbackJudgeResult(
   inputItems: readonly SkillJudgeInputItem[],
   stages: SkillJudgeStageRecord[],
 ): SkillJudgeResult {
-  const candidates = new Map<string, SkillJudgeCandidate>();
-  const ambiguous = new Set<string>();
-  for (const { candidates: skills } of inputItems) {
-    for (const skill of skills) {
-      const selectionKey = `${skill.source}/${skill.skillId}`;
-      const candidateId = selectionKey.toLowerCase();
-      const deprecated = /\bdeprecated\b/i.test(skill.description);
-      const existing = candidates.get(candidateId);
-      if (existing && existing.selectionKey !== selectionKey) ambiguous.add(candidateId);
-      if (!existing || (deprecated && !existing.deprecated)) {
-        candidates.set(candidateId, { candidateId, selectionKey, skill, deprecated });
-      }
-    }
-  }
-
-  const items: SkillJudgeItem[] = inputItems.map(({ candidates: skills, ...item }) => {
-    const candidateIds = [...new Set(skills.map((s) => `${s.source}/${s.skillId}`.toLowerCase()))];
-    return {
-      ...item,
-      candidateIds,
-      candidateAssessments: candidateIds.map((candidateId) => {
-        const deprecated = candidates.get(candidateId)?.deprecated === true;
-        const eligible = !deprecated && !ambiguous.has(candidateId);
-        return {
-          candidateId,
-          eligible,
-          ...(!eligible && {
-            rejection: {
-              reason: deprecated ? 'Marked deprecated by its description' : 'Candidate identity is ambiguous',
-              stage: 'decision' as const,
-            },
-          }),
-        };
-      }),
-      outcomes: [],
-      judgedBy: 'none',
-    };
-  });
+  const { candidates, items } = prepareItems({ items: inputItems });
 
   return {
     method: 'none',
@@ -373,7 +345,7 @@ function buildHeuristicRecommendations(
       eligible.some((c) => {
         const left = identity(chosen.skill);
         const right = identity(c.skill);
-        return left.id === right.id || left.name === right.name;
+        return left.id === right.id;
       }),
     );
     if (covering) {

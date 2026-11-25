@@ -8,7 +8,7 @@ export function extractJsonObject(text: string): unknown | null {
     if (object !== null) return object;
   }
 
-  const start = text.indexOf('{');
+  let start = text.indexOf('{');
   if (start === -1) return null;
 
   let depth = 0;
@@ -26,7 +26,13 @@ export function extractJsonObject(text: string): unknown | null {
       depth++;
     } else if (char === '}') {
       depth--;
-      if (depth === 0) return parseObject(text.slice(start, index + 1));
+      if (depth === 0) {
+        const object = parseObject(text.slice(start, index + 1));
+        if (object !== null) return object;
+        start = text.indexOf('{', index + 1);
+        if (start === -1) return null;
+        index = start - 1;
+      }
     }
   }
   return null;

@@ -39,7 +39,10 @@ import {
   skillJudgeRejectionSchema,
 } from './skill-judge.schema';
 import type { ValidatedSkillJudgeOutcome } from './skill-judge.schema';
-import type { SkillJudgeRequest } from './skill-judge.types';
+import type {
+  SkillJudgeInputItem,
+  SkillJudgeRequest,
+} from './skill-judge.types';
 
 const NORMAL_TIMEOUT_MS = 45_000;
 const NORMAL_RPC_CAP_MS = 65_000;
@@ -57,7 +60,20 @@ type InstallOutcome = Extract<SkillJudgeOutcome, { verdict: 'install' }>;
 type BuildOutcome = Extract<SkillJudgeOutcome, { verdict: 'build' }>;
 type StageTrace = NonNullable<HarnessLlmExecuteParams['stageTrace']>;
 
-function prepareItems(request: SkillJudgeRequest) {
+const EXPLICIT_SKILL_DEPRECATION =
+  /(?:\bthis\s+skill\s+(?:is|was|has\s+been)(?:\s+(?!not\b|never\b|no\b)[a-z]+){0,2}?\s+deprecated\b|^\s*\[deprecated\](?:\s|$|[.!?:;-])|^\s*deprecated\s*:)/i;
+const LEADING_DEPRECATION = /^\s*(?:marked\s+)?deprecated\b/i;
+const DEPRECATED_OTHER_NOUN =
+  /\bdeprecated(?:\s+[\w.-]+){0,3}\s+(?:apis?|methods?|features?|functions?|classes?|interfaces?|components?|hooks?|endpoints?|packages?|libraries?|modules?)\b/i;
+function hasSkillDeprecationNotice(description: string): boolean {
+  if (EXPLICIT_SKILL_DEPRECATION.test(description)) return true;
+  if (!LEADING_DEPRECATION.test(description)) return false;
+  return !DEPRECATED_OTHER_NOUN.test(description);
+}
+
+export function prepareItems(request: {
+  items: readonly SkillJudgeInputItem[];
+}) {
   const candidates = new Map<string, SkillJudgeCandidate>();
   const ambiguous = new Set<string>();
 
@@ -65,7 +81,7 @@ function prepareItems(request: SkillJudgeRequest) {
     for (const skill of skills) {
       const selectionKey = `${skill.source}/${skill.skillId}`;
       const candidateId = selectionKey.toLowerCase();
-      const deprecated = /\bdeprecated\b/i.test(skill.description);
+      const deprecated = hasSkillDeprecationNotice(skill.description);
       const existing = candidates.get(candidateId);
       if (existing && existing.selectionKey !== selectionKey) {
         ambiguous.add(candidateId);
@@ -250,11 +266,9 @@ function validOutcomes(
   item: SkillJudgeItem,
   outcomes: ValidatedSkillJudgeOutcome[],
 ): boolean {
-  if (
-    outcomes.some(({ verdict }) => verdict === 'no-skill') &&
-    outcomes.some(({ verdict }) => verdict !== 'no-skill')
-  )
-    return false;
+  if (outcomes.some(({ verdict }) => verdict === 'no-skill')) {
+    return outcomes.length === 1;
+  }
 
   const eligible = eligibleIds(item);
   const installs = outcomes.filter((outcome) => outcome.verdict === 'install');
@@ -453,7 +467,7 @@ export class SkillJudgeService {
         'decision',
         result.status,
         result.category,
-        result.status === 'failed' ? result : undefined,
+        result,
         [...invalidIds],
       );
     }

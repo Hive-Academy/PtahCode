@@ -362,6 +362,50 @@ describe('wizard generation tab ownership and recovery', () => {
     });
   });
 
+  it('settles a completed checkpoint as failed and propagates when a retry pair write fails', async () => {
+    const h = makeHarness();
+    recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+    const submitted = await previewAndSubmit(h);
+    await settle();
+    expect(manifestAt(h).lifecycle).toBe('completed');
+    const runId = submitted.accepted?.runId;
+    if (!runId) throw new Error('Submit did not accept a run');
+    const retryBinding = { ...tab, runId };
+    h.webviewManager.broadcastMessage.mockClear();
+    h.propagation.propagateWithReport.mockClear();
+    const nextSetup = {
+      ...DEFAULT_SETUP_SNAPSHOT,
+      providerId: 'next-provider',
+      model: 'next-model',
+    };
+    h.workspaceLlm.resolveSetup.mockResolvedValue({
+      kind: 'set',
+      snapshot: nextSetup,
+    });
+    recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+    const recordPair = jest
+      .spyOn(GenerationCheckpointService.prototype, 'recordEffectivePair')
+      .mockRejectedValueOnce(new Error('pair write failed'));
+
+    const retry = await call<{ success: boolean }>(h, 'wizard:retry-item', {
+      itemId: 'agent-a',
+      tabBinding: retryBinding,
+    });
+    const lookup = await h.handlers.getGenerationRunState({
+      tabBinding: tab,
+      runId: retryBinding.runId,
+    });
+
+    expect(retry.success).toBe(false);
+    expect(recordPair).toHaveBeenCalledTimes(1);
+    expect(manifestAt(h).lifecycle).toBe('failed');
+    expect(lookup.run).toMatchObject({
+      status: 'failed',
+      result: { status: 'failed', success: false },
+    });
+    expect(h.propagation.propagateWithReport).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a bound checkpoint failed until every failed agent is retried successfully', async () => {
     const h = makeHarness();
     recordingOrchestrator(h, [
@@ -2987,6 +3031,187 @@ describe('WizardGenerationRpcHandlers', () => {
       expect(result.error).toBe('template missing');
       expect(completeBroadcasts(h)).toHaveLength(1);
       expect(completeBroadcasts(h)[0].success).toBe(false);
+    });
+
+    it('admits one of two concurrent retries and writes the pair only for that retry', async () => {
+      const h = makeHarness();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      h.handlers.register();
+      await call(h, 'wizard:submit-selection', {
+        selectedAgentIds: ['agent-a'],
+        analysisDir: ANALYSIS_DIR,
+      });
+      await settle();
+      h.orchestrator.generateAgents.mockClear();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      const recordPair = jest.spyOn(
+        GenerationCheckpointService.prototype,
+        'recordEffectivePair',
+      );
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((resolve) => {
+        releaseSetup = resolve;
+      });
+      h.workspaceLlm.resolveSetup.mockImplementation(async () => {
+        await setupGate;
+        return { kind: 'set', snapshot: DEFAULT_SETUP_SNAPSHOT };
+      });
+
+      const first = call<{ success: boolean; error?: string }>(
+        h,
+        'wizard:retry-item',
+        { itemId: 'agent-a' },
+      );
+      const second = call<{ success: boolean; error?: string }>(
+        h,
+        'wizard:retry-item',
+        { itemId: 'agent-a' },
+      );
+      await flushMicrotasks();
+      releaseSetup();
+      const [firstResult, secondResult] = await Promise.all([first, second]);
+
+      expect(firstResult.success).toBe(true);
+      expect(secondResult.success).toBe(false);
+      expect(recordPair).toHaveBeenCalledTimes(1);
+      expect(h.orchestrator.generateAgents).toHaveBeenCalledTimes(1);
+      expect(secondResult.error).toMatch(/already in progress/i);
+    });
+
+    it('holds the completion broadcast until the admitted retry pair write finishes', async () => {
+      const h = makeHarness();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      h.handlers.register();
+      await call(h, 'wizard:submit-selection', BASE_SUBMIT_PARAMS);
+      await settle();
+      h.webviewManager.broadcastMessage.mockClear();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+
+      let releasePair!: () => void;
+      let pairStarted!: () => void;
+      const pairGate = new Promise<void>((resolve) => {
+        releasePair = resolve;
+      });
+      const pairWrite = new Promise<void>((resolve) => {
+        pairStarted = resolve;
+      });
+      const recordPair = jest
+        .spyOn(GenerationCheckpointService.prototype, 'recordEffectivePair')
+        .mockImplementation(async () => {
+          pairStarted();
+          await pairGate;
+        });
+
+      const retry = call<{ success: boolean }>(h, 'wizard:retry-item', {
+        itemId: 'agent-a',
+      });
+      await pairWrite;
+      const broadcastsWhilePairWasHeld = completeBroadcasts(h).length;
+      releasePair();
+      const result = await retry;
+      recordPair.mockRestore();
+
+      expect(result.success).toBe(true);
+      expect(broadcastsWhilePairWasHeld).toBe(0);
+      expect(completeBroadcasts(h)).toHaveLength(1);
+    });
+
+    it('broadcasts failure when the admitted retry pair write fails', async () => {
+      const h = makeHarness();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      h.handlers.register();
+      await call(h, 'wizard:submit-selection', BASE_SUBMIT_PARAMS);
+      await settle();
+      h.webviewManager.broadcastMessage.mockClear();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      const recordPair = jest
+        .spyOn(GenerationCheckpointService.prototype, 'recordEffectivePair')
+        .mockRejectedValueOnce(new Error('pair write failed'));
+
+      const result = await call<{ success: boolean; error?: string }>(
+        h,
+        'wizard:retry-item',
+        { itemId: 'agent-a' },
+      );
+      recordPair.mockRestore();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/finalization failed/i);
+      expect(completeBroadcasts(h)).toHaveLength(1);
+      expect(completeBroadcasts(h)[0]).toMatchObject({
+        success: false,
+        terminalStatus: 'failed',
+      });
+    });
+
+    it('refuses submit while a retry prepares its Setup snapshot', async () => {
+      const h = makeHarness();
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      h.handlers.register();
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((resolve) => {
+        releaseSetup = resolve;
+      });
+      h.workspaceLlm.resolveSetup.mockImplementationOnce(async () => {
+        await setupGate;
+        return { kind: 'set', snapshot: DEFAULT_SETUP_SNAPSHOT };
+      });
+
+      const retry = call<{ success: boolean }>(h, 'wizard:retry-item', {
+        itemId: 'agent-a',
+      });
+      const submit = await call<{ success: boolean; error?: string }>(
+        h,
+        'wizard:submit-selection',
+        BASE_SUBMIT_PARAMS,
+      );
+      releaseSetup();
+      const retryResult = await retry;
+
+      expect(submit.success).toBe(false);
+      expect(submit.error).toMatch(/already in progress/i);
+      expect(retryResult.success).toBe(true);
+    });
+
+    it('releases the retry reservation after a Setup failure', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      h.workspaceLlm.resolveSetup.mockRejectedValueOnce(
+        new Error('Setup unavailable'),
+      );
+      const failed = await callRaw(h, 'wizard:retry-item', {
+        itemId: 'agent-a',
+      });
+      expect(failed).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((resolve) => {
+        releaseSetup = resolve;
+      });
+      h.workspaceLlm.resolveSetup.mockImplementation(async () => {
+        await setupGate;
+        return { kind: 'set', snapshot: DEFAULT_SETUP_SNAPSHOT };
+      });
+      recordingOrchestrator(h, [outcome('agent-a', 'written')]);
+      const second = call<{ success: boolean }>(h, 'wizard:retry-item', {
+        itemId: 'agent-a',
+      });
+      const third = call<{ success: boolean; error?: string }>(
+        h,
+        'wizard:retry-item',
+        { itemId: 'agent-a' },
+      );
+      await flushMicrotasks();
+      releaseSetup();
+      const [secondResult, thirdResult] = await Promise.all([second, third]);
+
+      expect(secondResult.success).toBe(true);
+      expect(thirdResult.success).toBe(false);
+      expect(h.workspaceLlm.resolveSetup).toHaveBeenCalledTimes(2);
+      expect(thirdResult.error).toMatch(/already in progress/i);
     });
 
     it('rejects a retry while a submit-selection generation is still running', async () => {

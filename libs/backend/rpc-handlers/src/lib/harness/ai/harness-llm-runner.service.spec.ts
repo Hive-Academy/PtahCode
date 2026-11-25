@@ -239,8 +239,8 @@ describe('HarnessLlmRunner SDK outcomes and attribution', () => {
       });
 
       expect(result.terminal).toEqual(terminal);
-      expect(postProcess).toHaveBeenCalledWith(null);
-      expect(result.postProcessed).toBe('processed');
+      expect(postProcess).not.toHaveBeenCalled();
+      expect(result.postProcessed).toBeUndefined();
       expect(stageTrace).toEqual({ pairConfigured: configured, pairAttempted: submitted });
       expect(broadcaster.broadcastComplete.mock.calls).toEqual([
         ['design-agents', 'op-1', false, 'The AI request did not complete successfully'],

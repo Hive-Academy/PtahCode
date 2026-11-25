@@ -319,6 +319,30 @@ describe('SkillJudgeService', () => {
     });
   });
 
+  it('retains the configured Decision pair when System One skips inference', async () => {
+    const { service, execute, rankSkillCandidates } = fixture();
+    const item = stackItem('React', [candidate('react')]);
+    rankSkillCandidates.mockResolvedValue({
+      status: 'skipped',
+      category: 'no-work',
+      pairConfigured: DECISION_PAIR,
+      items: {},
+      itemRejections: {},
+    } as Awaited<ReturnType<Rank>>);
+    respond(execute, success({ items: [noSkill(item)] }));
+
+    const result = await service.judge(request([item]));
+
+    expect(result.stages[0]).toEqual({
+      stage: 'decision',
+      status: 'skipped',
+      category: 'no-work',
+      pairConfigured: DECISION_PAIR,
+      itemsJudged: 0,
+      invalidItemIds: [],
+    });
+  });
+
   it('Decision discards ambiguous, conflicting, deprecated or reason-less answer and routes only that item to Normal while retaining valid siblings and per-candidate rejections', async () => {
     const { service, execute, rankSkillCandidates } = fixture();
     const keep = stackItem('React', [
@@ -411,6 +435,36 @@ describe('SkillJudgeService', () => {
     });
   });
 
+  it.each([
+    ['Migrate from deprecated React APIs to modern APIs', true],
+    ['Migrate React APIs marked deprecated in React 19', true],
+    ['Deprecated API migration guide for React', true],
+    ['Marked deprecated APIs in React 19 and how to migrate them', true],
+    ['Deprecated Playwright helper', false],
+    ['Deprecated: Playwright helper', false],
+    ['[DEPRECATED] Playwright helper', false],
+    ['This skill has been deprecated. Use the replacement.', false],
+    ['This skill is deprecated - use the replacement.', false],
+    ['This skill is now deprecated. Use the replacement.', false],
+    ['This skill was officially deprecated in 2025.', false],
+    ['This skill has been marked deprecated.', false],
+    ['This skill is not deprecated and supports React 19.', true],
+  ])('classifies a deprecation description in the judge path: %s', async (description, eligible) => {
+    const { service, execute } = fixture();
+    const item = stackItem('React', [candidate('modern', description)]);
+    respond(execute, success({ items: [noSkill(item)] }));
+
+    const result = await service.judge(request([item]));
+
+    expect(result.items[0].candidateAssessments[0]).toMatchObject({
+      candidateId: 'org/repo/modern',
+      eligible,
+      ...(!eligible && {
+        rejection: { reason: 'Marked deprecated by its description' },
+      }),
+    });
+  });
+
   function malformedSiblingCase(textOnly: boolean) {
     return async () => {
       const { service, execute } = fixture();
@@ -490,6 +544,10 @@ describe('SkillJudgeService', () => {
     [install('org/repo/other')],
     [install('org/repo/a'), install('ORG/REPO/A')],
     [install('org/repo/a'), { verdict: 'no-skill', reason: 'Contradiction' }],
+    [
+      { verdict: 'no-skill', reason: 'No project skill needed.' },
+      { verdict: 'no-skill', reason: 'Duplicate no-skill outcome.' },
+    ],
     [install('org/repo/a', '  ')],
     [build('???', 'Empty slug')],
   ])('invalidates an item with invalid outcomes %#', async (...outcomes) => {
