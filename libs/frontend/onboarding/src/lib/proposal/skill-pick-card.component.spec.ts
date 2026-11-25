@@ -166,7 +166,7 @@ describe('SkillPickCardComponent', () => {
     it('keeps the unjudged card without a More button or reason', () => {
       const { root } = setup();
       expect(root.querySelector('button')).toBeNull();
-      expect(root.querySelector('.card-details')).toBeNull();
+      expect(root.querySelector('.skill-card-details')).toBeNull();
     });
   });
 });

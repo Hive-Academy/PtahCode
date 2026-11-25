@@ -19,7 +19,7 @@
       ><strong
         class="min-w-0 flex-1 text-base font-semibold text-base-content"
         [class.truncate]="!compact()"
-        [class.card-name]="compact()"
+        [class.skill-card-name]="compact()"
         [title]="skill().name"
         >{{ skill().name }}</strong
       >
@@ -89,7 +89,7 @@
         [id]="detailsId"
         [hidden]="!detailsExpanded()"
         [class.flex]="detailsExpanded()"
-        class="card-details flex-col gap-1.5 text-xs"
+        class="skill-card-details flex-col gap-1.5 text-xs"
       >
         <span class="text-sm text-base-content">{{ description() }}</span>
         @if (reason(); as judgeReason) {
@@ -106,7 +106,7 @@
       </span>
     }
     @if (compact() || safeUrl()) {
-      <span class="card-actions">
+      <span class="skill-card-actions">
         @if (compact()) {
           <button
             ptahButton

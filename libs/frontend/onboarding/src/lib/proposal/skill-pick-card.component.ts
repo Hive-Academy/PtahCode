@@ -30,7 +30,7 @@ let nextCardId = 0;
   host: { class: 'block h-full' },
   templateUrl: './skill-pick-card.component.html',
   styles: `
-    .card-name {
+    .skill-card-name {
       overflow-wrap: normal;
       word-break: normal;
       hyphens: none;
@@ -38,7 +38,7 @@ let nextCardId = 0;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .card-actions {
+    .skill-card-actions {
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
@@ -46,12 +46,12 @@ let nextCardId = 0;
       gap: var(--ptah-space-2);
       min-width: 0;
     }
-    .card-actions > button {
+    .skill-card-actions > button {
       flex: 0 0 auto;
       white-space: nowrap;
       max-width: 100%;
     }
-    .card-details {
+    .skill-card-details {
       overflow-wrap: normal;
       word-break: normal;
       hyphens: none;

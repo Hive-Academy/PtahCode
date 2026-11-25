@@ -443,8 +443,7 @@ function describeSetupIssue(
           </p>
           <button
             type="button"
-            class="btn mt-4"
-            [class.btn-primary]="setupReady()"
+            [ptahSetupAction]="setupReady() ? 'primaryFull' : 'plainFull'"
             [disabled]="!setupReady()"
             data-testid="start-analysis-button"
             (click)="startFresh()"

@@ -29,6 +29,7 @@ import {
   PtahFieldGridDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
+  SetupActionDirective,
   type ProviderIdentityOption,
   type ProviderModelSelection,
 } from '@ptah-extension/ui';
@@ -83,6 +84,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
     PtahIconButtonDirective,
     PtahInputDirective,
     SettingScopeRowComponent,
+    SetupActionDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -302,13 +304,13 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         </div>
                       }
                       @if (row.id === 'setup') {
-                        <p class="px-1 text-xs text-base-content-muted">
+                        <p class="px-[var(--ptah-space-1)] text-xs text-base-content-muted">
                           Choose a provider and model, then save them together.
                           @if (row.provider || row.model) {
                             Clearing the pair switches Setup to the workspace model.
                           }
                         </p>
-                        <div class="flex flex-wrap items-center gap-2">
+                        <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
                           <button
                             type="button"
                             ptahButton
@@ -333,7 +335,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         @let commit = state.setupCommit();
                         @if (commit.status === 'saving' || commit.status === 'invalid' || commit.status === 'failed') {
                           <p
-                            class="px-1 text-xs text-base-content"
+                            class="px-[var(--ptah-space-1)] text-xs text-base-content"
                             [attr.role]="commit.status === 'saving' ? 'status' : 'alert'"
                             data-testid="setup-commit-feedback"
                           >
@@ -351,7 +353,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                 </ptah-native-popover>
                 @if (row.id === 'setup') {
                   @if (setupIssue(); as issue) {
-                    <div class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2 text-xs">
+                    <div class="flex flex-wrap items-center gap-[calc(var(--ptah-space-1)*1.5)] rounded border border-base-content/10 p-[var(--ptah-space-2)] text-xs">
                       <span class="min-w-0 basis-full" role="alert" data-testid="setup-model-issue">
                         {{ issue.message }}
                       </span>
@@ -360,7 +362,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                           @if (issue.provider; as provider) {
                             <button
                               type="button"
-                              [class]="action"
+                              ptahSetupAction="ghostLink"
                               [disabled]="setupActionsDisabled()"
                               (click)="onSetupProvider(provider)"
                               data-testid="readiness-setup-setup"
@@ -372,7 +374,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         @case ('retry') {
                           <button
                             type="button"
-                            [class]="action"
+                            ptahSetupAction="ghostLink"
                             [disabled]="setupActionsDisabled()"
                             (click)="retrySection('setup')"
                           >
@@ -382,7 +384,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         @default {
                           <button
                             type="button"
-                            [class]="action"
+                            ptahSetupAction="ghostLink"
                             [disabled]="setupActionsDisabled()"
                             (click)="chooseSetupPart(issue.action === 'provider' ? 'provider' : 'model')"
                           >
@@ -393,7 +395,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       @if (issue.canUseWorkspace) {
                         <button
                           type="button"
-                          [class]="action"
+                          ptahSetupAction="ghostLink"
                           [disabled]="setupActionsDisabled()"
                           (click)="commitSetup(null)"
                           data-testid="setup-use-workspace"
@@ -409,7 +411,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   }
                   @let setupCommit = state.setupCommit();
                   @if (setupCommit.status !== 'idle' && activeEditId() !== 'setup') {
-                    <div class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2 text-xs">
+                    <div class="flex flex-wrap items-center gap-[calc(var(--ptah-space-1)*1.5)] rounded border border-base-content/10 p-[var(--ptah-space-2)] text-xs">
                       <span
                         class="min-w-0 flex-1"
                         [attr.role]="setupCommit.status === 'invalid' || setupCommit.status === 'failed' ? 'alert' : 'status'"
@@ -420,7 +422,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       @if (setupCommit.status === 'saved' && state.setupUndoEntry()) {
                         <button
                           type="button"
-                          [class]="action"
+                          ptahSetupAction="ghostLink"
                           [disabled]="setupActionsDisabled()"
                           aria-label="Undo Setup model change"
                           (click)="commitSetup('undo')"
