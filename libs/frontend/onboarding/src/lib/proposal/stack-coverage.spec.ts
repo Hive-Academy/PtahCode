@@ -1,12 +1,31 @@
+import { TestBed } from '@angular/core/testing';
 import type {
+  ModelPair,
+  SkillJudgeCandidate,
+  SkillJudgeItem,
+  SkillJudgeResult,
   SkillRecommendation,
+  SkillShEntry,
   StackSummaryItem,
+  WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import {
+  buildJudgedStackCoverage,
   buildStackCoverage,
+  canonicalCandidateId,
+  coverageSummaryText,
+  coverageVerdictLabel,
+  deriveCoverageVerdict,
   formatInstallCount,
+  skillSelectionKey,
   splitStackEvidence,
 } from './stack-coverage';
+import {
+  DRAFT_BLOCKED_BY_CONSENT_REASON,
+  INSTALL_BLOCKED_BY_DRAFT_REASON,
+  StackSkillStore,
+} from './stack-skill.store';
+
 const angular: StackSummaryItem = {
   name: 'Angular',
   kind: 'framework',
@@ -18,6 +37,66 @@ const jestItem: StackSummaryItem = {
   name: 'Jest',
   kind: 'test-tool',
 };
+const rxjsItem: StackSummaryItem = {
+  name: 'RxJS',
+  kind: 'library',
+  evidence: 'package.json',
+  sourcePhase: 'analysis',
+};
+const nxItem: StackSummaryItem = {
+  name: 'Nx',
+  kind: 'pattern',
+  evidence: 'nx.json',
+  sourcePhase: 'analysis',
+};
+const tailwindItem: StackSummaryItem = {
+  name: 'Tailwind CSS',
+  kind: 'library',
+  evidence: 'tailwind.config.js',
+  sourcePhase: 'analysis',
+};
+
+const skillOne: SkillShEntry = {
+  source: 'Acme/Repo',
+  skillId: 'One',
+  name: 'One',
+  description: 'Angular and RxJS guidance',
+  installs: 12400,
+  isInstalled: true,
+};
+const skillDeprecated: SkillShEntry = {
+  source: 'acme/repo',
+  skillId: 'legacy-ng',
+  name: 'Legacy Angular',
+  description: 'Deprecated Angular helper',
+  installs: 200,
+  isInstalled: false,
+};
+const skillRejected: SkillShEntry = {
+  source: 'other/org',
+  skillId: 'generic-js',
+  name: 'Generic JS',
+  description: 'Too broad',
+  installs: 500,
+  isInstalled: false,
+};
+const skillNotJudged: SkillShEntry = {
+  source: 'community/skills',
+  skillId: 'nx-monorepo',
+  name: 'Nx Monorepo',
+  description: 'Nx workspace helper',
+  installs: 800,
+  isInstalled: false,
+};
+const manualSkill: SkillShEntry = {
+  source: 'Manual/Org',
+  skillId: 'Jest-Tips',
+  name: 'Jest Tips',
+  description: 'Manual search result for Jest',
+  installs: 42,
+  isInstalled: false,
+};
+
 const row: SkillRecommendation = {
   skill: {
     source: 'acme/repo',
@@ -30,6 +109,185 @@ const row: SkillRecommendation = {
   evidence: ' angular , Jest ',
   score: 1,
 };
+
+function makeCandidate(
+  skill: SkillShEntry,
+  deprecated = false,
+): SkillJudgeCandidate {
+  const selectionKey = skillSelectionKey(skill);
+  return {
+    candidateId: canonicalCandidateId(selectionKey),
+    selectionKey,
+    skill,
+    deprecated,
+  };
+}
+
+function makeJudgeFixture(
+  overrides?: Partial<SkillJudgeResult>,
+): SkillJudgeResult {
+  const items: SkillJudgeItem[] = [
+    {
+      itemId: 'framework:angular',
+      item: angular,
+      registry: 'matched',
+      candidateIds: ['acme/repo/one', 'acme/repo/legacy-ng', 'other/org/generic-js'],
+      candidateAssessments: [
+        { candidateId: 'acme/repo/one', eligible: true },
+        {
+          candidateId: 'acme/repo/legacy-ng',
+          eligible: false,
+          rejection: { reason: 'Marked deprecated', stage: 'decision' },
+        },
+        {
+          candidateId: 'other/org/generic-js',
+          eligible: true,
+          rejection: { reason: 'Too generic for Angular', stage: 'normal' },
+        },
+      ],
+      outcomes: [
+        {
+          verdict: 'install',
+          candidateId: 'acme/repo/one',
+          reason: 'Covers Angular signals and DI',
+          stage: 'decision',
+        },
+        {
+          verdict: 'install',
+          candidateId: 'acme/repo/legacy-ng',
+          reason: 'Deprecated candidate should not preselect',
+          stage: 'decision',
+        },
+        {
+          verdict: 'build',
+          proposalId: 'prop-angular-app',
+          reason: 'Add repo-specific conventions',
+          stage: 'normal',
+        },
+      ],
+      judgedBy: 'normal',
+    },
+    {
+      itemId: 'library:rxjs',
+      item: rxjsItem,
+      registry: 'matched',
+      candidateIds: ['acme/repo/one'],
+      candidateAssessments: [{ candidateId: 'acme/repo/one', eligible: true }],
+      outcomes: [
+        {
+          verdict: 'install',
+          candidateId: 'acme/repo/one',
+          reason: 'Shared Angular+RxJS skill',
+          stage: 'decision',
+        },
+      ],
+      judgedBy: 'decision',
+    },
+    {
+      itemId: 'test-tool:jest',
+      item: jestItem,
+      registry: 'search-failed',
+      registryFailure: { kind: 'timed-out', reason: 'timeout' },
+      candidateIds: [],
+      candidateAssessments: [],
+      outcomes: [
+        {
+          verdict: 'build',
+          proposalId: 'prop-angular-app',
+          reason: 'Capture Jest config conventions',
+          stage: 'normal',
+        },
+      ],
+      judgedBy: 'normal',
+    },
+    {
+      itemId: 'library:tailwind',
+      item: tailwindItem,
+      registry: 'no-match',
+      candidateIds: [],
+      candidateAssessments: [],
+      outcomes: [
+        {
+          verdict: 'no-skill',
+          reason: 'Standard CSS utility usage needs no skill',
+          stage: 'decision',
+        },
+      ],
+      judgedBy: 'decision',
+    },
+    {
+      itemId: 'pattern:nx',
+      item: nxItem,
+      registry: 'matched',
+      candidateIds: ['community/skills/nx-monorepo'],
+      candidateAssessments: [
+        { candidateId: 'community/skills/nx-monorepo', eligible: true },
+      ],
+      outcomes: [],
+      judgedBy: 'none',
+    },
+  ];
+
+  return {
+    method: 'mixed',
+    counts: { decision: 2, normal: 2, notJudged: 1 },
+    items,
+    candidates: [
+      makeCandidate(skillOne, false),
+      makeCandidate(skillDeprecated, true),
+      makeCandidate(skillRejected, false),
+      makeCandidate(skillNotJudged, false),
+    ],
+    proposals: [
+      {
+        proposalId: 'prop-angular-app',
+        name: 'Angular App Guide',
+        description: 'Repo conventions for Angular and Jest',
+        itemIds: ['framework:angular', 'test-tool:jest'],
+      },
+    ],
+    stages: [
+      {
+        stage: 'decision',
+        status: 'used',
+        pairConfigured: { provider: 'openai', model: 'gpt-4.1-mini' },
+        pairAttempted: { provider: 'openai', model: 'gpt-4.1-mini' },
+        pairUsed: { provider: 'openai', model: 'gpt-4.1-mini' },
+        itemsJudged: 2,
+        invalidItemIds: [],
+      },
+      {
+        stage: 'normal',
+        status: 'used',
+        pairConfigured: { provider: 'anthropic', model: 'claude-sonnet-4' },
+        pairAttempted: { provider: 'anthropic', model: 'claude-sonnet-4' },
+        pairUsed: { provider: 'anthropic', model: 'claude-sonnet-4' },
+        itemsJudged: 2,
+        invalidItemIds: [],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function makeRecommendResult(
+  judge: SkillJudgeResult = makeJudgeFixture(),
+  analysisPair: ModelPair | null = {
+    provider: 'anthropic',
+    model: 'claude-opus-4',
+  },
+): WizardRecommendAnalysisSkillsResult {
+  return {
+    skills: [row],
+    judge,
+    analysisPair,
+    detectedItems: judge.items.map((entry) => entry.item),
+    unmatchedItems: [],
+    searchFailures: [{ item: 'Jest', reason: 'timeout' }],
+    summarySource: 'structured',
+  };
+}
+
 describe('stack coverage', () => {
   it('splits several items, preserves detected spelling, deduplicates and falls back to raw text', () => {
     expect(
@@ -44,13 +302,14 @@ describe('stack coverage', () => {
       rawEvidence: null,
     });
   });
+
   it('counts an installed selected skill for every matched item without duplicates', () => {
     const items = buildStackCoverage(
       [angular, jestItem],
       [],
       [],
       [row, row],
-      new Set(['acme/repo/one']),
+      new Set(['Acme/Repo/One']),
     );
     expect(
       items.map((item) => [item.state, item.selectedCount, item.totalCount]),
@@ -59,6 +318,7 @@ describe('stack coverage', () => {
       ['covered', 1, 1],
     ]);
   });
+
   it('distinguishes available, unmatched and failed items and keeps stack evidence', () => {
     expect(
       buildStackCoverage([angular], [], [], [row], new Set())[0],
@@ -70,20 +330,117 @@ describe('stack coverage', () => {
         [{ item: 'jest', reason: 'timeout' }],
         [],
         new Set(),
-      ).map((item) => item.state),
-    ).toEqual(['none', 'failed']);
+      ).map((item) => [item.state, Boolean(item.originalSearchFailed)]),
+    ).toEqual([
+      ['none', false],
+      ['failed', true],
+    ]);
   });
-  it('surfaces a search failure even with prior recommendations', () => {
+
+  it('marks a failed-search item with selected coverage as covered while preserving originalSearchFailed (R19)', () => {
+    const item = buildStackCoverage(
+      [angular],
+      [],
+      [{ item: 'Angular', reason: 'timeout' }],
+      [row],
+      new Set(['acme/repo/one']),
+    )[0];
+    expect(item).toMatchObject({
+      state: 'covered',
+      originalSearchFailed: true,
+      selectedCount: 1,
+    });
+    expect(coverageSummaryText(item)).toBe('Covered - original search failed');
+  });
+
+  it('builds judged stack coverage with verdict status words, registry facts, and R19 manual coverage', () => {
+    const judge = makeJudgeFixture();
+    const selectedByItem = new Map<string, ReadonlySet<string>>([
+      ['framework:angular', new Set(['acme/repo/one'])],
+      ['library:rxjs', new Set(['acme/repo/one'])],
+      ['test-tool:jest', new Set(['manual/org/jest-tips'])],
+      ['library:tailwind', new Set()],
+      ['pattern:nx', new Set()],
+    ]);
+    const manualByItem = new Map<string, ReadonlySet<string>>([
+      ['test-tool:jest', new Set(['manual/org/jest-tips'])],
+    ]);
+
+    const coverage = buildJudgedStackCoverage(
+      judge,
+      selectedByItem,
+      manualByItem,
+    );
+
     expect(
-      buildStackCoverage(
-        [angular],
-        [],
-        [{ item: 'Angular', reason: 'timeout' }],
-        [row],
-        new Set(['acme/repo/one']),
-      )[0],
-    ).toMatchObject({ state: 'failed', selectedCount: 1 });
+      coverage.map((c) => ({
+        itemId: c.itemId,
+        state: c.state,
+        verdict: c.verdict,
+        summary: coverageSummaryText(c),
+        verdictLabel: c.verdict ? coverageVerdictLabel(c.verdict) : null,
+        failed: Boolean(c.originalSearchFailed),
+      })),
+    ).toEqual([
+      {
+        itemId: 'framework:angular',
+        state: 'covered',
+        verdict: 'install-and-build',
+        summary: '1 selected',
+        verdictLabel: 'Install + Build',
+        failed: false,
+      },
+      {
+        itemId: 'library:rxjs',
+        state: 'covered',
+        verdict: 'install',
+        summary: '1 selected',
+        verdictLabel: 'Install',
+        failed: false,
+      },
+      {
+        itemId: 'test-tool:jest',
+        state: 'covered',
+        verdict: 'build',
+        summary: 'Covered - original search failed',
+        verdictLabel: 'Build',
+        failed: true,
+      },
+      {
+        itemId: 'library:tailwind',
+        state: 'none',
+        verdict: 'no-skill',
+        summary: 'no match',
+        verdictLabel: 'No skill needed',
+        failed: false,
+      },
+      {
+        itemId: 'pattern:nx',
+        state: 'available',
+        verdict: 'not-judged',
+        summary: '1 available',
+        verdictLabel: 'Not judged',
+        failed: false,
+      },
+    ]);
+
+    expect(
+      coverageSummaryText({
+        name: 'Vitest',
+        kind: 'test-tool',
+        evidence: '',
+        state: 'none',
+        registry: 'not-searched',
+        selectedCount: 0,
+        totalCount: 0,
+      }),
+    ).toBe('not searched');
+
+    expect(deriveCoverageVerdict({ outcomes: [], judgedBy: 'decision' })).toBe(
+      'not-judged',
+    );
   });
+
   it.each([
     [0, 'New'],
     [312, '312'],
@@ -117,5 +474,353 @@ describe('ambiguous stack names', () => {
       'none',
       'none',
     ]);
+  });
+});
+
+describe('StackSkillStore', () => {
+  let store: StackSkillStore;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({});
+    store = TestBed.inject(StackSkillStore);
+    store.reset();
+  });
+
+  it('keeps analysisPair and judge immutable, pre-selects valid non-deprecated Install verdicts only, and preserves analysisPair on Re-run', () => {
+    const pair: ModelPair = { provider: 'anthropic', model: 'claude-opus-4' };
+    const judge = makeJudgeFixture();
+    const first = makeRecommendResult(judge, pair);
+
+    store.applyRecommendationResult(first);
+
+    // Mutate caller inputs after applying
+    pair.model = 'mutated-model';
+    judge.items[0].item.name = 'Mutated';
+
+    expect(store.analysisPair()).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4',
+    });
+    expect(Object.isFrozen(store.analysisPair())).toBe(true);
+    expect(store.judge()?.items[0].item.name).toBe('Angular');
+
+    // Only non-deprecated install candidate is pre-selected (D5)
+    expect([...store.selectedCandidateIds()]).toEqual(['acme/repo/one']);
+    // Mapped to original-case selectionKey at the consent boundary
+    expect([...store.selectedIds()]).toEqual(['Acme/Repo/One']);
+    expect(store.selectedSelectionKeys()).toEqual(['Acme/Repo/One']);
+
+    // Re-run with a different analysisPair does not overwrite the recorded analysisPair (R14)
+    const rerun = makeRecommendResult(
+      makeJudgeFixture({ method: 'none' }),
+      { provider: 'openai', model: 'gpt-4.1' },
+    );
+    store.applyRecommendationResult(rerun);
+    expect(store.analysisPair()).toEqual({
+      provider: 'anthropic',
+      model: 'claude-opus-4',
+    });
+    // method === 'none' pre-selects nothing (TD 4.2)
+    expect(store.selectedCandidateIds().size).toBe(0);
+  });
+
+  it('toggles repeated candidates under one canonical ID and drives unified R19 coverage across strip and rail', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+
+    // Angular and RxJS are both covered by the single shared Install candidate
+    expect(store.coveredItemCount()).toBe(2);
+    expect(
+      [...(store.selectedCandidateIdsByItemId().get('framework:angular') ?? [])],
+    ).toEqual(['acme/repo/one']);
+    expect(
+      [...(store.selectedCandidateIdsByItemId().get('library:rxjs') ?? [])],
+    ).toEqual(['acme/repo/one']);
+
+    // Manual per-item search result covers the search-failed Jest item (R19)
+    store.setItemSearchResults('test-tool:jest', [manualSkill]);
+    store.toggle('Manual/Org/Jest-Tips');
+    expect(store.coveredItemCount()).toBe(3);
+    const jestCoverage = store
+      .stackCoverage()
+      .find((entry) => entry.itemId === 'test-tool:jest');
+    expect(jestCoverage).toMatchObject({
+      state: 'covered',
+      originalSearchFailed: true,
+      selectedCount: 1,
+    });
+
+    // Toggling with different casing unselects the same canonical ID
+    store.toggle('ACME/REPO/ONE');
+    expect(store.isCandidateSelected('acme/repo/one')).toBe(false);
+    expect(store.coveredItemCount()).toBe(1);
+  });
+
+  it('computes R16 item rows, residual Other candidates predicate, and F28 hidden pool counts', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+
+    // Under 'all': acme/repo/one (install), acme/repo/legacy-ng (install outcome),
+    // and community/skills/nx-monorepo (not-judged row) are shown; other/org/generic-js is residual.
+    expect(store.showOtherCandidatesSection()).toBe(true);
+    expect(store.residualCandidates().map((r) => [r.candidate.candidateId, r.reason])).toEqual([
+      ['other/org/generic-js', 'Too generic for Angular'],
+    ]);
+    expect(store.hiddenPoolCandidateCount()).toBe(0);
+    expect(store.verdictFilterOptions()).toEqual([
+      { value: 'all', count: 5 },
+      { value: 'install', count: 2 },
+      { value: 'build', count: 2 },
+      { value: 'no-skill', count: 1 },
+      { value: 'not-judged', count: 1 },
+    ]);
+
+    // Under 'install' filter: Other candidates section hides; F28 counts all hidden distinct pool candidates
+    store.setVerdictFilter('install');
+    expect(store.showOtherCandidatesSection()).toBe(false);
+    // Pool has 4 distinct candidates; 2 are install outcomes (one + legacy-ng), so 2 are hidden (generic-js + nx-monorepo)
+    expect(store.hiddenPoolCandidateCount()).toBe(2);
+
+    // Under 'build' filter: all 4 pool candidates are hidden
+    store.setVerdictFilter('build');
+    expect(store.hiddenPoolCandidateCount()).toBe(4);
+
+    // Under 'not-judged' filter: only nx-monorepo is shown, so 3 are hidden
+    store.setVerdictFilter('not-judged');
+    expect(store.hiddenPoolCandidateCount()).toBe(3);
+
+    // Under method === 'none' (no-judge / both-failed): Other candidates is never shown
+    store.applyRecommendationResult(
+      makeRecommendResult(makeJudgeFixture({ method: 'none' })),
+    );
+    expect(store.showOtherCandidatesSection()).toBe(false);
+    expect(store.residualCandidates()).toEqual([]);
+  });
+
+  it('enforces F29/R17 mutual exclusion in both orders and clears consent on selection toggle', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+
+    // Order 1: Draft open -> Consent blocked
+    const opened = store.openProposalDraft('prop-angular-app');
+    expect(opened.status).toBe('ok');
+    expect(store.draftOpen()).toBe(true);
+    expect(store.installBlockedReason()).toBe(INSTALL_BLOCKED_BY_DRAFT_REASON);
+    expect(store.openConsent([])).toBe(false);
+    store.setStage('consent');
+    expect(store.stage()).not.toBe('consent');
+    store.setPreviewing(true);
+    expect(store.previewing()).toBe(false);
+
+    store.closeDraft();
+    expect(store.installBlockedReason()).toBeNull();
+
+    // Order 2: Consent open -> Draft blocked
+    const consented = store.openConsent([
+      {
+        skillName: 'Acme/Repo/One',
+        contentHash: 'hash-1',
+        hasScripts: true,
+        scriptFiles: ['setup.sh'],
+        files: ['SKILL.md', 'setup.sh'],
+      },
+    ]);
+    expect(consented).toBe(true);
+    store.approve('Acme/Repo/One');
+    expect(store.consentOpen()).toBe(true);
+    expect(store.draftBlockedReason()).toBe(DRAFT_BLOCKED_BY_CONSENT_REASON);
+    expect(store.openProposalDraft('prop-angular-app')).toEqual({
+      status: 'blocked',
+      reason: DRAFT_BLOCKED_BY_CONSENT_REASON,
+    });
+    expect(store.openManualDraft('library:tailwind')).toEqual({
+      status: 'blocked',
+      reason: DRAFT_BLOCKED_BY_CONSENT_REASON,
+    });
+
+    // Selection toggle clears consent preview, approvals, and closes consent
+    store.toggle('Acme/Repo/One');
+    expect(store.preview()).toEqual([]);
+    expect(store.approvedIds().size).toBe(0);
+    expect(store.stage()).toBe('review');
+    expect(store.draftBlockedReason()).toBeNull();
+  });
+
+  it('pins open draft across filter changes (F30), enforces R18 dirty guards on all 4 triggers, guards stale previews, and tracks C5 createdSkillSlugs', () => {
+    store.applyRecommendationResult(makeRecommendResult());
+
+    // Manual draft opener works for any detected item (TD 3.8)
+    const manual = store.openManualDraft('library:tailwind');
+    expect(manual.status).toBe('ok');
+    if (manual.status === 'ok') {
+      expect(manual.draft.mode).toBe('edit');
+      expect(manual.draft.name).toBe('tailwind-css');
+      expect(manual.draft.body).toContain('## Project evidence');
+      expect(manual.draft.body).not.toContain('Describe how to work with');
+    }
+
+    // F30: filtering to 'install' keeps the pinned manual draft row visible
+    store.setVerdictFilter('install');
+    expect(
+      store.visibleItemRows().some((row) => row.itemId === 'library:tailwind' && row.pinned),
+    ).toBe(true);
+    store.resetFilters();
+
+    // Dirty manual draft triggers R18 confirm-dirty on all 4 triggers
+    store.updateDraftFields({ body: '## Project evidence\n\nCustom user edits' });
+    expect(store.openProposalDraft('prop-angular-app')).toEqual({
+      status: 'confirm-dirty',
+      trigger: 'preview-draft',
+    });
+    expect(store.openManualDraft('pattern:nx')).toEqual({
+      status: 'confirm-dirty',
+      trigger: 'manual-draft',
+    });
+    expect(store.requestCloseDraftForItemSearch()).toEqual({
+      status: 'confirm-dirty',
+      trigger: 'item-search',
+    });
+
+    // Force-discarding opens proposal draft with previewRequestSeq
+    const proposalOpen = store.openProposalDraft('prop-angular-app', {
+      forceDiscardDirty: true,
+    });
+    expect(proposalOpen.status).toBe('ok');
+    if (proposalOpen.status !== 'ok') return;
+    const firstReq = {
+      revision: proposalOpen.draft.revision,
+      previewRequestSeq: proposalOpen.draft.previewRequestSeq,
+    };
+
+    // F30: proposal stays pinned under 'no-skill' filter
+    store.setVerdictFilter('no-skill');
+    expect(
+      store.visibleProposals().map((p) => p.proposalId),
+    ).toEqual(['prop-angular-app']);
+    store.resetFilters();
+
+    // Generation failure opens edit mode with deterministic Project evidence + linked Build reasons
+    expect(
+      store.applyDraftPreviewResult(firstReq, {
+        ok: false,
+        category: 'timed-out',
+        message: 'Draft timed out',
+      }),
+    ).toBe(true);
+    expect(store.openDraft()?.mode).toBe('edit');
+    expect(store.openDraft()?.generationError).toEqual({
+      category: 'timed-out',
+      message: 'Draft timed out',
+      retryable: true,
+    });
+    expect(store.openDraft()?.body).toContain('Add repo-specific conventions');
+    expect(store.openDraft()?.body).toContain('Capture Jest config conventions');
+
+    // Editing makes draft dirty -> R18 trigger 4 (retry-generation) requires confirm
+    store.updateDraftFields({ body: '# My custom guide\n\nKeep this.' });
+    expect(store.beginRetryDraftGeneration()).toEqual({
+      status: 'confirm-dirty',
+      trigger: 'retry-generation',
+    });
+
+    const retried = store.beginRetryDraftGeneration({ forceDiscardDirty: true });
+    expect(retried.status).toBe('ok');
+    if (retried.status !== 'ok') return;
+
+    // Late response for firstReq is dropped (stale Preview guard)
+    expect(
+      store.applyDraftPreviewResult(firstReq, {
+        ok: true,
+        name: 'stale-name',
+        description: 'stale',
+        body: 'stale',
+        content: 'stale',
+        destinationSlug: 'stale-name',
+        pairUsed: { provider: 'openai', model: 'gpt-4.1' },
+      }),
+    ).toBe(false);
+
+    // Current request succeeds
+    expect(
+      store.applyDraftPreviewResult(
+        {
+          revision: retried.draft.revision,
+          previewRequestSeq: retried.draft.previewRequestSeq,
+        },
+        {
+          ok: true,
+          name: 'Angular App Guide',
+          description: 'Repo conventions',
+          body: '# Angular App Guide\n\nRules.',
+          content: '---\nname: "angular-app-guide"\n---',
+          destinationSlug: 'angular-app-guide',
+          pairUsed: { provider: 'anthropic', model: 'claude-sonnet-4' },
+        },
+      ),
+    ).toBe(true);
+    expect(store.openDraft()?.mode).toBe('preview');
+
+    // Begin Create freezes submitted snapshot & busy blocks mode/edit/close/replace without dialog (F30)
+    const submission = store.beginCreateDraft();
+    expect(submission?.submitted.slug).toBe('angular-app-guide');
+    if (!submission) return;
+    expect(store.beginCreateDraft()).toBeNull();
+    expect(store.setDraftMode('edit')).toBe(false);
+    expect(store.updateDraftFields({ name: 'changed' })).toBe(false);
+    expect(store.closeDraft({ forceDiscardDirty: true })).toEqual({
+      status: 'busy',
+    });
+    expect(store.openManualDraft('pattern:nx', { forceDiscardDirty: true })).toEqual({
+      status: 'busy',
+    });
+
+    // Failed Create keeps open draft & edits intact and clears busy/submitted
+    expect(
+      store.failCreateDraft(submission.revision, 'Disk write failed'),
+    ).toBe(true);
+    expect(store.openDraft()?.busy).toBe(false);
+    expect(store.openDraft()?.submitted).toBeNull();
+    expect(store.openDraft()?.createError).toBe('Disk write failed');
+
+    // Retry Create succeeds -> derives path from submitted snapshot, closes draft, blocks duplicate Create (F25), records C5 createdSkillSlugs
+    const secondSubmission = store.beginCreateDraft();
+    expect(secondSubmission).not.toBeNull();
+    if (!secondSubmission) return;
+    const createdPath = store.completeCreateDraft(secondSubmission.revision);
+    expect(createdPath).toBe(
+      '~/.ptah/plugins/ptah-harness-angular-app-guide/skills/angular-app-guide/SKILL.md',
+    );
+    expect(store.openDraft()).toBeNull();
+    expect(store.createdPathFor('proposal:prop-angular-app')).toBe(createdPath);
+    expect(store.createdSkillSlugs()).toEqual(['angular-app-guide']);
+    expect(store.openProposalDraft('prop-angular-app')).toEqual({
+      status: 'already-created',
+      path: createdPath,
+    });
+
+    // Reset clears C5 createdSkillSlugs and judged state
+    store.reset();
+    expect(store.createdSkillSlugs()).toEqual([]);
+    expect(store.judge()).toBeNull();
+    expect(store.analysisPair()).toBeNull();
+  });
+
+  it('preserves unjudged team-builder path compatibility', () => {
+    expect(store.judgedMode()).toBe(false);
+    store.setIntent('Build an Angular team');
+    store.setStage('review');
+    store.setSelectedIds(new Set(['Acme/Repo/One']));
+    store.setSearchResults([skillOne]);
+    store.setSearchResults([skillNotJudged]);
+    expect(store.retainedSearchResults().map((s) => s.skillId)).toEqual(['One']);
+    store.setPreview([
+      {
+        skillName: 'Acme/Repo/One',
+        contentHash: 'abc',
+        hasScripts: true,
+        scriptFiles: ['a.sh'],
+        files: ['SKILL.md'],
+      },
+    ]);
+    expect(store.previewScriptCount()).toBe(1);
+    store.approve('Acme/Repo/One');
+    expect(store.approvedIds().has('Acme/Repo/One')).toBe(true);
   });
 });

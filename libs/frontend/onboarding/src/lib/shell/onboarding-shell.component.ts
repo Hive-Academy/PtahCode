@@ -73,6 +73,25 @@ import { WorkspaceHeaderComponent } from './workspace-header.component';
             data-testid="onboarding-run-pill"
             >{{ label }}</span
           >
+        } @else if (runPill.badges().length) {
+          <div
+            class="ml-auto flex flex-wrap items-center gap-2"
+            data-testid="onboarding-run-pill"
+          >
+            @for (badge of runPill.badges(); track badge.key) {
+              <span
+                class="inline-flex items-center rounded-full border border-base-300 bg-base-200 px-3 py-0.5 text-xs"
+                [title]="
+                  badge.status === 'failed'
+                    ? 'Provider and model attempted for this run'
+                    : 'Provider and model for this run'
+                "
+                data-glass-surface="tile"
+                data-testid="onboarding-run-pill-badge"
+                >{{ badge.label }}: {{ badge.pair }}</span
+              >
+            }
+          </div>
         }
       </div>
       @if (!onHome() && !onEntryPage()) {

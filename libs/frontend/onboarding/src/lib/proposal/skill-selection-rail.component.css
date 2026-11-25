@@ -19,6 +19,10 @@
   bottom: 0;
   z-index: var(--ptah-z-raised);
 }
+:host([data-layout='bar']) {
+  width: 100%;
+  box-sizing: border-box;
+}
 :host(.responsive) [data-selection-frame],
 :host([data-layout='bar']) [data-selection-frame] {
   display: grid;
@@ -33,6 +37,8 @@
 :host(.responsive) [data-selected-list],
 :host(.responsive) [data-selection-title],
 :host(.responsive) progress,
+:host([data-layout='bar']) [data-selected-list],
+:host([data-layout='bar']) [data-selection-title],
 :host([data-layout='bar']) progress {
   display: none;
 }

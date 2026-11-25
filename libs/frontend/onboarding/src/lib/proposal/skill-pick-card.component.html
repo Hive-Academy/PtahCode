@@ -11,13 +11,15 @@
     [checked]="selected()"
     [disabled]="disabled()"
     [attr.aria-label]="'Select ' + skill().name"
-    [attr.aria-describedby]="descriptionId()"
+    [attr.aria-describedby]="descriptionId"
     (change)="toggled.emit()"
   />
   <span class="flex min-w-0 flex-col gap-1.5">
     <span class="flex min-w-0 items-center gap-2"
       ><strong
-        class="min-w-0 flex-1 truncate text-base font-semibold text-base-content"
+        class="min-w-0 flex-1 text-base font-semibold text-base-content"
+        [class.truncate]="!compact()"
+        [class.card-name]="compact()"
         [title]="skill().name"
         >{{ skill().name }}</strong
       >
@@ -25,7 +27,7 @@
         <span ptahBadge tone="ok" size="xs">Installed</span>
       }
     </span>
-    <span [id]="descriptionId()" class="contents">
+    <span [id]="descriptionId" class="contents">
       <span
         class="flex min-w-0 items-center gap-2 text-xs text-base-content-muted"
         ><span
@@ -43,7 +45,9 @@
         ></span
       >
       <span
-        class="mt-1 line-clamp-3 text-sm text-base-content"
+        class="mt-1 text-sm text-base-content"
+        [class.line-clamp-3]="!compact()"
+        [class.truncate]="compact()"
         [class.text-base-content-muted]="!skill().description.trim()"
         [title]="description()"
         >{{ description() }}</span
@@ -73,22 +77,69 @@
         </span>
       }
     </span>
-    @if (safeUrl(); as url) {
-      <a
-        ptahButton
-        variant="link"
-        size="xs"
-        class="self-end"
-        [href]="url"
-        target="_blank"
-        rel="noopener noreferrer"
-        (click)="stopLink($event)"
-        >View on skills.sh
-        <lucide-icon
-          [img]="externalLink"
-          class="size-ptah-icon-xs"
-          aria-hidden="true"
-      /></a>
+    @if (compact() && reason(); as judgeReason) {
+      <span
+        class="truncate text-xs text-base-content-muted"
+        [title]="judgeReason"
+        >{{ judgeReason }}</span
+      >
+    }
+    @if (compact()) {
+      <span
+        [id]="detailsId"
+        [hidden]="!detailsExpanded()"
+        class="card-details flex flex-col gap-1.5 text-xs"
+      >
+        <span class="text-sm text-base-content">{{ description() }}</span>
+        @if (reason(); as judgeReason) {
+          <span class="text-base-content-muted">{{ judgeReason }}</span>
+        }
+        @if (coveredItems().length) {
+          <span class="text-base-content-muted"
+            >Covers: {{ coveredItems().join(', ') }}</span
+          >
+        }
+        @if (scriptNote(); as note) {
+          <span class="text-base-content">{{ note }}</span>
+        }
+      </span>
+    }
+    @if (compact() || safeUrl()) {
+      <span class="card-actions">
+        @if (compact()) {
+          <button
+            ptahButton
+            variant="ghost"
+            size="xs"
+            type="button"
+            [attr.aria-expanded]="detailsExpanded()"
+            [attr.aria-controls]="detailsId"
+            [attr.aria-label]="
+              (detailsExpanded() ? 'Less about ' : 'More about ') + skill().name
+            "
+            (click)="toggleDetails($event)"
+          >
+            {{ detailsExpanded() ? 'Less' : 'More' }}
+          </button>
+        }
+        @if (safeUrl(); as url) {
+          <a
+            ptahButton
+            variant="link"
+            size="xs"
+            class="ml-auto"
+            [href]="url"
+            target="_blank"
+            rel="noopener noreferrer"
+            (click)="stopLink($event)"
+            >View on skills.sh
+            <lucide-icon
+              [img]="externalLink"
+              class="size-ptah-icon-xs"
+              aria-hidden="true"
+          /></a>
+        }
+      </span>
     }
     @if (skill().isInstalled) {
       <span class="text-xs text-base-content-muted"

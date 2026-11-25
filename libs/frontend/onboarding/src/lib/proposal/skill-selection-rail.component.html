@@ -81,10 +81,10 @@
         size="md"
         class="whitespace-normal"
         data-testid="skill-install-primary"
-        [disabled]="blocked()"
+        [disabled]="primaryDisabled()"
         [busy]="previewing()"
-        [attr.aria-describedby]="loading() ? null : helperId"
-        (click)="primary.emit()"
+        [attr.aria-describedby]="primaryDescribedBy()"
+        (click)="onPrimaryClick()"
       >
         {{ primaryLabel() }}
       </button>
@@ -102,24 +102,36 @@
         </button>
       }
     </ptah-form-actions>
-    @if (!loading()) {
+    @if (!loading() || normalizedInstallBlockedReason()) {
       <div
         data-selection-notes
         [id]="helperId"
         class="space-y-2 text-xs text-base-content-muted"
       >
-        <p>
-          {{
-            selected().length
-              ? 'Installs the selected skills in this workspace, then opens the next step.'
-              : 'Opens the next step. No skill is installed.'
-          }}
-        </p>
-        @if (scriptHelper(); as helper) {
-          <p>
-            <span aria-hidden="true" class="text-state-need">!</span>
-            {{ helper }}
+        @if (normalizedInstallBlockedReason(); as reason) {
+          <p
+            data-testid="skill-install-blocked-reason"
+            [id]="installBlockedId"
+            role="status"
+            class="font-medium text-state-need"
+          >
+            {{ reason }}
           </p>
+        }
+        @if (!loading()) {
+          <p>
+            {{
+              selected().length
+                ? 'Installs the selected skills in this workspace, then opens the next step.'
+                : 'Opens the next step. No skill is installed.'
+            }}
+          </p>
+          @if (scriptHelper(); as helper) {
+            <p>
+              <span aria-hidden="true" class="text-state-need">!</span>
+              {{ helper }}
+            </p>
+          }
         }
       </div>
     }

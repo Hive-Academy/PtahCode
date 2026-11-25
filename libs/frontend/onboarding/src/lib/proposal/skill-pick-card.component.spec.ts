@@ -97,4 +97,74 @@ describe('SkillPickCardComponent', () => {
     fixture.detectChanges();
     expect(root.querySelector('[data-tone="accent"]')).toBeNull();
   });
+
+  describe('compact judged card', () => {
+    const long = 'Full reason '.repeat(20).trim();
+    function compactSetup() {
+      const ctx = setup({ ...skill, description: 'Angular patterns' });
+      ctx.fixture.componentRef.setInput('compact', true);
+      ctx.fixture.componentRef.setInput('reason', long);
+      ctx.fixture.componentRef.setInput(
+        'scriptNote',
+        'Runs scripts/install.sh',
+      );
+      ctx.fixture.componentRef.setInput('coveredItems', ['A', 'B', 'C', 'D']);
+      ctx.fixture.detectChanges();
+      return ctx;
+    }
+
+    it('shows name, source, one-line description, covers and a one-line reason', () => {
+      const { root } = compactSetup();
+      expect(root.querySelector('strong')?.textContent).toContain(
+        'Angular skill',
+      );
+      expect(root.textContent).toContain('acme/repo');
+      const description = root.querySelector('span.truncate.text-sm');
+      expect(description?.textContent).toContain('Angular patterns');
+      expect(root.textContent).toContain('+1');
+      const reasonLine = [...root.querySelectorAll('span.truncate')].find(
+        (el) => el.textContent?.includes('Full reason'),
+      );
+      expect(reasonLine).toBeTruthy();
+    });
+
+    it('reveals the full reason and the script note with a native More button', () => {
+      const { fixture, root } = compactSetup();
+      const more = [...root.querySelectorAll('button')].find(
+        (b) => b.textContent?.trim() === 'More',
+      ) as HTMLButtonElement;
+      expect(more.getAttribute('aria-expanded')).toBe('false');
+      const region = root.querySelector(
+        `#${more.getAttribute('aria-controls')}`,
+      ) as HTMLElement;
+      expect(region.hidden).toBe(true);
+      const toggled = jest.fn();
+      fixture.componentInstance.toggled.subscribe(toggled);
+      more.click();
+      fixture.detectChanges();
+      expect(toggled).not.toHaveBeenCalled();
+      expect(more.getAttribute('aria-expanded')).toBe('true');
+      expect(more.textContent?.trim()).toBe('Less');
+      expect(region.hidden).toBe(false);
+      expect(region.textContent).toContain(long);
+      expect(region.textContent).toContain('Runs scripts/install.sh');
+      expect(region.textContent).toContain('A, B, C, D');
+    });
+
+    it('gives each rendering of the same skill a unique description id', () => {
+      const first = compactSetup();
+      const second = compactSetup();
+      const id = (root: HTMLElement) =>
+        root.querySelector('input')?.getAttribute('aria-describedby');
+      expect(id(first.root)).toBeTruthy();
+      expect(id(first.root)).not.toBe(id(second.root));
+      expect(first.root.querySelector(`#${id(first.root)}`)).toBeTruthy();
+    });
+
+    it('keeps the unjudged card without a More button or reason', () => {
+      const { root } = setup();
+      expect(root.querySelector('button')).toBeNull();
+      expect(root.querySelector('.card-details')).toBeNull();
+    });
+  });
 });

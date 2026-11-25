@@ -21,6 +21,7 @@
     </div>
   } @else {
     <div
+      #chipRow
       role="group"
       aria-label="Filter skills by stack item"
       class="flex flex-wrap gap-[var(--ptah-gap-controls)]"
@@ -29,25 +30,25 @@
         ptahButton
         type="button"
         size="sm"
+        data-strip-all
         [selected]="activeItem() === null"
         (click)="filterChanged.emit(null)"
       >
         All skills
       </button>
-      @for (item of visibleItems(); track item.kind + ':' + item.name) {
+      @for (item of visibleItems(); track itemKey(item)) {
         <button
           ptahButton
           type="button"
           size="sm"
-          [selected]="activeItem() === item.kind + ':' + item.name"
+          data-strip-chip
+          [selected]="activeItem() === itemKey(item)"
           [title]="item.kind + ': ' + item.evidence"
           [attr.aria-describedby]="descriptionId(item)"
           [attr.aria-label]="accessibleName(item)"
           (click)="
             filterChanged.emit(
-              activeItem() === item.kind + ':' + item.name
-                ? null
-                : item.kind + ':' + item.name
+              activeItem() === itemKey(item) ? null : itemKey(item)
             )
           "
         >
@@ -63,17 +64,21 @@
           }}<span class="text-xs text-base-content-muted">{{
             summary(item)
           }}</span>
+          @if (verdictLabel(item); as verdict) {
+            <span class="text-xs text-base-content-muted">· {{ verdict }}</span>
+          }
         </button>
       }
-      @if (!expanded() && items().length > 12) {
+      @if (showMoreVisible()) {
         <button
           ptahButton
           type="button"
           size="sm"
+          data-strip-show-more
           aria-expanded="false"
           (click)="expand()"
         >
-          +{{ items().length - 11 }} more
+          Show {{ hiddenCount() }} more
         </button>
       }
     </div>

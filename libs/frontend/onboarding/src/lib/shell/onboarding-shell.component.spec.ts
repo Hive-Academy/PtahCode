@@ -3,6 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { AppStateManager } from '@ptah-extension/core';
+import type { ModelPair, SkillJudgeStageRecord } from '@ptah-extension/shared';
 import { OnboardingFlagService } from '../first-run/onboarding-flag.service';
 import { OnboardingAnnouncerService } from './onboarding-announcer.service';
 import { OnboardingRunPillService } from './onboarding-run-pill.service';
@@ -44,6 +45,21 @@ describe('OnboardingShellComponent', () => {
   ): T | null {
     return (harness.fixture.nativeElement as HTMLElement).querySelector<T>(
       selector,
+    );
+  }
+
+  function queryAll<T extends Element>(
+    harness: RouterTestingHarness,
+    selector: string,
+  ): T[] {
+    return Array.from(
+      (harness.fixture.nativeElement as HTMLElement).querySelectorAll<T>(selector),
+    );
+  }
+
+  function badgeTexts(harness: RouterTestingHarness): string[] {
+    return queryAll(harness, '[data-testid="onboarding-run-pill-badge"]').map(
+      (badge) => badge.textContent?.replace(/\s+/g, ' ').trim() ?? '',
     );
   }
 
@@ -226,6 +242,150 @@ describe('OnboardingShellComponent', () => {
         harness,
         '[data-testid="onboarding-run-pill"]',
       )?.textContent?.trim(),
+    ).toBe('Claude · sonnet');
+
+    pill.clear();
+    harness.detectChanges();
+    expect(query(harness, '[data-testid="onboarding-run-pill"]')).toBeNull();
+  });
+
+  it('renders immutable analysisPair and deduplicated stage badges', async () => {
+    const harness = await open('/onboarding');
+    const pill = TestBed.inject(OnboardingRunPillService);
+
+    const analysisPair: ModelPair = {
+      provider: 'Anthropic',
+      model: 'claude-sonnet-4-5',
+    };
+    const decisionPairUsed: ModelPair = {
+      provider: 'Anthropic',
+      model: 'claude-sonnet-4-5',
+    };
+    const normalPairUsed: ModelPair = {
+      provider: 'Anthropic',
+      model: 'claude-sonnet-4-5',
+    };
+    const stages: SkillJudgeStageRecord[] = [
+      {
+        stage: 'decision',
+        status: 'used',
+        pairUsed: decisionPairUsed,
+        itemsJudged: 3,
+        invalidItemIds: [],
+      },
+      {
+        stage: 'normal',
+        status: 'used',
+        pairUsed: normalPairUsed,
+        itemsJudged: 2,
+        invalidItemIds: [],
+      },
+    ];
+
+    expect(query(harness, '[data-testid="onboarding-run-pill"]')).toBeNull();
+
+    pill.recordRun({ analysisPair, stages });
+    harness.detectChanges();
+
+    // Mutating the caller's snapshots after recording must not alter the pill.
+    analysisPair.provider = 'OpenAI';
+    analysisPair.model = 'gpt-5';
+    decisionPairUsed.model = 'gpt-5';
+    normalPairUsed.provider = 'OpenAI';
+    stages[0].status = 'failed';
+
+    // The equal Decision and Normal pairs collapse into one badge.
+    expect(badgeTexts(harness)).toEqual([
+      'Analysis: Anthropic / claude-sonnet-4-5',
+      'Decision + Normal stage: Anthropic / claude-sonnet-4-5',
+    ]);
+
+    pill.clear();
+    harness.detectChanges();
+    expect(query(harness, '[data-testid="onboarding-run-pill"]')).toBeNull();
+  });
+
+  it('shows one badge per stage when the stage pairs differ, and the attempted pair for a failed stage', async () => {
+    const harness = await open('/onboarding');
+    const pill = TestBed.inject(OnboardingRunPillService);
+
+    pill.recordRun({
+      analysisPair: { provider: 'Anthropic', model: 'claude-sonnet-4-5' },
+      stages: [
+        {
+          stage: 'decision',
+          status: 'used',
+          pairUsed: { provider: 'Anthropic', model: 'claude-opus-4-5' },
+          itemsJudged: 3,
+          invalidItemIds: [],
+        },
+        {
+          stage: 'normal',
+          status: 'used',
+          pairUsed: { provider: 'Anthropic', model: 'claude-sonnet-4-5' },
+          itemsJudged: 2,
+          invalidItemIds: [],
+        },
+      ],
+    });
+    harness.detectChanges();
+
+    expect(badgeTexts(harness)).toEqual([
+      'Analysis: Anthropic / claude-sonnet-4-5',
+      'Decision stage: Anthropic / claude-opus-4-5',
+      'Normal stage: Anthropic / claude-sonnet-4-5',
+    ]);
+
+    pill.recordRun({
+      analysisPair: { provider: 'Anthropic', model: 'claude-sonnet-4-5' },
+      stages: [
+        {
+          stage: 'decision',
+          status: 'skipped',
+          itemsJudged: 0,
+          invalidItemIds: [],
+        },
+        {
+          stage: 'normal',
+          status: 'failed',
+          pairAttempted: { provider: 'Anthropic', model: 'claude-sonnet-4-5' },
+          itemsJudged: 0,
+          invalidItemIds: [],
+        },
+      ],
+    });
+    harness.detectChanges();
+
+    // The failed stage shows the attempted pair; the skipped stage no badge.
+    expect(badgeTexts(harness)).toEqual([
+      'Analysis: Anthropic / claude-sonnet-4-5',
+      'Normal stage: attempted Anthropic / claude-sonnet-4-5',
+    ]);
+  });
+
+  it('shows no badge for a run without pairs and keeps the plain label flow', async () => {
+    const harness = await open('/onboarding');
+    const pill = TestBed.inject(OnboardingRunPillService);
+
+    pill.recordRun({ analysisPair: null, stages: [] });
+    harness.detectChanges();
+    expect(query(harness, '[data-testid="onboarding-run-pill"]')).toBeNull();
+
+    pill.recordRun({
+      analysisPair: { provider: 'Anthropic', model: 'claude-sonnet-4-5' },
+      stages: [],
+    });
+    harness.detectChanges();
+    expect(badgeTexts(harness)).toEqual([
+      'Analysis: Anthropic / claude-sonnet-4-5',
+    ]);
+
+    // A plain label replaces recorded badges; clear hides everything.
+    pill.show('Claude · sonnet');
+    harness.detectChanges();
+    expect(queryAll(harness, '[data-testid="onboarding-run-pill-badge"]')).toHaveLength(0);
+    expect(
+      query(harness, '[data-testid="onboarding-run-pill"]')?.textContent?.trim(),
     ).toBe('Claude · sonnet');
 
     pill.clear();
