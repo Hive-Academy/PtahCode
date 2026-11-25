@@ -1989,6 +1989,11 @@ export class AgentMonitorStore implements OnDestroy {
         reasoningEffort: info.reasoningEffort,
         observedModel: info.observedModel,
         supportsContinuation: info.supportsContinuation,
+        // A first spawn carries the lane's capabilities too (F3: a running ACP
+        // lane without them showed no composer until its first turn ended).
+        potentialCapabilities: info.potentialCapabilities,
+        effectiveCapabilities: info.effectiveCapabilities,
+        effectivePolicy: info.effectivePolicy,
         workflowRunId: wf.workflowRunId,
         workflowName: wf.workflowName,
         usageTotals: null,

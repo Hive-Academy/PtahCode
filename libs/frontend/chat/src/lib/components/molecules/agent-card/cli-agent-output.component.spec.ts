@@ -496,7 +496,7 @@ describe('unified CLI agent output', () => {
     );
     fixture.componentRef.setInput('isStreaming', false);
     fixture.detectChanges();
-    expect(fixture.componentInstance.executionNodes()[0].status).toBe('error');
+    expect(fixture.componentInstance.executionNodes()[0].status).toBe('interrupted');
   });
 
   it('shows reported zero values and total-only usage without invented token counts', () => {

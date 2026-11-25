@@ -199,6 +199,8 @@ export class CliAgentOutputComponent {
 
   /** Whether the agent is still running (passed through to ExecutionNodeComponent) */
   readonly isStreaming = input<boolean>(false);
+  /** When the lane's run ended (epoch ms): an unfinished tool's final elapsed time ends here. */
+  readonly endedAt = input<number | undefined>(undefined);
 
   /** Triggers auto-scroll when value changes (incremented externally) */
   readonly scrollTrigger = input<number>(0);
@@ -242,7 +244,7 @@ export class CliAgentOutputComponent {
           this.treeSegments(),
         );
     if (!this.isStreaming()) {
-      return this.treeBuilder.finalizeOrphanedTools(tree);
+      return this.treeBuilder.finalizeOrphanedTools(tree, this.endedAt());
     }
     return tree;
   });

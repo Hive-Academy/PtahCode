@@ -5,17 +5,22 @@ import { isAgentBudgetStopReason } from '@ptah-extension/shared';
 import { COMPOSER_STOP_BUTTON_CLASS } from '@ptah-extension/chat-ui';
 import { laneGuardStopText } from '../agent-card/agent-card-header.component';
 import { LaneComposerComponent } from '../lane-composer/lane-composer.component';
+import type { LaneStateChip } from '../lane-composer/lane-composer-labels';
+import { PtahTooltipDirective } from '@ptah-extension/ui';
 
 /**
  * Hosts the lane composer for the agent card panel and the canvas lane view.
  * It owns the visibility rules (no field while starting or without a way to
- * continue; Stop alone then) and the terminal status line. The canvas
- * (`composer`) mount puts Stop / Resume session into the composer toolbar.
+ * continue; Stop alone then) and the lane state (Stopping…, Stopped,
+ * Interrupted, Stop failed). The state is a chip inside the composer's
+ * toolbar, never a line under it: main chat has no lines under its input,
+ * and lines there pushed the lane panel past its height (two scrollbars).
+ * The canvas (`composer`) mount puts Stop / Resume session into the toolbar.
  */
 @Component({
   selector: 'ptah-agent-continue-input',
   standalone: true,
-  imports: [LaneComposerComponent, LucideAngularModule],
+  imports: [LaneComposerComponent, LucideAngularModule, PtahTooltipDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (
@@ -23,11 +28,12 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
       (variant() === 'composer' &&
         (agent().status === 'running' ||
           agent().status === 'starting' ||
-          terminalStatus()))
+          laneState()))
     ) {
-      <div class="flex flex-col gap-1 pb-2">
+      <div class="flex items-center gap-2 pb-2">
         @if (visible()) {
           <ptah-lane-composer
+            class="min-w-0 flex-1"
             [agentId]="agent().agentId"
             [laneLabel]="agent().displayName || agent().cli"
             [cli]="agent().displayName || agent().cli"
@@ -36,6 +42,7 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
             [resumable]="!!agent().cliSessionId"
             [stopPending]="stopBusy()"
             [resumePending]="resumePending()"
+            [laneState]="laneState()"
             (stopRequested)="stopRequested.emit($event)"
             (resumeRequested)="resumeRequested.emit($event)"
           />
@@ -54,14 +61,13 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
               @else { <lucide-angular [img]="PlayIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
             </button>
           }
-        }
-        @if (agent().stopError; as stopError) {
-          <span class="px-1 text-[11px] text-error" role="alert" data-testid="lane-stop-error">Stop failed: {{ stopError }}</span>
-        }
-        @if (variant() === 'composer' && terminalStatus(); as message) {
-          <span class="px-1 text-[11px]" [class.text-warning]="!stopping()"
-            [class.text-base-content-muted]="stopping()" role="status"
-            data-testid="lane-terminal-status">{{ message }}</span>
+          <!-- No composer card here: the state chip sits beside the button, on the same row. -->
+          @if (laneState(); as state) {
+            <span class="min-w-0 truncate text-xs" [class.text-state-idle]="state.tone === 'idle'"
+              [class.text-state-need]="state.tone === 'need'" [class.text-state-err]="state.tone === 'err'"
+              tabindex="0" [attr.role]="state.tone === 'err' ? 'alert' : 'status'" [ptahTooltip]="state.detail"
+              data-testid="lane-state-chip">{{ state.label }}@if (state.detail !== state.label) {<span class="sr-only">: {{ state.detail }}</span>}</span>
+          }
         }
       </div>
     }
@@ -85,27 +91,47 @@ export class AgentContinueInputComponent {
   /** The user pressed Stop and the lane's process has not exited yet. */
   protected readonly stopping = computed(() => this.agent().stopRequestedAt !== undefined);
   protected readonly stopBusy = computed(() => this.stopPending() || this.stopping());
-  protected readonly terminalStatus = computed(() => {
-    const agent = this.agent();
-    // Same words as the dock pill: "Stopping…" until the process exits.
-    if (this.stopping()) return 'Stopping…';
-    // A user stop reads stopped even when an older host reports it as failed.
-    const failed = agent.status === 'failed' && !agent.stoppedByUser;
-    const status = failed ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
-      : agent.status === 'stopped' || agent.status === 'failed'
-        ? (isAgentBudgetStopReason(agent.stopReason) ? 'Stopped by Ptah budget monitor'
-          : agent.stoppedByUser ? 'Stopped by you' : 'Stopped')
-        : '';
-    const reason = laneGuardStopText(agent.stopReason);
-    return this.active() ? '' : [status, reason].filter(Boolean).join(' · ');
-  });
+  /** The lane state chip, or null while the lane runs normally. */
+  protected readonly laneState = computed((): LaneStateChip | null => laneStateChip(this.agent()));
   protected readonly visible = computed(() => {
     const agent = this.agent();
     if (agent.status === 'starting') return false;
-    const messaging = agent.effectiveCapabilities?.messaging;
+    // The resolved capabilities when the host sent them, else the adapter's
+    // declared ones: a running ACP lane (Grok) can take a message before its
+    // first turn ends (F3).
+    const messaging = (agent.effectiveCapabilities ?? agent.potentialCapabilities)?.messaging;
     return agent.supportsContinuation === true || !!agent.cliSessionId ||
       (agent.status === 'running' && (
         messaging?.steer.state === 'supported' || messaging?.continuation.state === 'supported'
       ));
   });
+}
+
+/**
+ * The lane state as the composer chip. Order: a failed Stop (announced), a
+ * pending stop, then the terminal status with the host's reason. A running
+ * lane has no chip.
+ */
+export function laneStateChip(agent: MonitoredAgent): LaneStateChip | null {
+  if (agent.stopError) {
+    return { label: 'Stop failed', detail: `Stop failed: ${agent.stopError}`, tone: 'err' };
+  }
+  // Same words as the dock pill: "Stopping…" until the process exits.
+  if (agent.stopRequestedAt !== undefined) {
+    return { label: 'Stopping…', detail: 'Stopping: waiting for the lane process to exit.', tone: 'idle' };
+  }
+  if (agent.status === 'running' || agent.status === 'starting' || agent.status === 'completed') return null;
+  // A user stop reads stopped even when an older host reports it as failed.
+  const failed = agent.status === 'failed' && !agent.stoppedByUser;
+  const budget = isAgentBudgetStopReason(agent.stopReason);
+  const status = failed ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
+    : budget ? 'Stopped by Ptah budget monitor'
+      : agent.stoppedByUser ? 'Stopped by you' : 'Stopped';
+  const reason = laneGuardStopText(agent.stopReason);
+  const detail = [status, reason].filter(Boolean).join(' · ');
+  const label = failed ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
+    : budget ? 'Budget stop'
+      : agent.stopReason === 'host-restart' ? 'Interrupted'
+        : 'Stopped';
+  return { label, detail, tone: failed || agent.status === 'timeout' ? 'err' : budget ? 'need' : 'idle' };
 }

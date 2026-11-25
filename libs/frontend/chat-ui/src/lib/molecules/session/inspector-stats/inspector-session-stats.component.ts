@@ -158,7 +158,8 @@ let nextSessionId = 0;
               {{ modelNames().length || '—' }}
             </span>
             @if (modelSummary(); as summary) {
-              <span class="truncate text-xs font-normal text-base-content-muted">{{ summary }}</span>
+              <span class="truncate text-xs font-normal text-base-content-muted" [title]="modelDetail()"
+                data-testid="session-models-summary">{{ summary }}</span>
             }
           </span>
           <div #modelsHost>
@@ -167,6 +168,7 @@ let nextSessionId = 0;
                 class="block pt-2"
                 [snapshot]="stats().snapshot"
                 [sources]="metrics()"
+                [currentModel]="currentModelId()"
               />
             }
           </div>
@@ -373,9 +375,14 @@ export class InspectorSessionStatsComponent {
   });
 
   protected readonly modelsOpen = computed(() => this.expansion.isOpen(this.sessionKey(), 'models'));
-  protected readonly modelNames = computed(() => {
+  /** The model the session runs now: the live stats' model, else the snapshot's. */
+  protected readonly currentModelId = computed(() => {
     const { snapshot, liveModelStats } = this.stats();
-    const primary = liveModelStats?.model ?? snapshot?.model;
+    return liveModelStats?.model ?? snapshot?.model ?? null;
+  });
+  protected readonly modelNames = computed(() => {
+    const { snapshot } = this.stats();
+    const primary = this.currentModelId();
     const rows = snapshot?.modelUsageList;
     const used = rows?.length ? rows.map(({ model }) => model) : [];
     // The session's current model leads the summary ("Haiku 4.5 +2"); the
@@ -384,9 +391,20 @@ export class InspectorSessionStatsComponent {
     const ids = primary ? [primary, ...used.filter((id) => id !== primary)] : used;
     return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
   });
+  /** "Haiku 4.5 +2 earlier": the current model, then how many ran only in earlier turns. */
   protected readonly modelSummary = computed(() => {
     const [first, ...other] = this.modelNames();
-    return other.length ? `${first} +${other.length}` : first;
+    if (!other.length) return first;
+    return this.currentModelId() ? `${first} +${other.length} earlier` : `${first} +${other.length}`;
+  });
+  /** The summary's tooltip: which model is current and which ran earlier in this session. */
+  protected readonly modelDetail = computed(() => {
+    const [first, ...other] = this.modelNames();
+    if (!first) return '';
+    if (!this.currentModelId()) return [first, ...other].join(', ');
+    return other.length
+      ? `Current model: ${first}. Earlier in this session: ${other.join(', ')}.`
+      : `Current model: ${first}.`;
   });
 
   protected setModelsOpen(open: boolean): void {

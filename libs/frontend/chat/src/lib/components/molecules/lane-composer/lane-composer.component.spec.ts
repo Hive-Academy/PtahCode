@@ -181,8 +181,10 @@ describe('LaneComposerComponent', () => {
     textarea.dispatchEvent(new Event('input'));
     fixture.detectChanges();
   }
+  /** The in-card note when one shows, else what Send does (its tooltip): no line under the card. */
   function statusText(fixture: ComponentFixture<LaneComposerComponent>): string {
-    return root(fixture).querySelector('[data-testid="lane-status-line"] [aria-live="polite"]')?.textContent?.trim() ?? '';
+    const notice = root(fixture).querySelector('[data-testid="lane-composer-notice"]')?.textContent?.trim();
+    return notice || (sendButton(fixture).getAttribute('title') ?? '');
   }
   async function settle(fixture: ComponentFixture<LaneComposerComponent>): Promise<void> {
     for (let i = 0; i < 6; i++) await Promise.resolve();
@@ -214,9 +216,13 @@ describe('LaneComposerComponent', () => {
     const send = card.querySelectorAll('button[aria-label="Resume with message"]');
     expect(send).toHaveLength(1);
     expect(send[0].textContent?.trim()).toBe('');
-    const live = root(fixture).querySelector('[data-testid="lane-status-line"] [aria-live="polite"]') as HTMLElement;
-    expect(live.textContent).toContain('Resume CLI session 01a1bc68');
-    expect(live.getAttribute('title')).toContain('Resume CLI session 01a1bc68');
+    // The resume path is Send's tooltip and description, not a line under the card.
+    expect(send[0].getAttribute('title')).toContain('Resume CLI session 01a1bc68');
+    const hint = root(fixture).querySelector(`#${send[0].getAttribute('aria-describedby')}`) as HTMLElement;
+    expect(hint.textContent).toContain('Resume CLI session 01a1bc68');
+    expect(root(fixture).querySelector('[data-testid="lane-status-line"]')).toBeNull();
+    // The polite note region lives inside the card.
+    expect(card.querySelector('[data-testid="lane-composer-notice"]')?.getAttribute('aria-live')).toBe('polite');
     expect(root(fixture).querySelector('[aria-label="Send options"]')).toBeNull();
   });
 
@@ -607,7 +613,8 @@ describe('LaneComposerComponent', () => {
     expect(root(fixture).querySelector('ptah-composer-model-picker [aria-disabled="true"]')).not.toBeNull();
     expect(root(fixture).querySelector('ptah-composer-effort-picker [aria-disabled="true"]')).not.toBeNull();
     expect(sendButton(fixture).disabled).toBe(true);
-    expect(statusText(fixture)).toBe('Checking lane options…');
+    expect(chip.getAttribute('title')).toBe('Checking lane options…');
+    expect(statusText(fixture)).toBe('Checking message options…');
     expect(root(fixture).querySelector('[data-testid="lane-limited-badge"]')).toBeNull();
   });
 
@@ -633,16 +640,16 @@ describe('LaneComposerComponent', () => {
     expect(badge.getAttribute('aria-label')).toBe('1 control is limited on this lane: Images');
   });
 
-  it('gates model and effort with the backend reason and reveals it on the status line', async () => {
+  it('gates model and effort with the backend reason on the control itself', async () => {
     store.composerState.mockReturnValue(previews({}, {}, capabilities(turnInput({
       model: { state: 'unsupported', reason: 'Model is set at spawn for this lane.' },
     }))));
     const fixture = await mount();
     const pill = root(fixture).querySelector('ptah-composer-model-picker [aria-disabled="true"]') as HTMLElement;
     expect(pill.getAttribute('title')).toBe('Model is set at spawn for this lane.');
-    pill.dispatchEvent(new Event('focus'));
-    fixture.detectChanges();
-    expect(statusText(fixture)).toBe('Model is set at spawn for this lane.');
+    // Its title and aria-describedby carry the reason; no line under the card repeats it.
+    expect(root(fixture).querySelector(`#${pill.getAttribute('aria-describedby')}`)?.textContent)
+      .toContain('Model is set at spawn for this lane.');
     expect(root(fixture).querySelector('ptah-composer-effort-picker [aria-disabled="true"]')).toBeNull();
     const chip = root(fixture).querySelector('[data-testid="lane-approval-chip"]') as HTMLElement;
     expect(chip.textContent).toContain('Auto');
@@ -668,8 +675,9 @@ describe('LaneComposerComponent', () => {
     expect(card.classList).toContain('chat-composer-card');
     expect(card.classList).toContain('chat-composer-column');
     expect(field(fixture).classList).toContain('focus:outline-none');
-    const line = root(fixture).querySelector('[data-testid="lane-status-line"]') as HTMLElement;
-    expect(line.getAttribute('data-glass-surface')).toBe('plate');
+    // Main chat has no lines under its input; neither has the lane composer.
+    expect(root(fixture).querySelector('[data-testid="lane-status-line"]')).toBeNull();
+    expect(card.nextElementSibling).toBeNull();
   });
 
   it('keeps one model label: the record model as a catalog row, never the dated or multi-model id (M1)', async () => {
@@ -698,6 +706,30 @@ describe('LaneComposerComponent', () => {
     const fixture = await mount();
     const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
     expect(pill.textContent).toContain('Codex default');
+  });
+
+  it('re-reads the options when a turn settles with no model known, so the pill names the init model (D8)', async () => {
+    rpcCall.mockResolvedValue(rpcSuccess({ models: [{ id: 'claude-haiku-4-5', name: 'Haiku 4.5' }], efforts: [], commands: [] }));
+    const fixture = await mount();
+    const pill = () => (root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement).textContent ?? '';
+    expect(pill()).toContain('Codex default');
+    const reads = rpcCall.mock.calls.length;
+    // The host learned the model from the SDK init after the first read.
+    rpcCall.mockResolvedValue(rpcSuccess({
+      models: [{ id: 'claude-haiku-4-5', name: 'Haiku 4.5' }], efforts: [], commands: [], currentModel: 'claude-haiku-4-5',
+    }));
+    store.agentsById.set(new Map([[agentId, { status: 'completed', cli: 'codex' }]]));
+    fixture.detectChanges();
+    await settle(fixture);
+    expect(rpcCall.mock.calls.length).toBe(reads + 1);
+    expect(pill()).toContain('Haiku 4.5');
+    // A known model needs no further read.
+    store.agentsById.set(new Map([[agentId, { status: 'running', cli: 'codex' }]]));
+    fixture.detectChanges();
+    store.agentsById.set(new Map([[agentId, { status: 'completed', cli: 'codex' }]]));
+    fixture.detectChanges();
+    await settle(fixture);
+    expect(rpcCall.mock.calls.length).toBe(reads + 1);
   });
 
   it('says the pick applies when the stopped lane resumes (M4)', async () => {
@@ -776,8 +808,10 @@ describe('LaneComposerComponent', () => {
     }));
     const fixture = await mount();
     expect(root(fixture).querySelector('[role="alert"]')).toBeNull();
-    expect(root(fixture).querySelector('[data-testid="lane-options-stale"]')?.textContent)
-      .toContain('Showing the last known lane options. The latest read failed.');
+    const stale = root(fixture).querySelector('[data-testid="lane-composer-alert"]') as HTMLElement;
+    expect(stale.textContent).toContain('Showing the last known lane options. The latest read failed.');
+    expect(stale.getAttribute('role')).toBe('status');
+    expect(stale.closest('[data-glass-surface="tile"]')).not.toBeNull();
     expect(root(fixture).querySelector('ptah-composer-effort-picker [aria-disabled="true"]')).toBeNull();
   });
 
@@ -1031,6 +1065,28 @@ describe('LaneComposerComponent', () => {
     expect(sendMessage).toHaveBeenCalledWith(agentId, 'What colour?', 'queue', false, expect.any(String),
       { images: [{ data: 'aGk=', mediaType: 'image/png' }] });
   });
+  describe('lane state inside the card (round 4)', () => {
+    it('shows the lane state as a toolbar chip with its detail, and nothing under the card', async () => {
+      store.agentsById.set(new Map([[agentId, { status: 'stopped', cli: 'claude', cliSessionId: '06d21aa3-0000' }]]));
+      const fixture = await mount({ stopped: true });
+      fixture.componentRef.setInput('laneState', { label: 'Interrupted', detail: 'Stopped · Interrupted by host restart', tone: 'idle' });
+      fixture.detectChanges();
+      const chip = root(fixture).querySelector('[data-testid="lane-state-chip"]') as HTMLElement;
+      expect(chip.closest('.ptah-composer-toolbar')).not.toBeNull();
+      expect(chip.getAttribute('role')).toBe('status');
+      expect(chip.textContent).toContain('Interrupted');
+      expect(chip.querySelector('.sr-only')?.textContent).toContain('Interrupted by host restart');
+      const composer = root(fixture).querySelector('[data-testid="lane-composer"]') as HTMLElement;
+      expect(composer.textContent).not.toContain('Resume with message:');
+    });
+
+    it('announces an error state chip', async () => {
+      const fixture = await mount();
+      fixture.componentRef.setInput('laneState', { label: 'Stop failed', detail: 'Stop failed: Agent not found', tone: 'err' });
+      fixture.detectChanges();
+      expect(root(fixture).querySelector('[data-testid="lane-state-chip"]')?.getAttribute('role')).toBe('alert');
+    });
+  });
 });
 
 describe('findLaneModelOption (PR 1509)', () => {
@@ -1054,4 +1110,5 @@ describe('findLaneModelOption (PR 1509)', () => {
     expect(findLaneModelOption(options, 'GPT-5.5')?.id).toBe('gpt-5.5');
     expect(findLaneModelOption(options, 'haiku 5.5')?.id).toBe('claude-haiku-5-5-20261001');
   });
+
 });

@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { TabManagerService, laneKey as buildLaneKey, parseLaneKey } from '@ptah-extension/chat';
-import { AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
+import { AgentDeliveryStore, AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
 import { CanvasStore } from '../canvas.store';
 import { CanvasAttentionLaneOpener } from './canvas-attention-lane-opener.service';
 
@@ -10,6 +10,7 @@ export class CanvasDetailService {
   private readonly canvasStore = inject(CanvasStore);
   private readonly tabManager = inject(TabManagerService);
   private readonly monitor = inject(AgentMonitorStore);
+  private readonly delivery = inject(AgentDeliveryStore);
   private readonly background = inject(BackgroundAgentStore);
   private readonly destroyRef = inject(DestroyRef);
   private readonly attentionLaneOpener = inject(CanvasAttentionLaneOpener);
@@ -29,16 +30,39 @@ export class CanvasDetailService {
   }
 
   /**
-   * Resuming a stopped CLI lane spawns a new agent id that replaces the old
-   * card. A selection that names the old id follows it to the new card, so
-   * the user stays on the lane they sent from instead of dropping to the
-   * Orchestrator (D3).
+   * Resuming a stopped CLI lane spawns a new agent id. A selection that names
+   * the old id follows it to the new card, so the user stays on the lane they
+   * sent from (D3). Two links lead there:
+   * - the monitor's replaced-card link (a spawn naming `resumedFromAgentId`
+   *   or the same CLI session), for a lane stopped in this app run;
+   * - a delivery receipt the user sent to the old id that the host resolved
+   *   to another lane (`actualAgentId`, a cold resume). That also covers a
+   *   lane restored after a host restart, whose old card stays (F2).
+   * A receipt link is followed only to a card the monitor holds.
    */
   private currentLaneKey(key: string): string {
     const parsed = parseLaneKey(key);
     if (parsed?.kind !== 'cli') return key;
-    const current = this.monitor.currentAgentId(parsed.id);
-    return current === parsed.id ? key : buildLaneKey('cli', current);
+    let id = parsed.id;
+    for (let hops = 0; hops < 10; hops++) {
+      const next = this.resumedLaneOf(this.monitor.currentAgentId(id));
+      if (next === id) break;
+      id = next;
+    }
+    return id === parsed.id ? key : buildLaneKey('cli', id);
+  }
+
+  /** The lane a user message to `agentId` was resolved to, when the monitor shows it; else `agentId`. */
+  private resumedLaneOf(agentId: string): string {
+    const cards = this.monitor.agentsById();
+    let latest: { id: string; at: number } | null = null;
+    for (const receipt of this.delivery.receipts().get(agentId) ?? []) {
+      const actual = receipt.actualAgentId;
+      if (receipt.agentId !== agentId || receipt.sender !== 'user' || !actual || actual === agentId) continue;
+      if (!cards.has(actual)) continue;
+      if (!latest || receipt.createdAt >= latest.at) latest = { id: actual, at: receipt.createdAt };
+    }
+    return latest?.id ?? agentId;
   }
 
   selectLaneFor(tabId: string, key: string): void {

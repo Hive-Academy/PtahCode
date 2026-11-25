@@ -248,29 +248,46 @@ export class AgentMonitorTreeBuilderService {
   }
 
   /**
-   * Finalize orphaned tools in a tree: any tool still in 'streaming' status
-   * is marked as 'error' with a descriptive message. This handles the case
-   * where the SDK terminates (e.g. ExitPlanMode) before a tool finishes.
+   * Finalize the tree of a lane that no longer runs (stopped, failed, done,
+   * interrupted by a host restart). Nothing in it may stay "running" or keep
+   * counting:
+   * - a tool still `streaming` or `pending` reads `interrupted` (it never
+   *   finished; that is no failure of the tool), with its final elapsed time
+   *   (`endedAt - startTime`) when it has no duration of its own;
+   * - an agent node still `streaming` reads `interrupted`;
+   * - any other node still `streaming` (message, text, thinking) is `complete`,
+   *   so its turn is no longer live and its "Working" timer stops.
    *
    * Returns a new tree if changes were made, or the same reference if not.
    */
   finalizeOrphanedTools(
     nodes: readonly ExecutionNode[],
+    endedAt?: number,
   ): readonly ExecutionNode[] {
     let changed = false;
     const finalized = nodes.map((node) => {
       let updated = node;
-      if (node.type === 'tool' && node.status === 'streaming') {
+      if (node.type === 'tool' && (node.status === 'streaming' || node.status === 'pending')) {
+        const elapsed =
+          endedAt !== undefined && node.startTime !== undefined && endedAt >= node.startTime
+            ? endedAt - node.startTime
+            : undefined;
         updated = createExecutionNode({
           ...node,
-          status: 'error',
-          error: 'Tool execution interrupted — session ended before completion',
+          status: 'interrupted',
+          ...(node.duration === undefined && elapsed !== undefined ? { duration: elapsed } : {}),
+        });
+        changed = true;
+      } else if (node.status === 'streaming') {
+        updated = createExecutionNode({
+          ...node,
+          status: node.type === 'agent' ? 'interrupted' : 'complete',
         });
         changed = true;
       }
       if (node.children.length > 0) {
         const currentChildren = node.children;
-        const newChildren = this.finalizeOrphanedTools(currentChildren);
+        const newChildren = this.finalizeOrphanedTools(currentChildren, endedAt);
         if (newChildren !== currentChildren) {
           updated =
             updated === node

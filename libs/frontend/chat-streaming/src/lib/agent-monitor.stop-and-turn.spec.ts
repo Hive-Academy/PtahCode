@@ -163,6 +163,13 @@ describe('AgentMonitorStore stop, turn timer and resume identity', () => {
     expect(card()?.turnStartedAt).toBe(Date.parse('2026-11-25T12:12:45.000Z'));
   });
 
+  it('keeps the capabilities of a first spawn on the new card (F3)', () => {
+    const potentialCapabilities = { messaging: { continuation: { state: 'supported' } } };
+    const effectivePolicy = { permission: 'yolo' };
+    store.onAgentSpawned(processInfo({ agentId: 'grok-1', cli: 'grok', potentialCapabilities, effectivePolicy }));
+    expect(card('grok-1')).toMatchObject({ potentialCapabilities, effectivePolicy });
+  });
+
   it('follows a resumed lane to the card that replaced it', () => {
     store.onAgentSpawned(processInfo({ cliSessionId: 'cli-1' }));
     store.onAgentExited(processInfo({ status: 'stopped', cliSessionId: 'cli-1' }));

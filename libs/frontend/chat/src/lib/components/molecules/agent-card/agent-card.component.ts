@@ -139,6 +139,7 @@ import {
             [isStreaming]="
               agent().status === 'running' || agent().status === 'starting'
             "
+            [endedAt]="agent().completedAt"
             [scrollTrigger]="scrollTrigger()"
             [presentation]="presentation()"
           />

@@ -96,3 +96,11 @@ export function laneSendLabel(stopped: boolean, restart: LaneRestart): string {
   if (!stopped || restart === 'fresh') return 'Send message';
   return restart === 'warm' ? 'Continue with message' : 'Resume with message';
 }
+
+/** The lane's state as the composer toolbar chip: a short label, the full detail in its tooltip. */
+export interface LaneStateChip {
+  readonly label: string;
+  readonly detail: string;
+  /** `idle` informs, `need` asks for attention, `err` is announced at once. */
+  readonly tone: 'idle' | 'need' | 'err';
+}

@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { CanvasStore } from '../canvas.store';
 import { TabManagerService } from '@ptah-extension/chat';
-import { AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
+import { AgentDeliveryStore, AgentMonitorStore, BackgroundAgentStore } from '@ptah-extension/chat-streaming';
 import { CanvasDetailService } from './canvas-detail.service';
 import { CanvasAttentionLaneOpener } from './canvas-attention-lane-opener.service';
 
@@ -18,6 +18,8 @@ describe('CanvasDetailService', () => {
   ]));
   const agents = signal([{ parentSessionId: 'session', agentId: 'agent-1' }]);
   const successors = signal(new Map<string, string>());
+  const receipts = signal(new Map<string, readonly object[]>());
+  const agentsById = signal(new Map<string, object>());
   const onTabClosed = jest.fn((_listener: (event: { tabId: string; kind: string }) => void) => jest.fn());
   let detail: CanvasDetailService;
 
@@ -30,6 +32,8 @@ describe('CanvasDetailService', () => {
     focusTile.mockClear();
     onTabClosed.mockClear();
     successors.set(new Map());
+    receipts.set(new Map());
+    agentsById.set(new Map());
     TestBed.configureTestingModule({
       providers: [
         CanvasDetailService,
@@ -40,7 +44,8 @@ describe('CanvasDetailService', () => {
             tiles().some((tile) => tile.tabId === id) ? { tab: { claudeSessionId: 'session' } } : null,
         } },
         { provide: AgentMonitorStore, useValue: { subagents, agents,
-          currentAgentId: (id: string) => successors().get(id) ?? id } },
+          currentAgentId: (id: string) => successors().get(id) ?? id, agentsById } },
+        { provide: AgentDeliveryStore, useValue: { receipts } },
         { provide: BackgroundAgentStore, useValue: { agents: signal([]) } },
       ],
     });
@@ -54,6 +59,20 @@ describe('CanvasDetailService', () => {
     expect(detail.laneKey()).toBe('orchestrator');
     detail.selectLaneFor('a', 'orchestrator');
     expect(detail.laneKeyFor('a')).toBe('orchestrator');
+  });
+
+  it('follows a cold resume of a restored lane through the user receipt it resolved (F2)', () => {
+    detail.open('a', 'cli:agent-1');
+    const receipt = (actualAgentId: string, createdAt: number, sender = 'user') =>
+      ({ id: `r${createdAt}`, agentId: 'agent-1', actualAgentId, sender, createdAt });
+    // The resolved lane is not on screen yet: stay.
+    receipts.set(new Map([['agent-1', [receipt('agent-9', 1)]]]));
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+    agentsById.set(new Map([['agent-9', {}], ['agent-8', {}]]));
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-9');
+    // The newest user receipt wins; a parent's receipt never moves the view.
+    receipts.set(new Map([['agent-1', [receipt('agent-9', 1), receipt('agent-8', 2), receipt('agent-7', 3, 'parent')]]]));
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-8');
   });
 
   it('focuses a known tab and accepts chat lane keys', () => {

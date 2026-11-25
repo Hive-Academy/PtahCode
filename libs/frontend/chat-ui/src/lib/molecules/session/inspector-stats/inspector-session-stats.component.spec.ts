@@ -221,8 +221,26 @@ describe(InspectorSessionStatsComponent.name, () => {
       },
       liveModelStats: { model: 'opus', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
     });
-    expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1/);
+    expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1 earlier/);
     expect(models.textContent).not.toContain('claude-fable-5-2 +1');
+    const summary = models.querySelector('[data-testid="session-models-summary"]') as HTMLElement;
+    expect(summary.getAttribute('title')).toBe('Current model: Opus 4.7. Earlier in this session: claude-fable-5-2.');
+  });
+
+  it('labels each breakdown row current or earlier in this session', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'opus', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+          { model: 'opus', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
+        ],
+      },
+      liveModelStats: { model: 'opus', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+    });
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current']);
   });
 
   it('keeps the model count and real model category rows when multiple models are present', () => {

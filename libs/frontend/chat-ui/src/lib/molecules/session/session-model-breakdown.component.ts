@@ -109,6 +109,12 @@ interface ModelUsageSource {
                   [title]="usage.model"
                 >
                   {{ formatModelName(usage.model) }}
+                  @if (currentModel(); as current) {
+                    <!-- Which row runs now: a model used only in earlier turns must not look current. -->
+                    <span class="block truncate text-[10.5px] font-normal text-base-content-muted" data-testid="model-usage-when">{{
+                      usage.model === current ? 'current' : 'earlier in this session'
+                    }}</span>
+                  }
                 </div>
                 <div
                   class="text-xs text-right tabular-nums text-base-content-muted"
@@ -256,6 +262,8 @@ export class SessionModelBreakdownComponent {
 
   readonly snapshot = input<SessionStatsEntry | null>(null);
   readonly sources = input<readonly [ModelUsageSource, ModelUsageSource] | readonly []>([]);
+  /** The session's current model id; each row then says "current" or "earlier in this session". */
+  readonly currentModel = input<string | null>(null);
 
   protected readonly costBasis = computed(() => {
     const snapshot = this.snapshot();

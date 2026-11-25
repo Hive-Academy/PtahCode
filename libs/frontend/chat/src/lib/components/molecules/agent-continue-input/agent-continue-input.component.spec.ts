@@ -2,7 +2,8 @@ import { Component, input, output } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { LaneComposerComponent } from '../lane-composer/lane-composer.component';
-import { AgentContinueInputComponent } from './agent-continue-input.component';
+import { AgentContinueInputComponent, laneStateChip } from './agent-continue-input.component';
+import type { LaneStateChip } from '../lane-composer/lane-composer-labels';
 
 const agentId = '11111111-1111-4111-8111-111111111111';
 
@@ -17,6 +18,7 @@ class LaneComposerStubComponent {
   readonly resumable = input(false);
   readonly stopPending = input(false);
   readonly resumePending = input(false);
+  readonly laneState = input<LaneStateChip | null>(null);
   readonly stopRequested = output<Event>();
   readonly resumeRequested = output<Event>();
 }
@@ -83,14 +85,32 @@ describe('AgentContinueInputComponent', () => {
     fixture.detectChanges();
     expect(composer()?.stopped()).toBe(true);
     expect(composer()?.resumable()).toBe(true);
-    expect(fixture.nativeElement.textContent).toContain('Stopped');
+    expect(composer()?.laneState()?.label).toBe('Stopped');
   });
 
   it('names the Ptah budget monitor when a budget stop ended the lane', () => {
     setup(makeAgent({ status: 'stopped', cliSessionId: 'cli-1', stopReason: 'budget' }));
-    expect(fixture.nativeElement.textContent).toContain('Stopped by Ptah budget monitor');
+    expect(composer()?.laneState()).toEqual({ label: 'Budget stop', detail: 'Stopped by Ptah budget monitor', tone: 'need' });
     setup(makeAgent({ status: 'stopped', cliSessionId: 'cli-1' }));
-    expect(fixture.nativeElement.textContent).not.toContain('budget monitor');
+    expect(composer()?.laneState()?.detail).not.toContain('budget monitor');
+  });
+
+  it('renders no line under the composer: the lane state goes into the composer chip', () => {
+    setup(makeAgent({ status: 'stopped', cliSessionId: '06d21aa3-x', stopReason: 'host-restart' }));
+    expect(composer()?.laneState()).toEqual({ label: 'Interrupted', detail: 'Stopped · Interrupted by host restart', tone: 'idle' });
+    const host = fixture.nativeElement as HTMLElement;
+    // Only the composer is in the block: no status line beside or under it.
+    expect(host.querySelector('[data-testid="lane-terminal-status"]')).toBeNull();
+    expect(host.querySelector('[data-testid="lane-state-chip"]')).toBeNull();
+    expect(host.textContent?.trim()).toBe('');
+  });
+
+  it('puts the state chip beside Stop or Resume when there is no composer card', () => {
+    setup(makeAgent({ status: 'stopped', supportsContinuation: false, cliSessionId: undefined, stopReason: 'repeat-call' }));
+    const chip = fixture.nativeElement.querySelector('[data-testid="lane-state-chip"]') as HTMLElement;
+    expect(chip.textContent).toContain('Stopped');
+    expect(chip.textContent).toContain('repeated the same tool call');
+    expect(chip.getAttribute('role')).toBe('status');
   });
 
   it('offers Stop but no message composer while the lane is starting', () => {
@@ -117,6 +137,15 @@ describe('AgentContinueInputComponent', () => {
     expect(composer()?.stopPending()).toBe(true);
   });
 
+  it('mounts the composer for a running ACP lane from its declared capabilities before any turn ends (F3)', () => {
+    const declared = capabilities('unsupported');
+    const potential = { ...declared, messaging: { ...declared.messaging, continuation: { state: 'supported' as const } } };
+    setup(makeAgent({ cli: 'grok', supportsContinuation: undefined, cliSessionId: undefined, effectiveCapabilities: undefined,
+      potentialCapabilities: potential as unknown as MonitoredAgent['potentialCapabilities'] }));
+    expect(composer()).not.toBeNull();
+    expect(composer()?.stopped()).toBe(false);
+  });
+
   it('shows Stop alone for a running lane without steering or continuation', () => {
     setup(makeAgent({ supportsContinuation: false, effectiveCapabilities: capabilities('unsupported') }));
     expect(composer()).toBeNull();
@@ -133,33 +162,32 @@ describe('AgentContinueInputComponent', () => {
   it('reads "Stopping…" until the process exits, then stopped by you (D9)', () => {
     const stopping = makeAgent({ status: 'stopped', cliSessionId: 'cli-1', stopRequestedAt: 5, stopAcknowledged: true, stoppedByUser: true });
     setup(stopping);
-    const line = () => (fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement | null)?.textContent?.trim();
-    expect(line()).toBe('Stopping…');
+    expect(composer()?.laneState()?.label).toBe('Stopping…');
     expect(composer()?.stopPending()).toBe(true);
     fixture.componentRef.setInput('agent', { ...stopping, stopRequestedAt: undefined, stopAcknowledged: undefined });
     fixture.detectChanges();
-    expect(line()).toBe('Stopped by you');
+    expect(composer()?.laneState()).toMatchObject({ label: 'Stopped', detail: 'Stopped by you' });
     expect(composer()?.stopPending()).toBe(false);
   });
 
-  it('shows why a Stop failed', () => {
+  it('announces why a Stop failed, in the chip beside Stop', () => {
     setup(makeAgent({ status: 'running', supportsContinuation: false, stopError: 'Agent not found: lane' }));
-    const alert = fixture.nativeElement.querySelector('[data-testid="lane-stop-error"]') as HTMLElement;
+    const alert = fixture.nativeElement.querySelector('[data-testid="lane-state-chip"]') as HTMLElement;
     expect(alert.getAttribute('role')).toBe('alert');
-    expect(alert.textContent).toContain('Stop failed: Agent not found: lane');
+    expect(alert.textContent).toContain('Stop failed');
+    expect(alert.textContent).toContain('Agent not found: lane');
   });
 
   it('shows Stopping… on a running lane the moment Stop is pressed', () => {
     setup(makeAgent({ status: 'running', stopRequestedAt: 5, stoppedByUser: true }));
-    expect((fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement).textContent?.trim()).toBe('Stopping…');
+    expect(composer()?.laneState()?.label).toBe('Stopping…');
   });
 
   it('renders a user stop that an older host reports as failed as stopped, not failed (D13)', () => {
-    setup(makeAgent({ status: 'failed', cliSessionId: 'cli-1', stoppedByUser: true }));
-    const text = (fixture.nativeElement.querySelector('[data-testid="lane-terminal-status"]') as HTMLElement).textContent ?? '';
-    expect(text).toContain('Stopped by you');
-    expect(text).not.toContain('Failed');
-    setup(makeAgent({ status: 'failed', cliSessionId: 'cli-1' }));
-    expect(fixture.nativeElement.textContent).toContain('Failed');
+    expect(laneStateChip(makeAgent({ status: 'failed', stoppedByUser: true }))).toEqual(
+      { label: 'Stopped', detail: 'Stopped by you', tone: 'idle' });
+    expect(laneStateChip(makeAgent({ status: 'failed' }))).toEqual({ label: 'Failed', detail: 'Failed', tone: 'err' });
+    expect(laneStateChip(makeAgent({ status: 'running' }))).toBeNull();
+    expect(laneStateChip(makeAgent({ status: 'completed' }))).toBeNull();
   });
 });

@@ -121,6 +121,32 @@
             }
           </div>
 
+          <!-- Inside the card, never under it (main chat has no lines under its input):
+               errors to announce, then what the user must fix before sending. -->
+          @if (cardAlert(); as alert) {
+            <p
+              class="flex min-w-0 items-center gap-1 px-3 pb-1 text-xs"
+              [class.text-state-err]="alert.tone === 'err'"
+              [class.text-state-need]="alert.tone === 'need'"
+              [attr.role]="alert.tone === 'err' ? 'alert' : 'status'"
+              data-testid="lane-composer-alert"
+            >
+              <span class="min-w-0 truncate" [title]="alert.text">{{ alert.text }}</span>
+              @if (alert.retry) {
+                <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
+              }
+            </p>
+          }
+          <p
+            class="min-w-0 truncate px-3 text-xs"
+            [class.pb-1]="!!noticeText()"
+            [class.text-state-need]="noticeNeedsAction()"
+            [class.text-base-content-muted]="!noticeNeedsAction()"
+            aria-live="polite"
+            [title]="noticeText()"
+            data-testid="lane-composer-notice"
+          >{{ noticeText() }}</p>
+
           <!-- Main chat's toolbar order: + -> approval | model / effort -> mic -> Stop or Resume -> Send -->
           <div class="ptah-composer-toolbar flex items-center gap-1 px-2 pr-2.5 pb-2 min-w-0">
             <div class="ptah-composer-toolbar-start flex items-center gap-1 min-w-0 flex-1">
@@ -133,9 +159,36 @@
                 [label]="approvalLabel()"
                 [reason]="approvalReason()"
                 [pending]="checking()"
-                (reasonRevealed)="revealedReason.set($event)"
-                (reasonCleared)="revealedReason.set(null)"
               />
+              @if (laneState(); as state) {
+                <!-- The lane state as a chip; its detail is in the tooltip and read after the label. -->
+                <span
+                  class="inline-flex h-7 min-w-0 max-w-[12rem] items-center rounded-md border border-[var(--surface-border-strong)] px-2 text-xs"
+                  [class.text-state-idle]="state.tone === 'idle'"
+                  [class.text-state-need]="state.tone === 'need'"
+                  [class.text-state-err]="state.tone === 'err'"
+                  tabindex="0"
+                  [attr.role]="state.tone === 'err' ? 'alert' : 'status'"
+                  [ptahTooltip]="state.detail"
+                  data-testid="lane-state-chip"
+                >
+                  <span class="min-w-0 truncate">{{ state.label }}</span>
+                  @if (state.detail !== state.label) {
+                    <span class="sr-only">: {{ state.detail }}</span>
+                  }
+                </span>
+              }
+              @if (limitations().length > 0) {
+                <!-- Focusable so keyboard users reach the tooltip; the name says what is limited. -->
+                <span
+                  class="ptah-lane-limited-badge inline-flex h-7 flex-shrink-0 items-center rounded-md border border-[var(--surface-border-strong)] px-1.5 text-[11px] text-base-content-muted"
+                  role="note"
+                  tabindex="0"
+                  [attr.aria-label]="limitedLabel()"
+                  [ptahTooltip]="limitedTooltip()"
+                  data-testid="lane-limited-badge"
+                >{{ limitations().length }} limited</span>
+              }
             </div>
 
             <div class="ptah-composer-toolbar-end flex items-center gap-1 min-w-0 flex-shrink">
@@ -156,8 +209,6 @@
                   [disabledReason]="modelReason()"
                   (selected)="pickModel($event)"
                   (opened)="loadCatalog()"
-                  (reasonRevealed)="revealedReason.set($event)"
-                  (reasonCleared)="revealedReason.set(null)"
                 />
                 <span class="px-0.5" aria-hidden="true">·</span>
                 <ptah-composer-effort-picker
@@ -168,8 +219,6 @@
                   [footer]="settingFooter()"
                   [disabledReason]="effortReason()"
                   (selected)="pickEffort($event)"
-                  (reasonRevealed)="revealedReason.set($event)"
-                  (reasonCleared)="revealedReason.set(null)"
                 />
               </div>
 
@@ -196,7 +245,9 @@
                 }
               }
 
-              <!-- Send keeps the native disabled (decisions.md 10); its reason is on the status line. -->
+              <!-- Send keeps the native disabled (decisions.md 10); what Send does, or why it
+                   cannot, is its tooltip and its description. -->
+              <span class="sr-only" [id]="sendHintId">{{ sendTitle() }}</span>
               <button
                 type="button"
                 [class]="sendButtonClass"
@@ -204,6 +255,7 @@
                 [disabled]="sendDisabled()"
                 [title]="sendTitle()"
                 [attr.aria-label]="sendLabel()"
+                [attr.aria-describedby]="sendHintId"
                 (click)="send()"
               >
                 @if (delivery.sending()) {
@@ -231,44 +283,6 @@
         />
       </div>
     </div>
-  </div>
-
-  @if (optionsFailed()) {
-    <p class="mt-1 flex items-center gap-1 px-1 text-xs text-state-err" role="alert">
-      {{ optionsErrorText }}
-      <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
-    </p>
-  } @else if (delivery.error(); as message) {
-    <p class="mt-1 px-1 text-xs text-state-err" role="alert">{{ message }}</p>
-  } @else if (optionsStale()) {
-    <p class="mt-1 flex items-center gap-1 px-1 text-xs text-state-need" role="status" data-testid="lane-options-stale">
-      {{ optionsStaleText }}
-      <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
-    </p>
-  }
-
-  <!-- Main chat's plate under the status line: the text keeps its contrast over the scene (S4). -->
-  <div [class]="statusLineClass" data-glass-surface="plate" data-testid="lane-status-line">
-    @if (checking()) {
-      <span class="loading loading-spinner loading-xs flex-shrink-0" aria-hidden="true"></span>
-    }
-    <span
-      class="mr-auto min-w-0 truncate"
-      [class.text-state-need]="statusNeedsAction()"
-      aria-live="polite"
-      [title]="statusText()"
-    >{{ statusText() }}</span>
-    @if (limitations().length > 0) {
-      <!-- Focusable so keyboard users reach the tooltip; the name says what is limited. -->
-      <span
-        class="ptah-lane-limited-badge flex-shrink-0 rounded-md border border-[var(--surface-border-strong)] px-1.5 text-[11px] text-base-content-muted"
-        role="note"
-        tabindex="0"
-        [attr.aria-label]="limitedLabel()"
-        [ptahTooltip]="limitedTooltip()"
-        data-testid="lane-limited-badge"
-      >{{ limitations().length }} limited</span>
-    }
   </div>
 
   <div class="sr-only" aria-live="polite" aria-atomic="true">{{ foldAnnouncement() }}</div>
