@@ -116,3 +116,24 @@ These rules close review findings 13-21. Spec and prototype must agree with them
   SKILL.md content in a readable preview with an Edit toggle. The primary "Create skill" is inside that
   view only. Nothing is written to disk before "Create skill". R18 draft protection and R20 (rail Install
   disabled while the editor is open) still apply.
+
+## D48 (2026-11-25, coordinator) — CodeRabbit review round 1 on PR #1514
+
+CodeRabbit posted 5 Major, 17 Minor and 5 Trivial comments (saved in `coderabbit-review-r1.md`).
+Each item is triaged against the code: CONFIRMED -> fix + regression test; DISPUTED -> no change,
+evidence recorded in the batch report and given as the PR thread reply. Trivial nitpicks are optional.
+Three file-disjoint fix lanes: CR-A (codex: settings/Setup persistence + resolver, CR1-CR4),
+CR-B (kimi: rpc-handlers skill services and wizard Minors), CR-C (antigravity: onboarding UI + e2e
+driver, CR5). Cross-family review: CR-A by antigravity, CR-B and CR-C by codex. Revise cap 2.
+
+### D48 outcome (2026-11-25)
+
+- CR-A APPROVED 8/10 after round 1 (code-logic-review-cr-A-rereview.md). CR-C APPROVED 8/10 after
+  round 2 (code-logic-review-cr-C-rereview2.md). CR-B: revise cap reached; ONE bounded coordinator
+  correction (deprecation regex, model-missing copy) APPROVED 7/10 (code-logic-review-cr-B-bounded.md).
+- Follow-ups (not in PR #1514): cross-process settings.json rename race (CR3 second note);
+  "This skill is for migrating deprecated <noun>" false positive in EXPLICIT_SKILL_DEPRECATION;
+  PROVIDER_LABELS does not cover every provider selector (safe-failure-copy.ts); optional direct
+  profile refactor in workspace-provider-profile-resolver.ts.
+- User decision (19:40Z): finish the fixes, then merge with --admin when CI is green, then remove
+  the worktree and the feat/skill-judge branch.
