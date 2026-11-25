@@ -257,7 +257,7 @@ describe('SettingsComponent deep-link', () => {
   // Callers (memory diagnostics, tribunal, the connection drawer...) may still name tab 'orchestration': the section wins.
   it.each(
     (['orchestration', 'providers'] as const).flatMap((tab) =>
-      (['background-models', 'memory-curator', 'enhancement'] as const).map(
+      (['background-models', 'setup', 'memory-curator', 'enhancement'] as const).map(
         (section) => ({ tab, section }),
       ),
     ),
@@ -270,6 +270,17 @@ describe('SettingsComponent deep-link', () => {
       expect(page.providersTarget()).toBeNull();
     },
   );
+
+  it('gives a provider sign-in request focus when a Setup section is also present', async () => {
+    const page = await landWith({
+      tab: 'providers',
+      section: 'setup',
+      providerId: 'openrouter',
+    });
+    expect(page.requestedProviderId()).toBe('openrouter');
+    expect(page.providersTarget()).toBeNull();
+    expect(page.agentsRoutingTarget()).toBeNull();
+  });
 
   it.each(['orchestration', 'providers'] as const)(
     'routes cli-agents requested for %s to Providers (the CLI matrix lives there)',
@@ -459,7 +470,7 @@ describe('SettingsComponent agents-routing landing', () => {
       Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
     }
   });
-  it.each(['background-models', 'memory-curator', 'enhancement'] as const)(
+  it.each(['background-models', 'setup', 'memory-curator', 'enhancement'] as const)(
     'scrolls to and focuses the always-visible background section for the %s deep link',
     async (section) => {
       const element = await land({ tab: 'orchestration', section });

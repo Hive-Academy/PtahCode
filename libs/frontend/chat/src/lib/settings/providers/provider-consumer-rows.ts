@@ -2,10 +2,12 @@ import {
   PROVIDER_SESSION_PROVIDER_IDS,
   getAnthropicProvider,
   type ProviderModelTier,
+  type SetupPairState,
 } from '@ptah-extension/shared';
 import type {
   ProvidersSettingsPatch,
   ProvidersSettingsSection,
+  ProvidersSetupRowState,
 } from '@ptah-extension/core';
 import type { SettingScopeDisplay } from './setting-scope-row.component';
 
@@ -17,6 +19,7 @@ import type { SettingScopeDisplay } from './setting-scope-row.component';
 
 /** Background model roles, including the separate decision model. */
 export type BackgroundConsumerId =
+  | 'setup'
   | 'memory-curator'
   | 'enhancement'
   | 'decision';
@@ -24,8 +27,11 @@ export type BackgroundConsumerId =
 /** Roles that take a provider and model from the providers settings. */
 export type ProviderConsumerId = Exclude<BackgroundConsumerId, 'decision'>;
 
+export type SettingsPatchConsumerId = Exclude<ProviderConsumerId, 'setup'>;
+
 /** Provider-assigned roles in display order. */
 export const PROVIDER_CONSUMER_IDS: readonly ProviderConsumerId[] = [
+  'setup',
   'memory-curator',
   'enhancement',
 ];
@@ -116,7 +122,7 @@ export interface BackgroundConsumerRow {
    */
   readonly loaded: boolean;
   /** Which state-service section a retry re-reads. */
-  readonly retryKey: 'memory' | 'enhancement';
+  readonly retryKey: 'setup' | 'memory' | 'enhancement';
   /** Provider ids this role cannot run on: hidden in its picker and blocked by `providerReadiness`. */
   readonly unsupportedProviders: readonly string[];
 }
@@ -227,6 +233,7 @@ export function makeRow(
 
 /** Sections read by the provider-assigned rows. */
 export interface ConsumerSources {
+  readonly setup: ProvidersSettingsSection<ProvidersSetupRowState>;
   readonly memory: ProvidersSettingsSection<{
     readonly curatorProvider?: string;
     readonly curatorModel?: string;
@@ -238,13 +245,54 @@ export interface ConsumerSources {
   }>;
 }
 
-/** Memory curator and Enhancement in display order. */
+/** Setup, Memory curator and Enhancement in display order. */
 export function buildConsumerRows(
   sources: ConsumerSources,
   route: ConsumerRouteInfo | null,
   scopeOf: ScopeLookup,
 ): readonly BackgroundConsumerRow[] {
-  const { memory, enhancement } = sources;
+  const { setup, memory, enhancement } = sources;
+  const committed = setup.data?.committed;
+  const state = setup.data?.state;
+  const followsWorkspace =
+    state?.kind === 'unset' ||
+    ((state?.kind === 'invalid' || state?.kind === 'unavailable') &&
+      state.source === 'workspace');
+  const pair =
+    state?.kind === 'unset'
+      ? state.effective
+      : state?.kind === 'set'
+        ? state.pair
+        : state;
+  const providerName = pair?.provider
+    ? formatProviderDisplayName(pair.provider)
+    : '(no provider)';
+  const summary = `${followsWorkspace ? 'Workspace model: ' : ''}${providerName} / ${pair?.model || '(no model chosen)'}`;
+  const setupRow: BackgroundConsumerRow = {
+    ...makeRow(
+      {
+        id: 'setup',
+        name: 'Setup',
+        helperCopy:
+          'Runs project analysis, skill review, agent generation and guidance during setup.',
+        tier: 'sonnet',
+        toolUse: false,
+        provider: committed?.provider ?? '',
+        model: committed?.model ?? '',
+        providerKey: 'setup.provider',
+        modelKey: 'setup.model',
+        section: setup,
+        retryKey: 'setup',
+        unsupportedProviders: CURATOR_UNSUPPORTED_PROVIDER_IDS,
+      },
+      route,
+      () => ({ scope: 'global', hasOverride: false }),
+    ),
+    resolvedSummary: summary,
+    cellLabel: summary,
+    followsMain: followsWorkspace,
+    tierLabel: followsWorkspace ? 'Following workspace' : 'direct model',
+  };
   const memoryRow = makeRow(
     {
       id: 'memory-curator',
@@ -281,12 +329,62 @@ export function buildConsumerRows(
     route,
     scopeOf,
   );
-  return [memoryRow, enhancementRow];
+  return [setupRow, memoryRow, enhancementRow];
+}
+
+export function setupModelIssue(state: SetupPairState | undefined): {
+  readonly message: string;
+  readonly action: 'provider' | 'model' | 'sign-in' | 'retry';
+  readonly provider: string | null;
+  readonly canUseWorkspace: boolean;
+} | null {
+  if (!state || state.kind === 'set' || state.kind === 'unset') return null;
+  const { provider, cause, source } = state;
+  const name = provider ? formatProviderDisplayName(provider) : '';
+  const subject = source === 'setup' ? 'Setup' : 'The workspace model';
+  const canUseWorkspace = source === 'setup';
+  if (cause === 'not-signed-in') {
+    return {
+      message: `${name} is not signed in for ${source === 'setup' ? 'Setup' : 'the workspace model'}.`,
+      action: 'sign-in',
+      provider,
+      canUseWorkspace,
+    };
+  }
+  if (cause === 'provider-unavailable')
+    return {
+      message: `${subject} could not reach ${name}.`,
+      action: 'retry',
+      provider,
+      canUseWorkspace,
+    };
+  if (cause === 'model-missing' || cause === 'model-stale') {
+    const problem =
+      cause === 'model-missing'
+        ? `has no model selected for ${name}`
+        : `uses ${state.model}, which ${name} no longer offers`;
+    return {
+      message: `${subject} ${problem}.`,
+      action: 'model',
+      provider,
+      canUseWorkspace,
+    };
+  }
+  const problem =
+    cause === 'provider-missing'
+      ? 'has no provider selected'
+      : `uses ${name}, a provider that is ${cause === 'provider-unknown' ? 'no longer offered' : 'unsupported'}`;
+  return {
+    message: `${subject} ${problem}.`,
+    action: 'provider',
+    provider,
+    canUseWorkspace,
+  };
 }
 
 /** The settings patch that assigns `provider`/`model` to one role (the picker's `''` model is "inherit"). */
 export function consumerPatch(
-  id: ProviderConsumerId,
+  id: SettingsPatchConsumerId,
   provider: string,
   model: string,
 ): ProvidersSettingsPatch {

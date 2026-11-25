@@ -37,6 +37,7 @@ import {
   type ProvidersEditContext,
   type ProvidersSettingsPatch,
 } from '@ptah-extension/core';
+import type { ModelPair } from '@ptah-extension/shared';
 import {
   SettingsSaveFeedbackService,
   settingNotSavedMessage,
@@ -50,8 +51,10 @@ import {
   consumerPatch,
   formatProviderDisplayName,
   providerReadiness,
+  setupModelIssue,
   type ProviderConsumerId,
   type BackgroundConsumerRow,
+  type SettingsPatchConsumerId,
 } from './provider-consumer-rows';
 import { DecisionModelRowComponent } from './decision-model-row.component';
 import { DRAWER_WRITE_NO_CONTEXT } from './connection-drawer/drawer-write';
@@ -182,6 +185,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   [hasBackdrop]="true"
                   backdropClass="transparent"
                   [capToViewport]="false"
+                  (opened)="onPopoverOpened(row.id)"
                   (closed)="cancelEdit()"
                 >
                   <button
@@ -204,9 +208,9 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   >
                     <ptah-provider-mark
                       [providerId]="
-                        row.provider ||
-                        state.route().data?.driverProviderId ||
-                        ''
+                        row.id === 'setup'
+                          ? setupDisplayProvider()
+                          : row.provider || state.route().data?.driverProviderId || ''
                       "
                       fallback="Bot"
                       size="sm"
@@ -254,7 +258,11 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         [requiresToolUse]="row.requiresToolUse"
                         [extraProviders]="extraProviders()"
                         [excludedProviders]="row.unsupportedProviders"
-                        [disabled]="disabled() || (busy() && !assignmentSaving())"
+                        [disabled]="
+                          row.id === 'setup'
+                            ? setupActionsDisabled()
+                            : disabled() || (busy() && !assignmentSaving())
+                        "
                         (selectionChange)="onDraftChange(row.id, $event)"
                         [attr.data-testid]="'picker-' + row.id"
                       />
@@ -293,13 +301,137 @@ const TIMEOUT_DEFAULT_SEC = 120;
                           }
                         </div>
                       }
-                      <p class="px-1 text-xs text-base-content-muted">
-                        Each choice saves at once, with Undo. No provider
-                        follows the main agent.
-                      </p>
+                      @if (row.id === 'setup') {
+                        <p class="px-1 text-xs text-base-content-muted">
+                          Choose a provider and model, then save them together.
+                          @if (row.provider || row.model) {
+                            Clearing the pair switches Setup to the workspace model.
+                          }
+                        </p>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            ptahButton
+                            variant="primary"
+                            [disabled]="setupActionsDisabled() || !setupDraftComplete()"
+                            (click)="saveSetupDraft()"
+                            data-testid="setup-save"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            ptahButton
+                            variant="outline"
+                            [disabled]="setupActionsDisabled()"
+                            (click)="commitSetup(null)"
+                            [attr.data-testid]="row.provider || row.model ? 'setup-clear' : 'setup-use-workspace'"
+                          >
+                            {{ row.provider || row.model ? 'Clear' : 'Use workspace model' }}
+                          </button>
+                        </div>
+                        @let commit = state.setupCommit();
+                        @if (commit.status === 'saving' || commit.status === 'invalid' || commit.status === 'failed') {
+                          <p
+                            class="px-1 text-xs text-base-content"
+                            [attr.role]="commit.status === 'saving' ? 'status' : 'alert'"
+                            data-testid="setup-commit-feedback"
+                          >
+                            {{ commit.status === 'saving' ? 'Saving Setup model…' : commit.message }}
+                          </p>
+                        }
+                      } @else {
+                        <p class="px-1 text-xs text-base-content-muted">
+                          Each choice saves at once, with Undo. No provider
+                          follows the main agent.
+                        </p>
+                      }
                     </div>
                   }
                 </ptah-native-popover>
+                @if (row.id === 'setup') {
+                  @if (setupIssue(); as issue) {
+                    <div class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2 text-xs">
+                      <span class="min-w-0 flex-1" role="alert" data-testid="setup-model-issue">
+                        {{ issue.message }}
+                      </span>
+                      @switch (issue.action) {
+                        @case ('sign-in') {
+                          @if (issue.provider; as provider) {
+                            <button
+                              type="button"
+                              [class]="action"
+                              [disabled]="setupActionsDisabled()"
+                              (click)="onSetupProvider(provider)"
+                              data-testid="readiness-setup-setup"
+                            >
+                              Set up {{ providerName(provider) }}
+                            </button>
+                          }
+                        }
+                        @case ('retry') {
+                          <button
+                            type="button"
+                            [class]="action"
+                            [disabled]="setupActionsDisabled()"
+                            (click)="retrySection('setup')"
+                          >
+                            Retry loading Setup
+                          </button>
+                        }
+                        @default {
+                          <button
+                            type="button"
+                            [class]="action"
+                            [disabled]="setupActionsDisabled()"
+                            (click)="chooseSetupPart(issue.action === 'provider' ? 'provider' : 'model')"
+                          >
+                            {{ issue.action === 'provider' ? 'Choose a provider' : 'Choose a model' }}
+                          </button>
+                        }
+                      }
+                      @if (issue.canUseWorkspace) {
+                        <button
+                          type="button"
+                          [class]="action"
+                          [disabled]="setupActionsDisabled()"
+                          (click)="commitSetup(null)"
+                          data-testid="setup-use-workspace"
+                        >
+                          Use workspace model
+                        </button>
+                      }
+                    </div>
+                  } @else if (row.followsMain) {
+                    <p class="text-xs text-base-content-muted">
+                      No Setup model is chosen, so setup uses the workspace provider and its selected model.
+                    </p>
+                  }
+                  @let setupCommit = state.setupCommit();
+                  @if (setupCommit.status !== 'idle' && activeEditId() !== 'setup') {
+                    <div class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2 text-xs">
+                      <span
+                        class="min-w-0 flex-1"
+                        [attr.role]="setupCommit.status === 'invalid' || setupCommit.status === 'failed' ? 'alert' : 'status'"
+                        data-testid="setup-commit-feedback"
+                      >
+                        {{ setupCommit.status === 'saving' ? 'Saving Setup model…' : setupCommit.message }}
+                      </span>
+                      @if (state.setupUndoEntry()) {
+                        <button
+                          type="button"
+                          [class]="action"
+                          [disabled]="setupActionsDisabled()"
+                          aria-label="Undo Setup model change"
+                          (click)="commitSetup('undo')"
+                          data-testid="setup-undo"
+                        >
+                          Undo
+                        </button>
+                      }
+                    </div>
+                  }
+                }
                 @if (row.scopeShown) {
                   <ptah-setting-scope-row
                     [fieldName]="row.providerFieldName"
@@ -547,6 +679,7 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly focusRing = FOCUS;
   protected readonly action = ACTION;
   protected readonly cell = CELL;
+  protected readonly providerName = formatProviderDisplayName;
   readonly timeoutNotice = input<{ seconds: number } | null>(null);
   readonly disabled = input<boolean>(false);
   readonly initialEditingConsumerId = input<ProviderConsumerId | null>(null);
@@ -554,13 +687,13 @@ export class ProviderConsumerAssignmentsComponent {
   readonly deepLinkOpened = output<ProviderConsumerId>();
   readonly retryEnhancementRequested = output<void>();
   readonly assignmentSaved = output<{
-    id: ProviderConsumerId;
+    id: SettingsPatchConsumerId;
     provider: string;
     model: string;
   }>();
   readonly timeoutSaved = output<number>();
   protected readonly activeEditId = signal<ProviderConsumerId | null>(null);
-  protected readonly currentDraft = signal<{ provider: string; model: string }>(
+  protected readonly currentDraft = signal<ModelPair>(
     { provider: '', model: '' },
   );
   protected readonly assignmentSaving = signal(false);
@@ -569,6 +702,7 @@ export class ProviderConsumerAssignmentsComponent {
   private readonly timeoutInputRef =
     viewChild<ElementRef<HTMLInputElement>>('timeoutInput');
   private appliedDeepLinkId: ProviderConsumerId | null = null;
+  private setupFocusTarget: 'cell' | 'provider' | 'model' | null = null;
   private context: ProvidersEditContext | null = null;
   constructor() {
     // Deep link stays reactive: a later input change still opens the popover.
@@ -588,6 +722,14 @@ export class ProviderConsumerAssignmentsComponent {
         )
           return;
         this.appliedDeepLinkId = deepLinkId;
+        if (deepLinkId === 'setup') {
+          this.setupFocusTarget = 'cell';
+          if (this.activeEditId() === 'setup') {
+            afterNextRender(() => this.onPopoverOpened('setup'), {
+              injector: this.injector,
+            });
+          }
+        }
         // Opens it (a toggle would close a popover the user already opened on this row).
         if (this.activeEditId() !== deepLinkId) this.toggleEdit(deepLinkId);
         this.deepLinkOpened.emit(deepLinkId);
@@ -645,6 +787,7 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly rows = computed<readonly BackgroundConsumerRow[]>(() =>
     buildConsumerRows(
       {
+        setup: this.state.setupModel(),
         memory: this.state.memory(),
         enhancement: this.state.enhancement(),
       },
@@ -654,8 +797,29 @@ export class ProviderConsumerAssignmentsComponent {
   );
   protected readonly draftProviderReadiness = computed(() => {
     const row = this.rows().find((r) => r.id === this.activeEditId());
-    return row ? this.readinessFor(row) : null;
+    return row && row.id !== 'setup' ? this.readinessFor(row) : null;
   });
+  private readonly setupState = computed(
+    () => this.state.setupModel().data?.state,
+  );
+  protected readonly setupIssue = computed(() =>
+    setupModelIssue(this.setupState()),
+  );
+  protected readonly setupDisplayProvider = computed(() => {
+    const state = this.setupState();
+    if (state?.kind === 'unset') return state.effective.provider;
+    if (state?.kind === 'set') return state.pair.provider;
+    return state?.provider ?? '';
+  });
+  protected readonly setupActionsDisabled = computed(
+    () =>
+      this.disabled() ||
+      this.busy() ||
+      this.state.setupCommit().status === 'saving',
+  );
+  protected readonly setupDraftComplete = computed(
+    () => !!this.currentDraft().provider && !!this.currentDraft().model,
+  );
   private readinessFor(row: BackgroundConsumerRow) {
     const route = this.state.route().data;
     return providerReadiness(
@@ -679,6 +843,7 @@ export class ProviderConsumerAssignmentsComponent {
   }
   protected cancelEdit(): void {
     const id = this.activeEditId();
+    this.setupFocusTarget = null;
     this.activeEditId.set(null);
     if (!id) return;
     afterNextRender(
@@ -698,12 +863,45 @@ export class ProviderConsumerAssignmentsComponent {
       provider: selection.provider,
       model: selection.model,
     });
-    void this.saveDraft(id);
+    if (id !== 'setup') void this.saveDraft(id);
   }
   protected onSetupProvider(providerId: string): void {
     this.setupProviderRequested.emit(providerId);
   }
-  protected async saveDraft(id: ProviderConsumerId): Promise<void> {
+  protected chooseSetupPart(part: 'provider' | 'model'): void {
+    this.setupFocusTarget = part;
+    if (this.activeEditId() !== 'setup') this.toggleEdit('setup');
+    else this.onPopoverOpened('setup');
+  }
+  protected onPopoverOpened(id: ProviderConsumerId): void {
+    const target = this.setupFocusTarget;
+    if (id !== 'setup' || !target || this.activeEditId() !== 'setup') return;
+    this.setupFocusTarget = null;
+    const selector =
+      target === 'cell'
+        ? '[data-testid="consumer-edit-setup"]'
+        : `[data-testid="picker-setup"] [data-testid="provider-model-picker-${target}"]`;
+    this.element.nativeElement.querySelector<HTMLElement>(selector)?.focus();
+  }
+  protected saveSetupDraft(): void {
+    if (this.setupDraftComplete()) void this.commitSetup(this.currentDraft());
+  }
+  protected async commitSetup(pair: ModelPair | null | 'undo'): Promise<void> {
+    if (this.setupActionsDisabled()) return;
+    const draft = this.currentDraft();
+    const accepted =
+      pair === 'undo'
+        ? await this.state.undoSetupPair()
+        : await this.state.commitSetupPair(pair);
+    if (
+      accepted &&
+      this.activeEditId() === 'setup' &&
+      this.currentDraft() === draft
+    ) {
+      this.cancelEdit();
+    }
+  }
+  private async saveDraft(id: SettingsPatchConsumerId): Promise<void> {
     if (this.busy() || this.disabled()) return;
     this.assignmentSaving.set(true);
     let savedAssignment = false;
@@ -765,7 +963,7 @@ export class ProviderConsumerAssignmentsComponent {
     );
   }
   private async writeAssignment(
-    id: ProviderConsumerId,
+    id: SettingsPatchConsumerId,
     provider: string,
     model: string,
     context: ProvidersEditContext,
@@ -781,7 +979,8 @@ export class ProviderConsumerAssignmentsComponent {
   protected async retrySection(
     retryKey: BackgroundConsumerRow['retryKey'],
   ): Promise<void> {
-    if (retryKey === 'memory') await this.state.refreshMemory();
+    if (retryKey === 'setup') await this.state.refreshSetupModel();
+    else if (retryKey === 'memory') await this.state.refreshMemory();
     else await this.state.refreshEnhancement();
   }
   protected editTimeout(): void {

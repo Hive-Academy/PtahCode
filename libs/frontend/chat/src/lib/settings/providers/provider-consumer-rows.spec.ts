@@ -8,6 +8,7 @@ import {
   consumerPatch,
   formatResolvedSummary,
   providerReadiness,
+  setupModelIssue,
   toBackendEnhancementModel,
   toPickerModel,
   type ConsumerSources,
@@ -15,19 +16,31 @@ import {
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({ status: 'ready', data, error: null });
 const route = { driverProviderId: 'anthropic', resolvedAuthModality: 'api-key' };
+const workspacePair = { provider: 'anthropic', model: 'claude-sonnet' };
 const sources = (): ConsumerSources => ({
+  setup: ready({ state: { kind: 'unset', effective: workspacePair }, committed: null, commitSeq: 0 }),
   memory: ready({ curatorProvider: '', curatorModel: '' }),
   enhancement: ready({ provider: 'kimi-code', model: 'inherit', timeoutMs: 120000 }),
 });
 
 describe('provider consumer rows', () => {
-  it('shows Memory curator and Enhancement before the separate decision model', () => {
-    expect(PROVIDER_CONSUMER_IDS).toEqual(['memory-curator', 'enhancement']);
-    expect(BACKGROUND_ROLE_IDS).toEqual(['memory-curator', 'enhancement', 'decision']);
-    const rows = buildConsumerRows(sources(), route, () => null);
-    expect(rows.map((row) => row.name)).toEqual(['Memory curator', 'Enhancement']);
-    expect(rows.map((row) => row.retryKey)).toEqual(['memory', 'enhancement']);
-    expect(rows[1]).toEqual(expect.objectContaining({
+  it('shows Setup first, followed by Memory curator, Enhancement and the separate Decision model', () => {
+    expect(PROVIDER_CONSUMER_IDS).toEqual(['setup', 'memory-curator', 'enhancement']);
+    expect(BACKGROUND_ROLE_IDS).toEqual(['setup', 'memory-curator', 'enhancement', 'decision']);
+    const [setup, memory, enhancement] = buildConsumerRows(sources(), route, () => null);
+    expect(setup).toMatchObject({
+      name: 'Setup',
+      retryKey: 'setup',
+      helperCopy: 'Runs project analysis, skill review, agent generation and guidance during setup.',
+      cellLabel: 'Workspace model: anthropic / claude-sonnet',
+      tierLabel: 'Following workspace',
+      provider: '',
+      model: '',
+    });
+    expect(memory).toMatchObject({ name: 'Memory curator', retryKey: 'memory' });
+    expect(enhancement).toEqual(expect.objectContaining({
+      name: 'Enhancement',
+      retryKey: 'enhancement',
       helperCopy: ENHANCEMENT_HELPER_COPY,
       provider: 'kimi-code',
       model: '',
@@ -41,7 +54,7 @@ describe('provider consumer rows', () => {
     const row = buildConsumerRows(sources(), route, (key) => {
       keys.push(key);
       return { scope: key.endsWith('.model') ? 'workspace' : 'global', hasOverride: key.endsWith('.model') };
-    })[1];
+    })[2];
     expect(keys).toEqual([
       'memory.curatorProvider', 'memory.curatorModel',
       'skills.enhancement.provider', 'skills.enhancement.model',
@@ -55,10 +68,10 @@ describe('provider consumer rows', () => {
       ...sources(),
       enhancement: { status: 'unloaded', data: null, error: null },
     };
-    expect(buildConsumerRows(unloaded, route, () => null)[1]).toEqual(
+    expect(buildConsumerRows(unloaded, route, () => null)[2]).toEqual(
       expect.objectContaining({ loaded: false, sectionStatus: 'unloaded' }),
     );
-    expect(buildConsumerRows(sources(), route, () => null)[1].loaded).toBe(true);
+    expect(buildConsumerRows(sources(), route, () => null)[2].loaded).toBe(true);
   });
 
   it('round trips the inherit model sentinel in enhancement assignments', () => {
@@ -75,8 +88,7 @@ describe('provider consumer rows', () => {
 
   it('describes inherited and direct routes', () => {
     expect(formatResolvedSummary(null, '', '', 'haiku')).toContain('Active provider');
-    const inherited = buildConsumerRows(sources(), route, () => null)[0];
-    const direct = buildConsumerRows(sources(), route, () => null)[1];
+    const [, inherited, direct] = buildConsumerRows(sources(), route, () => null);
     expect(inherited.followsMain).toBe(true);
     expect(direct.followsMain).toBe(false);
     expect(direct.cellLabel).toContain('Kimi Code');
@@ -87,12 +99,32 @@ describe('provider consumer rows', () => {
     expect(providerReadiness('', [], false)).toEqual(expect.objectContaining({ blocking: true }));
   });
 
-  it('lists Codex as unsupported for the Memory curator only, and provider sessions for every role', () => {
+  it('lists Codex as unsupported for Setup and Memory curator, and provider sessions for every role', () => {
     const sessions = ['antigravity-cli', 'grok-cli', 'opencode-cli'];
     expect(CURATOR_UNSUPPORTED_PROVIDER_IDS).toEqual(['openai-codex', ...sessions]);
-    const [curator, enhancement] = buildConsumerRows(sources(), route, () => null);
+    const [setup, curator, enhancement] = buildConsumerRows(sources(), route, () => null);
+    expect(setup.unsupportedProviders).toBe(CURATOR_UNSUPPORTED_PROVIDER_IDS);
     expect(curator.unsupportedProviders).toEqual(['openai-codex', ...sessions]);
     expect(enhancement.unsupportedProviders).toEqual(sessions);
+  });
+
+  it('describes missing parts and offers clearing only for invalid Setup overrides', () => {
+    const issue = { kind: 'invalid', cause: 'provider-missing', provider: null, model: 'custom-model' } as const;
+    expect(setupModelIssue({ ...issue, source: 'setup' })).toMatchObject({
+      action: 'provider',
+      canUseWorkspace: true,
+      message: 'Setup has no provider selected.',
+    });
+    expect(setupModelIssue({ ...issue, source: 'workspace' })).toMatchObject({
+      action: 'provider',
+      canUseWorkspace: false,
+      message: 'The workspace model has no provider selected.',
+    });
+    const [row] = buildConsumerRows({
+      ...sources(),
+      setup: ready({ state: { ...issue, source: 'setup' }, committed: { provider: '', model: 'custom-model' }, commitSeq: 0 }),
+    }, route, () => null);
+    expect(row.cellLabel).toBe('(no provider) / custom-model');
   });
 
   it('blocks an unsupported provider even when it is connected, with no setup action', () => {
