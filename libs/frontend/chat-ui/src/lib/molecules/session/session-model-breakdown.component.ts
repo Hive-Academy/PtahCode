@@ -1,3 +1,4 @@
+import { sessionModelDisplayName } from './session-model-name';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -6,7 +7,6 @@ import {
   input,
 } from '@angular/core';
 import {
-  resolveModelDisplayName,
   type SessionStatsEntry,
 } from '@ptah-extension/shared';
 import { ModelStateService } from '@ptah-extension/core';
@@ -235,6 +235,6 @@ export class SessionModelBreakdownComponent {
   protected readonly formatOptionalTokens = formatOptionalTokens;
 
   protected formatModelName(modelId: string): string {
-    return resolveModelDisplayName(modelId, this.modelState.availableModels());
+    return sessionModelDisplayName(modelId, this.modelState.availableModels());
   }
 }

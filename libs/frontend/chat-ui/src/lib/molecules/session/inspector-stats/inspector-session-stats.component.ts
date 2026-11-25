@@ -1,3 +1,4 @@
+import { sessionModelDisplayName } from '../session-model-name';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -18,7 +19,6 @@ import {
   type PtahMeterSegment,
   type PtahTimeInput,
 } from '@ptah-extension/ui';
-import { resolveModelDisplayName } from '@ptah-extension/shared';
 import { Bot, Boxes, ChevronDown, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
 import { formatExpandedUsageCost, inspectorBudgetDisplay, SDK_BUDGET_SCOPE } from '../session-budget-format';
 import { SessionModelBreakdownComponent } from '../session-model-breakdown.component';
@@ -402,7 +402,7 @@ export class InspectorSessionStatsComponent {
     // usage list is in first-use order, so its head is the session's first
     // model, not the one it runs now. Display names, raw ids only when unknown.
     const ids = primary ? [primary, ...used.filter((id) => id !== primary)] : used;
-    return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
+    return ids.map((id) => sessionModelDisplayName(id, this.modelState.availableModels()));
   });
   /** "Haiku 4.5 +2 earlier": the current model, then how many ran only in earlier turns. */
   protected readonly modelSummary = computed(() => {

@@ -152,9 +152,15 @@ const LANE_CLI_PANEL_CLASS =
           [class.flex]="selectedKind() !== 'orchestrator'"
           [class.hidden]="selectedKind() === 'orchestrator'"
         >
-          @for (request of pendingQuestions(); track request.id) {
-            <div class="mx-auto w-full max-w-[758px] shrink-0 px-2 pb-2">
-              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
+          @if (pendingQuestions().length) {
+            <!-- Questions scroll in their own capped area, so a tall one keeps its
+                 answer controls reachable; the transcript stays the main scroller. -->
+            <div class="max-h-[45%] shrink-0 overflow-y-auto" data-testid="lane-pending-questions">
+              @for (request of pendingQuestions(); track request.id) {
+                <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
+                  <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
+                </div>
+              }
             </div>
           }
           @switch (selectedKind()) {

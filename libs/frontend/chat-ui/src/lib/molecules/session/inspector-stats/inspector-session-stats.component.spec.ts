@@ -230,7 +230,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1 earlier/);
     expect(models.textContent).not.toContain('claude-fable-5-2 +1');
     const summary = models.querySelector('[data-testid="session-models-summary"]') as HTMLElement;
-    expect(summary.getAttribute('title')).toBe('Current model: Opus 4.7. Earlier in this session: claude-fable-5-2.');
+    expect(summary.getAttribute('title')).toBe('Current model: Opus 4.7. Earlier in this session: Fable 5.2.');
   });
 
   it('takes the model pill as current, over a cost-ranked live pick of an older model (round 6)', () => {
@@ -248,7 +248,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(models.textContent).toMatch(/Models\s*2\s*/);
     const title = root.querySelector('[data-testid="session-models-summary"]')?.getAttribute('title') ?? '';
     expect(title).toMatch(/^Current model: (Opus 4\.7|opus(-20261001)?)\./);
-    expect(title).toContain('Earlier in this session: claude-fable-5-2.');
+    expect(title).toContain('Earlier in this session: Fable 5.2.');
     models.click();
     fixture.detectChanges();
     const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());

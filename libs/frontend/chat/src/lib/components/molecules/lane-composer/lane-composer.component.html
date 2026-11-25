@@ -273,7 +273,7 @@
     <div class="ptah-composer-fold ptah-composer-fold--bar">
       <div class="ptah-composer-fold-clip" [attr.inert]="isCompact() ? null : ''">
         <ptah-composer-compact-bar
-          [statusLabel]="cli() + ' is working…'"
+          [statusLabel]="compactStatus()"
           [modelLabel]="confirmedModelLabel()"
           [controlsId]="fullId"
           [showStop]="showLaneControls() && isCompact()"

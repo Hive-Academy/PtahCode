@@ -871,6 +871,30 @@ describe('LaneComposerComponent', () => {
     expect(root(fixture).querySelector('[data-testid="lane-stop-btn"]')).not.toBeNull();
   });
 
+  it('says Stopping… on the folded bar once Stop was pressed (round 8)', async () => {
+    const fixture = await mount({ showLaneControls: true });
+    fixture.componentRef.setInput('laneState', { label: 'Stopping…', detail: 'Stopping: waiting for the lane process to exit.', tone: 'idle' });
+    fixture.detectChanges();
+    const bar = root(fixture).querySelector('ptah-composer-compact-bar') as HTMLElement;
+    expect(bar.textContent).toContain('Stopping…');
+    expect(bar.textContent).not.toContain('is working');
+  });
+
+  it('enables Send for an image-only message on a lane that takes images (round 8)', async () => {
+    sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt });
+    const fixture = await mount();
+    expect(sendButton(fixture).disabled).toBe(true);
+    fixture.componentRef.injector.get(ComposerAttachmentsService).images.set([
+      { id: 'img-1', data: 'aGk=', mediaType: 'image/png', dataUrl: 'data:image/png;base64,aGk=', name: 'shot.png' },
+    ]);
+    fixture.detectChanges();
+    expect(sendButton(fixture).disabled).toBe(false);
+    key(fixture, {});
+    await settle(fixture);
+    expect(sendMessage).toHaveBeenCalledWith(agentId, '', 'queue', false, expect.any(String),
+      expect.objectContaining({ images: [{ data: 'aGk=', mediaType: 'image/png' }] }));
+  });
+
   it('puts Stop in the toolbar while running and Resume session once stopped', async () => {
     const fixture = await mount({ showLaneControls: true });
     type(fixture, 'keep it open');

@@ -213,6 +213,21 @@ describe('CanvasLaneViewComponent', () => {
     expect(fixture.nativeElement.querySelectorAll('ptah-question-card')).toHaveLength(0);
   });
 
+  it('keeps pending questions in a capped area of their own that scrolls (PR 1512 review)', () => {
+    subagents.set(new Map([['sub', { parentToolUseId: 'sub', parentSessionId: 'owner' }]]));
+    questionRequests.set([{ id: 'owned', sessionId: 'owner', questions: [] }]);
+    const fixture = TestBed.createComponent(CanvasLaneViewComponent);
+    fixture.componentRef.setInput('tabId', 'tab');
+    fixture.componentRef.setInput('sessionId', 'owner');
+    fixture.componentRef.setInput('laneKey', 'sub:sub');
+    fixture.detectChanges();
+    const area = fixture.nativeElement.querySelector('[data-testid="lane-pending-questions"]') as HTMLElement;
+    expect(area.classList).toContain('overflow-y-auto');
+    expect(area.classList).toContain('max-h-[45%]');
+    expect(area.classList).toContain('shrink-0');
+    expect(area.querySelectorAll('ptah-question-card')).toHaveLength(1);
+  });
+
   it('uses late router targets and excludes workflow claims in a subagent lane', () => {
     subagents.set(new Map([['sub', { parentToolUseId: 'sub', parentSessionId: 'owner' }]]));
     questionRequests.set([{ id: 'routed', sessionId: 'stale', questions: [] }]);

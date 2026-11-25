@@ -205,6 +205,10 @@ describe('LaneTranscriptComponent', () => {
     const row = root.querySelector('[data-testid="lane-host-notice"]') as HTMLElement;
     expect(row.textContent).toContain('Grok ran /context and returned no output.');
     expect(row.querySelector('time')?.getAttribute('datetime')).toBe(new Date(5_000).toISOString());
+    // Text and time never run together: a separator sits between them (round 8).
+    const parts = [...row.querySelectorAll('p > *')].map((node) => node.textContent?.trim());
+    expect(parts[0]).toBe('Grok ran /context and returned no output.');
+    expect(parts[1]).toBe('·');
     expect(root.querySelectorAll('ptah-message-bubble')).toHaveLength(0);
   });
 

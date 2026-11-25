@@ -106,6 +106,18 @@ describe('CanvasDetailService', () => {
     expect(detail.laneKeyFor('a')).toBe('orchestrator');
   });
 
+  it('clears a pending follow at once when the user picks another lane, even if they come back (PR 1512 review)', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
+    detail.open('a', 'cli:agent-1');
+    detail.followAfterSend('a', 'agent-1');
+    detail.selectLaneFor('a', 'orchestrator');
+    detail.selectLaneFor('a', 'cli:agent-1');
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+  });
+
   it('focuses a known tab and accepts chat lane keys', () => {
     detail.open('a', 'cli:agent-1');
     expect(detail.detailTabId()).toBeNull();

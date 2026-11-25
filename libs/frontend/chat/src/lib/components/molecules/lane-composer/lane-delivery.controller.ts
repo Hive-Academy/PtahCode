@@ -211,11 +211,17 @@ export class LaneDeliveryController {
     const receipts = this.store.receipts().get(this.agentId()) ?? [];
     return receipts.length ? this.store.receiptLabel(receipts[receipts.length - 1]) : '';
   });
+  /**
+   * Something to send: text, or staged images alone (main chat sends an
+   * image-only message too). Whether the lane takes images is the
+   * composer's gate (`imagesBlocked`), which keeps Send disabled otherwise.
+   */
+  private readonly hasContent = computed(() => !!this.draftText() || this.attachments.images().length > 0);
   readonly queueDisabled = computed(
-    () => this._sending() || !this.draftText() || !this.state().queue || !!this.state().queueDisabledReason,
+    () => this._sending() || !this.hasContent() || !this.state().queue || !!this.state().queueDisabledReason,
   );
   readonly nowDisabled = computed(
-    () => this._sending() || !this.draftText() || !this.state().now || !!this.state().nowDisabledReason,
+    () => this._sending() || !this.hasContent() || !this.state().now || !!this.state().nowDisabledReason,
   );
   /** Send now discards partial work of the running turn; the owner confirms first. */
   readonly nowNeedsConfirmation = computed(() => !!this.state().now?.lossDisclosure?.confirmationRequired);
@@ -354,11 +360,13 @@ export class LaneDeliveryController {
         this.attachments.files().length === 0 && this.attachments.images().length === 0;
       if (!empty) return;
       untracked(() => {
-        // A recovered message without text has nothing to restore; skip to the next.
+        // A recovered message with neither text nor attachments has nothing
+        // to restore; skip to the next. Attachments alone are a message (PR 1512 review).
         for (let message = this.store.takeRecoveredMessage(agentId); message;
           message = this.store.takeRecoveredMessage(agentId)) {
-          if (!message.text) continue;
-          this.restore(message.text, this.snapshotFromTurn(message.turn));
+          const snapshot = this.snapshotFromTurn(message.turn);
+          if (!message.text && !hasAttachments(snapshot)) continue;
+          this.restore(message.text, snapshot);
           return;
         }
       });
@@ -401,10 +409,22 @@ export class LaneDeliveryController {
   async refreshBeforeSend(): Promise<boolean> {
     const agentId = this.agentId();
     if (!agentId || this.sources()?.stopped() !== false) return true;
-    const loaded = await this.loadPreviews(agentId);
-    // A refresh that worked ends an earlier problem; it must not block this send.
-    if (loaded && this.agentId() === agentId) this._error.set(null);
-    return loaded;
+    // Success means the previews this call read are the ones the composer
+    // now shows. A refresh started after this one (focus, a steer change)
+    // owns the slot, so this call reads again until its own answer is
+    // current (PR 1512 review).
+    for (let attempt = 0; attempt < MAX_PREVIEW_ATTEMPTS; attempt++) {
+      const outcome = await this.loadPreviews(agentId);
+      if (outcome === 'failed') return false;
+      if (this.agentId() !== agentId) return false;
+      if (outcome === 'current') {
+        // A refresh that worked ends an earlier problem; it must not block this send.
+        this._error.set(null);
+        return true;
+      }
+    }
+    this._error.set(PREVIEW_UNSETTLED_TEXT);
+    return false;
   }
 
   /** The host has reported this lane's steer availability (`AgentOutputDelta.steerAvailable`). */
@@ -677,7 +697,8 @@ export class LaneDeliveryController {
 
   /** Hold a message for its lane: the lane's composer restores it when it shows the lane. */
   private holdForLane(agentId: string, text: string, snapshot: LaneTurnSnapshot): void {
-    if (!text) return;
+    // An image-only message is still a message: hold it with its attachments.
+    if (!text && !hasAttachments(snapshot)) return;
     const turn = toTurnRequest(snapshot);
     this.store.holdForComposer(agentId, turn ? { text, turn } : { text });
   }
@@ -767,18 +788,36 @@ export class LaneDeliveryController {
    * keeps the last previews without an error: the next activity, focus or
    * Send now reads them again and reports a failure then. True when both answered.
    */
-  private async loadPreviews(agentId: string, background = false): Promise<boolean> {
+  /**
+   * Read both previews. `current` when this call's own answers are the ones
+   * the composer state holds now; `stale` when a later read owns the slot
+   * (its answers, or the older state, are what the composer shows).
+   */
+  private async loadPreviews(agentId: string, background = false): Promise<'current' | 'stale' | 'failed'> {
+    const seq = ++this.previewLoadSeq;
     try {
-      await Promise.all([this.store.previewMessage(agentId, 'queue'), this.store.previewMessage(agentId, 'now')]);
-      return true;
+      const [queue, now] = await Promise.all([
+        this.store.previewMessage(agentId, 'queue'), this.store.previewMessage(agentId, 'now'),
+      ]);
+      // A later read from this composer started meanwhile: it owns the result.
+      if (seq !== this.previewLoadSeq) return 'stale';
+      // The store keeps only the newest answer per lane and delivery (another
+      // composer of the lane can read too): this call's answers must be the
+      // ones it holds.
+      const state = this.store.composerState(agentId);
+      const held = (answer: unknown, stored: unknown) => answer === undefined || answer === stored;
+      return held(queue, state.queue) && held(now, state.now) ? 'current' : 'stale';
     } catch {
       // degradation-audit: reported - a foreground failure shows "Message options
       // unavailable" and false stops Send now; a background one keeps the last
       // previews until the next refresh, focus or Send now reports it.
       if (!background && this.agentId() === agentId) this._error.set('Message options unavailable. Try again.');
-      return false;
+      return 'failed';
     }
   }
+
+  /** Sequence of this composer's preview reads; the newest one decides "current". */
+  private previewLoadSeq = 0;
 
   /** Reuse the key of an identical submission that failed in transit, so the backend can dedupe it. */
   private submissionKey(agentId: string, text: string, delivery: AgentMessageDelivery, turn: LaneTurnRequest | undefined): string {
@@ -789,4 +828,13 @@ export class LaneDeliveryController {
     this.submission = { agentId, signature, key: this.store.newIdempotencyKey() };
     return this.submission.key;
   }
+}
+
+/** A Send now decision rereads its previews this often before it gives up. */
+const MAX_PREVIEW_ATTEMPTS = 3;
+const PREVIEW_UNSETTLED_TEXT = 'Message options are still changing. Try again.';
+
+/** A turn snapshot that carries files or images. */
+function hasAttachments(snapshot: LaneTurnSnapshot): boolean {
+  return snapshot.files.length > 0 || snapshot.images.length > 0;
 }

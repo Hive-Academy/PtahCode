@@ -123,6 +123,21 @@ describe('LaneDeliveryController', () => {
     TestBed.tick();
   });
 
+  it('sends an image-only message: staged images with no text enable Send (round 8)', async () => {
+    expect(controller.queueDisabled()).toBe(true);
+    attachments.images.set([IMAGE]);
+    expect(controller.queueDisabled()).toBe(false);
+    expect(controller.nowDisabled()).toBe(false);
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: receipt() });
+    await controller.send('queue');
+    expect(store.sendMessage).toHaveBeenCalledWith(AGENT, '', 'queue', false, expect.any(String),
+      expect.objectContaining({ images: [{ data: IMAGE.data, mediaType: 'image/png' }] }));
+    expect(attachments.images()).toEqual([]);
+    // A staged file alone is not a message (main chat's rule is text or images).
+    attachments.addFile(FILE);
+    expect(controller.queueDisabled()).toBe(true);
+  });
+
   it('sends the draft with its attachments and pick, then clears the draft and the tray', async () => {
     const sent = receipt();
     store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
@@ -372,6 +387,14 @@ describe('LaneDeliveryController', () => {
     } finally {
       take.mockRestore();
     }
+  });
+
+  it('restores a recovered message that has only attachments (PR 1512 review)', () => {
+    recovered.set(new Map([[AGENT, { text: '', turn: { files: [FILE.path] } }]]));
+    TestBed.tick();
+    expect(draft()).toBe('');
+    expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+    expect(recovered().has(AGENT)).toBe(false);
   });
 
   it('restores the recovered turn (files, images, model, effort) with the text', () => {
@@ -927,6 +950,23 @@ describe('LaneDeliveryController', () => {
       store.previewMessage.mockResolvedValue(undefined);
       await expect(controller.refreshBeforeSend()).resolves.toBe(true);
       expect(controller.error()).toBeNull();
+    });
+
+    it('reports success only when its own previews are current: a later read makes it read again (PR 1512 review)', async () => {
+      const current = { queue: { supported: true, mode: 'queue-next-turn' }, now: { supported: true, mode: 'steer' } };
+      store.composerState.mockImplementation(() => current);
+      let calls = 0;
+      store.previewMessage.mockImplementation(async (_id: string, delivery: 'queue' | 'now') => {
+        calls++;
+        // The store holds a newer answer than the first read returned.
+        return calls <= 2 ? { ...current[delivery] } : current[delivery];
+      });
+      await expect(controller.refreshBeforeSend()).resolves.toBe(true);
+      expect(calls).toBe(4);
+      // Never current: it gives up with a reason instead of a stale success.
+      store.previewMessage.mockImplementation(async (_id: string, delivery: 'queue' | 'now') => ({ ...current[delivery] }));
+      await expect(controller.refreshBeforeSend()).resolves.toBe(false);
+      expect(controller.error()).toBe('Message options are still changing. Try again.');
     });
 
     it('does nothing for a lane with no running turn', async () => {

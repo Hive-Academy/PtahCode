@@ -52,14 +52,16 @@ import { echoImagesFor, laneEchoImages } from './lane-echo-images';
       @for (message of messages(); track message.id; let i = $index) {
         @if (isNotice(message)) {
           <!-- A Ptah host notice ("Grok ran /context and returned no output."): a neutral status row, no bubble. -->
-          <p
-            class="chat-msg-slot flex min-w-0 items-center gap-2 pb-3 text-xs text-base-content-muted"
-            data-testid="lane-host-notice"
-            [attr.data-ptah-transcript-message-id]="message.id"
-          >
-            <span class="min-w-0 break-words">{{ message.rawContent }}</span>
-            <time class="shrink-0" [attr.datetime]="isoTime(message.timestamp)">{{ shortTime(message.timestamp) }}</time>
-          </p>
+          <!-- The slot class sets its own display, so the row's flex layout is on an inner element. -->
+          <div class="chat-msg-slot pb-3" data-testid="lane-host-notice" [attr.data-ptah-transcript-message-id]="message.id">
+            <p class="flex min-w-0 flex-wrap items-baseline gap-x-2 text-xs text-base-content-muted">
+              <span class="min-w-0 break-words">{{ message.rawContent }}</span>
+              @if (shortTime(message.timestamp); as time) {
+                <span aria-hidden="true">·</span>
+                <time class="shrink-0" [attr.datetime]="isoTime(message.timestamp)">{{ time }}</time>
+              }
+            </p>
+          </div>
         } @else {
         @let turn = contexts().get(message.id) ?? null;
         @let live = turn !== null && liveTurns().has(turn.turnId);

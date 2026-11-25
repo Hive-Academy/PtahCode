@@ -105,6 +105,8 @@ let nextLaneComposerId = 0;
 const NEXT_TURN_FOOTER = 'Applies from your next message. The lane keeps running.';
 const STOPPED_FOOTER = 'Applies from your next message, which resumes the lane.';
 const MODELS_LOADING_LABEL = 'Loading models…';
+/** The lane state chip's label while a stop waits for the process exit (see `laneStateChip`). */
+const STOPPING_LABEL = 'Stopping…';
 /**
  * The id the host reports when one turn used several models
  * (`ptah-cli-stream-loop.service.ts` MULTI_MODEL_ID). It names no model, so
@@ -584,6 +586,11 @@ export class LaneComposerComponent {
     lanePlaceholder(this.laneLabel(), this.stopped(), this.delivery.restart()),
   );
   protected readonly sendLabel = computed(() => laneSendLabel(this.stopped(), this.delivery.restart()));
+
+  /** The folded bar's line: "Stopping…" once Stop was pressed, else the lane at work. */
+  protected readonly compactStatus = computed(() =>
+    this.laneState()?.label === STOPPING_LABEL ? STOPPING_LABEL : `${this.cli()} is working…`,
+  );
 
   /** The composer is folded into its one-row bar. */
   protected readonly isCompact = this.compactStore.compact;

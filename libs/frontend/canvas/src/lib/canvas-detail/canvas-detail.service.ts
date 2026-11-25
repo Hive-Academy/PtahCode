@@ -140,6 +140,16 @@ export class CanvasDetailService {
       this.destroyRef.onDestroy(unsubscribe);
     }
     this._laneKeys.update((current) => new Map(current).set(tabId, key));
+    // An explicit pick of another lane ends a pending follow of this tab at
+    // once, so it can never fire after the user came back (PR 1512 review).
+    const follow = this._pendingFollows().get(tabId);
+    if (follow && key !== buildLaneKey('cli', follow.agentId)) {
+      this._pendingFollows.update((current) => {
+        const next = new Map(current);
+        next.delete(tabId);
+        return next;
+      });
+    }
   }
 
   open(tabId: string, laneKey = 'orchestrator'): boolean {
