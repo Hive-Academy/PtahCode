@@ -282,3 +282,88 @@ Paths below are relative to the worktree `D:\projects\PtahCode\.claude-worktrees
 - eslint on all changed backend and shared files: 0 errors.
 - Degradation audit: 0 unsuppressed sites.
 - Line endings: all LF.
+
+## 10. Live re-check fixes (live-recheck-report.md)
+
+### F1: a resume silently upgraded to the CLI default model (cost)
+- Root cause, from `electron-main-recheck.log` 14:00:39: the resume gate chose `fresh` because
+  the lane lifetime budget had expired. A fresh handoff starts a new Claude session with no
+  `--resume`. The lane spawned before D8, so its record stored no model, and the spawn got no
+  model at all. The CLI default (`claude-opus-5-5`) ran. Earlier resumes kept Haiku only because
+  `--resume` keeps the session's model.
+- Change:
+  - New `messaging/lane-resumers/lane-last-model.ts`. `lastRunModelFromOutput` reads the lane's
+    persisted output forward through `SessionMetadataStore.getAgentOutputPage` (at most 64 pages)
+    and takes the model of the last turn: the reported turn telemetry `modelId`, else the
+    usage `model`. Placeholder ids are skipped. Persisted segments keep `turnTelemetry`, so this
+    works for lanes spawned before this build.
+  - `laneResumeModelLookup` logs info `[AgentLaneResume] Resuming on the model the lane last ran`
+    when it finds a model. When it finds none, or the output cannot be read, it logs the warning
+    `[AgentLaneResume] No stored or last-run model for the lane; it resumes on the CLI default`
+    `{ agentId, cli }` and the resume falls back to the CLI default.
+  - `AgentLaneResumeService` applies it to a Claude lane with no stored model, on both the cold
+    send (`resume`) and the explicit resume (`resumeRequest`, which before this passed no model
+    even when one was stored). It looks up the record named by `resumedFromAgentId`. A lane
+    with a stored model never triggers a lookup; other CLIs and Ptah CLI lanes are unchanged. Only
+    a lookup awaits, so the old handle's release still starts at once.
+  - Registered in `di/register-agent-messaging.ts`.
+- Specs:
+  - `lane-last-model.spec.ts`: last model across pages, the usage fallback and placeholder skip,
+    nothing found, both warnings.
+  - `agent-lane-resume.service.spec.ts`: last-run model used, stored model kept with no lookup,
+    no model when nothing is known and no lookup for other CLIs, explicit resume filled from the
+    resumed record.
+
+### F2: the resume of a restored (orphaned) lane had no card link
+- Root cause: `AgentProcessManager` set `resumedFromAgentId` only from `previous`, the tracked
+  record with the same CLI session id. A fresh handoff carries no session id, so no link was
+  emitted, although the resumer sent `resumedFromAgentId: info.agentId`.
+- Change: `resumedFromField()` uses the requested `resumedFromAgentId` when it names a tracked
+  record of the same CLI (a restored record stays tracked), else `previous`.
+- Field for the frontend: `AgentProcessInfo.resumedFromAgentId` (the old id) on the new lane's
+  `agent-monitor:spawned` event, now also on a fresh handoff of a restored lane. The cold send
+  also records the alias (old id → new id), and the delivery receipt carries `actualAgentId`.
+- Specs (`agent-process-manager.service.spec.ts`): a fresh handoff of a restored lane is linked;
+  an unknown id is ignored.
+
+### F3: capabilities on the first spawned event
+- Confirmed. `trackSdkHandle` stamps `potentialCapabilities` (the adapter manifest) and
+  `effectiveCapabilities` (resolved against the live handle) before the first `agent:spawned`,
+  which `agent-events.ts` broadcasts as `agent-monitor:spawned`. ACP lanes (Grok, agy) take the
+  same path. Live gates the ACP agent only reports after `initialize` (image input) start as
+  unsupported, and the preview refreshes them.
+- New spec: the first spawned event carries both.
+
+### F9: Grok `/context` and `/compact`
+- Probe: I ran Grok's real ACP agent once (`grok agent --no-leader stdio`, `session/new`, then
+  `session/prompt` with `/context`). Grok returns nothing: no `session/update` with content, a
+  `turn_completed` after 53 ms, and a prompt result with `totalTokens: 0`. So nothing was dropped
+  on Ptah's side; there is no output to forward.
+  - Note: a first probe run from Git Bash rewrote `/context` into a path and Grok answered it as
+    prose, a paid model turn of about 56k tokens on grok-4.7. The probe was then rerun with
+    `MSYS_NO_PATHCONV=1`.
+- Change, in `provider-session-lane-handle.ts`:
+  - A continued turn whose prompt is a raw advertised command (first token matches
+    `available_commands`, no Ptah header) is a command turn.
+  - During it, a "telemetry unavailable" turn total is dropped, so a command that called no model
+    no longer counts as unavailable telemetry and cannot trigger the budget handoff. Reported usage
+    still counts.
+  - If the turn ends cleanly with no provider output, the lane gets an info segment
+    `Grok ran /context and returned no output.` (`<CLI name> ran /<command> ...`).
+  - Ordinary turns and unadvertised `/…` text keep their unavailable telemetry.
+- Specs (`provider-session-lane-handle.spec.ts`, "raw command turns (F9)"): no telemetry plus the
+  notice; command output shown with no notice; an ordinary turn and an unadvertised command still
+  report missing usage.
+
+### Verification
+- `npx jest ... --runInBand --coverage=false --runTestsByPath` (cli-agent-runtime):
+  - Manager, resume service, last model, both resumers, both coordinator specs, ACP handle,
+    stream loop (with ba63bec27) and restore. The first run had 2 failures: a spec type error and
+    the release-ordering test. Both are fixed.
+  - Rerun of the resume service, last model and manager specs: 349 passed.
+  - The other suites in the batch: 8 passed.
+- `npx tsc --noEmit`: cli-agent-runtime lib and spec configs and the rpc-handlers lib config,
+  clean.
+- eslint on the changed and new files: 0 errors.
+- Degradation audit: 0 unsuppressed sites.
+- Line endings: all LF.

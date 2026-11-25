@@ -299,3 +299,119 @@ All checks were run as the focused commands allowed for this task. Logs are in `
   - chat-streaming: 160 errors. The one new error since round 2 is in `agent-delivery.store.spec.ts`, which is outside my area.
 - eslint on the changed files: 0 errors, 1 warning (the existing max-lines warning on the store).
 - ui-class audit: 0 over baseline. degradation audit: 0 unsuppressed sites.
+
+## Round 4: composer lines, single scroll container, stale tool row, model pill, models tile
+
+### 1. No lines under the composer
+- Root cause: `lane-composer.component.html` drew up to three blocks under the composer card: the options error with Retry, the delivery error and the stale-options notice; then a status line with the mode hint (for example "Resume with message: Resume CLI session 06d21aa3") and the "N limited" badge. `agent-continue-input.component.ts` added two more lines under that: the orange terminal status ("Stopped · Interrupted by host restart") and the stop error.
+- Change:
+  - **Composer** (`lane-composer.component.html` / `.ts`): nothing renders under the card any more.
+  - **Lane state chip:** a toolbar chip next to the approval chip (`laneState` input, `data-testid="lane-state-chip"`) shows a short label: Stopping…, Stopped, Interrupted, Budget stop, Failed, Timed out or Stop failed. The full detail is in its `ptahTooltip` and in an `sr-only` suffix. An error chip is `role="alert"`; any other chip is `role="status"`.
+  - **"N limited" badge:** moved into the toolbar.
+  - **Send:** the mode hint (resume, continue, queue, steer) is now Send's `title` and its `aria-describedby` text. The placeholder still says "Resume … with a message…".
+  - **Inside the card, above the toolbar:**
+    - `lane-composer-alert`: the options error (`role="alert"`, with Retry), the delivery error (`role="alert"`) and the stale-options notice (`role="status"`, with Retry).
+    - `lane-composer-notice`: a polite live region for what the user must fix before sending ("… Remove the image to send.", the attachment limit) and the last action's note. It is empty most of the time.
+  - **Gated-control reasons:** these are no longer repeated in a status line. Each control's own `title` and `aria-describedby` already carry the reason (`ComposerGatedControlDirective`).
+- `agent-continue-input.component.ts`: the new `laneStateChip(agent)` builds the chip. Its order is: Stop failed (err), then Stopping…, then the terminal status with the host's reason. When there is no composer card (Stop or Resume shown alone), the chip sits on the same row as the button. The footer lines are gone.
+
+### 2. Lane panel is a single scroll container
+- Root cause: `canvas-lane-view.component.ts` made the host `overflow-auto` for every non-orchestrator lane, and the lane block and panel were `h-full` with the questions stacked above them. Anything taller than the panel (the footer lines, a question card) made the host scroll as well as the transcript, so two scrollbars appeared.
+- Change:
+  - The host is always `overflow-hidden`, and the tab panel is always a flex column.
+  - The lane block is `flex-1 min-h-0`, and question cards in it are `shrink-0`.
+  - The CLI panel is `flex-1 min-h-0 overflow-hidden` instead of `h-full`.
+  - The background-agent strip, which is not a panel, scrolls in its own `min-h-0 overflow-y-auto` box.
+  - The transcript (`lane-scroller`) stays the only scroller, and the composer is pinned below it.
+- Other hosts of the same composer: the agent card panel (`agent-card`, card presentation) already bounds its output with `flex-1 min-h-0 overflow-hidden`, and the composer sits under it. The sub-agent lane uses its own composer. Neither had a line under the composer after the change above.
+
+### 3. A tool row of a terminal lane that keeps running
+- Root cause: `agent-monitor-tree-builder.service.ts` `finalizeOrphanedTools` handled only tools still `streaming`, and turned them into `error` ("Failed"). It left `pending` tools, and `streaming` message/text/agent nodes, untouched. Those kept the turn live, with its "running" rows and a timer that kept counting.
+- Change: for a lane that no longer runs, `finalizeOrphanedTools(nodes, endedAt)` now does the following:
+  - A `streaming` or `pending` tool becomes `interrupted`. Its final elapsed time is set to `endedAt - startTime` when the tool has no duration of its own.
+  - A `streaming` agent node becomes `interrupted`.
+  - Any other `streaming` node becomes `complete`, so its turn is no longer live.
+  - `cli-agent-output` takes a new `endedAt` input, and `agent-card` binds it to `agent().completedAt`.
+
+### 4. Model pill reads "claude default"
+- Finding: both causes apply.
+  - **This lane (likely):** I could not inspect the lane from the screenshot, so this is inferred. It was stopped by a host restart and rebuilt from history; if it was spawned before the backend fix, its reference has no `model` and its record has no `observedModel`. The backend now reports the SDK init model as the catalog's `currentModel`, but only after the lane runs again.
+  - **Frontend defect:** the composer read the catalog once at mount. A resumed lane learns its model from the system init after that read, so the pill stayed on "claude default" until the user opened the model menu.
+- Change: in `lane-composer.component.ts`, when a turn settles (the status leaves running or starting) and no model is known (no record `model`, `observedModel` or catalog `currentModel`), the composer re-reads the catalog once. The pill then names the init model.
+
+### 5. Inspector "models used" tile
+- The tile's summary now leads with the current model and counts the rest as earlier ones: "Haiku 4.5 +2 earlier".
+- Its tooltip reads "Current model: Haiku 4.5. Earlier in this session: claude-fable-5-2, …".
+- `session-model-breakdown` takes a new `currentModel` input. Each row is labelled "current" or "earlier in this session".
+- "Current" is the live stats model, else the snapshot model. When neither is known, the summary keeps the plain "+N".
+
+### Specs (round 4)
+- `lane-composer.component.spec.ts`: 66 pass.
+  - The `statusText` helper now reads the in-card note, else Send's tooltip.
+  - Updated: the resume path is on Send (title and description); nothing renders under the card; a gated control's reason is on the control; the stale notice is in the card with `role="status"`.
+  - New: the state chip in the toolbar (status and alert roles), and the catalog re-read when the model is unknown (D8).
+- `agent-continue-input.component.spec.ts`: 13 pass. Covers the chip for each state, no line under the composer, the chip beside Stop/Resume, a stop error announced, and `laneStateChip` failed→stopped.
+- `agent-monitor-tree-builder.service.spec.ts`: covers interrupted with the final elapsed time, `pending` tools, streaming messages ended, and recursion.
+- `cli-agent-output.component.spec.ts`: an orphaned tool is now `interrupted`, not `error`.
+- `canvas-lane-view.component.spec.ts`: the host is `overflow-hidden` for lanes too; the lane block is `flex-1 min-h-0` without `h-full`; the CLI panel is `flex-1 overflow-hidden`.
+- `inspector-session-stats.component.spec.ts`: "+1 earlier" with its tooltip, and the breakdown rows labelled current or earlier.
+
+### Verification (round 4)
+- Jest:
+
+  | Project | Specs | Result |
+  | --- | --- | --- |
+  | chat | lane-composer and agent-monitor-tree-builder | 113/113 |
+  | chat | agent-card unified, flat-header and truncation; cli-agent-output; lane-transcript; lane-delivery.controller | 100 tests: one `cli-agent-output` expectation failed (it still expected `error`); updated it and re-ran that spec, 25/25 |
+  | chat | agent-continue-input | 13/13 |
+  | canvas | canvas-lane-view and canvas-focus-area | 37/37 |
+  | chat-ui | inspector-session-stats, session-model-breakdown and session-stats-summary | 75/75 |
+
+- `npx tsc --noEmit -p libs/frontend/{chat,chat-ui,canvas}/tsconfig.lib.json`: 0 errors.
+- eslint on all changed frontend files: 0 errors, 7 warnings (existing non-null assertions and max-lines).
+- ui-class audit: 0 over baseline in both audits. degradation audit: 0 unsuppressed sites.
+- Not run: typecheck-templates and the Electron visual check (excluded). The layout fix should be confirmed in Electron: one scrollbar, and the composer pinned at the bottom of the lane panel.
+
+## Round 5: live re-check F2 (frontend half), F3, F4
+
+### F3: a running Grok lane showed no composer, only a stray Stop
+- Root causes:
+  1. `agent-monitor.store.ts` `onAgentSpawned`: the card built for a first spawn (the `fresh` branch) dropped `potentialCapabilities`, `effectiveCapabilities` and `effectivePolicy`. Only the re-open and replacement branches copied them.
+  2. `agent-continue-input.component.ts` `visible()` mounts the composer for a running lane only when one of these holds: `supportsContinuation`, a `cliSessionId`, or the resolved messaging capabilities (steer or continuation supported). A new Grok (ACP) lane has none of these until its first turn ends. The view then fell back to the lone Stop button ("stray stop square"), and the composer appeared once the turn ended.
+- Change:
+  - The first-spawn card now keeps the three capability fields.
+  - `visible()` reads `effectiveCapabilities ?? potentialCapabilities`. The Grok adapter manifest declares `continuation: supported` (`grok-cli.adapter.ts:192-197`), so a running Grok lane mounts the composer as Claude does.
+  - If the host sends neither capability set on the spawn, the old behaviour remains. The backend should make sure the spawn payload carries `potentialCapabilities`.
+- Specs:
+  - `agent-monitor.stop-and-turn.spec.ts`: a first spawn keeps its capabilities.
+  - `agent-continue-input.component.spec.ts`: the composer mounts for a running ACP lane from its declared capabilities.
+
+### F4: `/context` + Enter inserted `/compact`
+- Root cause: `composer-input.controller.ts` `matchCommands` filtered by "name or description contains the query" and kept the source order. `compact` comes first, and its description mentions context, so it took the first row. The lane composer's grouped lists and the main chat's `/` list both go through this one function.
+- Change: a new exported function, `rankCommandMatches(commands, query)`.
+  - Ranking tiers, in order: exact name, name prefix, name contains, description contains, then fuzzy (the query's letters appear in the name in order).
+  - Ties keep the source order. A leading `/` is ignored. An empty query keeps every command.
+  - `matchCommands` uses it, so main chat and lanes share it.
+- Spec: `composer-input.controller.spec.ts` "rankCommandMatches (F4)". It covers the exact match first for `context` and `/context`, the prefix/contains/fuzzy order, and the empty query.
+
+### F2 (frontend half): resuming a restored lane leaves the view on the old tab
+- What already reaches the frontend:
+  1. `AgentProcessInfo.resumedFromAgentId` on the resume's spawn. The monitor already replaces the old card on it and records the old id → new id link. The backend sets it in `agent-process-manager.service.ts` `resumedFromField` (around line 3810), but only when the named id is a record the manager tracks. Otherwise it falls back to the record found by session.
+  2. `AgentDeliveryReceipt.actualAgentId` ("Resolved lane after a cold resume", set in `agent-message-coordinator.service.ts:274`) on the receipt of the user's message. This one reaches the frontend in every case where the message itself resolved to a new lane, a restored lane included. It is held in `AgentDeliveryStore.receipts()`, keyed by both ids.
+- Change: `canvas-detail.service.ts` `currentLaneKey` follows both links, with a hop limit.
+  - First the monitor's replaced-card link (`currentAgentId`).
+  - Then the newest user receipt addressed to the old id whose `actualAgentId` is a different lane. This link is followed only once the monitor holds that card. A parent's receipt never moves the view.
+  - The dock, the lane view and the rail all read `laneKeyFor`, so the view stays on the conversation the user sent from.
+- Limit: once a restored card has a resolved successor, choosing that old card in the dock also shows the new lane. It is the same conversation.
+- If the backend adds a dedicated alias field later, `currentLaneKey` is the one place to read it.
+- Spec: `canvas-detail.service.spec.ts` "follows a cold resume of a restored lane through the user receipt it resolved (F2)". It checks: no move before the card exists; the move after it exists; the newest user receipt wins; a parent receipt is ignored.
+
+### Verification (round 5)
+- Jest:
+  - canvas: all 29 canvas suites, 617/617.
+  - chat-streaming: stop-and-turn and agent-monitor.store, 239/239.
+  - chat: agent-continue-input, lane-composer, all chat-input specs and composer-input.controller, 267/267 and 21/21.
+- `npx tsc --noEmit -p libs/frontend/{chat,chat-streaming,canvas}/tsconfig.lib.json`: 0 errors.
+- eslint on all changed frontend files: 0 errors, 11 warnings (existing non-null assertions and max-lines).
+- ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
+- Not run (excluded): typecheck-templates and the Electron check. F2 and F3 need a live re-check: a restored lane resumed from its tab, and a new Grok lane while it runs.
