@@ -53,7 +53,12 @@ function makePolicy(
   };
 }
 
-function makeHarness(options: { delivered?: boolean } = {}) {
+function makeHarness(
+  options: {
+    delivered?: boolean;
+    isGatewayTool?: (toolName: string) => boolean;
+  } = {},
+) {
   const logger: MockLogger = createMockLogger();
   const sent: SentMessage[] = [];
   const webviewManager = {
@@ -82,6 +87,13 @@ function makeHarness(options: { delivered?: boolean } = {}) {
       typeof SdkPermissionHandler
     >[2],
     registry,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.isGatewayTool
+      ? { isGatewayTool: options.isGatewayTool }
+      : undefined,
   );
 
   const callbackFor = (
@@ -178,6 +190,73 @@ describe('SdkPermissionHandler — unattended session policy', () => {
 
       expect(result).toEqual({ behavior: 'allow', updatedInput: input });
       expect(h.permissionRequests()).toHaveLength(0);
+    });
+  });
+
+  describe('gateway tools served through the ptah server (TASK_2026_979)', () => {
+    const HOST_TOOLS = new Set(['ptah_cron_list', 'ptah_agent_report']);
+    const isGatewayTool = (name: string): boolean =>
+      !HOST_TOOLS.has(name.replace(/^mcp__ptah__/, ''));
+
+    it.each([
+      ['a gateway tool', 'mcp__ptah__zernio__create_post'],
+      ['an unknown ptah name', 'mcp__ptah__x__y'],
+    ])('%s takes the out-of-policy branch', async (_label, toolName) => {
+      const h = makeHarness({ isGatewayTool });
+      h.registry.register(CHILD_TAB, makePolicy({ denyWindowMs: 0 }));
+
+      const result = await invoke(h.callbackFor(CHILD_TAB), toolName, {});
+
+      expect(denyMessage(result)).toContain(
+        `the tool "${toolName}" is not covered by the unattended policy`,
+      );
+    });
+
+    it('a gateway tool gets the bounded prompt, not the Ptah MCP allow', async () => {
+      jest.useFakeTimers();
+      const h = makeHarness({ isGatewayTool });
+      h.registry.register(CHILD_TAB, makePolicy({ denyWindowMs: 30_000 }));
+
+      const pending = invoke(
+        h.callbackFor(CHILD_TAB),
+        'mcp__ptah__zernio__create_post',
+        {},
+      );
+      await flushMicrotasks();
+      expect(h.permissionRequests()).toHaveLength(1);
+
+      jest.advanceTimersByTime(30_000);
+      expect((await pending).behavior).toBe('deny');
+    });
+
+    it.each([['mcp__ptah__ptah_cron_list'], ['mcp__ptah__ptah_agent_report']])(
+      'host tool %s stays allowed',
+      async (toolName) => {
+        const h = makeHarness({ isGatewayTool });
+        h.registry.register(CHILD_TAB, makePolicy());
+
+        const result = await invoke(h.callbackFor(CHILD_TAB), toolName, {});
+
+        expect(result).toEqual({ behavior: 'allow', updatedInput: {} });
+        expect(h.permissionRequests()).toHaveLength(0);
+      },
+    );
+
+    it('a predicate that throws counts as a gateway tool', async () => {
+      const h = makeHarness({
+        isGatewayTool: () => {
+          throw new Error('registry broken');
+        },
+      });
+      h.registry.register(CHILD_TAB, makePolicy({ denyWindowMs: 0 }));
+
+      const result = await invoke(
+        h.callbackFor(CHILD_TAB),
+        'mcp__ptah__ptah_cron_list',
+        {},
+      );
+
+      expect(result.behavior).toBe('deny');
     });
   });
 

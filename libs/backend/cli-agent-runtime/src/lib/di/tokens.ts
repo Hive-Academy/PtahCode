@@ -7,6 +7,8 @@ export const CLI_AGENT_RUNTIME_TOKENS = {
   AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
   /** Durable lane message envelopes (`AgentMessageEnvelopeStore`). */
   AGENT_MESSAGE_ENVELOPE_STORE: Symbol.for('AgentMessageEnvelopeStore'),
+  /** Host-memory images of held lane messages (`AgentMessageAttachmentStore`). */
+  AGENT_MESSAGE_ATTACHMENT_STORE: Symbol.for('AgentMessageAttachmentStore'),
   /** Old agent id → resumed agent id (`AgentIdAliasRegistry`). */
   AGENT_ID_ALIAS_REGISTRY: Symbol.for('AgentIdAliasRegistry'),
   /** One-timer cold inbox and retry scheduler (`AgentMessageDeliveryScheduler`). */

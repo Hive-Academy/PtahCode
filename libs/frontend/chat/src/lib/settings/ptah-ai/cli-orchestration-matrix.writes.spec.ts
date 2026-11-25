@@ -455,6 +455,19 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
     expect(reset).not.toBeNull();
     reset?.click();
+    fixture.detectChanges();
+    // The saved plan row resets to the built-in yolo default, so full access is confirmed first.
+    expect(state.saveSettings).not.toHaveBeenCalledWith(
+      { orchestration: { cliLaneDefaults: { codex: null } } },
+      CONTEXT,
+    );
+    Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>(
+        'dialog[open] button',
+      ),
+    )
+      .find((button) => button.textContent?.trim() === 'Confirm')
+      ?.click();
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
       { orchestration: { cliLaneDefaults: { codex: null } } },

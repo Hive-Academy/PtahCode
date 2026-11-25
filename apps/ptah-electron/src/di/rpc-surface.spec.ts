@@ -101,6 +101,7 @@ describe('Electron RPC surface', () => {
         'agent:getMessageReceipt',
         'agent:listMessageReceipts',
         'agent:getQueuedMessageBody',
+        'agent:getLaneComposerOptions',
         'agent:retryMessage',
         'agent:cancelMessage',
         'agent:listParentDeliveries',

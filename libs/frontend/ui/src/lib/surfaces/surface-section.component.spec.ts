@@ -16,6 +16,12 @@ class Host {}
   template: `<ptah-surface-section glassSurface="chrome"><p>Body</p></ptah-surface-section>`,
 })
 class ChromeHost {}
+@Component({
+  standalone: true,
+  imports: [SurfaceSectionComponent],
+  template: `<ptah-surface-section tone="flush" padding="md"><p>Body</p></ptah-surface-section>`,
+})
+class FlushHost {}
 describe('SurfaceSectionComponent', () => {
   it('projects its header/body and applies the compact section contract', async () => {
     await TestBed.configureTestingModule({
@@ -43,5 +49,15 @@ describe('SurfaceSectionComponent', () => {
     expect(section.classList.contains('has-[[role=dialog]]:z-30')).toBe(true);
     expect(host.classList.contains('has-[[role=dialog]]:z-30')).toBe(true);
     expect(host.classList.contains('has-[[role=dialog]]:relative')).toBe(true);
+  });
+  it('renders a flush section with no plane, radius or glass role', async () => {
+    await TestBed.configureTestingModule({ imports: [FlushHost] }).compileComponents();
+    const f = TestBed.createComponent(FlushHost);
+    f.detectChanges();
+    const section = f.nativeElement.querySelector('section') as HTMLElement;
+    expect(section.className).not.toMatch(/surface-\d/);
+    expect(section.className).not.toContain('rounded-xl');
+    expect(section.className).toContain('p-4');
+    expect(section.hasAttribute('data-glass-surface')).toBe(false);
   });
 });

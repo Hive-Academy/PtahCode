@@ -1,19 +1,23 @@
 import { ChangeDetectionStrategy, Component, ElementRef, AfterViewInit, OnDestroy, input, output, inject, signal } from '@angular/core';
-import type { ReviewFinding, ReviewRun, StageRecord } from '@ptah-extension/review-contracts';
+import { NgTemplateOutlet } from '@angular/common';
+import type { ReviewFinding, ReviewRun, ReviewUsageTotal, StageRecord } from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewFindingsPanelComponent } from '../findings/review-findings-panel.component';
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
 import { PtahBadgeDirective, PtahButtonDirective, PtahMeterComponent } from '@ptah-extension/ui';
 import { fallbackNotes, laneLine, type StageLaneLine } from './review-stage-lane';
+import { costDisplay, tokensDisplay, type UsageFigure } from './review-usage-format';
 
 /** The run contract and the query return 16 stage records at most. */
 const STAGE_LIMIT = 16;
 
 @Component({
-  selector: 'ptah-review-run-detail', standalone: true, imports: [ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective, PtahBadgeDirective, PtahMeterComponent],
+  selector: 'ptah-review-run-detail', standalone: true, imports: [NgTemplateOutlet, ReviewFindingsPanelComponent, ReviewConfirmDialogComponent, PtahButtonDirective, PtahBadgeDirective, PtahMeterComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <!-- A usage figure: an unknown or partial value hides its symbol from screen readers and reads its sentence instead. -->
+    <ng-template #usageFigure let-figure><span [attr.title]="figure.partial ? figure.srText : null"><span [attr.aria-hidden]="figure.text === figure.srText ? null : 'true'">{{ figure.text }}</span>@if (figure.text !== figure.srText) {<span class="sr-only">{{ figure.srText }}</span>}</span></ng-template>
     <div>
       <aside role="region" aria-labelledby="review-detail-title" (keydown)="onKeydown($event)">
         <header class="flex items-start justify-between gap-4"><div class="min-w-0">
@@ -42,6 +46,7 @@ const STAGE_LIMIT = 16;
               @else { <span class="text-base-content-muted" data-testid="review-detail-lens-count-unavailable">Lens count unavailable</span> }
             </div>
             @if (lensCount(); as count) { <ptah-meter class="mt-2 block w-full" [value]="count.completed" [max]="count.total" label="Completed lenses" size="xs" tone="primary" [hideLabel]="true" [showValue]="false" barRole="progressbar" aria-label="Completed lenses" /> }
+            <p class="mt-2 text-xs text-base-content-muted" data-testid="review-detail-usage">Usage: @if (run().usage; as usage) {<ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: tokens(usage) }" />&ngsp;<span class="whitespace-nowrap">·&nbsp;<ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: cost(usage) }" /></span>} @else {<span aria-hidden="true">—</span><span class="sr-only">unknown</span>}</p>
             @if (run().status === 'partial') { <p class="mt-2 text-sm text-state-need">Coverage limited. Unchecked paths are not claimed clean.</p> }
             @if (run().coverage.length) { <h3 class="mt-3 text-xs font-semibold">Coverage notes</h3>
               <ul class="mt-1 flex flex-wrap gap-x-3 gap-y-1" data-testid="review-detail-coverage-notes">@for (note of run().coverage; track $index) { <li class="break-all font-mono text-xs text-base-content-muted">{{ note }}</li> }</ul> }
@@ -52,6 +57,7 @@ const STAGE_LIMIT = 16;
               @for (stage of pipelineStages(); track stage.name + ':' + (stage.scope ?? '')) { <li class="surface-2 rounded-box px-3 py-2">
                 <p class="flex items-center gap-1.5 truncate text-sm" [class]="ink(stage.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ stageLabel(stage) }}</p>
                 <p class="text-xs text-base-content-muted">{{ label(stage.status) }}{{ stage.durationMs === null ? '' : ' · ' + seconds(stage.durationMs) }}</p>
+                @if (stage.usage; as usage) { <p class="text-xs text-base-content-muted" data-testid="review-stage-usage"><ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: tokens(usage) }" />&ngsp;<span class="whitespace-nowrap">·&nbsp;<ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: cost(usage) }" /></span>@if (usage.runs > 1) {&ngsp;<span class="whitespace-nowrap">·&nbsp;{{ usage.runs }} runs</span>}</p> }
                 @if (stageLane(stage, stage.name === 'triage' || stage.name === 'verification'); as line) {
                   <p class="truncate text-xs text-base-content-muted" data-testid="review-stage-lane"><span class="font-mono">{{ line.lane }}</span> · @if (line.model) {<span class="font-mono">{{ line.model }}</span>} @else {lane default}@if (line.family) { · family {{ line.family }}}</p>
                 } @else if (stage.family) { <p class="text-xs text-base-content-muted" data-testid="review-stage-family">Family: {{ stage.family }}</p> }
@@ -64,6 +70,7 @@ const STAGE_LIMIT = 16;
             @if (lensStages().length) { <ul class="mt-2 grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2" data-testid="review-detail-lenses">@for (lens of lensStages(); track lens.scope) { <li class="surface-2 rounded-box px-3 py-2">
               <p class="flex items-center gap-1.5 truncate text-sm font-semibold" [class]="ink(lens.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ lens.scope }}</p>
               <p class="text-xs text-base-content-muted">{{ label(lens.status) }}{{ lens.durationMs === null ? '' : ' · ' + seconds(lens.durationMs) }}</p>
+              @if (lens.usage; as usage) { <p class="text-xs text-base-content-muted" data-testid="review-stage-usage"><ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: tokens(usage) }" />&ngsp;<span class="whitespace-nowrap">·&nbsp;<ng-container *ngTemplateOutlet="usageFigure; context: { $implicit: cost(usage) }" /></span>@if (usage.runs > 1) {&ngsp;<span class="whitespace-nowrap">·&nbsp;{{ usage.runs }} runs</span>}</p> }
               @if (stageLane(lens, false); as line) {
                 <p class="truncate text-xs text-base-content-muted" data-testid="review-stage-lane"><span class="font-mono">{{ line.lane }}</span> · @if (line.model) {<span class="font-mono">{{ line.model }}</span>} @else {lane default}</p>
               }
@@ -130,6 +137,9 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
   /** Lane and model for records written after lane pools; null on older and lane-less records. */
   stageLane(stage: StageRecord, withFamily: boolean): StageLaneLine | null { return laneLine(stage, withFamily); }
   stageFallbacks(stage: StageRecord): string[] { return fallbackNotes(stage); }
+  /** Usage figures of a stage or the run; records without usage (older runs) show none or "—". */
+  tokens(usage: ReviewUsageTotal): UsageFigure { return tokensDisplay(usage); }
+  cost(usage: ReviewUsageTotal): UsageFigure { return costDisplay(usage); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }
   family(name: StageRecord['name']): string | null { return this.run().stages.find(stage => stage.name === name)?.family ?? null; }

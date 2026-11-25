@@ -49,7 +49,7 @@ export class ReviewLaneListingService {
         const catalog = Object.prototype.hasOwnProperty.call(catalogs, lane.id)
           ? ReviewLaneCatalogSchema.safeParse(catalogs[lane.id]) : null;
         return { id: lane.id, label: lane.label, family: lane.family, limitState: lane.limitState,
-          catalog: catalog?.success ? catalog.data : UNREAD_CATALOG };
+          catalog: catalog?.success ? catalog.data : UNREAD_CATALOG, ...(lane.defaultModelBlocked ? { defaultModelBlocked: true } : {}) };
       }),
       blockedModels: this.blockedModels(saved),
     };

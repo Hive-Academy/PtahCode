@@ -347,10 +347,15 @@ export class ReviewOrchestratorService {
     const row: ReviewStageRecord = { attemptId: claim.attemptId, stage: name, ordinal, state: 'running', startedAt,
       endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
     await this.repository.saveStage(row);
+    // An aborted stage ends `interrupted` with no checkpoint, so it reruns on resume and no row stays `running` (req 7.3).
+    const interrupt = async (): Promise<null> => {
+      await this.repository.closeRunningStage(claim.attemptId, name, ordinal, startedAt, new Date().toISOString());
+      return null;
+    };
     try {
-      if (signal?.aborted) return null;
+      if (signal?.aborted) return await interrupt();
       const value = await run();
-      if (signal?.aborted) return null;
+      if (signal?.aborted) return await interrupt();
       const retryReason = retry?.(value) ?? null;
       if (retryReason !== null) {
         await this.repository.saveStage({ ...row, state: 'interrupted', endedAt: new Date().toISOString(), outcome: 'partial',
@@ -358,13 +363,14 @@ export class ReviewOrchestratorService {
         return value;
       }
       await this.repository.saveCheckpoint(claim.attemptId, name, ordinal, value);
-      if (signal?.aborted) return null;
+      if (signal?.aborted) return await interrupt();
       const artifactPath = typeof value === 'object' && value !== null && 'artifactPath' in value && typeof value.artifactPath === 'string'
         ? value.artifactPath : null;
       await this.repository.saveStage({ ...row, state: 'completed', endedAt: new Date().toISOString(), outcome: 'completed', artifactPath });
       return value;
     } catch (error: unknown) {
-      if (!signal?.aborted) await this.repository.saveStage({ ...row, state: 'failed', endedAt: new Date().toISOString(), errorSummary: sanitizeReviewFailureMessage(error instanceof Error ? error.message : 'Unknown stage error') });
+      if (signal?.aborted) await interrupt();
+      else await this.repository.saveStage({ ...row, state: 'failed', endedAt: new Date().toISOString(), errorSummary: sanitizeReviewFailureMessage(error instanceof Error ? error.message : 'Unknown stage error') });
       throw error;
     }
   }

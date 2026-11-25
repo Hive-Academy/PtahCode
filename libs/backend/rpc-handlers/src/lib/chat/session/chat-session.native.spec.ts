@@ -183,7 +183,6 @@ function harness() {
         resolveSessionFields: async () => ({ outputStyleBody: 'style' }),
       },
       streamBroadcaster: { streamEventsToWebview: jest.fn() },
-      buildMcpServersOverride: async () => undefined,
     },
   );
   return {
@@ -385,20 +384,11 @@ describe('chat native session preparation', () => {
           headers: { Authorization: 'Bearer secret-token-y' },
         },
       };
-      const buildSmitheryOverrides = jest
-        .fn()
-        .mockResolvedValue(smitheryOverrides);
-      const buildOAuthOverrides = jest.fn().mockResolvedValue(oauthOverrides);
+      // Installed connectors reach the session through the gateway behind
+      // `ptah`; only a caller-supplied `mcpServersOverride` adds servers.
+      const callerOverrides = { ...smitheryOverrides, ...oauthOverrides };
       if (ambient) {
         Object.assign(h.service, {
-          buildMcpServersOverride:
-            ChatSessionService.prototype['buildMcpServersOverride'],
-          getSmitheryOverrideResolver: () => ({
-            buildOverrides: buildSmitheryOverrides,
-          }),
-          getOAuthOverrideResolver: () => ({
-            buildOverrides: buildOAuthOverrides,
-          }),
           outputStyleActivation: {
             resolveSessionFields: jest
               .fn()
@@ -418,6 +408,7 @@ describe('chat native session preparation', () => {
           ptahCliId: undefined,
           ptahUiFence: true,
           options: { model: 'default', ...(ambient ? { thinking } : {}) },
+          ...(ambient ? { mcpServersOverride: callerOverrides } : {}),
         }),
       ).resolves.toEqual({ success: true });
       expect(h.startChatSession).toHaveBeenCalledTimes(1);
@@ -436,12 +427,7 @@ describe('chat native session preparation', () => {
         expect.any(Function),
       );
       if (ambient) {
-        expect(buildSmitheryOverrides).toHaveBeenCalledTimes(1);
-        expect(buildOAuthOverrides).toHaveBeenCalledTimes(1);
-        expect(started.mcpServersOverride).toEqual({
-          ...smitheryOverrides,
-          ...oauthOverrides,
-        });
+        expect(started.mcpServersOverride).toEqual(callerOverrides);
         const { stripped, supported } = classifyCodexChatOptions(started);
         expect(stripped).toEqual(
           expect.arrayContaining(['thinking', 'outputStyleName']),
@@ -470,8 +456,8 @@ describe('chat native session preparation', () => {
       expect(startedProfile.profile.developerPrompt).not.toContain(
         'ptah-surface-authoring',
       );
-      // D8: the Smithery and OAuth servers the session layer resolved attach natively,
-      // beside Ptah MCP; the profile keeps references and the values travel as secrets.
+      // D8: caller-supplied HTTP servers attach natively beside Ptah MCP;
+      // the profile keeps references and the values travel as secrets.
       expect(startedProfile.profile.mcpServers).toEqual([
         expect.objectContaining({ name: 'ptah', transport: 'http' }),
         ...(ambient

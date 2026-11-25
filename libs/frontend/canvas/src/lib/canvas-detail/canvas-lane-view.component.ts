@@ -12,10 +12,11 @@ import {
 import {
   AgentCardComponent,
   AgentContinueInputComponent,
-  AgentPermissionResponder,
   ChatSessionLayoutComponent,
   ChatStore,
   LANE_COLUMN_CLASS,
+  LANE_WAITING_LABEL,
+  LanePermissionView,
   SubagentLaneComponent,
   ownedBySession,
   parseLaneKey,
@@ -26,7 +27,13 @@ import {
   AgentMonitorStore,
 } from '@ptah-extension/chat-streaming';
 import { NgTemplateOutlet } from '@angular/common';
-import { BackgroundAgentStripComponent, QuestionCardComponent } from '@ptah-extension/chat-ui';
+import {
+  BackgroundAgentStripComponent,
+  PermissionRequestCardComponent,
+  QuestionCardComponent,
+} from '@ptah-extension/chat-ui';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
+import { Check, LucideAngularModule } from 'lucide-angular';
 import { CanvasDetailTranscriptComponent } from './canvas-detail-transcript.component';
 import { CanvasDetailService } from './canvas-detail.service';
 
@@ -67,11 +74,13 @@ export function effectiveCanvasLaneKind(
 }
 
 /**
- * A lane's panel: the main chat view's chrome surface, and the size container
- * that `LANE_COLUMN_CLASS` and the lane transcript measure their column from.
+ * A lane's panel (CLI and sub-agent): the main chat view's chrome surface and
+ * the size container that `LANE_COLUMN_CLASS` and the lane transcript measure
+ * their column from. It does not scroll: the transcript scrolls in its own
+ * region and the composer sits below it, as the main chat view does.
  */
-const LANE_PANEL_CLASS =
-  'relative flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pt-2 [container-type:inline-size]';
+const LANE_CLI_PANEL_CLASS =
+  'relative flex h-full min-h-0 min-w-0 flex-col pt-2 [container-type:inline-size]';
 
 @Component({
   selector: 'ptah-canvas-lane-view',
@@ -83,9 +92,13 @@ const LANE_PANEL_CLASS =
     SubagentLaneComponent,
     BackgroundAgentStripComponent,
     QuestionCardComponent,
+    PermissionRequestCardComponent,
+    PtahBadgeDirective,
+    LucideAngularModule,
     CanvasDetailTranscriptComponent,
     NgTemplateOutlet,
   ],
+  providers: [LanePermissionView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block h-full min-h-0',
@@ -142,7 +155,7 @@ const LANE_PANEL_CLASS =
         >
           @for (request of pendingQuestions(); track request.id) {
             <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
-              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event)" />
+              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
             </div>
           }
           @switch (selectedKind()) {
@@ -151,50 +164,76 @@ const LANE_PANEL_CLASS =
                 <!-- The main chat shell: the chrome panel, the session layout
                      (column width) and one centered column for every row. -->
                 <div
-                  [class]="lanePanelClass"
+                  [class]="cliPanelClass"
                   data-glass-surface="chrome"
                   data-testid="lane-panel"
                 >
-                  <ptah-chat-session-layout class="!flex-none min-h-full">
-                    @for (
-                      permission of agent.permissionQueue;
-                      track permission.requestId
+                  <!-- Main chat's layout: the transcript scrolls in its own
+                       region and the composer sits below it, so no transcript
+                       row ever scrolls under the composer (B1). -->
+                  <ptah-chat-session-layout>
+                    <div
+                      sessionTranscript
+                      class="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                      data-testid="lane-scroller"
+                    >
+                    <!-- The lane's approvals and questions, as main chat's cards (Req 5). -->
+                    @if (
+                      prompts.waiting() ||
+                      prompts.notice() ||
+                      prompts.resolvedStatus()
                     ) {
                       <div
                         [class]="
-                          laneColumnClass +
-                          ' mb-2 shrink-0 rounded-box border border-warning/40 bg-warning/10 p-2 text-xs'
+                          laneColumnClass + ' mb-2 flex shrink-0 flex-col gap-1.5'
                         "
+                        data-testid="lane-prompts"
                       >
-                        <div>Permission: {{ permission.toolName }}</div>
-                        <div class="flex gap-2 mt-1">
-                          <button
-                            type="button"
-                            class="btn btn-xs btn-success"
-                            (click)="
-                              respond(
-                                agent.agentId,
-                                permission.requestId,
-                                'allow'
-                              )
-                            "
+                        @if (prompts.waiting()) {
+                          <span
+                            ptahBadge
+                            tone="warn"
+                            size="xs"
+                            class="self-start"
+                            role="status"
+                            >{{ waitingLabel }}</span
                           >
-                            Allow
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-xs btn-error btn-outline"
-                            (click)="
-                              respond(
-                                agent.agentId,
-                                permission.requestId,
-                                'deny'
-                              )
-                            "
+                        }
+                        @if (prompts.notice(); as notice) {
+                          <p class="text-[11px] text-state-need" role="status">
+                            {{ notice }}
+                          </p>
+                        }
+                        @for (request of prompts.permissions(); track request.id) {
+                          <ptah-permission-request-card
+                            [request]="request"
+                            [laneLabel]="prompts.laneLabel()"
+                            (responded)="prompts.respond($event)"
+                          />
+                        }
+                        @for (request of prompts.questions(); track request.id) {
+                          <ptah-question-card
+                            [request]="request"
+                            [laneLabel]="prompts.laneLabel()"
+                            (answered)="prompts.answer($event)"
+                          />
+                        }
+                        @if (
+                          !prompts.waiting() && prompts.resolvedStatus();
+                          as status
+                        ) {
+                          <p
+                            class="flex items-center gap-1 text-[11px] text-base-content-muted"
+                            role="status"
                           >
-                            Deny
-                          </button>
-                        </div>
+                            <lucide-angular
+                              [img]="CheckIcon"
+                              class="w-3 h-3 flex-shrink-0 text-success"
+                              aria-hidden="true"
+                            />
+                            {{ status }}
+                          </p>
+                        }
                       </div>
                     }
                     <ptah-agent-card
@@ -207,15 +246,18 @@ const LANE_PANEL_CLASS =
                         monitor.toggleAgentExpanded(agent.agentId)
                       "
                     />
-                    <ptah-agent-continue-input
-                      [class]="laneColumnClass + ' block flex-shrink-0 sticky bottom-0 z-10 bg-transparent pt-2'"
-                      variant="composer"
-                      [agent]="agent"
-                      [stopPending]="laneCard.isStopping()"
-                      [resumePending]="laneCard.isResuming()"
-                      (stopRequested)="laneCard.stopAgent($event)"
-                      (resumeRequested)="laneCard.resumeAgent($event)"
-                    />
+                    </div>
+                    <div sessionComposer class="flex-shrink-0 pt-2">
+                      <ptah-agent-continue-input
+                        [class]="laneColumnClass + ' block'"
+                        variant="composer"
+                        [agent]="agent"
+                        [stopPending]="laneCard.isStopping()"
+                        [resumePending]="laneCard.isResuming()"
+                        (stopRequested)="laneCard.stopAgent($event)"
+                        (resumeRequested)="laneCard.resumeAgent($event)"
+                      />
+                    </div>
                   </ptah-chat-session-layout>
                 </div>
               }
@@ -249,15 +291,17 @@ const LANE_PANEL_CLASS =
       }
       <ng-template #subagentLane>
         @if (selectedSubagent(); as sub) {
+          <!-- The CLI lane's shell: the lane scrolls its transcript and keeps
+               its composer below it (M4, as B1). -->
           <div
-            [class]="lanePanelClass"
+            [class]="cliPanelClass"
             data-glass-surface="chrome"
             data-testid="lane-panel"
           >
-            <ptah-chat-session-layout class="!flex-none min-h-full">
+            <ptah-chat-session-layout>
               <ptah-subagent-lane
                 [showStats]="false"
-                class="flex-1 min-h-fit"
+                class="min-h-0 flex-1"
                 presentation="flat"
                 [record]="sub"
                 [sessionId]="sessionId()"
@@ -274,13 +318,12 @@ const LANE_PANEL_CLASS =
   `,
 })
 export class CanvasLaneViewComponent {
-  protected readonly lanePanelClass = LANE_PANEL_CLASS;
+  protected readonly cliPanelClass = LANE_CLI_PANEL_CLASS;
   protected readonly laneColumnClass = LANE_COLUMN_CLASS;
   readonly monitor = inject(AgentMonitorStore);
   readonly chatStore = inject(ChatStore);
   private readonly detail = inject(CanvasDetailService);
   private readonly background = inject(BackgroundAgentStore);
-  private readonly responder = inject(AgentPermissionResponder);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
   private opener: HTMLElement | null = null;
@@ -290,6 +333,15 @@ export class CanvasLaneViewComponent {
   readonly panelId = input('canvas-lane-panel');
   readonly sessionId = input<string | null>(null);
   readonly laneKey = input('orchestrator');
+  /** The selected CLI lane's approvals and questions; empty for other lanes. */
+  protected readonly prompts = inject(LanePermissionView);
+  protected readonly waitingLabel = LANE_WAITING_LABEL;
+  protected readonly CheckIcon = Check;
+  /**
+   * Tab questions shown above a non-orchestrator lane, which covers the
+   * transcript. A question asked by a CLI lane (`agentId` set) is left out: it
+   * shows only in that lane's own card list, never in another lane.
+   */
   readonly pendingQuestions = computed(() => {
     if (this.selectedKind() === 'orchestrator') return [];
     const questions = this.chatStore.questionRequests();
@@ -297,7 +349,7 @@ export class CanvasLaneViewComponent {
     this.chatStore.routingTargetRevision();
     const sessionId = this.sessionId();
     const tabId = this.tabId();
-    return questions.filter(request => questionBelongsToTab(
+    return questions.filter(request => !request.agentId && questionBelongsToTab(
       request,
       this.chatStore.questionTargetTabsFor(request.id),
       this.chatStore.isQuestionClaimedByWorkflow(request),
@@ -349,6 +401,7 @@ export class CanvasLaneViewComponent {
     this.chatStore.getPermissionForTool(id);
 
   constructor() {
+    this.prompts.connect({ agent: this.selectedCli });
     let previousTabId: string | undefined;
     let previousKind: string | undefined;
     effect(() => {
@@ -393,14 +446,6 @@ export class CanvasLaneViewComponent {
       if (agent && !agent.expanded)
         this.monitor.toggleAgentExpanded(agent.agentId);
     });
-  }
-
-  respond(
-    agentId: string,
-    requestId: string,
-    decision: 'allow' | 'deny',
-  ): void {
-    this.responder.respondLane(agentId, requestId, decision);
   }
 
   back(): void {

@@ -16,7 +16,6 @@ import {
 import {
   AgentSteerInputComponent,
   InspectorCacheTileComponent,
-  LaneComposerComponent,
   isRunningAgentWord,
   type InspectorLaneRunDetail,
   type UsageContribution,
@@ -50,6 +49,7 @@ import {
   InspectorAgentRowComponent,
 } from './inspector-agent-row.component';
 import { injectInspectorAgentRows, type InspectorAgentRows } from './inspector-agent-rows';
+import { LaneComposerComponent } from '../../molecules/lane-composer/lane-composer.component';
 import { InspectorRequestLinesComponent } from './inspector-request-panel.component';
 
 /** Rows shown before "Show N more". */
@@ -270,7 +270,7 @@ let nextSectionId = 0;
                       @if (steerOpenKey() === row.key || row.agent.status === 'running') {
                         <ptah-lane-composer class="mb-2 ml-11 mr-3 block"
                           [agentId]="agentId" [laneLabel]="row.agent.name" [cli]="row.agent.cliId || row.secondary"
-                          variant="compact" [stopped]="row.agent.status !== 'running'" />
+                          [stopped]="row.agent.status !== 'running'" />
                       }
                     } @else if (steerOpenKey() === row.key && row.tray && row.agent.kind !== 'cli') {
                       <ptah-agent-steer-input
@@ -416,10 +416,12 @@ export class InspectorAgentsSectionComponent implements OnInit {
   });
 
   private readonly clockNow = inject(WallClockService).now('second');
-  private readonly cacheNow = injectWallClock('second', () => {
+  /** Boolean gate: a tick or an equal but new cache object never re-acquires the clock. */
+  private readonly cacheClockActive = computed(() => {
     const cache = this.cache();
     return cache !== null && this.detailKey() !== 'orchestrator' && cache.expiresAt > this.clockNow();
   });
+  private readonly cacheNow = injectWallClock('second', this.cacheClockActive);
   protected readonly cacheLine = computed(() => {
     const cache = this.cache();
     if (cache === null) return null;

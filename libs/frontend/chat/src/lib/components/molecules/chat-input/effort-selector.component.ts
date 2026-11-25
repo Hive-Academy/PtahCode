@@ -1,246 +1,48 @@
 /**
- * EffortSelectorComponent - Reasoning Effort Level Dropdown
+ * EffortSelectorComponent - main chat's reasoning-effort pill.
  *
- * A standalone dropdown for selecting Claude's reasoning effort level.
- * Uses NativeDropdownComponent to match model-selector and agent-selector patterns.
- *
- * Pattern: Signal-based state, output() API
- * UI: NativeDropdownComponent from @ptah-extension/ui with Floating UI positioning
- * Keyboard Navigation: Parent manages activeIndex signal for NativeOptionComponent
+ * The tab container for `ComposerEffortPickerComponent`: it resolves the
+ * effective effort of the tab (canvas tile or active main-panel tab) from
+ * `EffortStateService` and `TabManagerService`, renders the shared picker and
+ * stores a pick as the tab's override.
  */
 
 import {
   Component,
-  signal,
   computed,
   output,
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { LucideAngularModule, ChevronDown, Check } from 'lucide-angular';
 import { type EffortLevel } from '@ptah-extension/shared';
 import { EffortStateService } from '@ptah-extension/core';
-import {
-  NativeDropdownComponent,
-  NativeOptionComponent,
-  KeyboardNavigationService,
-} from '@ptah-extension/ui';
 import {
   TabManagerService,
   resolveTabEffort,
 } from '@ptah-extension/chat-state';
 import { SESSION_CONTEXT } from '../../../tokens/session-context.token';
-
-interface EffortOption {
-  value: EffortLevel | '';
-  label: string;
-  description: string;
-  /** Tailwind color class for the level indicator dot */
-  dotColor: string;
-  /** Tailwind text color for the selected option's label in the dropdown */
-  textColor: string;
-  /** Number of filled bars (0-4) for the level meter */
-  bars: number;
-}
-
-const EFFORT_OPTIONS: readonly EffortOption[] = [
-  {
-    value: '',
-    label: 'Default',
-    description: 'SDK default reasoning effort',
-    dotColor: 'bg-base-content/40',
-    textColor: 'text-base-content-muted',
-    bars: 0,
-  },
-  {
-    value: 'low',
-    label: 'Low',
-    description: 'Faster responses, less reasoning',
-    dotColor: 'bg-info',
-    textColor: 'text-info',
-    bars: 1,
-  },
-  {
-    value: 'medium',
-    label: 'Medium',
-    description: 'Balanced speed and reasoning',
-    dotColor: 'bg-success',
-    textColor: 'text-success',
-    bars: 2,
-  },
-  {
-    value: 'high',
-    label: 'High',
-    description: 'More thorough reasoning',
-    dotColor: 'bg-warning',
-    textColor: 'text-warning',
-    bars: 3,
-  },
-  {
-    value: 'xhigh',
-    label: 'X-High',
-    description: 'Extra-deep reasoning (Opus tier)',
-    dotColor: 'bg-error/80',
-    textColor: 'text-error/90',
-    bars: 4,
-  },
-  {
-    value: 'max',
-    label: 'Max',
-    description: 'Maximum reasoning depth (Opus tier)',
-    dotColor: 'bg-error',
-    textColor: 'text-error',
-    bars: 5,
-  },
-] as const;
+import {
+  ComposerEffortPickerComponent,
+  type ComposerEffortOption,
+} from '../composer-controls/composer-effort-picker.component';
 
 @Component({
   selector: 'ptah-effort-selector',
-  imports: [
-    LucideAngularModule,
-    NativeDropdownComponent,
-    NativeOptionComponent,
-  ],
-  providers: [KeyboardNavigationService],
+  imports: [ComposerEffortPickerComponent],
   template: `
-    <ptah-native-dropdown
-      [isOpen]="isOpen()"
-      [placement]="'bottom-end'"
-      [closeOnBackdropClick]="true"
-      (closed)="closeDropdown()"
-      (backdropClicked)="closeDropdown()"
-    >
-      <!-- Composer toolbar pill (h-7). The level bars are the icon and the
-           only place the effort colour appears; the label stays neutral. -->
-      <button
-        trigger
-        class="inline-flex items-center gap-1.5 h-7 px-2 rounded-full text-xs font-normal min-w-0 text-base-content-muted hover:text-base-content hover:bg-base-content/5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-base-content/30"
-        [class.bg-base-300]="isOpen()"
-        [class.text-base-content]="isOpen()"
-        type="button"
-        (click)="toggleDropdown()"
-        aria-label="Select reasoning effort level"
-        [attr.aria-expanded]="isOpen()"
-        [title]="'Reasoning effort: ' + selectedLabel()"
-      >
-        <!-- Level bars indicator (w-3.5 h-3.5 icon box). Only the fill color
-             changes, so transition colors only: transition-all also started
-             non-composited scrollbar-color transitions. -->
-        <div
-          class="flex items-end justify-center gap-px w-3.5 h-3.5 flex-shrink-0"
-          aria-hidden="true"
-        >
-          @for (bar of barSlots; track bar) {
-            <div
-              [class]="
-                'w-[2px] rounded-[1px] transition-colors ' +
-                (bar < selectedOption().bars
-                  ? selectedOption().dotColor
-                  : 'bg-base-content/20')
-              "
-              [style.height.px]="4 + bar * 2.5"
-            ></div>
-          }
-        </div>
-        <span class="ptah-composer-label truncate">{{ selectedLabel() }}</span>
-        <lucide-angular
-          [img]="ChevronDownIcon"
-          class="w-3 h-3 flex-shrink-0 opacity-60"
-        />
-      </button>
-
-      <div content class="w-56 max-h-80 flex flex-col">
-        <!-- Header -->
-        <div class="px-2 py-1.5 border-b border-base-300">
-          <span
-            class="text-[11px] font-semibold text-base-content-muted uppercase tracking-wide"
-          >
-            Reasoning Effort
-          </span>
-        </div>
-
-        <!-- Effort Options -->
-        <div
-          class="flex flex-col overflow-y-auto overflow-x-hidden max-h-64 p-1"
-        >
-          @for (option of effortOptions; track option.value; let i = $index) {
-            <ptah-native-option
-              [optionId]="'effort-' + i"
-              [value]="option"
-              [isActive]="i === activeIndex()"
-              (selected)="selectEffort($event)"
-              (hovered)="onHover(i)"
-            >
-              <div class="flex items-center gap-2.5 py-0.5">
-                <!-- Checkmark for selected -->
-                <div
-                  class="w-4 h-4 flex-shrink-0 flex items-center justify-center"
-                >
-                  @if (option.value === effectiveEffort()) {
-                    <lucide-angular [img]="CheckIcon" class="w-4 h-4" />
-                  }
-                </div>
-
-                <!-- Color dot indicator -->
-                <div
-                  [class]="
-                    'w-2 h-2 rounded-full flex-shrink-0 ' + option.dotColor
-                  "
-                ></div>
-
-                <!-- Option Info -->
-                <div class="flex flex-col items-start flex-1 min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span
-                      [class]="
-                        'font-medium text-xs ' +
-                        (option.value === effectiveEffort()
-                          ? option.textColor
-                          : '')
-                      "
-                      >{{ option.label }}</span
-                    >
-                    <!-- Mini level bars in dropdown -->
-                    <div class="flex items-end gap-px h-2.5">
-                      @for (bar of barSlots; track bar) {
-                        <div
-                          [class]="
-                            'w-[2px] rounded-[1px] ' +
-                            (bar < option.bars
-                              ? option.dotColor
-                              : 'bg-base-content/15')
-                          "
-                          [style.height.px]="3 + bar * 1.5"
-                        ></div>
-                      }
-                    </div>
-                  </div>
-                  <span class="text-[11px] mt-0.5 text-base-content-muted">
-                    {{ option.description }}
-                  </span>
-                </div>
-              </div>
-            </ptah-native-option>
-          }
-        </div>
-      </div>
-    </ptah-native-dropdown>
+    <ptah-composer-effort-picker
+      [selectedId]="effectiveEffort()"
+      (selected)="selectEffort($event)"
+    />
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class EffortSelectorComponent {
-  private readonly keyboardNav = inject(KeyboardNavigationService);
   private readonly effortState = inject(EffortStateService);
   private readonly tabManager = inject(TabManagerService);
   private readonly _sessionContext = inject(SESSION_CONTEXT, {
     optional: true,
   });
-
-  readonly ChevronDownIcon = ChevronDown;
-  readonly CheckIcon = Check;
-
-  readonly effortOptions = EFFORT_OPTIONS;
-  readonly barSlots = [0, 1, 2, 3, 4];
 
   /**
    * The tab this selector controls: the canvas tile's tab when present,
@@ -267,39 +69,14 @@ export class EffortSelectorComponent {
     );
   });
 
-  readonly selectedOption = computed(() => {
-    const value = this.effectiveEffort();
-    return EFFORT_OPTIONS.find((o) => o.value === value) ?? EFFORT_OPTIONS[0];
-  });
-
-  readonly selectedLabel = computed(() => {
-    return this.selectedOption().label;
-  });
-
   readonly effortChanged = output<EffortLevel | undefined>();
-
-  private readonly _isOpen = signal(false);
-  readonly isOpen = this._isOpen.asReadonly();
-
-  readonly activeIndex = this.keyboardNav.activeIndex;
-
-  toggleDropdown(): void {
-    this._isOpen.set(!this._isOpen());
-  }
-
-  closeDropdown(): void {
-    this._isOpen.set(false);
-  }
 
   /**
    * Select effort level for the session of this tab only. The choice is stored
    * on the tab. The send path applies it to the next turn of that session, so
    * other tabs and the global selection stay as they are.
    */
-  selectEffort(value: unknown): void {
-    const option = value as EffortOption;
-    this.closeDropdown();
-
+  selectEffort(option: Pick<ComposerEffortOption, 'value'>): void {
     const effortValue = option.value === '' ? undefined : option.value;
 
     this.effortChanged.emit(effortValue);
@@ -308,9 +85,5 @@ export class EffortSelectorComponent {
     if (tabId) {
       this.tabManager.setOverrideEffort(tabId, effortValue ?? null);
     }
-  }
-
-  onHover(index: number): void {
-    this.keyboardNav.setActiveIndex(index);
   }
 }

@@ -40,7 +40,11 @@ import {
 } from './cli-adapter.utils';
 import { probeCliStdout } from './cli-stdout-probe';
 import { grokAcpProfile } from '@ptah-extension/acp-runtime';
-import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
+import {
+  acpLaneManifestSections,
+  acpProfileEfforts,
+  createProviderSessionLaneHandle,
+} from './provider-session/provider-session-lane-handle';
 
 /** `grok models` must answer within this, or the model list is empty. */
 const GROK_MODELS_TIMEOUT_MS = 8000;
@@ -204,11 +208,19 @@ export class GrokCliAdapter implements CliAdapter {
       },
       limitReader: { state: 'available', source: 'grok' },
       mcp: { state: 'supported' },
+      // `commands.blocked` carries `grokAcpProfile.hiddenLaneCommands`
+      // (`always-approve`): refused on every path, hidden from the list (D18).
+      ...acpLaneManifestSections(grokAcpProfile, 'Grok exposes no native per-lane ask flag.'),
     };
   }
 
   parseOutput(raw: string): string {
     return stripAnsiCodes(raw);
+  }
+
+  /** The levels a live Grok lane serves for `model` (the profile mapping); no lane needed. */
+  laneEfforts(model?: string): readonly string[] {
+    return acpProfileEfforts(grokAcpProfile, model);
   }
 
   /** The models `grok models` lists; empty when the probe fails or prints something unrecognised. */

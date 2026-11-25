@@ -134,6 +134,11 @@ const CANDIDATES: readonly CandidateServer[] = [
   { id: 'todoist', label: 'Todoist', url: 'https://ai.todoist.net/mcp' },
   { id: 'trello', label: 'Trello', url: 'https://mcp.trello.com/v1' },
   { id: 'zernio', label: 'Zernio', url: 'https://mcp.zernio.com/mcp' },
+  {
+    id: 'higgsfield',
+    label: 'Higgsfield',
+    url: 'https://mcp.higgsfield.ai/mcp',
+  },
 
   // ── C1.2 — app-required candidates (research report section 4b) ────────────
   {
@@ -269,7 +274,10 @@ function messageOf(error: unknown): string {
 async function probe(candidate: CandidateServer): Promise<ProbeOutcome> {
   let authServer: string;
   try {
-    authServer = await discoverAuthorizationServer(candidate.url, liveFetch);
+    ({ authorizationServer: authServer } = await discoverAuthorizationServer(
+      candidate.url,
+      liveFetch,
+    ));
   } catch (error: unknown) {
     return {
       id: candidate.id,

@@ -85,14 +85,14 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         </h2>
       </header>
       <div
-        class="flex flex-1 min-h-0 flex-col overflow-y-auto py-2"
+        class="flex flex-1 min-h-0 flex-col py-2"
         data-testid="subagent-view-body"
       >
         @if (record(); as rec) {
-          <!-- flex-1 fills a short lane so the sticky composer sits at the
-               bottom; the lane's min-h-fit lets a long lane scroll. -->
+          <!-- The lane scrolls its own transcript and keeps its composer
+               below it, so no row scrolls under the composer (M4). -->
           <ptah-subagent-lane
-            class="flex-1"
+            class="min-h-0 flex-1"
             presentation="flat"
             [record]="rec"
             [sessionId]="rec.parentSessionId ?? null"
@@ -100,20 +100,22 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
             (permissionResponded)="onPermissionResponse($event)"
           />
         } @else {
-          <ptah-execution-node
-            [node]="fallbackHeader()"
-            [isStreaming]="isStreaming()"
-            [agentTileMode]="false"
-            [getPermissionForTool]="getPermissionForTool"
-            (permissionResponded)="onPermissionResponse($event)"
-          />
-          <ptah-lane-transcript
-            [laneId]="node().id"
-            [nodes]="node().children"
-            [isStreaming]="isStreaming()"
-            [getPermissionForTool]="getPermissionForTool"
-            (permissionResponded)="onPermissionResponse($event)"
-          />
+          <div class="min-h-0 flex-1 overflow-y-auto">
+            <ptah-execution-node
+              [node]="fallbackHeader()"
+              [isStreaming]="isStreaming()"
+              [agentTileMode]="false"
+              [getPermissionForTool]="getPermissionForTool"
+              (permissionResponded)="onPermissionResponse($event)"
+            />
+            <ptah-lane-transcript
+              [laneId]="node().id"
+              [nodes]="node().children"
+              [isStreaming]="isStreaming()"
+              [getPermissionForTool]="getPermissionForTool"
+              (permissionResponded)="onPermissionResponse($event)"
+            />
+          </div>
         }
       </div>
     </section>

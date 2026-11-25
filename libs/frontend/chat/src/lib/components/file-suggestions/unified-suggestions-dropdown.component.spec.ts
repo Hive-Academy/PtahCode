@@ -8,7 +8,10 @@ import {
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { File } from 'lucide-angular';
 import * as FloatingDom from '@floating-ui/dom';
-import { UnifiedSuggestionsDropdownComponent } from './unified-suggestions-dropdown.component';
+import {
+  UnifiedSuggestionsDropdownComponent,
+  type SuggestionGroup,
+} from './unified-suggestions-dropdown.component';
 import type { SuggestionItem } from './suggestion-option.component';
 
 jest.mock('@floating-ui/dom', () => {
@@ -65,6 +68,9 @@ function promptSuggestion(
     <ptah-unified-suggestions-dropdown
       [overlayOrigin]="overlayOrigin"
       [suggestions]="suggestions()"
+      [groups]="groups()"
+      [notice]="notice()"
+      [footer]="footer()"
       (suggestionSelected)="onSelected($event)"
     />
   `,
@@ -82,6 +88,9 @@ class HostComponent {
     fileSuggestion('/workspace/c.ts', 'c.ts'),
     fileSuggestion('/workspace/d.ts', 'd.ts'),
   ]);
+  readonly groups = signal<readonly SuggestionGroup[] | null>(null);
+  readonly notice = signal<string | null>(null);
+  readonly footer = signal<string | null>(null);
   readonly selectedItems: SuggestionItem[] = [];
 
   onSelected(item: SuggestionItem): void {
@@ -110,6 +119,16 @@ describe('UnifiedSuggestionsDropdownComponent', () => {
     });
 
     fixture.detectChanges();
+  });
+
+  it('shows a footer line only when one is given', () => {
+    const panel = fixture.nativeElement as HTMLElement;
+    expect(panel.querySelector('[data-testid="suggestions-footer"]')).toBeNull();
+    host.footer.set('Chosen files are sent as file references.');
+    fixture.detectChanges();
+    expect(panel.querySelector('[data-testid="suggestions-footer"]')?.textContent?.trim()).toBe(
+      'Chosen files are sent as file references.',
+    );
   });
 
   it('gives file, command and prompt suggestions a dense overlay surface', () => {
@@ -180,6 +199,79 @@ describe('UnifiedSuggestionsDropdownComponent', () => {
       expect(host.selectedItems).toEqual([
         promptSuggestion('Security vulnerability scan', 'Review'),
       ]);
+    });
+  });
+
+  describe('groups and notice rows (lane slash list)', () => {
+    const enter = () => new KeyboardEvent('keydown', { key: 'Enter' });
+
+    it('renders a header per group and a non-selectable notice for an empty one', () => {
+      host.groups.set([
+        { label: 'Commands', items: [commandSuggestion('review')] },
+        { label: 'Skills', items: [], notice: 'No skills in Codex lanes.' },
+      ]);
+      fixture.detectChanges();
+
+      const panel = fixture.nativeElement as HTMLElement;
+      const headers = Array.from(
+        panel.querySelectorAll('[role="presentation"]'),
+      ).map((el) => el.textContent?.trim());
+      expect(headers).toEqual(['Commands', 'Skills']);
+      const notice = panel.querySelector('[data-testid="suggestion-notice"]');
+      expect(notice?.getAttribute('role')).toBe('option');
+      expect(notice?.getAttribute('aria-disabled')).toBe('true');
+      expect(notice?.textContent).toContain('No skills in Codex lanes.');
+      expect(panel.querySelectorAll('ptah-suggestion-option').length).toBe(1);
+      expect(panel.textContent).toContain('Commands & Skills');
+
+      host.dropdown.onKeyDown(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+      host.dropdown.onKeyDown(enter());
+      expect(host.selectedItems).toEqual([commandSuggestion('review')]);
+    });
+
+    it('keys a command listed in two groups once per group', () => {
+      host.groups.set([
+        { label: 'Commands', items: [commandSuggestion('review')] },
+        { label: 'Skills', items: [commandSuggestion('review')] },
+      ]);
+      fixture.detectChanges();
+
+      const keys = host.dropdown.rows().map((row) => row.key);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(
+          'ptah-suggestion-option',
+        ).length,
+      ).toBe(2);
+    });
+
+    it('leaves out a group with no items and no notice', () => {
+      host.groups.set([
+        { label: 'Commands', items: [] },
+        { label: 'Skills', items: [commandSuggestion('plan')] },
+      ]);
+      fixture.detectChanges();
+      const headers = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(
+          '[role="presentation"]',
+        ),
+      ).map((el) => el.textContent?.trim());
+      expect(headers).toEqual(['Skills']);
+    });
+
+    it('shows only the notice row and selects nothing on Enter', () => {
+      host.notice.set('Codex lanes take no slash commands or skills.');
+      fixture.detectChanges();
+
+      const panel = fixture.nativeElement as HTMLElement;
+      expect(panel.querySelectorAll('ptah-suggestion-option').length).toBe(0);
+      const rows = panel.querySelectorAll('[data-testid="suggestion-notice"]');
+      expect(rows.length).toBe(1);
+      expect(rows[0]?.textContent).toContain(
+        'Codex lanes take no slash commands or skills.',
+      );
+      expect(host.dropdown.onKeyDown(enter())).toBe(true);
+      expect(host.selectedItems).toEqual([]);
     });
   });
 });

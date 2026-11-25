@@ -24,7 +24,9 @@ describe('composer visual regressions', () => {
     expect(active).toContain('background: oklch(var(--p));');
     expect(active).toContain('color: oklch(var(--pc));');
     expect(block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active \.opacity-70/)).toContain('opacity: 1;');
-    const badge = block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active \.badge\.badge/);
+    // The row's badges are ptahBadge spans: the selector must reach them (S5).
+    expect(option).toContain('ptahBadge');
+    const badge = block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active :is\(\.badge\.badge, \[data-ptah-badge\]\)/);
     expect(badge).toContain('background: oklch(var(--pc));');
     expect(badge).toContain('color: oklch(var(--p));');
   });
@@ -120,8 +122,8 @@ describe('glass local scrim floors', () => {
   });
 
   it('marks the composer attachment menu as an overlay without changing the shared native popover', () => {
-    const source = readFileSync(join(__dirname, '../../../../libs/frontend/chat/src/lib/components/molecules/chat-input/chat-input.component.ts'), 'utf8');
-    expect(source).toMatch(/<div content data-glass-surface="overlay" data-composer-overlay[^>]*role="menu"/);
+    const source = readFileSync(join(__dirname, '../../../../libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-attach-menu.component.ts'), 'utf8');
+    expect(source).toMatch(/<div\s+content\s+data-glass-surface="overlay"\s+data-composer-overlay[^>]*role="menu"/);
   });
 
   it('keeps composer overlays dense and respects opaque accessibility modes', () => {

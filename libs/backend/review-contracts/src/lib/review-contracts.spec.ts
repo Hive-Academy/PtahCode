@@ -6,7 +6,10 @@ import {
   RepoReviewConfigV1Schema,
   ReviewRpcSchemas,
   ReviewFindingSchema,
+  REVIEW_STAGE_USAGE_RUNS_MAX,
   ReviewRunSchema,
+  ReviewUsageTotalSchema,
+  StageRecordSchema,
   VerifierVerdictSchema,
 } from '../index';
 
@@ -303,5 +306,74 @@ describe('review lane RPC contracts', () => {
     expect(schema.result.safeParse(listing).success).toBe(true);
     expect(schema.result.safeParse({ ...listing, extra: 1 }).success).toBe(false);
     expect(schema.result.safeParse({ ...listing, lanes: [{ ...listing.lanes[0], limitState: 'busy' }] }).success).toBe(false);
+  });
+});
+
+describe('review usage totals', () => {
+  const total = {
+    inputTokens: 1200,
+    outputTokens: 300,
+    cacheReadTokens: 50,
+    cacheWriteTokens: 0,
+    totalTokens: 1550,
+    costUsd: 0.0123,
+    tokensPartial: false,
+    costPartial: true,
+    runs: 3,
+  };
+  const stage = { name: 'lenses', status: 'succeeded', family: null, scope: null, durationMs: 10, error: null, artifactPath: null };
+  const run = {
+    repo: { owner: 'octo', name: 'repo' },
+    prNumber: 7,
+    headSha: sha,
+    attemptId: 'attempt-1',
+    trigger: 'manual',
+    configHash: null,
+    status: 'succeeded',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    startedAt: null,
+    completedAt: null,
+    deadlineAt: null,
+    coverage: [],
+    stages: [stage],
+  };
+
+  it('keeps the per-document run bound at 16', () => {
+    expect(REVIEW_STAGE_USAGE_RUNS_MAX).toBe(16);
+  });
+
+  it('accepts known, unknown and large run totals', () => {
+    expect(ReviewUsageTotalSchema.parse(total)).toEqual(total);
+    const unknown = { ...total, inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null, costUsd: null };
+    expect(ReviewUsageTotalSchema.safeParse(unknown).success).toBe(true);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, runs: 10_000 }).success).toBe(true);
+  });
+
+  it('rejects negative cost, non-integer or unsafe tokens and unknown keys', () => {
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, costUsd: -1 }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, costUsd: Number.POSITIVE_INFINITY }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, inputTokens: 1.5 }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, outputTokens: -1 }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, totalTokens: Number.MAX_SAFE_INTEGER + 1 }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, runs: 1.5 }).success).toBe(false);
+    expect(ReviewUsageTotalSchema.safeParse({ ...total, extra: 1 }).success).toBe(false);
+    const { costPartial: _omitted, ...missing } = total;
+    expect(ReviewUsageTotalSchema.safeParse(missing).success).toBe(false);
+  });
+
+  it('parses old stage records and runs without usage', () => {
+    expect(StageRecordSchema.parse(stage)).toEqual(stage);
+    expect(ReviewRunSchema.parse(run)).toEqual(run);
+  });
+
+  it('parses stage and run usage, and accepts null', () => {
+    const withUsage = { ...run, usage: total, stages: [{ ...stage, usage: total }] };
+    expect(ReviewRunSchema.parse(withUsage)).toEqual(withUsage);
+    expect(ReviewRunSchema.safeParse({ ...run, usage: null, stages: [{ ...stage, usage: null }] }).success).toBe(true);
+  });
+
+  it('rejects a run or stage with a malformed usage total', () => {
+    expect(ReviewRunSchema.safeParse({ ...run, usage: { ...total, costUsd: -1 } }).success).toBe(false);
+    expect(StageRecordSchema.safeParse({ ...stage, usage: { ...total, inputTokens: 2.5 } }).success).toBe(false);
   });
 });

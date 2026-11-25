@@ -50,7 +50,9 @@ const STALE_TEMP_FILE_AGE_MS = 10 * 60 * 1000;
 const ROUTING_KEYS = new Set([
   'agentOrchestration.hostRouting',
   'agentOrchestration.decisionModel',
+  'agentOrchestration.decisionModelPrefillTokensPerSecond',
   'agentOrchestration.laneRotation',
+  'agentOrchestration.routingRules',
 ]);
 
 /**

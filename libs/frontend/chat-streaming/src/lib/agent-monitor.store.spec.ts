@@ -180,6 +180,79 @@ describe('AgentMonitorStore', () => {
     });
   });
 
+  describe('lane turn settings on the record (TASK_2026_2320_lnpar)', () => {
+    const lane = (agentId: string): AgentProcessInfo => ({
+      agentId: agentId as AgentId,
+      cli: 'codex',
+      task: 'Work',
+      workingDirectory: '/workspace/root',
+      startedAt: '2026-10-01T10:00:00.000Z',
+      status: 'running',
+      model: 'gpt-5',
+    });
+
+    it('copies reasoningEffort and observedModel from a fresh spawn', () => {
+      store.onAgentSpawned({ ...lane('lane'), reasoningEffort: 'high', observedModel: 'gpt-5.1' });
+      expect(store.agents()[0]).toMatchObject({
+        model: 'gpt-5',
+        reasoningEffort: 'high',
+        observedModel: 'gpt-5.1',
+      });
+    });
+
+    it('leaves both fields undefined when the record has none', () => {
+      store.onAgentSpawned(lane('lane'));
+      expect(store.agents()[0].reasoningEffort).toBeUndefined();
+      expect(store.agents()[0].observedModel).toBeUndefined();
+    });
+
+    it('takes new values on a same-id re-spawn and keeps known ones when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 1, reasoningEffort: 'low', observedModel: 'a' });
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 2, reasoningEffort: 'high' });
+      expect(store.agents()[0]).toMatchObject({ reasoningEffort: 'high', observedModel: 'a' });
+    });
+
+    it('takes the model a continued turn publishes and keeps it when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 1, model: 'gpt-5.4' });
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 2, model: 'gpt-5.5' });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 3, model: undefined });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+    });
+
+    it('takes the values an exit payload carries and keeps known ones when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), reasoningEffort: 'low' });
+      store.onAgentExited({ ...lane('lane'), status: 'completed', observedModel: 'gpt-5.1' });
+      expect(store.agents()[0]).toMatchObject({
+        status: 'completed',
+        reasoningEffort: 'low',
+        observedModel: 'gpt-5.1',
+      });
+    });
+
+    it('copies both fields onto a replacement card', () => {
+      store.onAgentSpawned({ ...lane('old'), cliSessionId: 'thread', parentSessionId: 'owner' });
+      store.onAgentExited({
+        ...lane('old'),
+        status: 'completed',
+        cliSessionId: 'thread',
+        parentSessionId: 'owner',
+      });
+      store.onAgentSpawned({
+        ...lane('new'),
+        cliSessionId: 'thread',
+        reasoningEffort: 'medium',
+        observedModel: 'gpt-5.1',
+      });
+      expect(store.agents()).toHaveLength(1);
+      expect(store.agents()[0]).toMatchObject({
+        agentId: 'new',
+        reasoningEffort: 'medium',
+        observedModel: 'gpt-5.1',
+      });
+    });
+  });
+
   describe('CLI turn and resume lifecycle', () => {
     const info = (
       agentId: string,
@@ -2543,14 +2616,6 @@ describe('AgentMonitorStore', () => {
       expect(ok).toBe(true);
     });
 
-    it('interruptSession dispatches subagent:interrupt for the active session', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcSuccess({ ok: true } as const));
-      await store.interruptSession();
-      expect(rpcMock.call).toHaveBeenCalledWith('subagent:interrupt', {
-        sessionId: SESSION,
-      });
-    });
-
     it('sendMessageToAgent fails fast when there is no active session', async () => {
       mockActiveTab.set(null);
       await store.sendMessageToAgent(PARENT, 'hello');
@@ -2564,44 +2629,6 @@ describe('AgentMonitorStore', () => {
       await store.stopAgent(TASK);
       const after = store.subagents().get(PARENT)?.status;
       expect(after).toBe(before); // unchanged — waits for agent_completed
-    });
-  });
-
-  describe('continueAgent', () => {
-    it('calls agent:continue with agentId + message and maps success', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcSuccess({ success: true }));
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(rpcMock.call).toHaveBeenCalledWith('agent:continue', {
-        agentId: 'agent-1',
-        message: 'do more',
-      });
-      expect(result).toEqual({ ok: true, code: undefined });
-    });
-
-    it('reports a refusal as ok=false, carrying its typed code', async () => {
-      // The handler answers a refusal as a transport SUCCESS whose payload says
-      // `success: false`. Reading only the envelope reports every refusal as a
-      // sent message, and the caller clears the user's draft over a follow-up
-      // that never reached the agent.
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: false, code: 'busy' }),
-      );
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe('busy');
-    });
-
-    it('reports ok=false when the RPC itself fails', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcError<unknown>('boom'));
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(result.ok).toBe(false);
-      expect(result.code).toBeUndefined();
     });
   });
 
@@ -3203,59 +3230,6 @@ describe('AgentMonitorStore', () => {
 
       expect(card('live-no-turn')?.usageTotals).toBeNull();
       expect(card('live-no-turn')?.model).toBeUndefined();
-    });
-  });
-
-  describe('resumeAgentWithMessage', () => {
-    const expired = {
-      agentId: 'agent-x',
-      cli: 'codex' as const,
-      task: 'the original task',
-      cliSessionId: 'session-9',
-      parentSessionId: 'parent-1',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    it('resumes the session with the follow-up as the run task', async () => {
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: true, agentId: 'agent-y' }),
-      );
-
-      const result = await store.resumeAgentWithMessage(expired, 'do more');
-
-      expect(rpcMock.call).toHaveBeenCalledWith('agent:resumeCliSession', {
-        cliSessionId: 'session-9',
-        cli: 'codex',
-        // The follow-up IS the resumed run's task — history comes from the
-        // session id, not from re-sending the original prompt.
-        task: 'do more',
-        parentSessionId: 'parent-1',
-        ptahCliId: undefined,
-        previousAgentId: 'agent-x',
-      });
-      expect(result.ok).toBe(true);
-    });
-
-    it('refuses without a session id rather than spawning a contextless agent', async () => {
-      const result = await store.resumeAgentWithMessage(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { ...expired, cliSessionId: undefined } as any,
-        'do more',
-      );
-
-      expect(rpcMock.call).not.toHaveBeenCalled();
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('no session to resume');
-    });
-
-    it('surfaces a handler-level failure verbatim', async () => {
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: false, error: 'no such session file' }),
-      );
-
-      const result = await store.resumeAgentWithMessage(expired, 'do more');
-
-      expect(result).toEqual({ ok: false, error: 'no such session file' });
     });
   });
 

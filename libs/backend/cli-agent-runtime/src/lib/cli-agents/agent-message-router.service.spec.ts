@@ -804,3 +804,138 @@ describe('AgentMessageRouter pause hold', () => {
     expect(outcome.detail ?? '').not.toContain('paused new work');
   });
 });
+
+describe('AgentMessageRouter turn input and raw body', () => {
+  const turn = { model: 'gpt-5', files: ['src/a.ts'] };
+  const rawBody = '/compact';
+  const continuable = (): MessageRoutableAgent => {
+    const tracked = createRecord();
+    tracked.sdkHandle = { supportsContinuation: () => true, continue: jest.fn() } as unknown as SdkHandle;
+    return tracked;
+  };
+
+  it('keeps turn and rawBody on a parked entry and passes both at flush', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    const dispatcher = createDispatcher();
+    const queued = await router.route(AGENT_ID, tracked, '[Ptah message] /compact', dispatcher, 'queue', 'env-1', false, { turn, rawBody });
+    expect(queued.mode).toBe('queue-next-turn');
+    expect(tracked.pendingMessages[0]).toMatchObject({ turn, rawBody, journaled: true });
+    tracked.info = { ...tracked.info, status: 'completed' };
+    await router.flushPending(AGENT_ID, tracked, dispatcher);
+    expect(dispatcher.continueConversation).toHaveBeenCalledWith(AGENT_ID, '[Ptah message] /compact', 'env-1', turn, rawBody);
+  });
+
+  it('passes turn and rawBody on interrupt-resume', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    tracked.sdkHandle = { ...tracked.sdkHandle, supportsInterrupt: () => true,
+      interrupt: async () => { tracked.info = { ...tracked.info, status: 'completed' }; },
+    } as SdkHandle;
+    const dispatcher = createDispatcher();
+    const outcome = await router.route(AGENT_ID, tracked, 'formatted', dispatcher, 'now', 'env-2', true, { turn, rawBody });
+    expect(outcome.mode).toBe('interrupt-resume');
+    expect(dispatcher.continueConversation).toHaveBeenCalledWith(AGENT_ID, 'formatted', undefined, turn, rawBody);
+  });
+
+  it('refuses a settings change before interrupting, leaving the running turn alone (M4)', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    const interrupt = jest.fn();
+    tracked.sdkHandle = { ...tracked.sdkHandle, supportsInterrupt: () => true, interrupt } as SdkHandle;
+    const refusal = Object.assign(new Error('Codex did not accept the model gpt-x.'), { code: 'turn-options-refused' });
+    refusal.name = 'AgentContinueError';
+    const dispatcher = {
+      ...createDispatcher(),
+      prepareInterruptTurn: jest.fn().mockRejectedValue(refusal),
+    };
+    const outcome = await router.route(AGENT_ID, tracked, 'formatted', dispatcher, 'now', 'env-3', true, { turn, rawBody });
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-options-refused', detail: 'Codex did not accept the model gpt-x.',
+    });
+    expect(dispatcher.prepareInterruptTurn).toHaveBeenCalledWith(AGENT_ID, 'formatted', turn, rawBody);
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+  });
+
+  it('passes images and files as steer content, and text-only steers keep one argument', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    const steer = jest.fn().mockResolvedValue(undefined);
+    tracked.sdkHandle = { ...tracked.sdkHandle, steer } as SdkHandle;
+    const image = { data: 'aGk=', mediaType: 'image/png' };
+    await router.route(AGENT_ID, tracked, 'look', createDispatcher(), 'now', undefined, false, { turn: { images: [image] } });
+    expect(steer).toHaveBeenCalledWith('look', { images: [image] });
+    await router.route(AGENT_ID, tracked, 'plain', createDispatcher(), 'now');
+    expect(steer).toHaveBeenLastCalledWith('plain');
+  });
+
+  it('hides steer when the handle reports supportsSteer false (shared resolver)', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    tracked.sdkHandle = { ...tracked.sdkHandle, steer: jest.fn(), supportsSteer: () => false } as SdkHandle;
+    const outcome = await router.route(AGENT_ID, tracked, 'now please', createDispatcher(), 'steer');
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'steer-unavailable' });
+  });
+
+  describe('user echo (L2/M5)', () => {
+    const echoDispatcher = (impl?: () => Promise<void>) => {
+      const dispatcher = createDispatcher(impl) as jest.Mocked<ContinuationDispatcher> & { recordAgentNote: jest.Mock };
+      dispatcher.recordAgentNote = jest.fn();
+      return dispatcher;
+    };
+    const idleRecord = (): MessageRoutableAgent => createRecord({
+      info: { ...createRecord().info, status: 'completed' },
+      sdkHandle: { supportsContinuation: () => true, continue: jest.fn() } as unknown as SdkHandle,
+    });
+
+    it('echoes the body of a delivered new turn as a user segment', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, idleRecord(), '[Ptah message m1 from the user] hello', dispatcher,
+        'queue', undefined, false, { rawBody: 'hello', echo: 'hello' });
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        { type: 'user', content: 'hello', sentAt: expect.any(Number) });
+    });
+
+    it('echoes nothing without an echo body, or when the turn was not delivered', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, idleRecord(), 'from parent', dispatcher);
+      const failing = echoDispatcher(() => Promise.reject(new Error('busy')));
+      await router.route(AGENT_ID, idleRecord(), 'x', failing, 'queue', undefined, false, { echo: 'x' });
+      expect(dispatcher.recordAgentNote).not.toHaveBeenCalled();
+      expect(failing.recordAgentNote).not.toHaveBeenCalled();
+    });
+
+    it('echoes a queued message when the flush delivers it, not when it is parked', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const tracked = createRecord({
+        sdkHandle: { supportsContinuation: () => true, continue: jest.fn() } as unknown as SdkHandle,
+      });
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, tracked, 'queued text', dispatcher, 'queue', undefined, false, { echo: 'queued' });
+      expect(dispatcher.recordAgentNote).not.toHaveBeenCalled();
+      tracked.info = { ...tracked.info, status: 'completed' };
+      await router.flushPending(AGENT_ID, tracked, dispatcher);
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        expect.objectContaining({ type: 'user', content: 'queued' }));
+    });
+
+    it('echoes an interrupt-and-send once the message is re-submitted', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const tracked = createRecord();
+      tracked.sdkHandle = {
+        supportsInterrupt: () => true,
+        interrupt: jest.fn(async () => { tracked.info = { ...tracked.info, status: 'completed' }; }),
+        supportsContinuation: () => true,
+        continue: jest.fn(),
+      } as unknown as SdkHandle;
+      const dispatcher = echoDispatcher();
+      const outcome = await router.route(AGENT_ID, tracked, 'redirect', dispatcher, 'now', undefined, true, { echo: 'redirect' });
+      expect(outcome.mode).toBe('interrupt-resume');
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        expect.objectContaining({ type: 'user', content: 'redirect' }));
+    });
+  });
+});

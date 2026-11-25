@@ -112,6 +112,15 @@ export interface InternalQueryConfig {
    * prompt asks for.
    */
   toolAccess?: OneShotToolAccess;
+
+  /**
+   * `true` lets the run call the user's own MCP servers (connectors, intents,
+   * file-declared servers) that `ptah` serves. The run is unattended, so no
+   * one is asked before such a call; only a caller that opted in on the
+   * user's behalf (a cron job) sets it. Omitted: no gateway tool is listed or
+   * callable.
+   */
+  includeConnectors?: boolean;
 }
 
 /**

@@ -324,23 +324,6 @@ describe('ClaudeRpcService — typed method wrappers', () => {
     await pending;
   });
 
-  it('interruptSubagentSession posts subagent:interrupt with sessionId', async () => {
-    const pending = service.interruptSubagentSession(
-      'sess-1' as Parameters<typeof service.interruptSubagentSession>[0],
-    );
-    const sent = lastPostedRpc(postMessage);
-
-    expect(sent.payload.method).toBe('subagent:interrupt');
-    expect(sent.payload.params).toEqual({ sessionId: 'sess-1' });
-
-    service.handleResponse({
-      success: true,
-      data: { interrupted: true },
-      correlationId: sent.payload.correlationId,
-    });
-    await pending;
-  });
-
   it('RpcResult.isSuccess() returns false when data is undefined even with success=true', () => {
     // Edge case: success=true but no data
     const result = new RpcResult(true, undefined, undefined);

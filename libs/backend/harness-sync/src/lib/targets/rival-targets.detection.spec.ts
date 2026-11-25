@@ -170,7 +170,8 @@ describe('rival targets — detection gating (E17)', () => {
     expect(byId.get('codex')?.facets.commands).toBe('unsupported');
     expect(byId.get('codex')?.facets.skills).toBe('supported');
     expect(byId.get('antigravity')?.facets.agents).toBe('unsupported');
-    expect(byId.get('vscode')?.facets.skills).toBe('unsupported');
-    expect(byId.get('vscode')?.facets.mcp).toBe('supported');
+    expect(byId.get('codex')?.facets.mcp).toBe('unsupported');
+    // The MCP-only VS Code target is gone (TASK_2026_979, decision row 10).
+    expect(byId.has('vscode')).toBe(false);
   });
 });

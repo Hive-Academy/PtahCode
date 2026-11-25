@@ -1,4 +1,4 @@
-import { ReviewFindingSchema } from '@ptah-extension/review-contracts';
+import { ReviewFindingSchema, type ReviewUsageTotal } from '@ptah-extension/review-contracts';
 import { renderInline, renderSummary } from './review-markdown.renderer';
 
 const sha = 'a'.repeat(40);
@@ -70,5 +70,36 @@ describe('review Markdown renderer', () => {
       [{ findingId: 'f1', finding, body: '' }], 0, []);
     expect(body).toContain('| correctness\\-lifecycle | codex | 0 | 1 | 0 | 0 | completed |');
     expect(body).toContain('Usage: unavailable');
+  });
+
+  describe('usage line', () => {
+    const total: ReviewUsageTotal = { inputTokens: 1000, outputTokens: 200, cacheReadTokens: 30, cacheWriteTokens: 4,
+      totalTokens: 1234, costUsd: null, tokensPartial: false, costPartial: true, runs: 3 };
+    const summary = (usage: ReviewUsageTotal | null) => renderSummary(sha, [], [], 0, [], value => value, usage);
+
+    it('shows the exact token total without a lower bound when tokens are known and costs unknown (5.1)', () => {
+      expect(summary(total)).toContain('\nUsage: 1,234 tokens (input 1,000 · output 200 · cache read 30 · cache write 4)\n');
+      expect(summary(total)).not.toContain('≥');
+    });
+
+    it('marks partial tokens as a lower bound and lists only known split entries', () => {
+      const line = summary({ ...total, tokensPartial: true, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: 1200 });
+      expect(line).toContain('\nUsage: ≥ 1,200 tokens (input 1,000 · output 200)\n');
+    });
+
+    it('never shows a known cost (5.3)', () => {
+      const body = summary({ ...total, costUsd: 12.75, costPartial: false });
+      expect(body).toContain('Usage: 1,234 tokens');
+      expect(body).not.toMatch(/\$|USD|12\.75|12,75/);
+    });
+
+    it('shows unavailable without usage or without a token total (5.2)', () => {
+      expect(summary(null)).toContain('\nUsage: unavailable\n');
+      expect(summary({ ...total, totalTokens: null, tokensPartial: true })).toContain('\nUsage: unavailable\n');
+    });
+
+    it('renders the same input to an identical string (5.4)', () => {
+      expect(summary(total)).toBe(summary({ ...total }));
+    });
   });
 });

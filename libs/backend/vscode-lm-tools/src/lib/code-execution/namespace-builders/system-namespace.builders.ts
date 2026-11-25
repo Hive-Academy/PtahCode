@@ -287,7 +287,10 @@ DISCOVERY:
     Smithery API key is configured). Returns { servers, count, status, sources,
     next_cursor? }. 'limit' bounds the MERGED list, drawn round-robin so neither
     source starves the other.
-- listInstalledMcpServers() - Servers already in .vscode/mcp.json and .mcp.json.
+- listInstalledMcpServers() - Servers in .vscode/mcp.json and .mcp.json, plus
+    those installed through Ptah (served by the gateway, in no config file).
+    Each row has { name, config, source, targets? }; source is the file or
+    'ptah-intent (global|workspace|main checkout)'.
 
 READING A SEARCH RESULT — three states, not two:
   status 'ok'       + empty list -> the catalogue genuinely has nothing.
@@ -323,8 +326,9 @@ HANDING BACK TO THE USER:
     enabledTools) is still refused — the container shape is negotiable, the
     key is not.
 
-- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Writes a
-    transport config to the target files. Defaults to ['claude','vscode'] and
+- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Records
+    the server for the targets; Ptah serves it through its own MCP server and
+    writes no config file. Defaults to ['claude','vscode'] and
     scope 'workspace'; scope 'user' installs for every workspace and is required
     for codex/copilot/antigravity. The result includes the scope.`,
 

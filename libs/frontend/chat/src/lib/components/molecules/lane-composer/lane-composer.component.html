@@ -1,0 +1,271 @@
+<div
+  #composerRoot
+  class="ptah-composer relative flex flex-col min-w-0"
+  data-testid="lane-composer"
+  (keydown)="onRootKeydown($event)"
+  (paste)="onRootPaste($event)"
+  (dragover)="handleDragOver($event)"
+  (dragleave)="composerInput.handleDragLeave($event)"
+  (drop)="composerInput.handleDrop($event)"
+>
+  <!-- While the turn-loss dialog is open, only the dialog takes input. -->
+  <ptah-queued-message-list
+    [attr.inert]="confirmLoss() ? '' : null"
+    [items]="queuedItems()"
+    [sendNowAction]="sendNowAction()"
+    (withdraw)="withdraw($event)"
+    (sendNow)="requestQueuedNow($event)"
+  />
+
+  <!-- Image validation errors (auto-clear), as main chat shows them. -->
+  <ptah-attachment-tray [showPickButtons]="false" [showChips]="false" />
+
+  @if (confirmLoss()) {
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      [attr.aria-labelledby]="lossTitleId"
+      [attr.aria-describedby]="lossTextId"
+      class="absolute bottom-full left-0 right-0 z-30 mb-1 rounded-xl border border-warning bg-base-100 p-2.5 text-xs shadow-lg"
+      (keydown.tab)="trapDialog($event)"
+      (keydown.shift.tab)="trapDialog($event)"
+      (keydown.escape)="closeLoss()"
+    >
+      <p class="flex items-center gap-1.5 font-semibold" [id]="lossTitleId">
+        <lucide-angular [img]="WarnIcon" class="w-3.5 h-3.5 text-warning flex-shrink-0" aria-hidden="true" />
+        Interrupt this turn?
+      </p>
+      <p class="mt-1" [id]="lossTextId">{{ lossText() }}</p>
+      <div class="mt-2 flex justify-end gap-[var(--ptah-gap-controls)]">
+        <button #confirmButton type="button" class="btn btn-warning btn-xs" (click)="confirmNow()">
+          {{ sendNowAction().label }}
+        </button>
+        <button #cancelButton type="button" ptahButton variant="ghost" size="xs" (click)="closeLoss()">
+          Keep current turn
+        </button>
+      </div>
+    </div>
+  }
+
+  <div
+    class="ptah-composer-stage"
+    [attr.data-compact]="isCompact() ? '' : null"
+    [attr.inert]="confirmLoss() ? '' : null"
+  >
+    <div class="ptah-composer-fold ptah-composer-fold--full">
+      <div
+        class="ptah-composer-fold-clip"
+        [class.is-unclipped]="compactStore.unclipped()"
+        [id]="fullId"
+        [attr.inert]="isCompact() ? '' : null"
+        ptahComposerActivity
+      >
+        <div [class]="cardClass" data-glass-surface="tile">
+          @if (composerInput.dragging()) {
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 border border-dashed border-primary rounded-xl pointer-events-none">
+              <div class="flex items-center gap-2 text-primary text-sm font-medium">
+                <lucide-angular [img]="ImageIconRef" class="w-5 h-5" aria-hidden="true" />
+                <span>Drop image here</span>
+              </div>
+            </div>
+          }
+
+          <ptah-attachment-tray [showPickButtons]="false" [showError]="false" [imagesBlocked]="imagesBlocked()" />
+
+          <div class="relative">
+            <label class="sr-only" [for]="fieldId">Message {{ laneLabel() }}</label>
+            <textarea
+              #inputElement
+              dir="auto"
+              rows="2"
+              [id]="fieldId"
+              style="field-sizing: content"
+              [class]="textareaClass"
+              [value]="draft()"
+              [readonly]="confirmLoss()"
+              [placeholder]="placeholder()"
+              role="combobox"
+              aria-autocomplete="list"
+              [attr.aria-expanded]="composerInput.showSuggestions()"
+              [attr.aria-controls]="composerInput.getListboxId()"
+              [attr.aria-activedescendant]="composerInput.getActiveDescendantId()"
+              (focus)="delivery.refreshPreviews()"
+              (input)="onInput($event)"
+              (keydown)="onKeydown($event)"
+              (paste)="composerInput.handlePaste($event)"
+              ptahAtTrigger
+              (atActivated)="composerInput.handleAtActivated($event)"
+              (atTriggered)="composerInput.handleAtTriggered($event)"
+              (atClosed)="composerInput.handleAtClosed()"
+              (atQueryChanged)="composerInput.handleQueryChanged($event)"
+              ptahSlashTrigger
+              (slashActivated)="composerInput.handleSlashActivated($event)"
+              (slashTriggered)="composerInput.handleSlashTriggered()"
+              (slashClosed)="composerInput.handleSlashClosed()"
+              (slashQueryChanged)="composerInput.handleQueryChanged($event)"
+            ></textarea>
+
+            @if (composerInput.showSuggestions() && textareaOrigin() && compactStore.unclipped()) {
+              <ptah-unified-suggestions-dropdown
+                #suggestionsDropdown
+                [overlayOrigin]="textareaOrigin()!"
+                [suggestions]="composerInput.filteredSuggestions()"
+                [groups]="composerInput.suggestionGroups()"
+                [notice]="composerInput.suggestionNotice()"
+                [isLoading]="composerInput.isLoadingSuggestions()"
+                [errorMessage]="composerInput.filePickerError()"
+                [footer]="composerInput.suggestionMode() === 'at-trigger' ? fileFooter() : null"
+                (suggestionSelected)="onSuggestionSelected($event)"
+                (closed)="composerInput.closeSuggestions()"
+              />
+            }
+          </div>
+
+          <!-- Main chat's toolbar order: + -> approval | model / effort -> mic -> Stop or Resume -> Send -->
+          <div class="ptah-composer-toolbar flex items-center gap-1 px-2 pr-2.5 pb-2 min-w-0">
+            <div class="ptah-composer-toolbar-start flex items-center gap-1 min-w-0 flex-1">
+              <ptah-composer-attach-menu
+                (pickFiles)="pickFiles()"
+                (pickImages)="attachments.pickImages()"
+              />
+              <ptah-lane-approval-chip
+                class="min-w-0"
+                [label]="approvalLabel()"
+                [reason]="approvalReason()"
+                [pending]="checking()"
+                (reasonRevealed)="revealedReason.set($event)"
+                (reasonCleared)="revealedReason.set(null)"
+              />
+            </div>
+
+            <div class="ptah-composer-toolbar-end flex items-center gap-1 min-w-0 flex-shrink">
+              <div
+                role="group"
+                aria-label="Model and effort"
+                class="inline-flex items-center h-7 min-w-0 rounded-md text-xs text-base-content-muted"
+              >
+                <ptah-composer-model-picker
+                  class="min-w-0"
+                  [options]="modelOptions()"
+                  [selectedId]="selectedModel()"
+                  [emptyLabel]="modelEmptyLabel()"
+                  [loading]="catalog().status === 'loading'"
+                  [loaded]="catalog().status === 'ready'"
+                  [pending]="pending().model !== undefined"
+                  [footer]="settingFooter()"
+                  [disabledReason]="modelReason()"
+                  (selected)="pickModel($event)"
+                  (opened)="loadCatalog()"
+                  (reasonRevealed)="revealedReason.set($event)"
+                  (reasonCleared)="revealedReason.set(null)"
+                />
+                <span class="px-0.5" aria-hidden="true">·</span>
+                <ptah-composer-effort-picker
+                  class="min-w-0 flex-shrink-0"
+                  [options]="effortOptions()"
+                  [selectedId]="selectedEffort()"
+                  [pending]="pending().reasoningEffort !== undefined"
+                  [footer]="settingFooter()"
+                  [disabledReason]="effortReason()"
+                  (selected)="pickEffort($event)"
+                  (reasonRevealed)="revealedReason.set($event)"
+                  (reasonCleared)="revealedReason.set(null)"
+                />
+              </div>
+
+              <ptah-composer-voice-button
+                (transcript)="composerInput.insertTranscript($event)"
+                (failed)="composerInput.showError($event)"
+              />
+
+              <!-- One Stop at a time: on the compact bar while folded. -->
+              @if (showLaneControls() && !isCompact()) {
+                @if (laneActive()) {
+                  <button type="button" [class]="stopButtonClass" aria-label="Stop generating" title="Stop generating"
+                    data-testid="lane-stop-btn" [disabled]="stopPending()" (click)="stopRequested.emit($event)">
+                    @if (stopPending()) { <span class="loading loading-spinner loading-xs" aria-hidden="true"></span> }
+                    @else { <lucide-angular [img]="SquareIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
+                  </button>
+                } @else if (resumable()) {
+                  <button type="button" [class]="stopButtonClass" [attr.aria-label]="'Resume ' + cli() + ' session'"
+                    title="Resume session" data-testid="lane-resume-btn" [disabled]="resumePending()"
+                    (click)="resumeRequested.emit($event)">
+                    @if (resumePending()) { <span class="loading loading-spinner loading-xs" aria-hidden="true"></span> }
+                    @else { <lucide-angular [img]="PlayIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
+                  </button>
+                }
+              }
+
+              <!-- Send keeps the native disabled (decisions.md 10); its reason is on the status line. -->
+              <button
+                type="button"
+                [class]="sendButtonClass"
+                data-testid="lane-send-btn"
+                [disabled]="sendDisabled()"
+                [title]="sendTitle()"
+                [attr.aria-label]="stopped() ? 'Resume with message' : 'Send message'"
+                (click)="send()"
+              >
+                @if (delivery.sending()) {
+                  <span class="loading loading-spinner loading-xs" aria-hidden="true"></span>
+                } @else {
+                  <lucide-angular [img]="ArrowUpIcon" class="w-4 h-4" aria-hidden="true" />
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ptah-composer-fold ptah-composer-fold--bar">
+      <div class="ptah-composer-fold-clip" [attr.inert]="isCompact() ? null : ''">
+        <ptah-composer-compact-bar
+          [statusLabel]="cli() + ' is working…'"
+          [modelLabel]="confirmedModelLabel()"
+          [controlsId]="fullId"
+          [showStop]="showLaneControls() && isCompact()"
+          [collapsed]="!isCompact()"
+          (expandRequested)="expandComposer()"
+          (stopRequested)="stopFromCompact()"
+        />
+      </div>
+    </div>
+  </div>
+
+  @if (optionsFailed()) {
+    <p class="mt-1 flex items-center gap-1 px-1 text-xs text-state-err" role="alert">
+      {{ optionsErrorText }}
+      <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
+    </p>
+  } @else if (delivery.error(); as message) {
+    <p class="mt-1 px-1 text-xs text-state-err" role="alert">{{ message }}</p>
+  } @else if (optionsStale()) {
+    <p class="mt-1 flex items-center gap-1 px-1 text-xs text-state-need" role="status" data-testid="lane-options-stale">
+      {{ optionsStaleText }}
+      <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
+    </p>
+  }
+
+  <!-- Main chat's plate under the status line: the text keeps its contrast over the scene (S4). -->
+  <div [class]="statusLineClass" data-glass-surface="plate" data-testid="lane-status-line">
+    @if (checking()) {
+      <span class="loading loading-spinner loading-xs flex-shrink-0" aria-hidden="true"></span>
+    }
+    <span
+      class="mr-auto min-w-0 truncate"
+      [class.text-state-need]="statusNeedsAction()"
+      aria-live="polite"
+      [title]="statusText()"
+    >{{ statusText() }}</span>
+    @if (limitedReasons().length > 0) {
+      <span
+        class="ptah-lane-limited-badge flex-shrink-0 rounded-md border border-[var(--surface-border-strong)] px-1.5 text-[11px] text-base-content-muted"
+        [title]="limitedReasons().join('\n')"
+        data-testid="lane-limited-badge"
+      >{{ limitedReasons().length }} limited</span>
+    }
+  </div>
+
+  <div class="sr-only" aria-live="polite" aria-atomic="true">{{ foldAnnouncement() }}</div>
+</div>

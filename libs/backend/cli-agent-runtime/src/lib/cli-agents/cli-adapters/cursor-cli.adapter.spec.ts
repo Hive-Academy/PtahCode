@@ -98,6 +98,8 @@ jest.mock('fs', () => {
 
 import * as fs from 'fs';
 import { CursorCliAdapter } from './cursor-cli.adapter';
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
+import type { CliOutputSegment } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SdkHandle } from './cli-adapter.interface';
 import type { AgentRoleDefinition } from '@ptah-extension/shared';
@@ -374,7 +376,8 @@ describe('CursorCliAdapter', () => {
       currentRun?.end();
       await handle.done;
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+        mode: 'agent',
+        local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
       }));
     });
 
@@ -547,7 +550,10 @@ describe('CursorCliAdapter', () => {
 
       expect(mockResume).toHaveBeenCalledWith(
         'agent-resumed',
-        expect.objectContaining({ mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } } }),
+        expect.objectContaining({
+          mode: 'agent',
+          local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
+        }),
       );
       expect(mockCreate).not.toHaveBeenCalled();
     });
@@ -606,6 +612,31 @@ describe('CursorCliAdapter', () => {
       expect(createArg.mcpServers?.['ptah']?.headers).toEqual({
         Authorization: 'Bearer lane-token',
       });
+    });
+
+    // A5 (TASK_2026_979): `@cursor/sdk` loads project and user
+    // `.cursor/mcp.json` and plugin MCP only for the matching
+    // `local.settingSources` entries, so an empty list leaves `ptah` alone.
+    it('loads no ambient Cursor settings, so `ptah` is the only MCP server', async () => {
+      const handle = await adapter.runSdk({
+        ...defaultOptions,
+        mcpPort: 4321,
+        mcpToken: 'lane-token',
+      });
+      handle.onOutput(() => {
+        /* drain */
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.end();
+      await handle.done;
+
+      const createArg = mockCreate.mock.calls[0][0] as {
+        local?: { settingSources?: unknown };
+        mcpServers?: Record<string, unknown>;
+      };
+      expect(createArg.local?.settingSources).toEqual([]);
+      expect(Object.keys(createArg.mcpServers ?? {})).toEqual(['ptah']);
     });
 
     it.each([undefined, 'agent-resumed'])(
@@ -838,7 +869,8 @@ describe('CursorCliAdapter', () => {
       expect(code).toBe(0);
       expect(mockCreate).toHaveBeenCalledTimes(1);
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+        mode: 'agent',
+        local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
       }));
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockSend.mock.calls[1][0]).toContain('Follow-up');
@@ -1233,5 +1265,93 @@ describe('CursorCliAdapter', () => {
       expect(JSON.stringify(warnMock.mock.calls)).not.toContain(SECRET);
       expect(JSON.stringify(errorMock.mock.calls)).not.toContain(SECRET);
     });
+  });
+});
+
+describe('CursorCliAdapter lane turn input (B9)', () => {
+  let adapter: CursorCliAdapter;
+  let currentRun: FakeRunControls | null = null;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    currentRun = null;
+    process.env = { ...ORIGINAL_ENV, CURSOR_API_KEY: 'test-key' };
+    mockCreate.mockImplementation(async () => ({
+      agentId: 'agent-abc',
+      send: (...args: unknown[]) => {
+        mockSend(...args);
+        currentRun = createFakeRun('agent-abc');
+        return Promise.resolve(currentRun.run);
+      },
+      close: mockClose,
+    }));
+    adapter = new CursorCliAdapter(undefined, jest.fn(async () => undefined));
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+  });
+
+  async function firstTurn(): Promise<SdkHandle> {
+    const handle = await adapter.runSdk({ task: 'Refactor module', workingDirectory: '/proj', model: 'cursor-a' });
+    for (let tick = 0; tick < 10 && !currentRun; tick += 1) await Promise.resolve();
+    currentRun?.end();
+    await handle.done;
+    return handle;
+  }
+
+  it('declares per-send model, images and turn-end usage', async () => {
+    const manifest = adapter.capabilities();
+    expect(manifest.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'unsupported' },
+      images: { state: 'supported', onSteer: false },
+      files: { state: 'unsupported' },
+      commands: { state: 'unsupported' },
+      skills: { state: 'unsupported' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'turn-end', reason: 'Cursor reports usage once, when the turn ends.' });
+    const handle = await firstTurn();
+    expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
+  });
+
+  it('sends the applied model and inline images on the next send of the same agent', async () => {
+    const handle = await firstTurn();
+    mockModelsList.mockResolvedValue([{ id: 'cursor-a' }, { id: 'cursor-b' }]);
+    await expect(handle.applyTurnSettings?.({ model: 'cursor-b' }))
+      .resolves.toEqual({ model: 'cursor-b', appliesAt: 'next-turn' });
+    const next = await handle.continue?.('Follow-up', { images: [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }] });
+    for (let tick = 0; tick < 10 && mockSend.mock.calls.length < 2; tick += 1) await Promise.resolve();
+    currentRun?.end();
+    await next?.done;
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    const [message, sendOptions] = mockSend.mock.calls[1] as [{ text: string; images: unknown[] }, unknown];
+    expect(message.text).toContain('Follow-up');
+    expect(message.images).toEqual([{ data: 'iVBORw0KGgo=', mimeType: 'image/png' }]);
+    expect(sendOptions).toEqual({ model: { id: 'cursor-b' } });
+    expect(mockSend.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('refuses effort, an unknown model and an unreadable model list', async () => {
+    const handle = await firstTurn();
+    await expect(handle.applyTurnSettings?.({ reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+    mockModelsList.mockResolvedValue([{ id: 'cursor-a' }]);
+    await expect(handle.applyTurnSettings?.({ model: 'cursor-z' }))
+      .rejects.toMatchObject({ field: 'model', reason: 'Cursor has no model "cursor-z".' });
+    mockModelsList.mockRejectedValue(new Error('network'));
+    await expect(handle.applyTurnSettings?.({ model: 'cursor-a' }))
+      .rejects.toMatchObject({ field: 'model', reason: 'Cursor models could not be read; the model was not changed.' });
+  });
+
+  it('marks the one turn-end usage segment as the turn total', async () => {
+    const handle = await adapter.runSdk({ task: 'Refactor module', workingDirectory: '/proj' });
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((value) => segments.push(value));
+    for (let tick = 0; tick < 10 && !currentRun; tick += 1) await Promise.resolve();
+    currentRun?.push({ type: 'usage', agent_id: 'agent-abc', run_id: 'run-1', usage: { inputTokens: 12, outputTokens: 3, cacheReadTokens: 2, cacheWriteTokens: 1, totalTokens: 15 } });
+    currentRun?.end();
+    await handle.done;
+    expect(segments.filter((segment) => segment.usage).map((segment) => segment.usageScope)).toEqual(['turn']);
   });
 });

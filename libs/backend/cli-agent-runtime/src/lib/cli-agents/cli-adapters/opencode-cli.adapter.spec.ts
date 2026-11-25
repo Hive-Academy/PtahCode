@@ -143,16 +143,19 @@ jest.mock('fs/promises', () => ({
 
 import path from 'path';
 import {
+  OPENCODE_ONE_FILE_TEXT,
   OpencodeCliAdapter,
   resolveOpencodeNativeBinary,
 } from './opencode-cli.adapter';
 import type { CliCommandOptions, SdkHandle } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import type {
   AgentRoleDefinition,
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { buildTaskPrompt, renderRoleBlock } from './cli-adapter.utils';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 
 /** Drain a handle's raw output + structured segments into arrays. */
 function collect(handle: SdkHandle): {
@@ -512,6 +515,16 @@ describe('OpencodeCliAdapter', () => {
 
       const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
       expect(argsArg).not.toContain('--auto');
+    });
+
+    it('spawns the built-in default (yolo with network) with --auto', async () => {
+      const resolved = resolveCliLanePolicy({ cli: 'opencode', manifest: adapter.capabilities(), saved: {}, request: {} });
+      expect(resolved).toMatchObject({ permission: 'yolo', network: 'allow', permissionSource: 'built-in' });
+      const handle = await adapter.runSdk({ ...baseOptions, ...resolved });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+      expect(mockSpawnCli.mock.calls[0][1]).toContain('--auto');
     });
 
     it('uses --auto and merges permission allow with the existing MCP config for yolo', async () => {
@@ -1051,7 +1064,9 @@ describe('OpencodeCliAdapter', () => {
       expect(info).toHaveLength(2);
       expect(info[0].content).toContain('671 input');
       expect(info[0].content).toContain('8 output');
-      expect(info[0].usage).toBeUndefined();
+      // Each step's usage goes out live as a `message` increment (B9).
+      expect(info[0]).toMatchObject({ usageScope: 'message', usage: { inputTokens: 671, outputTokens: 8 } });
+      expect(info[1]).toMatchObject({ usageScope: 'turn', usage: { inputTokens: 671, outputTokens: 8 } });
       expect(info[1].turnTelemetry).toEqual(expect.objectContaining({
         status: 'reported', usage: expect.objectContaining({ inputTokens: 671, outputTokens: 8, modelId: 'billed-provider/billed-model' }),
       }));
@@ -1819,5 +1834,114 @@ describe('OpencodeCliAdapter', () => {
     it('strips ANSI escape codes', () => {
       expect(adapter.parseOutput('\x1b[32mok\x1b[0m')).toBe('ok');
     });
+  });
+});
+
+describe('OpencodeCliAdapter lane turn input (B9)', () => {
+  let adapter: OpencodeCliAdapter;
+  const options = { task: 'Do the thing', workingDirectory: '/proj', model: 'opencode-go/glm-5.3' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    currentChild = null;
+    mockSpawnCli.mockImplementation(() => {
+      currentChild = createFakeChild();
+      return currentChild.child;
+    });
+    mockHelpProbe.mockImplementation(() => helpProbeChild(V2_RUN_HELP));
+    mockExistsSync.mockReturnValue(false);
+    mockReadFile.mockRejectedValue(new Error('missing'));
+    mockWriteFile.mockResolvedValue(undefined);
+    adapter = new OpencodeCliAdapter();
+  });
+
+  async function firstTurn(): Promise<{ handle: SdkHandle; segments: CliOutputSegment[] }> {
+    const handle = await adapter.runSdk(options);
+    const { segments } = collect(handle);
+    currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
+    currentChild?.emitClose(0);
+    await handle.done;
+    return { handle, segments };
+  }
+  const spawnArgs = (index: number) => (mockSpawnCli.mock.calls[index] as [string, string[]])[1];
+
+  it('declares next-spawn model, file references, live usage and no effort or images', async () => {
+    const manifest = adapter.capabilities();
+    expect(manifest.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-spawn' },
+      effort: { state: 'unsupported' },
+      images: { state: 'unsupported' },
+      files: { state: 'supported', delivery: 'reference' },
+      commands: { state: 'unsupported' },
+      skills: { state: 'unsupported' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'live' });
+    const { handle } = await firstTurn();
+    expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
+  });
+
+  it('spawns the next turn with the applied model and one --file entry, prompt last', async () => {
+    const { handle } = await firstTurn();
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([
+      { id: 'opencode-go/glm-5.3', name: 'opencode-go/glm-5.3' },
+      { id: 'openai/gpt-x', name: 'openai/gpt-x' },
+    ]);
+    await expect(handle.applyTurnSettings?.({ model: 'openai/gpt-x' }))
+      .resolves.toEqual({ model: 'openai/gpt-x', appliesAt: 'next-spawn' });
+    const next = await handle.continue?.('Next', { files: ['/proj/a b.ts'] });
+    currentChild?.emitClose(0);
+    await next?.done;
+    const args = spawnArgs(1);
+    expect(args[args.indexOf('--model') + 1]).toBe('openai/gpt-x');
+    expect(args).not.toContain('opencode-go/glm-5.3');
+    expect(args.slice(-5)).toEqual(['--session', 'ses_1', '--file', '/proj/a b.ts', 'Next']);
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({ currentModel: 'openai/gpt-x', efforts: [] });
+  });
+
+  it('refuses a second attached file and spawns nothing (S2)', async () => {
+    const { handle } = await firstTurn();
+    const spawned = mockSpawnCli.mock.calls.length;
+    await expect(handle.continue?.('Next', { files: ['/proj/a.ts', '/proj/c.ts'] }))
+      .rejects.toThrow(OPENCODE_ONE_FILE_TEXT);
+    expect(mockSpawnCli.mock.calls.length).toBe(spawned);
+  });
+
+  it('says an unlisted model is unchecked when opencode lists none (M3)', async () => {
+    const { handle } = await firstTurn();
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([]);
+    await expect(handle.applyTurnSettings?.({ model: 'open/typo' }))
+      .resolves.toEqual({ model: 'open/typo', appliesAt: 'next-spawn' });
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'OpenCode lists no models, so "open/typo" was not checked. The next turn uses it.',
+    });
+  });
+
+  it('refuses an unknown model and any effort', async () => {
+    const { handle } = await firstTurn();
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([{ id: 'opencode-go/glm-5.3', name: 'opencode-go/glm-5.3' }]);
+    await expect(handle.applyTurnSettings?.({ model: 'nope/model' }))
+      .rejects.toMatchObject({ field: 'model', reason: 'OpenCode has no model "nope/model".' });
+    await expect(handle.applyTurnSettings?.({ reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+  });
+
+  it('streams each step usage mid-turn as a message increment', async () => {
+    const handle = await adapter.runSdk(options);
+    const { segments } = collect(handle);
+    await new Promise((resolve) => setImmediate(resolve));
+    currentChild?.stdout.write(JSON.stringify({ type: 'step_start', sessionID: 'ses_1' }) + '\n');
+    currentChild?.stdout.write(JSON.stringify({
+      type: 'step_finish', sessionID: 'ses_1',
+      part: { type: 'step-finish', reason: 'tool-calls', tokens: { input: 40, output: 3 } },
+    }) + '\n');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(segments.filter((item) => item.usage)).toEqual([
+      expect.objectContaining({ usageScope: 'message', usage: { inputTokens: 40, outputTokens: 3 } }),
+    ]);
+    currentChild?.emitClose(0);
+    await handle.done;
   });
 });

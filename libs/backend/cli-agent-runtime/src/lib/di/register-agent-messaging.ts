@@ -26,6 +26,7 @@ import { AgentMessageCoordinator } from '../cli-agents/messaging/agent-message-c
 import { AgentMessageDeliveryScheduler } from '../cli-agents/messaging/agent-message-delivery.scheduler';
 import type { AgentMessageDispatchJournal } from '../cli-agents/messaging/agent-message-dispatch-journal.port';
 import { AgentMessageEnvelopeStore } from '../cli-agents/messaging/envelope/agent-message-envelope.store';
+import { AgentMessageAttachmentStore } from '../cli-agents/messaging/agent-message-attachment.store';
 import type { LaneLimitLookupService } from '../cli-agents/limits/lane-limit-lookup.service';
 import { LaneDeliveryLimitGate } from '../cli-agents/messaging/lane-delivery-limit.gate';
 import { LaneMessagePolicy } from '../cli-agents/messaging/lane-message.policy';
@@ -43,14 +44,34 @@ const envelopeStore = (c: DependencyContainer): AgentMessageEnvelopeStore =>
 const isParentFrozen = (c: DependencyContainer) => (parentSessionId: string): boolean =>
   c.resolve(ParentEnvelopeStoreService).isParentFrozen(parentSessionId);
 
-/** Envelope store and the router's dispatch journal over it. */
+/**
+ * Held images go when their envelope ends (settled, cancelled, expired); a
+ * failed one keeps them for Recover text or Retry, bounded by a TTL and the cap.
+ */
+function withAttachmentRelease(
+  c: DependencyContainer,
+  store: AgentMessageEnvelopeStore,
+): AgentMessageEnvelopeStore {
+  const attachments = c.resolve<AgentMessageAttachmentStore>(
+    CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE,
+  );
+  store.setTerminalListener((envelope) => attachments.releaseForTerminal(envelope));
+  return store;
+}
+
+/** Attachment side store, envelope store and the router's dispatch journal over it. */
 export function registerAgentMessageJournal(container: DependencyContainer): void {
+  container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE, {
+    useFactory: instanceCachingFactory((c) => new AgentMessageAttachmentStore(
+      c.resolve<Logger>(TOKENS.LOGGER),
+    )),
+  });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE, {
-    useFactory: instanceCachingFactory((c) => AgentMessageEnvelopeStore.fromStateStorage(
+    useFactory: instanceCachingFactory((c) => withAttachmentRelease(c, AgentMessageEnvelopeStore.fromStateStorage(
       c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
       lazyReceiptSink(c),
       c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    ))),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_DISPATCH_JOURNAL, {
     useFactory: instanceCachingFactory((c): AgentMessageDispatchJournal => ({
@@ -157,7 +178,8 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         const codex = c.isRegistered(SDK_TOKENS.CODEX_CHAT_ADAPTER, true)
           ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined; resolveLiveSessionId?(callerId: string): string | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
           : undefined;
-        return parentLanePermission(parentSessionId, lifecycle, codex);
+        // Resume: a parent that is not live (app restart) is unknown, not plan (TASK_2026_2324_efc4).
+        return parentLanePermission(parentSessionId, lifecycle, codex, { unknownParent: 'uncapped' });
       };
       return new AgentLaneResumeService(manager, new PtahCliLaneResumer(
         manager,
@@ -196,6 +218,7 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         purge: c.resolve<ParentSessionPurgeService>(CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE),
         isParentFrozen: isParentFrozen(c),
         lanePolicy: c.resolve<LaneMessagePolicy>(CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY),
+        attachments: c.resolve<AgentMessageAttachmentStore>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE),
         logger,
       });
       // Purge recovery decides before the scheduler delivers anything (Component 10).

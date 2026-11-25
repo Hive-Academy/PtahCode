@@ -1,9 +1,11 @@
-import type {
-  AgentProcessInfo,
-  CliType,
-  LaneNetworkMode,
-  LanePermissionMode,
-  SpawnAgentResult,
+import {
+  EFFORT_LEVELS,
+  type AgentProcessInfo,
+  type CliType,
+  type EffortLevel,
+  type LaneNetworkMode,
+  type LanePermissionMode,
+  type SpawnAgentResult,
 } from '@ptah-extension/shared';
 import type { SessionMetadataStore } from '@ptah-extension/agent-sdk';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -28,6 +30,23 @@ export interface PtahCliResumeParams {
   readonly permission?: LanePermissionMode;
   readonly network?: LaneNetworkMode;
   readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
+  /** Provider model id the resumed SDK query starts with. */
+  readonly model?: string;
+  /** Effort the resumed SDK query starts with; absent keeps the agent's saved effort. */
+  readonly reasoningEffort?: EffortLevel;
+}
+
+function isEffortLevel(value: string): value is EffortLevel {
+  return (EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * Ptah CLI lanes take attached files as path text (D14): the paths follow the
+ * prompt, one per line. A text with no files is returned unchanged.
+ */
+export function withFileReferences(task: string, files?: readonly string[]): string {
+  if (!files || files.length === 0) return task;
+  return `${task}\n\nAttached files:\n${files.map((file) => `- ${file}`).join('\n')}`;
 }
 
 export type PtahCliLaneResumerManager = Pick<
@@ -48,7 +67,11 @@ export class PtahCliLaneResumer implements LaneResumer {
     private readonly parentLevel?: ParentLaneLevel,
   ) {}
 
-  resume(info: AgentProcessInfo, task: string): Promise<LaneResumeResult> {
+  resume(
+    info: AgentProcessInfo,
+    task: string,
+    files?: readonly string[],
+  ): Promise<LaneResumeResult> {
     if (!info.cliSessionId) {
       throw new LaneResumeError(
         'no-session',
@@ -61,13 +84,25 @@ export class PtahCliLaneResumer implements LaneResumer {
         'No Ptah CLI agent id is available for resume.',
       );
     }
+    const effort = info.reasoningEffort;
+    if (effort !== undefined && !isEffortLevel(effort)) {
+      // Refused before any spawn, so the send fails visibly instead of
+      // resuming with the agent's saved effort.
+      throw new LaneResumeError(
+        'turn-settings-refused',
+        `Ptah CLI has no effort level "${effort.slice(0, 40)}".`,
+      );
+    }
     return this.resumePtahCli(
       {
         cliSessionId: info.cliSessionId,
         cli: info.cli,
-        task,
+        task: withFileReferences(task, files),
         parentSessionId: info.parentSessionId,
         ptahCliId: info.ptahCliId,
+        // The model and effort are carried into the resumed query (A11).
+        ...(info.model ? { model: info.model } : {}),
+        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
         previousAgentId: info.agentId,
         permission: info.effectivePolicy?.permission,
         network: info.effectivePolicy?.network,
@@ -86,6 +121,8 @@ export class PtahCliLaneResumer implements LaneResumer {
       const prepared = await this.manager.prepareSdkHandleSpawn({
         cli: 'ptah-cli',
         task: params.task,
+        // R9.5 checks the model this resume launches, not only the default.
+        ...(params.model ? { model: params.model } : {}),
         resumeSessionId: params.cliSessionId,
       });
       const agentId = this.manager.reserveAgentId();
@@ -100,6 +137,8 @@ export class PtahCliLaneResumer implements LaneResumer {
           ...(this.parentLevel && parentSessionId
             ? { parentLevel: this.parentLevel(parentSessionId) } : {}),
           agentId,
+          ...(params.model ? { model: params.model } : {}),
+          ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
           laneToolGate: this.manager.laneToolGateFor(agentId),
           ...(params.permission ? { permission: params.permission } : {}),
           ...(params.network ? { network: params.network } : {}),
@@ -141,8 +180,11 @@ export class PtahCliLaneResumer implements LaneResumer {
         agentId,
         mcpPort: this.registry.getMcpPort(),
         expectsMcp: true,
-        // Stored on the new record, so the next resume keeps the same policy.
+        // Stored on the new record, so the next resume keeps the same policy,
+        // model and effort.
         effectivePolicy: spawnResult.effectivePolicy,
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
       });
       spawnResult.setAgentId(result.agentId);
       return result;

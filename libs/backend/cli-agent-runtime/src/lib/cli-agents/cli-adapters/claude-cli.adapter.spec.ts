@@ -24,9 +24,11 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   ClaudeCliAdapter,
+  CLAUDE_NAMED_RESUME_IMAGES_TEXT,
   type ClaudeCliAdapterDependencies,
 } from './claude-cli.adapter';
 import type { ClaudeCliCommandOptions } from './cli-adapter.interface';
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
   ClaudeSdkLaneRunner,
   type ClaudeSdkLaneRunContext,
@@ -179,6 +181,15 @@ describe('ClaudeCliAdapter constructibility', () => {
     });
     expect(f.query).not.toHaveBeenCalled();
   });
+  it('declares approval prompts unsupported for a yolo lane only (M1)', () => {
+    const f = fixture();
+    expect(f.adapter.capabilities('yolo').prompts?.approvals).toEqual({
+      state: 'unsupported',
+      reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.',
+    });
+    expect(f.adapter.capabilities('ask').prompts?.approvals.state).toBe('supported');
+    expect(f.adapter.capabilities().prompts?.approvals.state).toBe('supported');
+  });
 });
 
 describe('ClaudeCliAdapter native SDK execution', () => {
@@ -230,6 +241,11 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       undefined,
     );
     const context = f.run.mock.calls[0][0];
+    // The manifest's steer reaches the runner; it stays unsupported (dormant).
+    expect(context.manifestSteer).toEqual({
+      state: 'unsupported',
+      reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.',
+    });
     expect(f.query).toHaveBeenCalledWith({
       prompt: context.mailbox.prompt,
       options: context.options,
@@ -284,13 +300,41 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     expect(f.adapter.roleChannel).toBe('system-prompt');
     expect(handle.supportsContinuation?.()).toBe(true);
     expect(handle.steer).toBeUndefined();
-    expect(handle.interrupt).toBeUndefined();
+    expect(typeof handle.interrupt).toBe('function');
     handle.setAgentId?.('tracked-id');
     expect(f.limits.attach).toHaveBeenCalledWith('tracked-id');
     const next = await handle.continue?.('follow up');
     f.finish(0);
     await expect(handle.done).resolves.toBe(0);
     await expect(next?.done).resolves.toBe(0);
+  });
+
+  it('starts a cold resume with the held images in its first turn (L3)', async () => {
+    const f = fixture();
+    expect(f.adapter.capabilities().turnInput?.images).toEqual({ state: 'supported', onSteer: false, onResume: true });
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const handle = await f.adapter.runSdk({
+      ...f.input, resumeSessionId: 'resume-1', turnImages: [{ data: png, mediaType: 'image/png' }],
+    });
+    const context = f.run.mock.calls[0]?.[0];
+    expect((await context?.mailbox.prompt.next())?.value).toMatchObject({
+      message: { content: [
+        { type: 'text', text: 'do work' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+      ] },
+    });
+    f.finish(0);
+    await expect(handle.done).resolves.toBe(0);
+  });
+
+  it('refuses resume images on a named-account lane instead of dropping them', async () => {
+    const f = fixture();
+    await expect(f.adapter.runSdk({
+      ...f.input, resumeSessionId: 'resume-1',
+      accountAdmission: { kind: 'omitted' } as unknown as ClaudeCliCommandOptions['accountAdmission'],
+      turnImages: [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }],
+    })).rejects.toThrow(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
+    expect(f.run).not.toHaveBeenCalled();
   });
 
   it('reports adapter capabilities that match the handle it returns (D39)', async () => {
@@ -304,6 +348,23 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     // steer or interrupt must not expose either.
     expect(typeof handle.continue === 'function')
       .toBe(reported.messaging.continuation.state === 'supported');
+    expect(typeof handle.interrupt === 'function')
+      .toBe(reported.messaging.interrupt.state === 'supported');
+    expect(handle.steer).toBeUndefined();
+    expect(reported.messaging.steer.state).toBe('unsupported');
+    // Req 4.3: every claimed turn input item has its handle operation.
+    expect(laneTurnInputContractViolations(handle, reported)).toEqual([]);
+    expect(reported.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported' },
+      files: { state: 'supported', delivery: 'path-text' },
+      commands: { state: 'supported' },
+      skills: { state: 'supported' },
+    });
+    expect(reported.usage).toEqual({ timing: 'live' });
+    expect(reported.prompts).toEqual({ approvals: { state: 'supported' }, questions: { state: 'supported' } });
+    expect(handle.turnInputSupport?.()).toEqual({ images: { state: 'supported' } });
     f.finish(0);
     await expect(handle.done).resolves.toBe(0);
   });
@@ -473,7 +534,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     const context = f.run.mock.calls[0][0];
     expect(context.options.abortController.signal.aborted).toBe(true);
     // A closed mailbox ends after the initial task drains; nothing new queues.
-    context.mailbox.push('late follow up');
+    context.mailbox.push({ content: 'late follow up' });
     const drained: unknown[] = [];
     for await (const message of context.mailbox.prompt) drained.push(message);
     expect(drained).toHaveLength(1);

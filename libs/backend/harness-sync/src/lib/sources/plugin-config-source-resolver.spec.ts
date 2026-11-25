@@ -11,11 +11,11 @@
  *     unfiltered `empty` state;
  *   - a reader without the method keeps the synchronous path.
  *
- * And the D-1/D-2 source boundary (TASK_2026_853):
- *   - MCP intents are the global records plus the reconciled workspace's own,
- *     so an install in workspace A never reaches B's state or manifest;
- *   - retired skills.sh roots and retired MCP keys ride on EVERY resolution,
- *     the read-failure and frozen states included.
+ * And the D-2 source boundary (TASK_2026_853):
+ *   - retired skills.sh roots ride on EVERY resolution, the read-failure and
+ *     frozen states included;
+ *   - the source state carries no MCP intents: no target writes MCP config
+ *     (TASK_2026_979), so the resolver no longer reads the intent store.
  */
 
 import {
@@ -35,7 +35,7 @@ import {
 } from '@ptah-extension/shared';
 import { HarnessManifestBuilder } from '../manifest/harness-manifest.builder';
 import type { HarnessSourceLayout } from './harness-source.port';
-import { McpIntentPersistError, McpIntentStore } from './mcp-intent-store';
+import { McpIntentStore } from './mcp-intent-store';
 import { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import { HarnessReconcilerService } from '../reconciler/harness-reconciler.service';
 import { ClaudeTarget } from '../targets/claude-target';
@@ -79,11 +79,7 @@ describe('PluginConfigSourceResolver — layered policy', () => {
   function resolverFor(
     reader: HarnessPluginConfigReader | null,
   ): PluginConfigSourceResolver {
-    return new PluginConfigSourceResolver(
-      () => reader,
-      layout,
-      new McpIntentStore(join(home, '.ptah', 'mcp-installed.json')),
-    );
+    return new PluginConfigSourceResolver(() => reader, layout);
   }
 
   /** Sync members that fail the test if the effective path mixes them in. */
@@ -212,7 +208,6 @@ describe('PluginConfigSourceResolver — layered policy', () => {
       const resolver = createPluginConfigSourceResolver(
         () => reader,
         undefined,
-        undefined,
         getter,
       );
       expect(getter).not.toHaveBeenCalled();
@@ -246,7 +241,6 @@ describe('PluginConfigSourceResolver — layered policy', () => {
       const actual = await createPluginConfigSourceResolver(
         () => reader,
         undefined,
-        undefined,
         getter,
       ).resolve('/ws/a');
       expect(actual.agentModels).toBeUndefined();
@@ -262,7 +256,6 @@ describe('PluginConfigSourceResolver — layered policy', () => {
       const state = await new PluginConfigSourceResolver(
         () => null,
         undefined,
-        undefined,
         getter,
       ).resolve(root);
       expect(getter).not.toHaveBeenCalled();
@@ -277,7 +270,6 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
   let storePath: string;
   let pluginsRoot: string;
   let wsA: string;
-  let wsB: string;
   let store: McpIntentStore;
 
   /** A `.git` marker stops the canonical-root walk inside the temp home. */
@@ -302,15 +294,11 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
   const resolverFor = (
     reader: () => HarnessPluginConfigReader | null,
   ): PluginConfigSourceResolver =>
-    new PluginConfigSourceResolver(
-      reader,
-      {
-        skillsRoot: join(home, 'skills'),
-        commandsRoot: join(home, 'commands'),
-        agentsRoot: join(home, 'agents'),
-      },
-      store,
-    );
+    new PluginConfigSourceResolver(reader, {
+      skillsRoot: join(home, 'skills'),
+      commandsRoot: join(home, 'commands'),
+      agentsRoot: join(home, 'agents'),
+    });
 
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), 'harness-source-scope-'));
@@ -318,7 +306,6 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
     storePath = join(home, '.ptah', 'mcp-installed.json');
     pluginsRoot = join(home, '.ptah', 'plugins');
     wsA = workspace('ws-a');
-    wsB = workspace('ws-b');
     store = new McpIntentStore(storePath);
   });
 
@@ -326,7 +313,7 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
     rmSync(home, { recursive: true, force: true });
   });
 
-  it('an install in workspace A is absent from B’s state and built manifest', async () => {
+  it('never reads the intent store: an install leaves the state and manifest MCP-free', async () => {
     store.record({
       serverKey: 'only-a',
       registryName: 'io.test/only-a',
@@ -335,135 +322,42 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
       scope: 'workspace',
       workspaceRoot: wsA,
     });
-    const resolver = resolverFor(syncReader);
-    const builder = new HarnessManifestBuilder();
+    const state = await resolverFor(syncReader).resolve(wsA);
 
-    const stateA = await resolver.resolve(wsA);
-    const stateB = await resolver.resolve(wsB);
-
-    expect(stateA.mcpIntents?.map((i) => i.serverKey)).toEqual(['only-a']);
-    expect(stateB.mcpIntents).toEqual([]);
-    expect((await builder.build(stateA)).mcp.map((s) => s.serverKey)).toEqual([
-      'only-a',
-    ]);
-    expect((await builder.build(stateB)).mcp).toEqual([]);
+    expect(state).not.toHaveProperty('mcpIntents');
+    // No target writes MCP config (TASK_2026_979, parity row 19).
+    expect(await new HarnessManifestBuilder().build(state)).not.toHaveProperty(
+      'mcp',
+    );
   });
 
-  it('merges global targets with the workspace’s own, and never widens an unscoped pass', async () => {
-    store.record({
-      serverKey: 'github',
-      registryName: 'io.test/github',
-      config: stdio,
-      targets: ['claude'],
-      scope: 'global',
-    });
-    store.record({
-      serverKey: 'github',
-      registryName: 'io.test/github',
-      config: stdio,
-      targets: ['codex'],
-      scope: 'workspace',
-      workspaceRoot: wsA,
-    });
-    const resolver = resolverFor(syncReader);
+  it('an unreadable intent store no longer fails the pass, and no MCP file changes', async () => {
+    const userMcpJson = `${JSON.stringify(
+      { mcpServers: { github: { command: 'npx', args: ['github'] } } },
+      null,
+      2,
+    )}\n`;
+    writeFileSync(join(wsA, '.mcp.json'), userMcpJson, 'utf-8');
+    // A directory at the store path: reading it fails with EISDIR.
+    mkdirSync(storePath, { recursive: true });
+    const manifests = new ManagedManifestStore();
+    const reconciler = new HarnessReconcilerService(
+      {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+      } as never,
+      new HarnessManifestBuilder(),
+      manifests,
+      resolverFor(syncReader),
+      [new ClaudeTarget(manifests)],
+    );
 
-    const targetsFor = async (root?: string) =>
-      (await resolver.resolve(root)).mcpIntents?.map((i) => [
-        i.serverKey,
-        [...i.targets].sort(),
-      ]);
-
-    expect(await targetsFor(wsA)).toEqual([['github', ['claude', 'codex']]]);
-    expect(await targetsFor(wsB)).toEqual([['github', ['claude']]]);
-    expect(await targetsFor(undefined)).toEqual([['github', ['claude']]]);
-  });
-
-  it('reads the canonical workspace, so a sub-directory sees its root’s records', async () => {
-    store.record({
-      serverKey: 'only-a',
-      registryName: 'io.test/only-a',
-      config: stdio,
-      targets: ['claude'],
-      scope: 'workspace',
-      workspaceRoot: wsA,
-    });
-    const nested = join(wsA, 'packages', 'app');
-    mkdirSync(nested, { recursive: true });
-
-    const state = await resolverFor(syncReader).resolve(nested);
-
-    expect(state.mcpIntents?.map((i) => i.serverKey)).toEqual(['only-a']);
-  });
-
-  describe('an unreadable intent store fails the pass safe (Phase D review)', () => {
-    const readMcpJson = (root: string): Record<string, unknown> =>
-      JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8')).mcpServers;
-
-    const reconcilerFor = (
-      warn: jest.Mock = jest.fn(),
-    ): HarnessReconcilerService => {
-      const manifests = new ManagedManifestStore();
-      return new HarnessReconcilerService(
-        { debug: jest.fn(), info: jest.fn(), warn, error: jest.fn() } as never,
-        new HarnessManifestBuilder(),
-        manifests,
-        resolverFor(syncReader),
-        [new ClaudeTarget(manifests)],
-      );
-    };
-
-    /** A directory at the store path: reading it fails with EISDIR, not ENOENT. */
-    const breakStore = (): void => {
-      rmSync(storePath, { force: true });
-      mkdirSync(storePath, { recursive: true });
-    };
-
-    beforeEach(async () => {
-      store.record({
-        serverKey: 'github',
-        registryName: 'io.test/github',
-        config: stdio,
-        targets: ['claude'],
-        scope: 'workspace',
-        workspaceRoot: wsA,
-      });
-      await reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'seed' });
-      expect(Object.keys(readMcpJson(wsA))).toEqual(['github']);
-    });
-
-    it('resolve throws the typed read failure instead of an empty intent list', () => {
-      breakStore();
-      expect(() => resolverFor(syncReader).resolve(wsA)).toThrow(
-        McpIntentPersistError,
-      );
-    });
-
-    it('a reconcile over the unreadable store removes and writes nothing', async () => {
-      const manifestBefore = new ManagedManifestStore().load(wsA, 'claude');
-      const mcpBefore = readFileSync(join(wsA, '.mcp.json'), 'utf-8');
-      breakStore();
-
-      await expect(
-        reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'broken' }),
-      ).rejects.toMatchObject({
-        name: 'McpIntentPersistError',
-        code: 'read-failed',
-        message: 'The MCP intent store could not be read.',
-      });
-
-      expect(readFileSync(join(wsA, '.mcp.json'), 'utf-8')).toBe(mcpBefore);
-      expect(new ManagedManifestStore().load(wsA, 'claude')).toEqual(
-        manifestBefore,
-      );
-    });
-
-    it('control: a store that truly records nothing does remove the entry', async () => {
-      rmSync(storePath, { force: true });
-
-      await reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'empty' });
-
-      expect(readMcpJson(wsA)).toEqual({});
-    });
+    await expect(
+      reconciler.reconcile(wsA, { mode: 'full', reason: 'broken store' }),
+    ).resolves.toBeDefined();
+    expect(readFileSync(join(wsA, '.mcp.json'), 'utf-8')).toBe(userMcpJson);
   });
 
   describe('retired sources', () => {
@@ -558,10 +452,9 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
           join(pluginsRoot, 'ptah-skillssh-acme-skills'),
           join(pluginsRoot, 'ptah-skillssh-zeta-skills'),
         ],
-        mcpServerKeys: ['legacy'],
       });
-      // A retired v1 server is never desired anywhere.
-      expect(state.mcpIntents).toEqual([]);
+      // The intent store is not read: no target writes MCP config.
+      expect(state).not.toHaveProperty('mcpIntents');
     });
 
     it.each([
@@ -575,24 +468,22 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
 
       const state = await resolverFor(syncReader).resolve(wsA);
 
-      expect(state.retired).toEqual({
-        skillSourceRoots: [],
-        mcpServerKeys: ['legacy'],
-      });
+      expect(state.retired).toEqual({ skillSourceRoots: [] });
     });
 
-    it('re-reads both registries on every pass', async () => {
+    it('re-reads the skills.sh registry on every pass, and carries no retired MCP keys', async () => {
       const resolver = resolverFor(syncReader);
-      expect((await resolver.resolve(wsA)).retired?.mcpServerKeys).toEqual([
-        'legacy',
-      ]);
+      expect((await resolver.resolve(wsA)).retired).not.toHaveProperty(
+        'mcpServerKeys',
+      );
+      expect(
+        (await resolver.resolve(wsA)).retired?.skillSourceRoots,
+      ).toHaveLength(2);
 
-      rmSync(storePath);
       rmSync(join(pluginsRoot, SKILLS_SH_RETIRED_FILE));
 
       expect((await resolver.resolve(wsA)).retired).toEqual({
         skillSourceRoots: [],
-        mcpServerKeys: [],
       });
     });
   });

@@ -5,6 +5,7 @@ import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  PermissionHandlerService,
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import {
@@ -74,6 +75,7 @@ describe('raw stdout fallback', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent],
       providers: [
+        { provide: PermissionHandlerService, useValue: { questionRequests: signal([]) } },
         { provide: PTAH_CLOCK, useValue: { now, acquire: () => () => undefined } },
         {
           provide: ChatStore,
@@ -93,7 +95,7 @@ describe('raw stdout fallback', () => {
             error: jest.fn(),
           } satisfies Pick<LoggingService, 'debug' | 'info' | 'warn' | 'error'>,
         },
-        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecovered: () => null,
+        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecoveredMessage: () => null,
           composerState: () => ({ queue: { mode: 'queue-next-turn' }, now: { mode: 'steer' } }), previewMessage: jest.fn().mockResolvedValue(undefined),
           receiptLabel: () => 'Queued', receiptStatus: () => ({ label: 'Queued' }), newIdempotencyKey: () => 'key' } },
         {

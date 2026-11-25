@@ -1,7 +1,9 @@
 import 'reflect-metadata';
 import { MIGRATIONS, SqliteConnectionService, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
 import { Logger } from '@ptah-extension/vscode-core';
+import { REVIEW_STAGE_USAGE_RUNS_MAX } from '@ptah-extension/review-contracts';
 import type { ReviewQueueHead } from '../review-queue.service';
+import type { ReviewLaneRunUsage } from '../lanes/review-lane-usage';
 import { SqliteReviewRepository } from './sqlite-review.repository';
 
 const at = (offset: number): string => new Date(Date.UTC(2026, 0, 1) + offset).toISOString();
@@ -246,5 +248,101 @@ describe('SqliteReviewRepository', () => {
       // A lane record never shadows the stage's own checkpoint.
       expect(await repository.getCheckpoint(attempt.attemptId, row.stage, 0)).toBeNull();
     } finally { db.close(); }
+  });
+
+  describe('lane run usage', () => {
+    const run = (inputTokens: number, costUsd: number | null = 0.25): ReviewLaneRunUsage => ({ inputTokens, outputTokens: 5,
+      cacheReadTokens: null, cacheWriteTokens: null, costUsd, model: 'model-a', partial: false });
+    const use = (lane: string, family: string | null) => ({ lane, model: 'model-a', family, fallback: [] });
+    const stageRow = (attemptId: string, startedAt: string) => ({ attemptId, stage: 'lens:security-privacy', ordinal: 0,
+      state: 'running' as const, startedAt, endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null });
+    const family = (db: SqliteDatabase, attemptId: string) => db.prepare(`SELECT family FROM review_stages
+      WHERE attempt_id = ? AND stage = 'lens:security-privacy' AND ordinal = 0`).get(attemptId);
+
+    it('begins a pending run on a fresh document without touching the family column, then ends it (req 1.1)', async () => {
+      const { db, repository } = setup();
+      try {
+        const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+        await repository.saveStage(stageRow(attempt.attemptId, at(1)));
+        await repository.beginStageLaneRun(attempt.attemptId, 'lens:security-privacy', 0);
+        expect(await repository.getCheckpoint(attempt.attemptId, 'lane:lens:security-privacy', 0)).toEqual({ version: 1, lane: null,
+          model: null, family: null, fallback: [], usage: { runs: [{ inputTokens: null, outputTokens: null, cacheReadTokens: null,
+            cacheWriteTokens: null, costUsd: null, model: null, partial: true, ended: false }] } });
+        expect(family(db, attempt.attemptId)).toEqual({ family: null });
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('codex', 'codex'), run(10));
+        expect(await repository.getCheckpoint(attempt.attemptId, 'lane:lens:security-privacy', 0)).toEqual({ version: 1,
+          ...use('codex', 'codex'), usage: { runs: [{ ...run(10), ended: true }] } });
+        expect(family(db, attempt.attemptId)).toEqual({ family: 'codex' });
+      } finally { db.close(); }
+    });
+
+    it('ends a begun run with no lane and no usage as no runs and keeps the stored lane (req 1.5)', async () => {
+      const { db, repository } = setup();
+      try {
+        const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+        await repository.saveStage(stageRow(attempt.attemptId, at(1)));
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('codex', 'codex'));
+        await repository.beginStageLaneRun(attempt.attemptId, 'lens:security-privacy', 0);
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, null);
+        expect(await repository.getCheckpoint(attempt.attemptId, 'lane:lens:security-privacy', 0)).toEqual({ version: 1,
+          ...use('codex', 'codex'), usage: { runs: [] } });
+        expect(family(db, attempt.attemptId)).toEqual({ family: 'codex' });
+      } finally { db.close(); }
+    });
+
+    it('resets the stored family to null when the new lane has none (req 7.5)', async () => {
+      const { db, repository } = setup();
+      try {
+        const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+        await repository.saveStage(stageRow(attempt.attemptId, at(1)));
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('codex', 'codex'), run(1));
+        expect(family(db, attempt.attemptId)).toEqual({ family: 'codex' });
+        await repository.beginStageLaneRun(attempt.attemptId, 'lens:security-privacy', 0);
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('claude', null), run(2));
+        expect(family(db, attempt.attemptId)).toEqual({ family: null });
+        expect(await repository.getCheckpoint(attempt.attemptId, 'lane:lens:security-privacy', 0))
+          .toMatchObject({ lane: 'claude', family: null });
+      } finally { db.close(); }
+    });
+
+    it('closes only the running row its caller started (F5, A7)', async () => {
+      const { db, repository } = setup();
+      try {
+        const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+        await repository.saveStage(stageRow(attempt.attemptId, at(1)));
+        // A new lease owner restarts the same row.
+        await repository.saveStage(stageRow(attempt.attemptId, at(2)));
+        await repository.closeRunningStage(attempt.attemptId, 'lens:security-privacy', 0, at(1), at(3));
+        expect(await repository.getStages(attempt.attemptId)).toEqual([expect.objectContaining({ state: 'running', startedAt: at(2), endedAt: null })]);
+        await repository.closeRunningStage(attempt.attemptId, 'lens:security-privacy', 0, at(2), at(4));
+        expect(await repository.getStages(attempt.attemptId)).toEqual([expect.objectContaining({ state: 'interrupted', startedAt: at(2),
+          endedAt: at(4), errorSummary: null })]);
+        // A row that is no longer running stays as it is.
+        await repository.saveStage({ ...stageRow(attempt.attemptId, at(5)), state: 'completed', endedAt: at(6), outcome: 'completed' });
+        await repository.closeRunningStage(attempt.attemptId, 'lens:security-privacy', 0, at(5), at(7));
+        expect((await repository.getStages(attempt.attemptId))[0]).toMatchObject({ state: 'completed', endedAt: at(6) });
+      } finally { db.close(); }
+    });
+
+    it('marks a full run list overflowed instead of growing it, on begin and on save (F9)', async () => {
+      const { db, repository } = setup();
+      try {
+        const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+        await repository.saveStage(stageRow(attempt.attemptId, at(1)));
+        for (let index = 0; index < REVIEW_STAGE_USAGE_RUNS_MAX; index += 1) {
+          await repository.beginStageLaneRun(attempt.attemptId, 'lens:security-privacy', 0);
+          await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('codex', 'codex'), run(1));
+        }
+        const stored = async () => (await repository.getCheckpoint(attempt.attemptId, 'lane:lens:security-privacy', 0)) as
+          { usage: { runs: unknown[]; overflow?: true } };
+        expect((await stored()).usage).toEqual({ runs: Array(REVIEW_STAGE_USAGE_RUNS_MAX).fill({ ...run(1), ended: true }) });
+        await repository.beginStageLaneRun(attempt.attemptId, 'lens:security-privacy', 0);
+        expect((await stored()).usage.runs).toHaveLength(REVIEW_STAGE_USAGE_RUNS_MAX);
+        expect((await stored()).usage.overflow).toBe(true);
+        await repository.saveStageLane(attempt.attemptId, 'lens:security-privacy', 0, use('codex', 'codex'), run(1));
+        expect((await stored()).usage.runs).toHaveLength(REVIEW_STAGE_USAGE_RUNS_MAX);
+        expect((await stored()).usage.overflow).toBe(true);
+      } finally { db.close(); }
+    });
   });
 });

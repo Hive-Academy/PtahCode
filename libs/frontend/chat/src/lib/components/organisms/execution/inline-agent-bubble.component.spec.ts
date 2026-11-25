@@ -111,7 +111,6 @@ describe('InlineAgentBubbleComponent — Phase 3', () => {
     isAgentResumed: jest.fn(() => false),
     sendMessageToAgent: jest.fn(async () => undefined),
     stopAgent: jest.fn(async () => undefined),
-    interruptSession: jest.fn(async () => undefined),
     backgroundAgent: jest.fn(async () => true),
   } as unknown as AgentMonitorStore;
 

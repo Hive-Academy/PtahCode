@@ -162,6 +162,13 @@ describe('review lane listing', () => {
     expect(ReviewLaneListingSchema.parse(listing)).toEqual(listing);
   });
 
+  it('accepts an optional default-model block flag and rejects a non-boolean one', () => {
+    expect(ReviewLaneListingSchema.parse({ lanes: [lane], blockedModels: [] }).lanes[0].defaultModelBlocked).toBeUndefined();
+    const flagged = { lanes: [{ ...lane, defaultModelBlocked: true }, { ...lane, id: 'claude', defaultModelBlocked: false }], blockedModels: [] };
+    expect(ReviewLaneListingSchema.parse(flagged)).toEqual(flagged);
+    expect(ReviewLaneListingSchema.safeParse({ lanes: [{ ...lane, defaultModelBlocked: 'yes' }], blockedModels: [] }).success).toBe(false);
+  });
+
   it('bounds the catalog and rejects unknown states and keys', () => {
     expect(REVIEW_LANE_CATALOG_MAX).toBe(500);
     const models = (count: number) => Array.from({ length: count }, (_, index) => `model-${index}`);

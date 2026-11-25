@@ -58,6 +58,11 @@ const ManagedEntrySchema = z.object({
   sourceHash: z.string().optional(),
   /** Absolute source path the entry was derived from. Diagnostic only. */
   source: z.string(),
+  /**
+   * `mcp` is still accepted so a manifest written before TASK_2026_979 keeps
+   * parsing. {@link ManagedManifestStore.load} drops those rows: Ptah no longer
+   * writes MCP config, so a pre-P2 row owns nothing this lib will touch.
+   */
   kind: z.enum(['skill', 'command', 'agent', 'mcp']),
 });
 
@@ -138,6 +143,12 @@ export class ManagedManifestStore {
    * foreign. That is the safe direction: the reconciler will refuse to touch
    * files it can no longer prove it wrote, instead of overwriting user work on
    * the strength of a damaged record.
+   *
+   * Pre-P2 `kind: 'mcp'` rows are dropped here (TASK_2026_979, decision D1).
+   * Each named a server key inside a native config file Ptah no longer writes;
+   * that entry stays on disk untouched (D-U5), and the row would otherwise
+   * count against every preflight and never be planned away. The next save of
+   * this manifest no longer carries it.
    */
   load(workspaceRoot: string, target: HarnessTargetId): ManagedManifest {
     const path = this.manifestPath(workspaceRoot, target);
@@ -150,7 +161,7 @@ export class ManagedManifestStore {
 
     try {
       const parsed = ManagedManifestSchema.parse(JSON.parse(raw));
-      return { ...parsed, target };
+      return { ...parsed, target, entries: withoutMcpRows(parsed.entries) };
     } catch (error: unknown) {
       this.warn(
         '[harness-sync] Managed manifest unreadable, treating as empty',
@@ -201,6 +212,15 @@ export class ManagedManifestStore {
       return false;
     }
   }
+}
+
+/** The entries minus every pre-P2 `kind: 'mcp'` row (decision D1). */
+function withoutMcpRows(entries: ManagedEntries): ManagedEntries {
+  const kept: ManagedEntries = {};
+  for (const [relPath, entry] of Object.entries(entries)) {
+    if (entry.kind !== 'mcp') kept[relPath] = entry;
+  }
+  return kept;
 }
 
 /** Deterministic key order so a no-op reconcile produces a byte-identical file. */

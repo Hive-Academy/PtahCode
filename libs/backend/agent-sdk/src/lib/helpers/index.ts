@@ -96,7 +96,11 @@ export {
   type McpServerBackoffRecord,
   type McpServerBackoffOptions,
 } from './mcp-server-backoff.service';
-export { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
+export {
+  redactMcpUrl,
+  redactMcpOverrideMap,
+  redactMcpErrorText,
+} from './redact-mcp-url';
 export {
   SessionEndCallbackRegistry,
   SESSION_END_CAUSES,

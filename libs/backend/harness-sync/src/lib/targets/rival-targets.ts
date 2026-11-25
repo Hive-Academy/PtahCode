@@ -1,5 +1,5 @@
 /**
- * The six non-Claude harness targets, as configurations of one engine.
+ * The five non-Claude harness targets, as configurations of one engine.
  *
  * Each entry below is the complete answer to "where does this tool look for its
  * harness, and what can it accept". They are deliberately data, not classes:
@@ -8,14 +8,24 @@
  *
  * ## Target × facet matrix
  *
- * | Target      | skills                  | commands                | agents                        | mcp                          |
- * |-------------|-------------------------|-------------------------|-------------------------------|------------------------------|
- * | codex       | `{ws}/.agents/skills`   | **unsupported**         | `{ws}/.codex/agents/*.toml`   | `~/.codex/config.toml`       |
- * | copilot     | `{ws}/.github/skills`   | **unsupported**         | `{ws}/.github/agents/*.agent.md` | `~/.copilot/mcp-config.json` |
- * | cursor      | `{ws}/.cursor/skills`   | `{ws}/.cursor/commands` | `{ws}/.cursor/agents/*.md`    | `{ws}/.cursor/mcp.json`      |
- * | antigravity | `{ws}/.agents/skills`   | **unsupported**         | **unsupported**               | `~/.gemini/config/mcp_config.json` |
- * | opencode    | **unsupported**         | **unsupported**         | `{ws}/.opencode/agent/*.md`   | `{ws}/opencode.json`         |
- * | vscode      | **unsupported**         | **unsupported**         | **unsupported**               | `{ws}/.vscode/mcp.json`      |
+ * | Target      | skills                  | commands                | agents                           |
+ * |-------------|-------------------------|-------------------------|----------------------------------|
+ * | codex       | `{ws}/.agents/skills`   | **unsupported**         | `{ws}/.codex/agents/*.toml`      |
+ * | copilot     | `{ws}/.github/skills`   | **unsupported**         | `{ws}/.github/agents/*.agent.md` |
+ * | cursor      | `{ws}/.cursor/skills`   | `{ws}/.cursor/commands` | `{ws}/.cursor/agents/*.md`       |
+ * | antigravity | `{ws}/.agents/skills`   | **unsupported**         | **unsupported**                  |
+ * | opencode    | **unsupported**         | **unsupported**         | `{ws}/.opencode/agent/*.md`      |
+ *
+ * ## No target writes MCP config
+ *
+ * The `mcp` facet is `unsupported` on every target (TASK_2026_979, decision
+ * row 10). Ptah no longer writes `~/.codex/config.toml`,
+ * `~/.copilot/mcp-config.json`, `{ws}/.cursor/mcp.json`,
+ * `~/.gemini/config/mcp_config.json`, `{ws}/opencode.json` or
+ * `{ws}/.vscode/mcp.json`. A Ptah-spawned lane gets its servers through the
+ * Ptah gateway, which the spawn adapter passes inline; a CLI started outside
+ * Ptah sees only the servers the user configured in it. The VS Code target
+ * existed only to write `.vscode/mcp.json` and is gone.
  *
  * ### Why the `unsupported` cells are unsupported
  *
@@ -29,8 +39,7 @@
  * - **Antigravity agents.** `agy` documents no subagent format. A transformer
  *   would have to invent a file layout the CLI does not read, so the facet
  *   reports `unsupported` and the health surface says so out loud rather than
- *   showing agents permanently missing. (MCP is NOT in this list any more — see
- *   the two-writer section below.)
+ *   showing agents permanently missing.
  * - **OpenCode skills.** Not a gap and not a missing capability: OpenCode
  *   discovers skills from `{ws}/.claude/skills` and `{ws}/.agents/skills` on
  *   its own, and both are directories Ptah already fills for OTHER targets. A
@@ -43,22 +52,6 @@
  *   rules were not established by the probe that motivated this target. Left
  *   `unsupported` rather than guessed at — declaring a directory OpenCode may
  *   not read is exactly the failure the Codex `commands` row records.
- * - **VS Code skills/commands/agents.** VS Code is an editor, not a CLI agent
- *   harness. It appears here solely because `.vscode/mcp.json` is a real MCP
- *   surface the install RPC has always offered.
- *
- * ## Antigravity MCP has more than one writer, and not all of them are here
- *
- * `agy` reads `~/.gemini/config/mcp_config.json`. Besides this target,
- * `CodeExecutionMCP` writes Ptah's OWN `ptah` server into that file; the former
- * per-spawn writer, `AntigravityCliAdapter` (`cli-agent-runtime`), stopped in
- * TASK_2026_2322. Every writer goes through this target's facet, so the file
- * has one module that knows its format, its lock and its atomic write. The keys
- * are partitioned and no side may reap another's: `ptah`
- * ({@link PTAH_SPAWN_MCP_KEY}) is not manifest-owned, manifest-owned keys are
- * the user's installs, and everything else is the user's own. The key name
- * itself is `PTAH_SPAWN_MCP_KEY` in `mcp/mcp-facet.port.ts`, so the writers
- * cannot disagree about it. TASK_2026_285.
  *
  * ## Codex and Antigravity share `{ws}/.agents/skills`
  *
@@ -74,10 +67,6 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import type { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { IHarnessCliDetector } from '../sources/harness-source.port';
 import type { IHarnessTarget } from './harness-target.port';
-import {
-  createMcpFacet,
-  type McpFacetOptions,
-} from './mcp/mcp-facet.registry';
 import { CodexAgentTransformer } from './transformers/codex-agent-transformer';
 import { CopilotAgentTransformer } from './transformers/copilot-agent-transformer';
 import { CursorAgentTransformer } from './transformers/cursor-agent-transformer';
@@ -94,15 +83,7 @@ function facets(supported: Partial<HarnessFacetMatrix>): HarnessFacetMatrix {
   };
 }
 
-/** Facet options derived from the shared target dependencies. */
-function facetOptions(deps: RivalTargetDeps): McpFacetOptions {
-  return {
-    ...(deps.homeDir === undefined ? {} : { homeDir: deps.homeDir }),
-    ...logOptions(deps),
-  };
-}
-
-/** The optional logger, spread into the target and facet options. */
+/** The optional logger, spread into the target options. */
 function logOptions(deps: RivalTargetDeps): { logger?: Pick<Logger, 'warn'> } {
   return deps.logger === undefined ? {} : { logger: deps.logger };
 }
@@ -111,10 +92,13 @@ function logOptions(deps: RivalTargetDeps): { logger?: Pick<Logger, 'warn'> } {
 export interface RivalTargetDeps {
   manifestStore: ManagedManifestStore;
   detector: IHarnessCliDetector;
-  /** Overridable so specs can redirect user-global config files. */
+  /**
+   * Read by no target since the MCP facets left (TASK_2026_979); still accepted
+   * so existing fixtures that redirect the home directory keep compiling.
+   */
   homeDir?: string;
   /**
-   * Receives warnings about unreadable agent sources and MCP config files.
+   * Receives warnings about unreadable agent sources.
    * Optional, so specs and callers without a logger keep working.
    */
   logger?: Pick<Logger, 'warn'>;
@@ -123,16 +107,11 @@ export interface RivalTargetDeps {
 export function createCodexTarget(deps: RivalTargetDeps): IHarnessTarget {
   return new WorkspaceHarnessTarget({
     id: 'codex',
-    facets: facets({
-      skills: 'supported',
-      agents: 'supported',
-      mcp: 'supported',
-    }),
+    facets: facets({ skills: 'supported', agents: 'supported' }),
     manifestStore: deps.manifestStore,
     detector: deps.detector,
     skillsDirRel: '.agents/skills',
     agentTransformer: new CodexAgentTransformer(),
-    mcpFacet: createMcpFacet('codex', facetOptions(deps)),
     ...logOptions(deps),
     coOwners: ['antigravity'],
   });
@@ -141,16 +120,11 @@ export function createCodexTarget(deps: RivalTargetDeps): IHarnessTarget {
 export function createCopilotTarget(deps: RivalTargetDeps): IHarnessTarget {
   return new WorkspaceHarnessTarget({
     id: 'copilot',
-    facets: facets({
-      skills: 'supported',
-      agents: 'supported',
-      mcp: 'supported',
-    }),
+    facets: facets({ skills: 'supported', agents: 'supported' }),
     manifestStore: deps.manifestStore,
     detector: deps.detector,
     skillsDirRel: '.github/skills',
     agentTransformer: new CopilotAgentTransformer(),
-    mcpFacet: createMcpFacet('copilot', facetOptions(deps)),
     ...logOptions(deps),
   });
 }
@@ -162,14 +136,12 @@ export function createCursorTarget(deps: RivalTargetDeps): IHarnessTarget {
       skills: 'supported',
       commands: 'supported',
       agents: 'supported',
-      mcp: 'supported',
     }),
     manifestStore: deps.manifestStore,
     detector: deps.detector,
     skillsDirRel: '.cursor/skills',
     commandsDirRel: '.cursor/commands',
     agentTransformer: new CursorAgentTransformer(),
-    mcpFacet: createMcpFacet('cursor', facetOptions(deps)),
     ...logOptions(deps),
   });
 }
@@ -177,11 +149,10 @@ export function createCursorTarget(deps: RivalTargetDeps): IHarnessTarget {
 export function createAntigravityTarget(deps: RivalTargetDeps): IHarnessTarget {
   return new WorkspaceHarnessTarget({
     id: 'antigravity',
-    facets: facets({ skills: 'supported', mcp: 'supported' }),
+    facets: facets({ skills: 'supported' }),
     manifestStore: deps.manifestStore,
     detector: deps.detector,
     skillsDirRel: '.agents/skills',
-    mcpFacet: createMcpFacet('antigravity', facetOptions(deps)),
     ...logOptions(deps),
     coOwners: ['codex'],
   });
@@ -191,34 +162,18 @@ export function createAntigravityTarget(deps: RivalTargetDeps): IHarnessTarget {
  * OpenCode (`opencode` v2), added because a live probe found Ptah's 15
  * subagents reaching every rival CLI except this one.
  *
- * Skills and MCP already arrived by other routes — OpenCode discovers
+ * Skills and MCP already arrive by other routes — OpenCode discovers
  * `.claude/skills` and `.agents/skills` itself, and the spawn adapter hands it
- * Ptah's own server through `OPENCODE_CONFIG_CONTENT` — so agents were the
- * whole gap, and the MCP facet here is what makes a server the USER installs
- * persist beyond a single Ptah-spawned session.
+ * Ptah's own server through `OPENCODE_CONFIG_CONTENT` — so agents are the
+ * whole gap.
  */
 export function createOpencodeTarget(deps: RivalTargetDeps): IHarnessTarget {
   return new WorkspaceHarnessTarget({
     id: 'opencode',
-    facets: facets({ agents: 'supported', mcp: 'supported' }),
+    facets: facets({ agents: 'supported' }),
     manifestStore: deps.manifestStore,
     detector: deps.detector,
     agentTransformer: new OpencodeAgentTransformer(),
-    mcpFacet: createMcpFacet('opencode', facetOptions(deps)),
-    ...logOptions(deps),
-  });
-}
-
-export function createVscodeMcpTarget(deps: RivalTargetDeps): IHarnessTarget {
-  return new WorkspaceHarnessTarget({
-    id: 'vscode',
-    facets: facets({ mcp: 'supported' }),
-    manifestStore: deps.manifestStore,
-    // VS Code is the host in one of the three runtimes and simply present in
-    // the others' eyes; there is no binary to probe for, and gating on one
-    // would silently drop `.vscode/mcp.json` installs.
-    detector: { isInstalled: () => Promise.resolve(true) },
-    mcpFacet: createMcpFacet('vscode', facetOptions(deps)),
     ...logOptions(deps),
   });
 }
@@ -231,6 +186,5 @@ export function createRivalTargets(deps: RivalTargetDeps): IHarnessTarget[] {
     createCursorTarget(deps),
     createAntigravityTarget(deps),
     createOpencodeTarget(deps),
-    createVscodeMcpTarget(deps),
   ];
 }

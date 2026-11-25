@@ -61,7 +61,7 @@ When the user clicks Apply, Ptah materializes the configuration:
 - \`.claude/agents/*.md\` — one file per designed subagent.
 - \`~/.ptah/plugins/ptah-harness-*/skills/*/SKILL.md\` — one per entry in skills.createdSkills, written at apply time if you did not already author it with createSkill.
 - \`.claude/skills/\` — junctions for skills that exist on disk under an enabled plugin or a ptah-harness-* plugin, PLUS every skills.sh skill installed from \`skills.selectedSkillRefs\`.
-- \`.mcp.json\` and \`.vscode/mcp.json\` — every enabled mcp.servers entry you recorded WITH a transport config.
+- MCP servers — no config file is written. Every enabled mcp.servers entry you recorded WITH a transport config is recorded for this workspace, and Ptah serves it to every session and CLI lane through its own \`ptah\` MCP server.
 - \`~/.ptah/harnesses/<name>.json\` — the reusable preset.
 
 A skills.sh skill is only installed if you record its origin alongside the id. Put the id in \`skills.selectedSkills\` and the origin in \`skills.selectedSkillRefs\`:
@@ -71,7 +71,7 @@ Locally discovered skills need no ref — just the id in \`selectedSkills\`. A s
 
 An MCP entry is only installed if you give it a \`config\`. Record servers like this:
 \`{ name: 'github', url: '', enabled: true, config: { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'] } }\`
-for a local server, or \`config: { type: 'http', url: 'https://…/mcp' }\` for a remote one. Optional: \`serverKey\` (config key, defaults to name) and \`installTargets\` (defaults to ['claude','vscode']).
+for a local server, or \`config: { type: 'http', url: 'https://…/mcp' }\` for a remote one. Optional: \`serverKey\` (the server's name in Ptah, defaults to name) and \`installTargets\` (defaults to ['claude','vscode']).
 An entry without a \`config\` is still described in CLAUDE.md but is NOT installed, and the user is warned to add it by hand — so only omit the config when you genuinely cannot determine the transport.
 Set the user's expectations accordingly as the design firms up.`;
 

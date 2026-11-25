@@ -140,13 +140,14 @@ export function laneAccountText(
         </span>
       }
 
-      <!-- Model badge -->
-      @if (agent().model) {
+      <!-- Model badge: the model the provider confirmed, else the requested one -->
+      @if (modelName(); as model) {
         <span
-          class="font-mono text-[9px] text-base-content-muted flex-shrink-0" ptahBadge
-          [title]="'Model: ' + agent().model"
+          class="font-mono text-[9px] text-base-content-muted max-w-[10rem] min-w-0 flex-shrink-0" ptahBadge
+          data-testid="lane-model"
+          [title]="'Model: ' + model"
         >
-          {{ agent().model }}
+          <span class="ptah-badge-text">{{ model }}</span>
         </span>
       }
 
@@ -273,6 +274,14 @@ export class AgentCardHeaderComponent {
   );
 
   private readonly injector = inject(Injector);
+
+  /**
+   * Model the provider confirmed for the last turn, else the requested one. A
+   * picker change stays off the chip until the provider confirms it.
+   */
+  protected readonly modelName = computed(
+    () => this.agent().observedModel || this.agent().model || null,
+  );
 
   /**
    * End time for the elapsed timer: `null` while running (live), the finish

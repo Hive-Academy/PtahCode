@@ -6,6 +6,7 @@
  * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
  */
 import type {
+  CliAdapterManifest,
   CliOutputSegment,
   FlatStreamEventUnion,
   ProviderAccountBinding,
@@ -17,6 +18,8 @@ import {
   ACP_CANCEL_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUTS_MS,
   ACP_USAGE_DRAIN_MS,
+  antigravityAcpProfile,
+  grokAcpProfile,
   readAcpErrorDetail,
   type AcpRequestFailure,
   type AcpSpawnOptions,
@@ -29,10 +32,18 @@ import {
   type FakeAcpAgentOptions,
   type FakeAcpMessage,
   type FakeAcpTransport,
+  readAcpFixture,
+  recordedResult,
 } from '@ptah-extension/acp-runtime/testing';
+import { LaneUsageNormalizer } from '../../lane-usage-normalizer';
 import type { McpAttachment } from '../../mcp-attachment-probe.port';
 import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
-import { createProviderSessionLaneHandle } from './provider-session-lane-handle';
+import {
+  acpLaneManifestSections,
+  acpProfileEfforts,
+  createProviderSessionLaneHandle,
+} from './provider-session-lane-handle';
+import { laneTurnInputContractViolations } from '../../testing/lane-turn-input-contract';
 
 const NAME = 'Test Agent';
 const SESSION_ID = 'sess-1';
@@ -1835,5 +1846,267 @@ describe('createProviderSessionLaneHandle — MCP credential revoke (round 4)', 
     });
     await expect(handle.done).resolves.toBe(1);
     expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createProviderSessionLaneHandle — lane turn input (B8)', () => {
+  const PNG = 'iVBORw0KGgo=';
+  const IMAGE_CAPABLE = { loadSession: true, sessionCapabilities: { resume: {} }, promptCapabilities: { image: true } };
+  const EFFORT_OPTION = {
+    id: 'reasoning_effort',
+    name: 'Effort',
+    type: 'select',
+    currentValue: 'low',
+    options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }],
+  };
+  const effortProfile: Partial<AcpVendorProfile> = {
+    sessionConfig: (options) => [
+      ...(options.model ? [{ configId: 'model', value: options.model, binding: true }] : []),
+      ...(options.reasoningEffort ? [{ configId: 'reasoning_effort', value: options.reasoningEffort }] : []),
+    ],
+  };
+
+  /** Replays a fixture's `available_commands_update` payloads during the first prompt. */
+  function withFixtureCommands(fixture: string) {
+    const updates = readAcpFixture(fixture)
+      .filter((envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === 'session/update')
+      .map((envelope) => (envelope.msg?.['params'] as { update?: unknown } | undefined)?.update)
+      .filter((update): update is Record<string, unknown> =>
+        typeof update === 'object' && update !== null &&
+        (update as Record<string, unknown>)['sessionUpdate'] === 'available_commands_update');
+    return (agent: FakeAcpAgent) =>
+      agent.handle('session/prompt', async (params, fake) => {
+        for (const update of updates) await fake.sessionUpdate(String(params['sessionId']), update);
+        return { result: { stopReason: 'end_turn' } };
+      });
+  }
+
+  it('sends images and files as ACP content blocks on a continued turn', async () => {
+    const h = start({ agent: { agentCapabilities: IMAGE_CAPABLE } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.turnInputSupport?.().images).toEqual({ state: 'supported', onSteer: false });
+    const next = await h.handle.continue?.('look', {
+      images: [{ data: PNG, mediaType: 'image/png' }],
+      files: ['/repo/src/a.ts'],
+    });
+    await expect(next?.done).resolves.toBe(0);
+    const prompt = paramsOf(sent(h.agent, 'session/prompt')[1])['prompt'];
+    expect(prompt).toEqual([
+      { type: 'text', text: 'look' },
+      { type: 'image', mimeType: 'image/png', data: PNG },
+      { type: 'resource_link', uri: 'file:///repo/src/a.ts', name: 'a.ts' },
+    ]);
+    expect(JSON.stringify(h.logger.info.mock.calls)).not.toContain(PNG);
+    // Req 4.3: every turn input item the ACP sections claim has its handle operation.
+    const sections = acpLaneManifestSections(createProfile(), 'No lane prompts.');
+    expect(laneTurnInputContractViolations(h.handle, sections as unknown as CliAdapterManifest)).toEqual([]);
+  });
+
+  it('refuses images the agent did not advertise and sends nothing', async () => {
+    const h = start();
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.turnInputSupport?.().images).toEqual({
+      state: 'unsupported',
+      reason: `${NAME} did not advertise image input.`,
+    });
+    await expect(
+      h.handle.continue?.('look', { images: [{ data: PNG, mediaType: 'image/png' }] }),
+    ).rejects.toThrow(`${NAME} did not advertise image input`);
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(1);
+  });
+
+  it('applies model and effort through session/set_config_option for the next turn', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION, EFFORT_OPTION] }, profile: effortProfile });
+    await expect(h.handle.done).resolves.toBe(0);
+    const before = sent(h.agent, 'session/set_config_option').length;
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-b', reasoningEffort: 'high' }))
+      .resolves.toEqual({ model: 'model-b', reasoningEffort: 'high', appliesAt: 'next-turn' });
+    expect(sent(h.agent, 'session/set_config_option').slice(before).map(paramsOf)).toEqual([
+      { sessionId: SESSION_ID, configId: 'model', value: 'model-b' },
+      { sessionId: SESSION_ID, configId: 'reasoning_effort', value: 'high' },
+    ]);
+  });
+
+  it('refuses an effort the profile maps to nothing before the model changes (M2)', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION, EFFORT_OPTION] } });
+    await expect(h.handle.done).resolves.toBe(0);
+    const before = sent(h.agent, 'session/set_config_option').length;
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-b', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+    expect(sent(h.agent, 'session/set_config_option').slice(before)).toHaveLength(0);
+  });
+
+  it('rolls the model back when the agent refuses the effort (M2)', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION, EFFORT_OPTION] }, profile: effortProfile });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.agent.handle('session/set_config_option', (params) =>
+      params['configId'] === 'reasoning_effort'
+        ? { error: { code: -32602, message: 'Invalid params' } }
+        : { result: { configOptions: [MODEL_OPTION, EFFORT_OPTION] } });
+    const before = sent(h.agent, 'session/set_config_option').length;
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-b', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort', reason: `${NAME} did not accept the effort level "high".` });
+    expect(sent(h.agent, 'session/set_config_option').slice(before).map(paramsOf)).toEqual([
+      { sessionId: SESSION_ID, configId: 'model', value: 'model-b' },
+      { sessionId: SESSION_ID, configId: 'reasoning_effort', value: 'high' },
+      { sessionId: SESSION_ID, configId: 'model', value: 'model-a' },
+    ]);
+  });
+
+  it('refuses a model the agent rejects, naming the CLI and the model', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION] }, profile: effortProfile });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.agent.handle('session/set_config_option', () => ({
+      error: { code: -32602, message: 'Invalid params' },
+    }));
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-x' })).rejects.toMatchObject({
+      field: 'model',
+      reason: `${NAME} did not accept the model "model-x".`,
+    });
+  });
+
+  it('splits the Grok fixture into commands and skills and hides always-approve', async () => {
+    const h = start({
+      agent: { configOptions: [MODEL_OPTION] },
+      profile: { ...effortProfile, hiddenLaneCommands: ['always-approve'] },
+      script: withFixtureCommands('grok-plain-turn.ndjson'),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const catalog = await h.handle.listTurnOptions?.();
+    const names = catalog?.commands.map((command) => command.name) ?? [];
+    expect(names).not.toContain('always-approve');
+    expect(names).toHaveLength(54);
+    expect(catalog?.commands.filter((command) => command.group === 'skill')).toHaveLength(40);
+    expect(catalog?.commands[0]).toEqual({
+      name: 'compact',
+      description: 'Compress conversation history to save context window',
+      group: 'command',
+    });
+    expect(catalog?.models).toEqual([
+      { id: 'model-a', name: 'Model A' },
+      { id: 'model-b', name: 'Model B' },
+    ]);
+    expect(catalog?.currentModel).toBe('model-a');
+    expect(catalog?.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(h.handle.turnInputSupport?.().skills).toEqual({ state: 'supported' });
+  });
+
+  it('reports no skills for the agy fixture', async () => {
+    const h = start({ script: withFixtureCommands('antigravity-p3-ptah-mcp-tool-use.ndjson') });
+    await expect(h.handle.done).resolves.toBe(0);
+    const catalog = await h.handle.listTurnOptions?.();
+    expect(catalog?.commands).toHaveLength(13);
+    expect(catalog?.commands.every((command) => command.group === 'command')).toBe(true);
+    expect(catalog?.efforts).toEqual([]);
+    expect(h.handle.turnInputSupport?.().skills).toEqual({
+      state: 'unsupported',
+      reason: `${NAME} advertises no skills to lanes.`,
+    });
+  });
+
+  it('keeps turn-total usage semantics after the normalizer change, with and without a handle scope', async () => {
+    const h = start();
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.usageScope).toBe('turn');
+    const failed = createProviderSessionLaneHandle({
+      profile: createProfile(),
+      options: { task: 'x', workingDirectory: process.cwd() },
+      command: 'test-agent',
+    });
+    // The manager's fold: segment scope ?? handle scope ?? 'turn'.
+    expect(failed.usageScope).toBeUndefined();
+    const normalizer = new LaneUsageNormalizer();
+    const first = normalizer.accept('lane', h.handle.usageScope ?? 'turn', { inputTokens: 10, outputTokens: 4 });
+    expect(first.increment).toEqual({ inputTokens: 10, outputTokens: 4 });
+    expect(first.turnTotal).toEqual({ inputTokens: 10, outputTokens: 4 });
+    normalizer.settleTurn('lane');
+    const second = normalizer.accept('lane', failed.usageScope ?? 'turn', { inputTokens: 7, outputTokens: 2 });
+    expect(second.increment).toEqual({ inputTokens: 7, outputTokens: 2 });
+    expect(second.turnTotal).toEqual({ inputTokens: 7, outputTokens: 2 });
+  });
+});
+
+describe('createProviderSessionLaneHandle — Grok live usage', () => {
+  const P1 = readAcpFixture('grok-p1-ptah-mcp-search-use-tool.ndjson');
+  const vendorNotifications = P1.filter(
+    (envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === '_x.ai/session_notification',
+  ).map((envelope) => envelope.msg?.['params'] as Record<string, unknown>);
+
+  it('declares live usage for Grok and keeps agy at turn end', () => {
+    expect(acpLaneManifestSections(grokAcpProfile, 'x').usage).toEqual({ timing: 'live' });
+    expect(acpLaneManifestSections(antigravityAcpProfile, 'x').usage).toEqual({
+      timing: 'turn-end',
+      reason: 'Antigravity reports token usage when the turn ends.',
+    });
+  });
+
+  it('streams the p1 model calls as message increments whose sum is the turn total, with no double count', async () => {
+    const h = start({
+      profile: { extensions: grokAcpProfile.extensions },
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          for (const notification of vendorNotifications) {
+            await fake.notify('_x.ai/session_notification', {
+              ...notification,
+              sessionId: String(params['sessionId']),
+            });
+          }
+          return { result: recordedResult(P1, 'session/prompt') };
+        }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const usageSegments = h.segments.filter((segment) => segment.usage);
+    expect(usageSegments.map((segment) => segment.usageScope)).toEqual([
+      'message', 'message', 'message', undefined,
+    ]);
+    expect(usageSegments.slice(0, 3).some((segment) => segment.turnTelemetry)).toBe(false);
+    expect(usageSegments[3]?.turnTelemetry).toBeDefined();
+
+    // The manager's fold: segment scope ?? handle scope ?? 'turn'.
+    const normalizer = new LaneUsageNormalizer();
+    const steps = usageSegments.map((segment) =>
+      normalizer.accept('lane', segment.usageScope ?? h.handle.usageScope ?? 'turn', segment.usage ?? {
+        inputTokens: 0, outputTokens: 0,
+      }));
+    const card = (key: 'inputTokens' | 'outputTokens') =>
+      steps.reduce((sum, step) => sum + (step.increment[key] ?? 0), 0);
+    expect(steps.slice(0, 3).map((step) => step.turnTotal)).toMatchObject([
+      { inputTokens: 18267, outputTokens: 168 },
+      { inputTokens: 43359, outputTokens: 395 },
+      { inputTokens: 69024, outputTokens: 473 },
+    ]);
+    // The turn-end total corrects nothing: the per-call sums already equal it.
+    expect(steps[3]?.increment).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    expect(card('inputTokens')).toBe(69024);
+    expect(card('outputTokens')).toBe(473);
+    expect(steps[3]?.turnTotal).toMatchObject({ inputTokens: 69024, outputTokens: 473 });
+  });
+});
+
+describe('acpProfileEfforts (stopped-lane efforts)', () => {
+  it('gives Grok every level its mapping accepts, whatever the model', () => {
+    expect(acpProfileEfforts(grokAcpProfile)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(acpProfileEfforts(grokAcpProfile, 'grok-4.7')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('gives agy its thought levels, and none for a model id with an effort suffix', () => {
+    expect(acpProfileEfforts(antigravityAcpProfile, 'gemini-3-pro')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(acpProfileEfforts(antigravityAcpProfile, 'gemini-3-pro-high')).toEqual([]);
+  });
+
+  it('gives none for a profile without sessionConfig', () => {
+    expect(acpProfileEfforts(createProfile(), 'model-a')).toEqual([]);
+  });
+
+  it('matches what the live handle serves for the same model', async () => {
+    const h = start({
+      agent: { configOptions: [MODEL_OPTION] },
+      profile: { sessionConfig: antigravityAcpProfile.sessionConfig },
+      options: { model: 'model-a-high' },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const live = await h.handle.listTurnOptions?.();
+    expect(live?.efforts).toEqual(acpProfileEfforts(antigravityAcpProfile, 'model-a-high'));
+    expect(live?.efforts).toEqual([]);
   });
 });

@@ -28,7 +28,6 @@ import type {
   HarnessTargetHealth,
   HarnessTargetId,
   HarnessWriteFailure,
-  McpServerConfig,
 } from '@ptah-extension/shared';
 import type { HarnessDesiredState } from '../manifest/desired-state.types';
 import type {
@@ -41,16 +40,14 @@ export interface HarnessPlanWrite {
   /**
    * Workspace-relative POSIX path, e.g. `.claude/skills/orchestration`.
    *
-   * For `kind: 'mcp'` this is a FRAGMENT key — `<configRelPath>#<serverKey>`,
-   * e.g. `.mcp.json#github` — because many servers share one config file. A
-   * leading `~/` marks a user-global config. See `mcp/mcp-facet.port.ts`.
+   * No target plans a `kind: 'mcp'` write: Ptah writes no native MCP config
+   * file (TASK_2026_979, decision row 10).
    */
   relPath: string;
   kind: HarnessEntryKind;
   /**
-   * Absolute source directory (skills) or file (commands/agents). For
-   * `kind: 'mcp'` there is no source path, so this carries the registry name;
-   * the field is diagnostic-only either way.
+   * Absolute source directory (skills) or file (commands/agents). Diagnostic
+   * only.
    */
   source: string;
   /** Desired content hash after the write. */
@@ -70,11 +67,6 @@ export interface HarnessPlanWrite {
    * it is listed in {@link HarnessPlan.keptLocalEdit} instead (D8).
    */
   reason: 'create' | 'update';
-  /**
-   * `kind: 'mcp'` only: the server entry to install, and under which key.
-   * Absent for every other kind, whose content is read from {@link source}.
-   */
-  mcp?: { serverKey: string; config: McpServerConfig };
 }
 
 /** A manifest-owned artifact whose source disappeared. */
@@ -82,12 +74,9 @@ export interface HarnessPlanRemove {
   relPath: string;
   kind: HarnessEntryKind;
   isDirectory: boolean;
-  /** `kind: 'mcp'` only: the key to delete from the config file. */
-  mcpServerKey?: string;
   /**
    * Set when the entry is a copy of a RETIRED source: its manifest `source`
-   * lies under one of {@link HarnessRetiredSources.skillSourceRoots}, or its
-   * MCP key is one of {@link HarnessRetiredSources.mcpServerKeys}. Such a
+   * lies under one of {@link HarnessRetiredSources.skillSourceRoots}. Such a
    * removal runs the D-2 proof policy and reports into
    * {@link HarnessApplyResult.removedRetired} / `keptRetired`; it is never
    * snapshot-removed. Absent for every ordinary removal.
@@ -105,8 +94,6 @@ export interface HarnessRetiredSources {
    * under one is `skillsShRetiredItemId(basename(root))`.
    */
   skillSourceRoots: readonly string[];
-  /** Retired MCP server keys; item id `mcpRetiredItemId(serverKey)`. */
-  mcpServerKeys: readonly string[];
 }
 
 /** A one-time repair of state left by the pre-reconciler implementation. */
@@ -303,13 +290,11 @@ export interface IHarnessTarget {
    * COPIES, for the `.gitignore` managed block (E23).
    *
    * Directories only, and only ones whose whole contents are derived. MCP
-   * config files are excluded on purpose: `.mcp.json`, `.cursor/mcp.json` and
-   * `.vscode/mcp.json` are project configuration teams commit, which happen to
-   * carry a Ptah-owned fragment — not build output.
+   * config files (`.mcp.json`, `.cursor/mcp.json`) are never listed: they are
+   * project configuration teams commit, and Ptah does not write them.
    *
    * Optional because a legitimate implementation of this port may have nothing
-   * to ignore (the `vscode` target writes one config file and no directory),
-   * and because a test double is a legitimate implementation too. The
+   * to ignore, and because a test double is a legitimate implementation too. The
    * reconciler treats an absent method as an empty list.
    */
   managedDirs?(): readonly string[];

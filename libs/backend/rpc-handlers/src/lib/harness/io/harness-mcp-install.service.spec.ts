@@ -8,8 +8,8 @@
  *
  * The service builds its own `McpInstallService` over the default intent
  * store, so `os.homedir()` is redirected to a scratch directory before the SUT
- * is imported. No reconciler is registered, so nothing is written to any
- * target config file; only the intent file is.
+ * is imported. An install records intent only (TASK_2026_979 B18): nothing
+ * is written to any target config file, only the intent file is.
  */
 
 import 'reflect-metadata';
@@ -70,7 +70,7 @@ import { HarnessMcpInstallService } from './harness-mcp-install.service';
 const intentPath = path.join(os.homedir(), '.ptah', 'mcp-installed.json');
 const stdio = { type: 'stdio' as const, command: 'node', args: ['s.js'] };
 
-/** A container with no harness reconciler: intents are recorded, nothing is written. */
+/** A container with no harness reconciler. Install never needs one: it records intent only. */
 const noReconciler = {
   isRegistered: () => false,
   resolve: () => {
@@ -129,7 +129,13 @@ describe('HarnessMcpInstallService — workspace intent (D-4)', () => {
   it('records the applied server for workspace A only; it is absent from B', async () => {
     const { a, b } = workspaces();
 
-    await makeService().installServers([entry()], a);
+    const outcome = await makeService().installServers([entry()], a);
+
+    // The outcome names the recorded server, never a config path, and no
+    // config file appears in the workspace.
+    expect(outcome).toEqual({ recordedServers: ['alpha'], warnings: [] });
+    expect(fs.existsSync(path.join(a, '.mcp.json'))).toBe(false);
+    expect(fs.existsSync(path.join(a, '.vscode', 'mcp.json'))).toBe(false);
 
     expect(store().scopeOf('alpha', a)).toBe('workspace');
     expect(store().targetsIn('alpha', 'workspace', a)).toEqual([
@@ -145,9 +151,7 @@ describe('HarnessMcpInstallService — workspace intent (D-4)', () => {
     const { a } = workspaces();
     const spy = jest
       .spyOn(McpInstallService.prototype, 'install')
-      .mockResolvedValue([
-        { target: 'claude', success: true, configPath: '/a/.mcp.json' },
-      ]);
+      .mockResolvedValue([{ target: 'claude', success: true, configPath: '' }]);
 
     const outcome = await makeService().installServers(
       [entry({ serverKey: 'alpha-key', installTargets: ['claude'] })],
@@ -163,7 +167,7 @@ describe('HarnessMcpInstallService — workspace intent (D-4)', () => {
       'workspace',
     );
     expect(outcome).toEqual({
-      installedPaths: ['/a/.mcp.json'],
+      recordedServers: ['alpha-key'],
       warnings: [],
     });
   });
@@ -199,7 +203,7 @@ describe('HarnessMcpInstallService — workspace intent (D-4)', () => {
     expect(spy).not.toHaveBeenCalled();
     expect(fs.existsSync(intentPath)).toBe(false);
     expect(outcome.warnings).toHaveLength(1);
-    expect(outcome.installedPaths).toEqual([]);
+    expect(outcome.recordedServers).toEqual([]);
   });
 
   it('with no workspace open warns and records nothing', async () => {

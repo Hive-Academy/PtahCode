@@ -65,7 +65,10 @@ import {
   withAgyConptyNoiseFilter,
   type AntigravityAcpSeam,
 } from './antigravity-acp-lane';
-import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
+import {
+  acpProfileEfforts,
+  createProviderSessionLaneHandle,
+} from './provider-session/provider-session-lane-handle';
 import type { Logger } from '@ptah-extension/vscode-core';
 
 /** Values agy accepts as an effort (ACP `thought_level`, model-id suffix). Anything else is dropped. */
@@ -427,6 +430,14 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   parseOutput(raw: string): string {
     return stripAnsiCodes(raw);
+  }
+
+  /**
+   * The levels a live agy lane serves for `model` (the profile mapping); no
+   * lane needed. A model id that carries its own effort suffix gets none.
+   */
+  laneEfforts(model?: string): readonly string[] {
+    return acpProfileEfforts(antigravityAcpProfile, model);
   }
 
   /**

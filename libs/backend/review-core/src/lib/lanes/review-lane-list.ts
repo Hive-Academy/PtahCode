@@ -5,11 +5,8 @@ import type { Logger } from '@ptah-extension/vscode-core';
 /** Most lanes one list read serves; the listing contract carries no more. */
 export const REVIEW_LANE_LIST_MAX = 100;
 
-/** One gateway lane row: the listing entry without its catalog, plus the default-model block flag. */
-export const ReviewLaneCandidateSchema = ReviewLaneListingEntrySchema.omit({ catalog: true }).extend({
-  /** The model the lane runs on when none is sent (its setting, else the CLI default) is blocked. */
-  defaultModelBlocked: z.boolean().optional(),
-});
+/** One gateway lane row: the listing entry without its catalog. */
+export const ReviewLaneCandidateSchema = ReviewLaneListingEntrySchema.omit({ catalog: true });
 /** One lane of the review lane list, in gateway (global preference) order. */
 export type ReviewLaneCandidate = z.infer<typeof ReviewLaneCandidateSchema>;
 

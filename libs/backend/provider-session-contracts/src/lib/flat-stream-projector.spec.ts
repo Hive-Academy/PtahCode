@@ -284,6 +284,30 @@ describe('createFlatStreamProjector', () => {
     ).toEqual([]);
   });
 
+  it('ignores mid-turn usage: the open message completes only on the turn usage', () => {
+    const projector = createFlatStreamProjector();
+    projector.project(event({ type: 'textDelta', itemId: 'm1', delta: 'Hi' }));
+    expect(
+      projector.project(
+        event({
+          type: 'usageProgress',
+          provider: 'Grok',
+          turnId: 'sess-1:agent-1:1',
+          usage: { inputTokens: 5, outputTokens: 2 },
+        }),
+      ),
+    ).toEqual([]);
+    const completed = projector.project(
+      event({
+        type: 'usage',
+        provider: 'Grok',
+        turnId: 'sess-1:agent-1:1',
+        usage: { inputTokens: 9, outputTokens: 4 },
+      }),
+    );
+    expect(completed.map((row) => row.eventType)).toEqual(['message_complete']);
+  });
+
   it('gives no stream row to infos, plans and stderr, and never throws', () => {
     const projector = createFlatStreamProjector();
     for (const body of [

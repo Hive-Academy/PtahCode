@@ -10,7 +10,7 @@
  *     assembly, allowedTools serialization, return value
  *   - searchMcpRegistry — delegation with default limit
  *   - listInstalledMcpServers — reads .vscode/mcp.json and .mcp.json with
- *     tolerance for IO errors
+ *     tolerance for IO errors, plus the installer's Ptah install intents
  *   - installMcpServer — target/key defaulting, zod config validation, missing
  *     installer degradation, per-target failure warnings
  *   - proposeConfig — zod validation before broadcast
@@ -307,10 +307,8 @@ describe('buildHarnessNamespace — installMcpServer', () => {
     expect(out.scope).toBe('workspace');
     expect(out.serverKey).toBe('server-name');
     expect(out.targets).toEqual(['claude', 'vscode']);
-    expect(out.installedPaths).toEqual([
-      'D:/ws/.mcp.json',
-      'D:/ws/.vscode/mcp.json',
-    ]);
+    expect(out.recordedTargets).toEqual(['claude', 'vscode']);
+    expect(out).not.toHaveProperty('installedPaths');
     expect(out.warnings).toEqual([]);
   });
 
@@ -355,13 +353,13 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       stdio,
     );
 
-    expect(out.installedPaths).toEqual(['D:/ws/.mcp.json']);
+    expect(out.recordedTargets).toEqual(['claude']);
     expect(out.warnings).toEqual([
       'Failed to install "owner/srv" to vscode: permission denied',
     ]);
   });
 
-  it('dedupes repeated config paths', async () => {
+  it('names each recorded target once', async () => {
     const mcpInstaller = makeInstaller([
       { target: 'claude', success: true, configPath: 'D:/ws/.mcp.json' },
       { target: 'cursor', success: true, configPath: 'D:/ws/.mcp.json' },
@@ -375,7 +373,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       ['claude', 'cursor'],
     );
 
-    expect(out.installedPaths).toEqual(['D:/ws/.mcp.json']);
+    expect(out.recordedTargets).toEqual(['claude', 'cursor']);
   });
 
   it('degrades with a clear error when no installer is wired', async () => {
@@ -456,7 +454,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
           undefined,
           ['claude', target],
         ),
-      ).rejects.toThrow("Use scope 'user' to write home-folder CLI configs");
+      ).rejects.toThrow("Use scope 'user' to install for home-folder CLIs");
       expect(mcpInstaller.install).not.toHaveBeenCalled();
     },
   );
@@ -488,7 +486,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       'global',
     );
     expect(out.scope).toBe('user');
-    expect(out.installedPaths).toEqual(['D:/home/.codex/config.toml']);
+    expect(out.recordedTargets).toEqual(['codex']);
   });
 
   it('records an explicit user-scope install with no folder open', async () => {
@@ -522,7 +520,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
     );
     // Deferred, not failed: one note, no per-target failure warning.
     expect(out.warnings).toEqual([
-      '"owner/srv" was saved for all workspaces. Its config files are written when you open a folder.',
+      '"owner/srv" was saved for all workspaces. Ptah serves it in every workspace you open.',
     ]);
   });
 
@@ -1802,5 +1800,95 @@ describe('buildHarnessNamespace — listInstalledMcpServers', () => {
     const { deps } = makeDeps();
     const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
     expect(out).toEqual([]);
+  });
+
+  // B24: an install through `ptah_harness_install_mcp_server` is recorded as
+  // an intent the gateway serves; no file carries it, so the list reads the
+  // installer's rows too and says where each came from.
+  describe('Ptah install intents', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+    const intentRow = (
+      serverKey: string,
+      target: string,
+      scope: 'global' | 'workspace',
+      removal: 'ptah-managed' | 'none' = 'ptah-managed',
+    ) => ({
+      serverKey,
+      target,
+      configPath: 'D:/home/.ptah/mcp-installed.json',
+      config: stdio,
+      managedByPtah: true,
+      origin: 'ptah-intent',
+      originLabel: 'Ptah',
+      removal,
+      scope,
+    });
+    const withRows = (rows: unknown[] | Error): McpInstallerMock & {
+      listInstalled: jest.Mock;
+    } => ({
+      install: jest.fn(),
+      listInstalled:
+        rows instanceof Error
+          ? jest.fn().mockRejectedValue(rows)
+          : jest.fn().mockResolvedValue(rows),
+    });
+
+    it('lists each recorded server once per scope with its targets, after the files', async () => {
+      existsSync.mockImplementation((p: string) => p.endsWith('.mcp.json'));
+      fsp.readFile.mockResolvedValueOnce(
+        JSON.stringify({ mcpServers: { github: { url: 'x' } } }),
+      );
+      const mcpInstaller = withRows([
+        intentRow('g', 'codex', 'global'),
+        intentRow('k', 'claude', 'workspace'),
+        intentRow('k', 'cursor', 'workspace'),
+        intentRow('m', 'claude', 'workspace', 'none'),
+        // A file row is already listed from the file itself.
+        { ...intentRow('github', 'claude', 'workspace'), origin: 'harness-config' },
+      ]);
+      const { deps } = makeDeps({ mcpInstaller });
+
+      const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
+
+      expect(mcpInstaller.listInstalled).toHaveBeenCalledWith('D:/ws');
+      expect(out).toEqual([
+        { name: 'github', config: { url: 'x' }, source: '.mcp.json' },
+        {
+          name: 'g',
+          config: stdio,
+          source: 'ptah-intent (global)',
+          targets: ['codex'],
+        },
+        {
+          name: 'k',
+          config: stdio,
+          source: 'ptah-intent (workspace)',
+          targets: ['claude', 'cursor'],
+        },
+        {
+          name: 'm',
+          config: stdio,
+          source: 'ptah-intent (main checkout)',
+          targets: ['claude'],
+        },
+      ]);
+    });
+
+    it('still lists the files, and logs, when the installer cannot list', async () => {
+      existsSync.mockImplementation((p: string) => p.endsWith('.mcp.json'));
+      fsp.readFile.mockResolvedValueOnce(
+        JSON.stringify({ mcpServers: { github: { url: 'x' } } }),
+      );
+      const { deps, logger } = makeDeps({
+        mcpInstaller: withRows(new Error('store unreadable')),
+      });
+
+      const out = await buildHarnessNamespace(deps).listInstalledMcpServers();
+
+      expect(out.map((s) => s.source)).toEqual(['.mcp.json']);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('store unreadable'),
+      );
+    });
   });
 });

@@ -204,6 +204,49 @@ describe('review lane options', () => {
     expect(laneLabel(null, 'raw-id')).toBe('raw-id');
   });
 
+  describe('blocked lane default model', () => {
+    const blockedLane = lane({ id: 'a', defaultModelBlocked: true });
+
+    it('marks a pool entry and a pin on Lane default unavailable with the reason', () => {
+      const pool = entryState(listing([blockedLane]), { lane: 'a', model: null }, 'pool');
+      expect(pool.unavailable).toBe(true);
+      expect(pool.marks).toEqual([{ status: 'warning', label: 'Unavailable' }]);
+      expect(pool.reason).toBe('Lane default model blocked for review lanes. Reviews skip it and say so.');
+      const pin = entryState(listing([blockedLane]), { lane: 'a', model: null }, 'pin');
+      expect(pin.unavailable).toBe(true);
+      expect(pin.reason).toBe('Lane default model blocked for review lanes. Reviews use the pool order and say so.');
+    });
+
+    it('offers Lane default first, marked blocked', () => {
+      const options = modelOptions(listing([blockedLane]), 'a', null);
+      expect(options[0]).toEqual({
+        value: NO_CHOICE,
+        label: 'Lane default (blocked)',
+        description: "This lane's default model is blocked for review lanes.",
+      });
+      expect(options.slice(1).map((o) => o.value)).toEqual(['m-1', 'm-2']);
+    });
+
+    it('marks a saved Lane default entry blocked as soon as the listing loads', () => {
+      const saved = { lane: 'a', model: null };
+      expect(entryState(null, saved, 'pool').unavailable).toBe(false);
+      expect(entryState(listing([blockedLane]), saved, 'pool').unavailable).toBe(true);
+    });
+
+    it('keeps the at-limit reason first, and an explicit model usable', () => {
+      const atLimit = lane({ id: 'a', defaultModelBlocked: true, limitState: 'at-limit' });
+      expect(entryState(listing([atLimit]), { lane: 'a', model: null }, 'pool').reason).toBe('At its usage limit. Reviews skip it and say so.');
+      expect(entryState(listing([blockedLane]), { lane: 'a', model: 'm-1' }, 'pool').unavailable).toBe(false);
+    });
+
+    it('does not block Lane default when the field is absent or false', () => {
+      for (const entry of [lane({ id: 'a' }), lane({ id: 'a', defaultModelBlocked: false })]) {
+        expect(entryState(listing([entry]), { lane: 'a', model: null }, 'pool').unavailable).toBe(false);
+        expect(modelOptions(listing([entry]), 'a', null)[0]).toEqual({ value: NO_CHOICE, label: 'Lane default', description: 'No model is sent' });
+      }
+    });
+  });
+
   it('derives lens roles from the lens contract', () => {
     expect(REVIEW_LANE_ROLES.filter(isLensRole)).toEqual(LensSchema.options);
     expect(isLensRole('triage')).toBe(false);

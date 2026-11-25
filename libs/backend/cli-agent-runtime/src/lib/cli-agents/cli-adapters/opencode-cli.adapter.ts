@@ -67,14 +67,19 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   CliDetectionResult,
   CliOutputSegment,
+  LaneTurnContent,
+  LaneTurnSettings,
 } from '@ptah-extension/shared';
-import type {
-  CliAdapterManifest,
-  CliAdapter,
-  CliCommandOptions,
-  CliModelInfo,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliAdapterManifest,
+  type CliAdapter,
+  type CliCommandOptions,
+  type CliModelInfo,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
 import { applyLaneArgvPolicy, translateLaneSpawnPolicy } from '../lane-spawn-policy';
@@ -96,6 +101,14 @@ import {
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { classifyCliStderr } from './cli-stderr-severity';
+import { UnverifiedLaneModel } from './lane-unverified-model';
+
+/**
+ * Refusal for a turn with more than one attached file (S2): `--file` is a
+ * single-value flag in `opencode run --help`, and repeating it is unconfirmed.
+ */
+export const OPENCODE_ONE_FILE_TEXT =
+  'OpenCode lanes take one attached file per message. The message was not sent.';
 
 /**
  * Provider API-key env vars treated as a "credentials present" signal when no
@@ -388,6 +401,23 @@ export class OpencodeCliAdapter implements CliAdapter {
       },
       limitReader: { state: 'available', source: 'opencode-go' },
       mcp: { state: 'supported' },
+      turnInput: {
+        // `--model` is a spawn flag: each `opencode run` turn takes the latest one.
+        model: { state: 'supported', appliesAt: 'next-spawn' },
+        effort: { state: 'unsupported', reason: 'OpenCode model variants for reasoning effort are not known to Ptah.' },
+        images: { state: 'unsupported', reason: 'OpenCode image input through --file is not confirmed.' },
+        // One file per turn (S2): `opencode run --help` (v2.3.2) lists
+        // `--file, -f string`, a single value like `--model`; whether it
+        // repeats is not confirmed, so a second file is refused at send.
+        files: { state: 'supported', delivery: 'reference' },
+        commands: { state: 'unsupported', reason: 'OpenCode lanes take no slash commands in run mode.' },
+        skills: { state: 'unsupported', reason: 'OpenCode lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'live' },
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'No verified native approval route.' },
+        questions: { state: 'unsupported', reason: 'No verified native question route.' },
+      },
     };
   }
 
@@ -716,9 +746,9 @@ export class OpencodeCliAdapter implements CliAdapter {
     if (policy.requested.permission === 'yolo') {
       baseArgs.push('--auto');
     }
-    if (options.model) {
-      baseArgs.push('--model', options.model);
-    }
+    /** The model of the next spawned turn (`applyTurnSettings`, next-spawn). */
+    let turnModel = options.model;
+    const unverifiedModel = new UnverifiedLaneModel('OpenCode', (item) => segment.emit(item));
     const standalone = await this.supportsStandalone(binary);
     const legacyAutoFallback = policy.requested.permission === 'yolo'
       && options.permissionSource === 'built-in' && !standalone;
@@ -768,23 +798,35 @@ export class OpencodeCliAdapter implements CliAdapter {
     const startTurn = (
       prompt: string,
       sessionId: string | undefined,
+      files: readonly string[] = [],
     ): Promise<number> => {
+      const model = turnModel;
       const args = [
         ...spawnDescriptor.prefixArgs,
-        ...applyLaneArgvPolicy(baseArgs,
+        ...applyLaneArgvPolicy(
+          model ? [...baseArgs, '--model', model] : baseArgs,
           policy.cli === 'opencode' ? policy.argv : { addArgs: [], removeArgs: [] }),
       ];
       if (sessionId) {
         args.push('--session', sessionId);
       }
+      // At most one `--file` (S2), its own argv entry; `continue` refuses more.
+      const [file] = files;
+      if (file !== undefined) args.push('--file', file);
       // Prompt is a positional arg; keep it LAST.
       args.push(prompt);
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
+      const settleModel = (code: number): number => {
+        // A failed turn drops its unchecked model (M3); an aborted one proves nothing.
+        if (!abortController.signal.aborted && unverifiedModel.settle(model, code === 0))
+          turnModel = options.model;
+        return code;
+      };
       return this.runTurn({
         windowsJobPolicy: standalone === true ? 'job' : 'no-job',
         turnNumber: ++turnSequence,
         runId: options.agentId,
-        requestedModelId: options.model,
+        requestedModelId: model,
         command: spawnDescriptor.command,
         args,
         workingDirectory: options.workingDirectory,
@@ -809,7 +851,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           }
         },
         expectedSessionId: sessionId,
-      });
+      }).then(settleModel);
     };
 
     const resumableSessionId = (): string | undefined =>
@@ -832,7 +874,7 @@ export class OpencodeCliAdapter implements CliAdapter {
       getSessionId: resumableSessionId,
       getPid: () => activeChild?.pid,
       supportsContinuation: () => resumableSessionId() !== undefined,
-      continue: (message: string): Promise<ContinuationOutcome> => {
+      continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> => {
         const sessionId = resumableSessionId();
         if (!sessionId) {
           return Promise.reject(
@@ -842,10 +884,32 @@ export class OpencodeCliAdapter implements CliAdapter {
             ),
           );
         }
+        if ((content?.files?.length ?? 0) > 1)
+          return Promise.reject(new Error(OPENCODE_ONE_FILE_TEXT));
         // The session already holds the task and its context; the message is
         // the whole prompt of the new turn.
-        return Promise.resolve({ done: startTurn(message, sessionId) });
+        return Promise.resolve({ done: startTurn(message, sessionId, content?.files) });
       },
+      applyTurnSettings: async (settings: LaneTurnSettings): Promise<LaneTurnSettingsResult> => {
+        if (settings.reasoningEffort !== undefined)
+          throw new LaneTurnSettingRefusal(
+            'reasoningEffort',
+            'OpenCode model variants for reasoning effort are not known to Ptah.',
+          );
+        const { model } = settings;
+        if (model !== undefined) {
+          // An empty list (failed probe) takes the model unchecked and says so (M3).
+          unverifiedModel.accept(model, await this.listModels());
+          turnModel = model;
+        }
+        return { ...(model !== undefined ? { model } : {}), appliesAt: 'next-spawn' };
+      },
+      listTurnOptions: async (): Promise<LaneTurnOptionsCatalog> => ({
+        models: await this.listModels(),
+        efforts: [],
+        ...(turnModel ? { currentModel: turnModel } : {}),
+        commands: [],
+      }),
     };
   }
 
@@ -999,7 +1063,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           } : undefined;
           emitSegment({
             type: 'info', content: 'OpenCode turn telemetry',
-            ...(usage ? { usage } : {}),
+            ...(usage ? { usage, usageScope: 'turn' as const } : {}),
             turnTelemetry: completedTurnTelemetry({
               ...turnIdentity({ provider: 'opencode', turnId: state.turnId,
                 sessionId: boundSessionId ?? launch.expectedSessionId ?? `opencode:${child.pid ?? 'unknown'}`,
@@ -1240,9 +1304,13 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
     const usageStr = `Usage: ${tokens.input} input, ${tokens.output} output tokens`;
     emitOutput(`\n[${usageStr}]\n`);
+    // Live: each step's own usage is a `message` increment; the turn
+    // telemetry total corrects the running sum (B4).
     emitSegment({
       type: 'info',
       content: usageStr,
+      usageScope: 'message',
+      usage: { inputTokens: tokens.input, outputTokens: tokens.output },
     });
   }
 }

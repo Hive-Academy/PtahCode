@@ -138,6 +138,7 @@ export class InternalQueryService {
         toolAccess: config.toolAccess,
         dispatch: config.dispatch,
         onProviderSubmit: config.onProviderSubmit,
+        includeConnectors: config.includeConnectors,
       });
     } catch (error: unknown) {
       release();

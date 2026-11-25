@@ -167,8 +167,121 @@ describe('AgentDeliveryStore', () => {
     rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body' }));
     await store.recoverIntoComposer(resumed, lane, 'message-1');
     expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
-    expect(store.takeRecovered(resumed)).toBe('queued body');
-    expect(store.takeRecovered(resumed)).toBeNull();
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'queued body' });
+    expect(store.takeRecoveredMessage(resumed)).toBeNull();
+  });
+
+  it('holds a message for a lane composer without a backend read and merges it with one waiting', async () => {
+    rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'recovered' }));
+    await store.recoverIntoComposer(resumed, lane, 'message-1');
+    rpc.call.mockClear();
+    store.holdForComposer(resumed, { text: 'came back', turn: { files: ['a.ts'] } });
+    expect(rpc.call).not.toHaveBeenCalled();
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'recovered\ncame back', turn: { files: ['a.ts'] } });
+  });
+
+  describe('turn snapshot', () => {
+    const turn = { model: 'gpt-5.5', reasoningEffort: 'high', files: ['src/app.ts'] };
+
+    it('recoverQueuedText still resolves the text alone', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
+      await expect(store.recoverQueuedText(lane, 'message-1')).resolves.toBe('queued body');
+    });
+
+    it('recoverQueuedMessage resolves the text and its turn', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
+      await expect(store.recoverQueuedMessage(lane, 'message-1')).resolves.toEqual({ text: 'queued body', turn });
+      expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
+    });
+
+    it('recoverQueuedMessage omits turn for a text-only message and rejects a missing body', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'plain' }));
+      const plain = await store.recoverQueuedMessage(lane, 'message-1');
+      expect(plain).toEqual({ text: 'plain' });
+      expect('turn' in plain).toBe(false);
+      rpc.call.mockResolvedValueOnce(rpcError('gone'));
+      await expect(store.recoverQueuedMessage(lane, 'message-1')).rejects.toThrow('gone');
+    });
+
+    it('Recover text hands the composer the message with its turn', async () => {
+      const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn: { ...turn, images: [image] } }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
+      expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'queued body', turn: { ...turn, images: [image] } });
+      expect(store.takeRecoveredMessage(resumed)).toBeNull();
+    });
+
+    it('Recover text keeps a text-only message without a turn', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'plain' }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      const message = store.takeRecoveredMessage(resumed);
+      expect(message).toEqual({ text: 'plain' });
+      expect(message && 'turn' in message).toBe(false);
+    });
+
+    it('merges two recoveries: texts joined, attachments deduplicated, later model and effort win', async () => {
+      const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
+      rpc.call
+        .mockResolvedValueOnce(rpcSuccess({ text: 'first', turn: { model: 'a', reasoningEffort: 'low', files: ['x.ts'], images: [image] } }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'second', turn: { model: 'b', files: ['x.ts', 'y.ts'], images: [image] } }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      await store.recoverIntoComposer(resumed, lane, 'message-2');
+      expect(store.takeRecoveredMessage(resumed)).toEqual({
+        text: 'first\nsecond',
+        turn: { model: 'b', reasoningEffort: 'low', files: ['x.ts', 'y.ts'], images: [image] },
+      });
+    });
+
+    it('merges a turn after a text-only recovery and keeps it after a later text-only one', async () => {
+      rpc.call
+        .mockResolvedValueOnce(rpcSuccess({ text: 'one' }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'two', turn }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'three' }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      await store.recoverIntoComposer(resumed, lane, 'message-2');
+      await store.recoverIntoComposer(resumed, lane, 'message-3');
+      expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'one\ntwo\nthree', turn });
+    });
+
+    it('sends the turn with the message only when one is given', async () => {
+      rpc.call.mockResolvedValue(rpcSuccess({ mode: 'queue-next-turn', receipt: receipt() }));
+      await store.sendMessage(lane, 'hello', 'now', true, 'key-1', turn);
+      expect(rpc.call).toHaveBeenLastCalledWith('agent:sendMessage', {
+        agentId: lane, message: 'hello', delivery: 'now', allowPartialTurnLoss: true, idempotencyKey: 'key-1', turn,
+      });
+      await store.sendMessage(lane, 'hello', 'queue', undefined, 'key-2');
+      expect('turn' in (rpc.call.mock.calls[1][1] as object)).toBe(false);
+    });
+
+    it.each([
+      ['turn-options-refused', 'Not delivered: lane refused the model or effort · 5m'],
+      ['turn-input-unsupported', 'Not delivered: lane cannot take this attachment or command · 5m'],
+      ['attachments-unavailable', 'Not delivered: attachments no longer held · 5m'],
+      ['attachments-capacity', 'Not delivered: attachment storage full · 5m'],
+    ])('labels the %s reason', (reason, text) => {
+      expect(store.receiptStatus(receipt({ state: 'failed', reason })).text).toBe(text);
+    });
+
+    it.each(['turn-options-refused', 'turn-input-unsupported'])(
+      'offers no Retry for a %s failure, which would be refused again',
+      (reason) => {
+        const kinds = store.receiptStatus(receipt({ state: 'failed', reason })).actions.map((action) => action.kind);
+        expect(kinds).toEqual(['recover', 'cancel']);
+      },
+    );
+
+    it('keeps Retry for a transient failure', () => {
+      const kinds = store.receiptStatus(receipt({ state: 'failed', reason: 'delivery-failed' })).actions.map((a) => a.kind);
+      expect(kinds).toEqual(['retry', 'recover', 'cancel']);
+    });
+
+    it('stops offering Recover text once a composer restored the message (M4)', () => {
+      const failed = receipt({ state: 'failed', reason: 'agent_stopped' });
+      expect(store.receiptStatus(failed).actions.map((action) => action.kind)).toContain('recover');
+      store.markRestored(failed.id);
+      expect(store.receiptStatus(failed).actions.map((action) => action.kind)).toEqual(['retry', 'cancel']);
+    });
   });
 
   describe('actions', () => {
@@ -350,6 +463,12 @@ describe('AgentDeliveryStore', () => {
       expect(AgentDeliveryStore.ackLabel(item)).toBe(expected);
       expect(AgentDeliveryStore.ackLabel(ackState, ackNote)).toBe(expected);
       expect(store.receiptStatus(item).ackLabel).toBe(expected);
+    });
+
+    it('labels a raw /command delivery instead of a missing ack', () => {
+      const item = receipt({ state: 'settled', ackState: 'unavailable', rawDelivery: true });
+      expect(AgentDeliveryStore.ackLabel(item)).toBe('Delivered as a command');
+      expect(store.receiptStatus(item).ackLabel).toBe('Delivered as a command');
     });
 
     it('distinguishes known vs unknown limit reset times and keeps transport, turn outcome, and ack separate', () => {

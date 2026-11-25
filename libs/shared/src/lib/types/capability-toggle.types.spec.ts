@@ -43,6 +43,17 @@ describe('defaultEnabled', () => {
     ).toEqual({ enabled: true, reason: 'user-scope' });
   });
 
+  it('turns a workspace-scoped Ptah install on: it is the user record, not a repository file', () => {
+    expect(
+      defaultEnabled({
+        kind: 'mcp',
+        id: 'stdiocheck',
+        scopes: ['workspace'],
+        installedByPtah: true,
+      }),
+    ).toEqual({ enabled: true, reason: 'user-scope' });
+  });
+
   it('keeps a repository-only or undeclared server off', () => {
     expect(
       defaultEnabled({ kind: 'mcp', id: 'firecrawl', scopes: ['workspace'] }),

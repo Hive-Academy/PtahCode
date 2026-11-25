@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { CodexModelInfo } from '@ptah-extension/codex-runtime';
 import type { CliModelInfo } from '../cli-adapter.interface';
+import { validatedEffort } from './codex-app-server-lane-rejection';
 
 /**
  * Dynamic `model/list` rows, validated at the lane boundary. The optional
@@ -31,4 +32,13 @@ export function codexLaneModels(input: readonly CodexModelInfo[]): CliModelInfo[
       ? { id: model.model, name: `${name} (Codex default)` }
       : { id: model.model, name };
   });
+}
+/**
+ * The effort levels the live catalog advertises: the union of every model's
+ * `supportedEfforts` that a lane can send, in catalog order. Empty when the
+ * catalog advertises none; Ptah adds no static list here.
+ */
+export function codexAdvertisedEfforts(catalog: readonly CodexModelInfo[]): string[] {
+  return [...new Set(catalog.flatMap((model) => model.supportedEfforts ?? []))]
+    .filter((effort) => validatedEffort(effort) !== undefined);
 }

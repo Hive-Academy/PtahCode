@@ -136,6 +136,7 @@ jest.mock('fs/promises', () => ({
   readFile: (...args: unknown[]) => mockReadFile(...args),
 }));
 
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import { PiCliAdapter } from './pi-cli.adapter';
 import type { SdkHandle } from './cli-adapter.interface';
 import type {
@@ -143,6 +144,7 @@ import type {
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { buildTaskPrompt, renderRoleBlock } from './cli-adapter.utils';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 import { LaneInstructionFileStore } from '../lane-instruction-file-store';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 
@@ -942,8 +944,96 @@ describe('PiCliAdapter (RPC mode)', () => {
       expect(adapter.supportsMcp).toBe(false);
     });
 
+    it('has no built-in lane policy because no permission mode is verified', () => {
+      expect(() => resolveCliLanePolicy({ cli: 'pi', manifest: adapter.capabilities(), saved: {}, request: {} }))
+        .toThrow('supports no verified permission mode');
+    });
+
     it('strips ANSI escape codes', () => {
       expect(adapter.parseOutput('\x1b[32mok\x1b[0m')).toBe('ok');
     });
+  });
+});
+
+describe('PiCliAdapter lane turn input (B9)', () => {
+  let adapter: PiCliAdapter;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    currentChild = null;
+    spawnedChildren = [];
+    mockSpawnCli.mockImplementation(() => {
+      currentChild = createFakeChild();
+      spawnedChildren.push(currentChild);
+      return currentChild.child;
+    });
+    mockReadFile.mockRejectedValue(new Error('missing'));
+    adapter = new PiCliAdapter();
+  });
+
+  async function firstTurn(): Promise<{ handle: SdkHandle; segments: CliOutputSegment[] }> {
+    const handle = await adapter.runSdk({ task: 'Count', workingDirectory: '/proj', model: 'provider/model' });
+    const { segments } = collect(handle);
+    currentChild?.stdout.write(`${JSON.stringify({ type: 'session', id: 'pi-session-1' })}\n`);
+    currentChild?.stdout.write('{"type":"agent_settled"}\n');
+    await handle.done;
+    return { handle, segments };
+  }
+
+  it('declares next-spawn settings, live usage and images unsupported per A7', async () => {
+    const manifest = adapter.capabilities();
+    expect(manifest.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-spawn' },
+      effort: { state: 'supported', appliesAt: 'next-spawn' },
+      images: { state: 'unsupported', reason: 'Pi image input over RPC is not confirmed.' },
+      files: { state: 'unsupported' },
+      commands: { state: 'unsupported' },
+      skills: { state: 'unsupported' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'live' });
+    const { handle } = await firstTurn();
+    expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
+  });
+
+  it('spawns the next turn with the applied model and thinking level', async () => {
+    const { handle } = await firstTurn();
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([
+      { id: 'provider/model', name: 'provider/model' },
+      { id: 'provider/other', name: 'provider/other' },
+    ]);
+    await expect(handle.applyTurnSettings?.({ model: 'provider/other', reasoningEffort: 'high' }))
+      .resolves.toEqual({ model: 'provider/other', reasoningEffort: 'high', appliesAt: 'next-spawn' });
+    const next = await handle.continue?.('Again');
+    spawnedChildren[1].stdout.write('{"type":"agent_settled"}\n');
+    await next?.done;
+    const args = (mockSpawnCli.mock.calls[1] as [string, string[]])[1];
+    expect(args[args.indexOf('--model') + 1]).toBe('provider/other');
+    expect(args[args.indexOf('--thinking') + 1]).toBe('high');
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
+      currentModel: 'provider/other', currentEffort: 'high',
+      efforts: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+    });
+  });
+
+  it('refuses an unknown model and thinking level', async () => {
+    const { handle } = await firstTurn();
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([{ id: 'provider/model', name: 'provider/model' }]);
+    await expect(handle.applyTurnSettings?.({ model: 'nope/x' }))
+      .rejects.toMatchObject({ field: 'model', reason: 'Pi has no model "nope/x".' });
+    await expect(handle.applyTurnSettings?.({ reasoningEffort: 'inherit' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort', reason: 'Pi has no thinking level "inherit".' });
+  });
+
+  it('streams each message_end usage before the turn settles', async () => {
+    const handle = await adapter.runSdk({ task: 'Count', workingDirectory: '/proj', model: 'provider/model' });
+    const { segments } = collect(handle);
+    currentChild?.stdout.write(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', model: 'provider/model', usage: { input: 10, output: 2, cacheRead: 3 } } })}\n`);
+    expect(segments.filter((segment) => segment.usage)).toEqual([{
+      type: 'info', content: 'Pi message usage.', usageScope: 'message',
+      usage: { model: 'provider/model', inputTokens: 10, outputTokens: 2, cacheReadTokens: 3 },
+    }]);
+    currentChild?.stdout.write('{"type":"agent_settled"}\n');
+    await handle.done;
+    expect(segments.filter((segment) => segment.usage).map((segment) => segment.usageScope)).toEqual(['message', 'turn']);
   });
 });

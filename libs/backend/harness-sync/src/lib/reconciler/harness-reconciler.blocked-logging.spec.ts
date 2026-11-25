@@ -9,11 +9,15 @@
  * (`targets/claude-target.ts:189-194`), so `writeFailed: 0` was never evidence
  * that those writes had succeeded.
  *
- * Source-under-test: `HarnessReconcilerService.log` + `ClaudeTarget` +
- * `createVscodeMcpTarget`.
+ * Source-under-test: `HarnessReconcilerService.log` + `ClaudeTarget`.
+ *
+ * Both blocked paths are files: no target plans an MCP config entry any more
+ * (TASK_2026_979, decision row 10), so a server key the user defines in
+ * `.mcp.json` is never blocked and never touched.
  */
 
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -33,12 +37,8 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import { HarnessManifestBuilder } from '../manifest/harness-manifest.builder';
 import { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import { createStaticSourceResolver } from '../sources/plugin-config-source-resolver';
-import type {
-  HarnessSourceState,
-  IHarnessCliDetector,
-} from '../sources/harness-source.port';
+import type { HarnessSourceState } from '../sources/harness-source.port';
 import { ClaudeTarget } from '../targets/claude-target';
-import { createVscodeMcpTarget } from '../targets/rival-targets';
 import { HarnessReconcilerService } from './harness-reconciler.service';
 import { HarnessStateStore } from '../gitignore/harness-state-store';
 
@@ -65,6 +65,12 @@ function grantSkillSync(workspaceRoot: string): void {
 const BLOCKED_MESSAGE = HARNESS_BLOCKED_WARN_MESSAGE;
 const SUMMARY_GAPS = '[harness-sync] Reconcile finished with gaps';
 const SUMMARY_CLEAN = '[harness-sync] Reconcile complete';
+/** The user's own Claude MCP config, which no pass may touch. */
+const USER_MCP_JSON = `${JSON.stringify(
+  { mcpServers: { wanted: { command: 'the-users-server' } } },
+  null,
+  2,
+)}\n`;
 
 interface BlockedPath {
   target: HarnessTargetId;
@@ -97,11 +103,6 @@ function makeFakeLogger(): FakeLogger {
     warn: jest.fn(),
     error: jest.fn(),
   };
-}
-
-function detectorFor(installed: HarnessTargetId[]): IHarnessCliDetector {
-  const set = new Set(installed);
-  return { isInstalled: (target) => Promise.resolve(set.has(target)) };
 }
 
 /** Every `logger.warn` payload logged under the given message. */
@@ -138,10 +139,9 @@ function blockedDetail(logger: FakeLogger): BlockedDetail {
 describe('HarnessReconcilerService — the blocked-path line', () => {
   let ws: string;
   let sourcesRoot: string;
-  let home: string;
   let logger: FakeLogger;
 
-  /** Two skills and one command in the user layer, plus one MCP intent. */
+  /** Two skills and one command in the user layer. */
   function writeSources(): HarnessSourceState {
     const skillsRoot = join(sourcesRoot, 'skills');
     const commandsRoot = join(sourcesRoot, 'commands');
@@ -164,14 +164,6 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [
-        {
-          serverKey: 'wanted',
-          registryName: 'io.github.example/wanted',
-          config: { type: 'stdio', command: 'wanted-server' },
-          targets: ['vscode'],
-        },
-      ],
     };
   }
 
@@ -186,21 +178,15 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
       new HarnessManifestBuilder(),
       store,
       createStaticSourceResolver(sourceState),
-      [
-        new ClaudeTarget(store),
-        createVscodeMcpTarget({
-          manifestStore: store,
-          detector: detectorFor(['vscode']),
-          homeDir: home,
-        }),
-      ],
+      [new ClaudeTarget(store)],
     );
   }
 
   /**
    * The captured shape, in miniature: a desired skill slug occupied by a
-   * directory the user wrote, an undesired foreign skill beside it, and a
-   * desired MCP key the user already defines.
+   * directory the user wrote, an undesired foreign skill beside it, a desired
+   * command occupied by a file the user wrote, and the user's own `.mcp.json`
+   * (never desired, never blocked, never touched).
    */
   function writeOccupants(): void {
     mkdirSync(join(ws, '.claude', 'skills', 'alpha'), { recursive: true });
@@ -219,33 +205,25 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
       'utf-8',
     );
 
-    mkdirSync(join(ws, '.vscode'), { recursive: true });
+    mkdirSync(join(ws, '.claude', 'commands'), { recursive: true });
     writeFileSync(
-      join(ws, '.vscode', 'mcp.json'),
-      JSON.stringify(
-        {
-          servers: {
-            'user-thing': { type: 'stdio', command: 'the-users-server' },
-            wanted: { type: 'stdio', command: 'the-users-other-server' },
-          },
-        },
-        null,
-        2,
-      ),
+      join(ws, '.claude', 'commands', 'run-it.md'),
+      'my own command\n',
       'utf-8',
     );
+
+    writeFileSync(join(ws, '.mcp.json'), USER_MCP_JSON, 'utf-8');
   }
 
   beforeEach(() => {
     ws = mkdtempSync(join(tmpdir(), 'harness-blocked-ws-'));
     grantSkillSync(ws);
     sourcesRoot = mkdtempSync(join(tmpdir(), 'harness-blocked-src-'));
-    home = mkdtempSync(join(tmpdir(), 'harness-blocked-home-'));
     logger = makeFakeLogger();
   });
 
   afterEach(() => {
-    for (const dir of [ws, sourcesRoot, home]) {
+    for (const dir of [ws, sourcesRoot]) {
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -258,8 +236,8 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
 
     const detail = blockedDetail(logger);
     expect(detail.paths.map((entry) => entry.relPath).sort()).toEqual([
+      '.claude/commands/run-it.md',
       '.claude/skills/alpha',
-      '.vscode/mcp.json#wanted',
     ]);
     expect(detail.blocked).toBe(2);
     // Foreign, but nobody asked for it. A gap it is not.
@@ -268,7 +246,7 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
     );
   });
 
-  it('states the refusal in words, per path, and distinguishes an occupied path from an occupied server key', async () => {
+  it('states the refusal in words, per path, and never in MCP server-key wording', async () => {
     const reconciler = buildReconciler(writeSources());
     writeOccupants();
 
@@ -281,10 +259,13 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
       'occupied by a file or directory Ptah does not own',
     );
     expect(byPath.get('.claude/skills/alpha')?.target).toBe('claude');
-    expect(byPath.get('.vscode/mcp.json#wanted')?.reason).toBe(
-      'the config file already defines this server key, and Ptah did not write it',
+    expect(byPath.get('.claude/commands/run-it.md')?.reason).toBe(
+      'occupied by a file or directory Ptah does not own',
     );
-    expect(byPath.get('.vscode/mcp.json#wanted')?.target).toBe('vscode');
+    for (const entry of byPath.values()) {
+      expect(entry.relPath).not.toContain('#');
+      expect(entry.reason).not.toContain('server key');
+    }
   });
 
   it('leads the user action with MOVE, warns the occupant may be their own, and never presents destruction as the remedy anywhere in the line', async () => {
@@ -361,7 +342,7 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
     // Scope-labelled the same way the summary is (Task 5.3), so the two lines
     // cannot be read as one target's numbers beside another's.
     expect(detail.scope).toBe('all-targets');
-    expect(detail.targetCount).toBe(2);
+    expect(detail.targetCount).toBe(1);
     expect(detail.reason).toBe('activation');
     expect(detail.mode).toBe('full');
   });
@@ -411,10 +392,12 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
     expect(
       readFileSync(join(ws, '.claude', 'skills', 'alpha', 'SKILL.md'), 'utf-8'),
     ).toBe('hand-written by the user\n');
-    const config = JSON.parse(
-      readFileSync(join(ws, '.vscode', 'mcp.json'), 'utf-8'),
-    ) as { servers: Record<string, { command?: string }> };
-    expect(config.servers['wanted'].command).toBe('the-users-other-server');
+    expect(
+      readFileSync(join(ws, '.claude', 'commands', 'run-it.md'), 'utf-8'),
+    ).toBe('my own command\n');
+    // The user's MCP config is never a write target (TASK_2026_979).
+    expect(readFileSync(join(ws, '.mcp.json'), 'utf-8')).toBe(USER_MCP_JSON);
+    expect(existsSync(join(ws, '.vscode', 'mcp.json'))).toBe(false);
 
     for (const target of health.targets) {
       expect(target.writeFailed).toEqual([]);
@@ -488,9 +471,9 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
     const grown = blockedDetail(logger);
     expect(grown.blocked).toBe(3);
     expect(grown.paths.map((entry) => entry.relPath).sort()).toEqual([
+      '.claude/commands/run-it.md',
       '.claude/skills/alpha',
       '.claude/skills/gamma',
-      '.vscode/mcp.json#wanted',
     ]);
     // The wording guard still holds on the re-emitted line — this is the same
     // payload builder, and a second emit path must not become a second wording.
@@ -515,11 +498,7 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
         force: true,
       });
     }
-    writeFileSync(
-      join(ws, '.vscode', 'mcp.json'),
-      JSON.stringify({ servers: {} }, null, 2),
-      'utf-8',
-    );
+    rmSync(join(ws, '.claude', 'commands', 'run-it.md'), { force: true });
     await reconciler.reconcile(ws, {
       mode: 'full',
       reason: 'harness:reconcile',
@@ -586,8 +565,8 @@ describe('HarnessReconcilerService — the blocked-path line', () => {
       blockedTargetPaths(target),
     );
     expect(stillBlocked.sort()).toEqual([
+      '.claude/commands/run-it.md',
       '.claude/skills/alpha',
-      '.vscode/mcp.json#wanted',
     ]);
   });
 });

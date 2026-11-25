@@ -29,6 +29,8 @@ import {
   type ResultStatsPayload,
   type SessionStatsEntry,
 } from '@ptah-extension/shared';
+import { PLATFORM_TOKENS, type IMcpGateway } from '@ptah-extension/platform-core';
+import { withGatewayServers } from './gateway-server-status';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   RunModelUsage,
@@ -547,6 +549,8 @@ export class StreamTransformer {
      */
     @inject(SDK_TOKENS.SDK_SESSION_PLAN_LIMIT_REGISTRY)
     private readonly planLimits: SessionPlanLimitCallbackRegistry,
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: Pick<IMcpGateway, 'status'>,
   ) {}
 
   /**
@@ -602,6 +606,7 @@ export class StreamTransformer {
     const pricingProvider = this.pricingProvider;
     const mcpStatus = this.mcpStatus;
     const planLimits = this.planLimits;
+    const mcpGateway = this.mcpGateway;
 
     return {
       async *[Symbol.asyncIterator]() {
@@ -797,10 +802,16 @@ export class StreamTransformer {
                 mcpStatus.notifyAll({
                   kind: 'servers',
                   sessionId: realSessionId,
-                  servers: sdkMessage.mcp_servers.map((server) => ({
-                    name: server.name,
-                    status: server.status,
-                  })),
+                  servers: withGatewayServers(
+                    mcpGateway,
+                    sdkMessage.mcp_servers.map((server) => ({
+                      name: server.name,
+                      status: server.status,
+                    })),
+                    sdkMessage.cwd,
+                    logger,
+                    realSessionId,
+                  ),
                 });
               }
             }

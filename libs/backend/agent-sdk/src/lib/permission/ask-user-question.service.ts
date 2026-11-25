@@ -45,6 +45,11 @@ export class AskUserQuestionService {
     sessionId?: SessionId,
     signal?: AbortSignal,
     tabId?: TabId,
+    /**
+     * Agent id of the CLI lane that asked. Set on the request only when
+     * present, so a main chat question keeps its existing shape.
+     */
+    agentId?: string,
   ): Promise<PermissionResult> {
     if (!isAskUserQuestionToolInput(input)) {
       this.logger.warn('[SdkPermissionHandler] Invalid AskUserQuestion input', {
@@ -70,6 +75,7 @@ export class AskUserQuestionService {
       timeoutAt: 0,
       sessionId,
       tabId: resolvedTabId,
+      ...(agentId ? { agentId } : {}),
     };
 
     if (!request.tabId) {
@@ -83,6 +89,7 @@ export class AskUserQuestionService {
       requestId,
       questionCount: input.questions.length,
       toolUseId,
+      agentId,
     });
 
     this.webviewManager

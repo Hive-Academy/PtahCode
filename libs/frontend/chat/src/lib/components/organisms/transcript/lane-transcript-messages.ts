@@ -5,6 +5,11 @@ import {
   type ExecutionNode,
   type FlatStreamEventUnion,
 } from '@ptah-extension/shared';
+import { LANE_USER_ECHO_NODE_PREFIX } from '../../../services/agent-monitor-tree-builder.service';
+
+function isUserEcho(node: ExecutionNode): boolean {
+  return node.type === 'text' && node.id.startsWith(LANE_USER_ECHO_NODE_PREFIX);
+}
 
 /**
  * One node for two trees of the same message: children by id in first-seen
@@ -79,11 +84,45 @@ export function laneTranscriptMessages(
       );
   }
   users.sort((a, b) => a.timestamp - b.timestamp);
+  // A user turn the stream already shows (a provider that echoes its prompt)
+  // keeps one bubble: the host echo of the same body is dropped. Each echo
+  // matches one streamed user message of its own delivery, used only once: a
+  // timed echo takes the first unused one that contains its body and does not
+  // predate the last output before the send, so an earlier turn's message
+  // never hides a later delivery.
+  const streamedUsed = users.map(() => false);
+  const outputTimes = nodes
+    .filter((node) => !isUserEcho(node) && !userTextIds.has(node.id))
+    .map((node) => node.startTime)
+    .filter((time): time is number => time !== undefined);
+  const consumeStreamed = (body: string, sentAt?: number): boolean => {
+    const wanted = body.trim();
+    if (wanted === '') return false;
+    const floor =
+      sentAt === undefined
+        ? -Infinity
+        : outputTimes.reduce((last, time) => (time < sentAt && time > last ? time : last), -Infinity);
+    const index = users.findIndex(
+      (user, i) =>
+        !streamedUsed[i] &&
+        user.timestamp >= floor &&
+        (user.rawContent ?? '').includes(wanted),
+    );
+    if (index < 0) return false;
+    streamedUsed[index] = true;
+    return true;
+  };
 
   const messages: ExecutionChatMessage[] = [];
   /** Emitted SDK message node per id, with its position in `messages`. */
   const emitted = new Map<string, { index: number; node: ExecutionNode }>();
   let children: ExecutionNode[] = [];
+  /**
+   * Time of the last user echo. A segment-only lane's nodes carry no times,
+   * so its bubbles take the time of the echo before them and keep their order
+   * (the final sort is stable). Without an echo it stays 0, as before.
+   */
+  let lastTime = 0;
   const flush = () => {
     if (!children.length) return;
     const root = createExecutionNode({
@@ -99,7 +138,7 @@ export function laneTranscriptMessages(
       createExecutionChatMessage({
         id: root.id,
         role: 'assistant',
-        timestamp: root.startTime ?? 0,
+        timestamp: root.startTime ?? lastTime,
         streamingState: root,
       }),
     );
@@ -110,6 +149,22 @@ export function laneTranscriptMessages(
   for (const node of nodes) {
     if (userTextIds.has(node.id)) {
       flush();
+      continue;
+    }
+    if (isUserEcho(node)) {
+      // What the user sent (body only): a user bubble in stream order.
+      flush();
+      const body = node.content ?? '';
+      lastTime = node.startTime ?? lastTime;
+      if (!consumeStreamed(body, node.startTime))
+        messages.push(
+          createExecutionChatMessage({
+            id: `${laneId}:echo:${node.id}`,
+            role: 'user',
+            timestamp: lastTime,
+            rawContent: body,
+          }),
+        );
       continue;
     }
     const time = node.startTime ?? previousTime;

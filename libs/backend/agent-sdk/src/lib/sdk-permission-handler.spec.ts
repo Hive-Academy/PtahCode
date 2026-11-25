@@ -41,6 +41,7 @@ interface AskUserQuestionPayload {
   toolName: 'AskUserQuestion';
   sessionId?: string;
   tabId?: string;
+  agentId?: string;
 }
 
 function makeHandler(
@@ -1304,6 +1305,60 @@ describe('SdkPermissionHandler - live session id resolution', () => {
 
     ac.abort();
     await pending;
+  });
+
+  describe('AskUserQuestion lane id', () => {
+    const LANE_SESSION_ID = '11111111-2222-4333-8444-555555555555';
+    const QUESTION_INPUT = {
+      questions: [
+        {
+          question: 'Continue?',
+          header: 'Confirm',
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        },
+      ],
+    };
+
+    async function askAndCapture(
+      cliAgentResolver?: () => string | undefined,
+    ): Promise<AskUserQuestionPayload> {
+      const { handler, sent } = makeHandler();
+      const callback = handler.createCallback(
+        asSessionId(LANE_SESSION_ID),
+        cliAgentResolver,
+      );
+      const ac = new AbortController();
+      const pending = callback('AskUserQuestion', QUESTION_INPUT, {
+        signal: ac.signal,
+        toolUseID: 'tool-lane-ask',
+        requestId: 'tool-lane-ask',
+      });
+      await flushMicrotasks();
+      const broadcast = sent.find(
+        (m) => m.type === MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST,
+      );
+      expect(broadcast).toBeDefined();
+      ac.abort();
+      await pending;
+      return broadcast!.payload as unknown as AskUserQuestionPayload;
+    }
+
+    it('carries the resolved lane agentId on a lane question', async () => {
+      const payload = await askAndCapture(() => 'lane-agent-42');
+      expect(payload.agentId).toBe('lane-agent-42');
+      expect(payload.sessionId).toBe(LANE_SESSION_ID);
+    });
+
+    it('sends a main chat question without an agentId key', async () => {
+      const payload = await askAndCapture();
+      expect('agentId' in payload).toBe(false);
+      expect(payload.sessionId).toBe(LANE_SESSION_ID);
+    });
+
+    it('sends the question without an agentId when the lane id is unresolved', async () => {
+      const payload = await askAndCapture(() => undefined);
+      expect('agentId' in payload).toBe(false);
+    });
   });
 
   it('stamps the resolved SDK session id on an AskUserQuestion request', async () => {
@@ -2625,6 +2680,7 @@ describe('CLI lane callback level override', () => {
       'allow',
     ],
     ['mcp__ptah__ptah_search_files', { pattern: '*.ts' }, 'allow'],
+    ['mcp__ptah__ptah_agent_message_ack', { messageId: 'm1', state: 'read' }, 'allow'],
   ] as const)(
     'decides %s for a plan-level lane without an approval prompt',
     async (toolName, input, behavior) => {
@@ -2657,6 +2713,60 @@ describe('CLI lane callback level override', () => {
       ).toEqual([]);
     },
   );
+  it.each([
+    'mcp__ptah__ptah_agent_message_ack',
+    'mcp__ptah__ptah_agent_report',
+    'mcp__ptah__ptah_agent_message_status',
+  ])('allows the lane-own tool %s for an ask-level lane without a prompt (L5)', async (toolName) => {
+    const { handler, sent } = makeHandler();
+    const result = await handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'),
+      () => 'ask-lane',
+      undefined,
+      () => 'ask',
+    )(toolName, { messageId: 'm1', state: 'read' }, {
+      signal: new AbortController().signal,
+      toolUseID: `ask-${toolName}`,
+      requestId: `ask-${toolName}`,
+    });
+    expect(result).toMatchObject({ behavior: 'allow' });
+    expect(
+      sent.filter(
+        (message) =>
+          message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+          message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
+      ),
+    ).toEqual([]);
+  });
+  it('keeps the prompt for other Ptah tools of an ask-level lane, and for the ack outside a lane', async () => {
+    const { handler, sent } = makeHandler();
+    const abort = new AbortController();
+    const lane = handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'),
+      () => 'ask-lane',
+      undefined,
+      () => 'ask',
+    )('mcp__ptah__ptah_agent_message', { agentId: 'x', message: 'y' }, {
+      signal: abort.signal, toolUseID: 'ask-send', requestId: 'ask-send',
+    });
+    const main = handler.createCallback(
+      asSessionId('11111111-2222-4333-8444-555555555555'),
+      undefined,
+      undefined,
+      () => 'ask',
+    )('mcp__ptah__ptah_agent_message_ack', { messageId: 'm1', state: 'read' }, {
+      signal: abort.signal, toolUseID: 'main-ack', requestId: 'main-ack',
+    });
+    await flushMicrotasks();
+    const prompts = sent.filter(
+      (message) =>
+        message.type === MESSAGE_TYPES.PERMISSION_REQUEST ||
+        message.type === MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
+    );
+    expect(prompts.length).toBe(2);
+    abort.abort();
+    await Promise.allSettled([lane, main]);
+  });
   it('keeps the prompt for a plan-level interactive session (no lane resolver)', async () => {
     const { handler, sent } = makeHandler();
     const abort = new AbortController();

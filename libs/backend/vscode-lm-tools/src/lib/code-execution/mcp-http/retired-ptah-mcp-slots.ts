@@ -66,6 +66,7 @@ import {
   ANTIGRAVITY_URL_KEY,
   PTAH_SPAWN_MCP_KEY,
   createMcpFacet,
+  isLinkedWorktreeRoot,
   withMcpConfigLock,
 } from '@ptah-extension/harness-sync';
 
@@ -231,6 +232,12 @@ export interface RetiredPtahMcpSweepDeps extends RetiredPtahMcpDeps {
  *
  * The credential is revoked before the file is read, so the token stops
  * authorizing in memory even when the file cannot be changed this pass.
+ *
+ * The workspace file of a root that is a linked git worktree is never written
+ * (#1469): it is usually a tracked file of the shared repository, and a rewrite
+ * there would put unrelated config churn on the task branch. Its credential is
+ * still revoked, which touches no file. The main checkout and the home file are
+ * swept as before.
  */
 export async function sweepRetiredPtahMcpEntries(
   deps: RetiredPtahMcpSweepDeps,
@@ -247,9 +254,15 @@ export async function sweepRetiredPtahMcpEntries(
     );
     return;
   }
+  // Nothing to sweep (agy not detected): touch no disk at all, as before.
+  if (configPaths.length === 0) return;
+  const linkedWorkspaceFiles = await linkedWorktreeWorkspaceFiles(
+    deps.workspaceRoots,
+  );
   for (const configPath of configPaths) {
     try {
       await deps.revokeCredential(configPath);
+      if (linkedWorkspaceFiles.has(configPath)) continue;
       const removed = await removeRetiredPtahEntry(configPath);
       if (removed !== false) {
         deps.logger.info(
@@ -266,6 +279,27 @@ export async function sweepRetiredPtahMcpEntries(
       );
     }
   }
+}
+
+/**
+ * The workspace config path of every root that is a linked git worktree.
+ * `isLinkedWorktreeRoot` never rejects; an error reads as "not linked", which
+ * keeps the main-checkout behaviour.
+ */
+async function linkedWorktreeWorkspaceFiles(
+  roots: readonly string[],
+): Promise<Set<string>> {
+  const unique = [...new Set(roots.filter((root) => root !== ''))];
+  const linked = await Promise.all(
+    unique.map(async (root) =>
+      (await isLinkedWorktreeRoot(root)) ? root : null,
+    ),
+  );
+  return new Set(
+    linked
+      .filter((root): root is string => root !== null)
+      .map((root) => path.join(root, ...WORKSPACE_SEGMENTS)),
+  );
 }
 
 function messageOf(error: unknown): string {

@@ -238,7 +238,6 @@ import type {
   SubagentQueryResult,
   SubagentSendMessageParams,
   SubagentStopParams,
-  SubagentInterruptParams,
   SubagentBackgroundParams,
   SubagentBackgroundResult,
   SubagentCommandResult,
@@ -489,6 +488,8 @@ import type {
   AgentListMessageReceiptsResult,
   AgentGetQueuedMessageBodyParams,
   AgentGetQueuedMessageBodyResult,
+  AgentGetLaneComposerOptionsParams,
+  AgentGetLaneComposerOptionsResult,
   AgentRetryMessageParams,
   AgentRetryMessageResult,
   AgentCancelMessageParams,
@@ -505,8 +506,7 @@ import type {
   AgentSetClaudeBuiltinParams,
   AgentSetClaudeBuiltinResult,
   AgentListCliModelsResult,
-  AgentContinueErrorCode,
-  AgentPermissionDecision,
+  LanePermissionResponse,
   SkillShEntry,
   InstalledSkill,
   SkillsShInstallParams,
@@ -1778,10 +1778,6 @@ export interface RpcMethodRegistry
     params: SubagentStopParams;
     result: SubagentCommandResult;
   };
-  'subagent:interrupt': {
-    params: SubagentInterruptParams;
-    result: SubagentCommandResult;
-  };
   'subagent:background': {
     params: SubagentBackgroundParams;
     result: SubagentBackgroundResult;
@@ -1963,6 +1959,11 @@ export interface RpcMethodRegistry
     params: AgentGetQueuedMessageBodyParams;
     result: AgentGetQueuedMessageBodyResult;
   };
+  /** Models, efforts and slash commands one lane offers its composer. */
+  'agent:getLaneComposerOptions': {
+    params: AgentGetLaneComposerOptionsParams;
+    result: AgentGetLaneComposerOptionsResult;
+  };
   'agent:retryMessage': {
     params: AgentRetryMessageParams;
     result: AgentRetryMessageResult;
@@ -1987,9 +1988,9 @@ export interface RpcMethodRegistry
     params: void;
     result: AgentListCliModelsResult;
   };
-  /** Route user's permission decision to Copilot SDK bridge */
+  /** Route a lane user's permission decision to the SDK handler or the Copilot bridge */
   'agent:permissionResponse': {
-    params: AgentPermissionDecision;
+    params: LanePermissionResponse;
     result: { success: boolean; error?: string };
   };
   'agent:pendingPermissions': {
@@ -2027,10 +2028,6 @@ export interface RpcMethodRegistry
   'agent:stop': {
     params: { agentId: string };
     result: { success: boolean; error?: string };
-  };
-  'agent:continue': {
-    params: { agentId: string; message: string };
-    result: { success: boolean; error?: string; code?: AgentContinueErrorCode };
   };
   /** Resume a CLI agent session by spawning a new process with resumeSessionId */
   'agent:resumeCliSession': {
@@ -2993,7 +2990,10 @@ export interface RpcMethodRegistry
   };
   'tasks:list': { params: TasksListParams; result: TasksListResult };
   'tasks:get': { params: TasksGetParams; result: TasksGetResult };
-  'tasks:getDigest': { params: TasksGetDigestParams; result: TasksGetDigestResult };
+  'tasks:getDigest': {
+    params: TasksGetDigestParams;
+    result: TasksGetDigestResult;
+  };
   'tasks:getArtifact': {
     params: TasksGetArtifactParams;
     result: TasksGetArtifactResult;
@@ -3942,7 +3942,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'chat:dismiss-resumable-subagents': true,
   'subagent:send-message': true,
   'subagent:stop': true,
-  'subagent:interrupt': true,
   'subagent:background': true,
   'subagent:history-page': true,
   'enhancedPrompts:getStatus': true,
@@ -3978,6 +3977,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:listMessageReceipts': true,
   'agent:getMessageReceipt': true,
   'agent:getQueuedMessageBody': true,
+  'agent:getLaneComposerOptions': true,
   'agent:retryMessage': true,
   'agent:cancelMessage': true,
   'agent:listParentDeliveries': true,
@@ -3988,7 +3988,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:pendingPermissions': true,
   'agent:e2eSeedPermission': true, // TEST-ONLY seam, PTAH_E2E-gated (TASK_2026_264)
   'agent:stop': true,
-  'agent:continue': true,
   'agent:resumeCliSession': true, // CLI agent session resume
   'agent:backgroundList': true, // Background agent listing
   // TASK_2026_623 R10.1. `agent:` is ALREADY in `ALLOWED_METHOD_PREFIXES`, so

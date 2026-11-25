@@ -1,7 +1,11 @@
 import 'reflect-metadata';
 import { MIGRATIONS, SqliteConnectionService, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
 import { Logger } from '@ptah-extension/vscode-core';
+import { z } from 'zod';
+import { REVIEW_STAGE_USAGE_RUNS_MAX, ReviewRunSchema } from '@ptah-extension/review-contracts';
+import type { ReviewLaneRunUsage } from '../lanes/review-lane-usage';
 import { ReviewQueryRepository } from './review-query.repository';
+import { SqliteReviewRepository } from './sqlite-review.repository';
 
 describe('ReviewQueryRepository', () => {
   it('binds cursor parameters and filters partial runs by persisted result', async () => {
@@ -171,5 +175,181 @@ describe('ReviewQueryRepository', () => {
       ]);
       expect((await query.listRuns({ limit: 10 })).runs.find((entry) => entry.attemptId === 'lanes')?.stages).toHaveLength(3);
     } finally { db.close(); }
+  });
+
+  describe('lane usage on runs and stages', () => {
+    const at = (offset: number): string => new Date(Date.UTC(2026, 0, 1) + offset).toISOString();
+    const target = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 1, headSha: 'a'.repeat(40) };
+    const LENS = 'lens:security-privacy';
+    const run = (inputTokens: number, costUsd: number | null = 0.25): ReviewLaneRunUsage => ({ inputTokens, outputTokens: 5,
+      cacheReadTokens: 1, cacheWriteTokens: 2, costUsd, model: 'model-a', partial: false });
+    const use = (lane: string) => ({ lane, model: 'model-a', family: lane, fallback: [] });
+    const row = (attemptId: string, stage: string, startedAt: string, ordinal = 0) => ({ attemptId, stage, ordinal, state: 'running' as const,
+      startedAt, endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null });
+
+    function setup() {
+      const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase;
+      const db = new Database(':memory:');
+      db.pragma('foreign_keys = ON');
+      for (const version of [65, 66, 67, 68, 69]) {
+        const migration = MIGRATIONS.find((entry) => entry.version === version);
+        if (!migration?.sql) throw new Error('Review migration missing: ' + version);
+        db.exec(migration.sql);
+      }
+      const logger = Object.create(Logger.prototype) as Logger;
+      logger.info = jest.fn();
+      const connection = new SqliteConnectionService(':memory:', logger);
+      Object.defineProperty(connection, 'db', { value: db });
+      return { db, repository: new SqliteReviewRepository(connection, logger), query: new ReviewQueryRepository(connection) };
+    }
+
+    async function claimed(repository: SqliteReviewRepository, leaseEnd = at(100_000)): Promise<string> {
+      const attempt = await repository.enqueueDiscovered(target, at(0));
+      await repository.claimNext('owner', at(1), leaseEnd);
+      return attempt.attemptId;
+    }
+
+    async function laneRun(repository: SqliteReviewRepository, attemptId: string, stage: string, lane: string | null,
+      usage?: ReviewLaneRunUsage, ordinal = 0): Promise<void> {
+      await repository.beginStageLaneRun(attemptId, stage, ordinal);
+      await repository.saveStageLane(attemptId, stage, ordinal, lane === null ? null : use(lane), usage);
+    }
+
+    it('shows the latest lane of a rerun stage and sums both runs into the stage and the run (A1, req 2.3, 3.1)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository);
+        await repository.saveStage(row(id, LENS, at(2)));
+        await laneRun(repository, id, LENS, 'codex', run(10));
+        await laneRun(repository, id, LENS, 'claude', run(20, 0.5));
+        await repository.saveStage({ ...row(id, 'triage', at(3), 1) });
+        await laneRun(repository, id, 'triage', 'gemini', run(1), 1);
+        const result = await query.getRun(id);
+        const lens = { inputTokens: 30, outputTokens: 10, cacheReadTokens: 2, cacheWriteTokens: 4, totalTokens: 46, costUsd: 0.75,
+          tokensPartial: false, costPartial: false, runs: 2 };
+        expect(result?.stages).toEqual([expect.objectContaining({ name: 'lenses', lane: 'claude', usage: lens }),
+          expect.objectContaining({ name: 'triage', lane: 'gemini', usage: { ...lens, inputTokens: 1, outputTokens: 5,
+            cacheReadTokens: 1, cacheWriteTokens: 2, totalTokens: 9, costUsd: 0.25, runs: 1 } })]);
+        expect(result?.usage).toEqual({ inputTokens: 31, outputTokens: 15, cacheReadTokens: 3, cacheWriteTokens: 6, totalTokens: 55,
+          costUsd: 1, tokensPartial: false, costPartial: false, runs: 3 });
+        expect(ReviewRunSchema.parse(result)).toEqual(result);
+      } finally { db.close(); }
+    });
+
+    it('leaves usage absent on a stage whose lane was refused before spawn (req 1.5)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository);
+        await repository.saveStage(row(id, LENS, at(2)));
+        await laneRun(repository, id, LENS, null);
+        const result = await query.getRun(id);
+        expect(result?.stages[0]).not.toHaveProperty('usage');
+        expect(result).not.toHaveProperty('usage');
+      } finally { db.close(); }
+    });
+
+    it('reads a begun stage as interrupted after lease reconciliation, keeps earlier usage, and marks both partial (req 7.7)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository, at(5));
+        await repository.saveStage(row(id, LENS, at(2)));
+        await laneRun(repository, id, LENS, 'codex', run(10));
+        // The process dies after begin: no save, no in-process close.
+        await repository.beginStageLaneRun(id, LENS, 0);
+        expect(await repository.reconcileExpiredLeases(at(6))).toBe(1);
+        const result = await query.getRun(id);
+        expect(result?.stages).toEqual([expect.objectContaining({ name: 'lenses', status: 'interrupted', lane: 'codex' })]);
+        expect(result?.stages[0].usage).toEqual({ inputTokens: 10, outputTokens: 5, cacheReadTokens: null, cacheWriteTokens: null,
+          totalTokens: 18, costUsd: 0.25, tokensPartial: true, costPartial: true, runs: 2 });
+        expect(result?.usage).toEqual(result?.stages[0].usage);
+      } finally { db.close(); }
+    });
+
+    it('counts an overflowed stage list as partial with one extra unknown run (F9)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository);
+        await repository.saveStage(row(id, LENS, at(2)));
+        for (let index = 0; index < REVIEW_STAGE_USAGE_RUNS_MAX; index += 1) await laneRun(repository, id, LENS, 'codex', run(1));
+        await laneRun(repository, id, LENS, 'codex', run(1));
+        const usage = (await query.getRun(id))?.stages[0].usage;
+        expect(usage).toMatchObject({ inputTokens: REVIEW_STAGE_USAGE_RUNS_MAX, tokensPartial: true, costPartial: true,
+          runs: REVIEW_STAGE_USAGE_RUNS_MAX + 1 });
+      } finally { db.close(); }
+    });
+
+    it('returns runs whose lane documents hold more than 256 runs in total (F8)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository);
+        for (let stage = 0; stage < 17; stage += 1)
+          for (let index = 0; index < REVIEW_STAGE_USAGE_RUNS_MAX; index += 1) await laneRun(repository, id, `lens:extra-${stage}`, 'codex', run(1));
+        const expected = { inputTokens: 272, outputTokens: 1360, runs: 272, tokensPartial: false, costPartial: false };
+        expect((await query.getRun(id))?.usage).toMatchObject(expected);
+        expect((await query.listRuns({ limit: 10 })).runs.find((entry) => entry.attemptId === id)?.usage).toMatchObject(expected);
+      } finally { db.close(); }
+    });
+
+    it('keeps rows and lane documents this build writes readable by the pre-change readers (NFR a, b)', async () => {
+      const { db, repository } = setup();
+      try {
+        const id = await claimed(repository);
+        await repository.saveStage(row(id, LENS, at(2)));
+        await laneRun(repository, id, LENS, 'codex', run(1));
+        await repository.saveStage(row(id, 'verification', at(3), 3));
+        await repository.beginStageLaneRun(id, 'verification', 3);
+        await repository.closeRunningStage(id, 'verification', 3, at(3), at(4));
+        // Copies of the pre-change readers.
+        const stageState = z.enum(['queued', 'running', 'completed', 'failed', 'interrupted', 'skipped']);
+        const oldStageSchema = z.object({ stage: z.string(), ordinal: z.number(), state: stageState, outcome: z.string().nullable(),
+          family: z.string().nullable(), scope: z.string().nullable(), started_at: z.number().nullable(), ended_at: z.number().nullable(),
+          error_summary: z.string().nullable(), artifact_path: z.string().nullable() });
+        const oldLaneRecordSchema = z.object({ version: z.literal(1), lane: z.string().nullable(), model: z.string().nullable(),
+          fallback: z.array(z.unknown()) });
+        const stages = db.prepare(`SELECT stage, ordinal, state, outcome, family, scope, started_at, ended_at, error_summary, artifact_path
+          FROM review_stages WHERE attempt_id = ? AND stage NOT LIKE 'checkpoint:%' ORDER BY ordinal`).all(id)
+          .map((value) => oldStageSchema.parse(value));
+        expect(stages.map(({ stage, state }) => ({ stage, state }))).toEqual([{ stage: LENS, state: 'running' },
+          { stage: 'verification', state: 'interrupted' }]);
+        const docs = db.prepare(`SELECT outcome FROM review_stages WHERE attempt_id = ? AND stage LIKE 'checkpoint:lane:%' ORDER BY stage`)
+          .all(id).map((value) => oldLaneRecordSchema.parse(JSON.parse(z.object({ outcome: z.string() }).parse(value).outcome)));
+        expect(docs).toEqual([{ version: 1, lane: 'codex', model: 'model-a', fallback: [] },
+          { version: 1, lane: null, model: null, fallback: [] }]);
+      } finally { db.close(); }
+    });
+
+    it('reads a run written before usage capture with usage absent and a valid response (req 2.4)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository);
+        await repository.saveStage(row(id, LENS, at(2)));
+        db.prepare(`INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome) VALUES (?, ?, 0, 'completed', ?)`)
+          .run(id, `checkpoint:lane:${LENS}`, JSON.stringify({ version: 1, lane: 'codex', model: null, family: 'codex', fallback: [] }));
+        const result = await query.getRun(id);
+        expect(result?.stages).toEqual([expect.objectContaining({ lane: 'codex' })]);
+        expect(result?.stages[0]).not.toHaveProperty('usage');
+        expect(result).not.toHaveProperty('usage');
+        expect(ReviewRunSchema.parse(result)).toEqual(result);
+      } finally { db.close(); }
+    });
+
+    it('keeps the stored usage of a completed stage that a resume skips and counts it once (req 2.2)', async () => {
+      const { db, repository, query } = setup();
+      try {
+        const id = await claimed(repository, at(5));
+        await repository.saveStage(row(id, LENS, at(2)));
+        await laneRun(repository, id, LENS, 'codex', run(10));
+        await repository.saveStage({ ...row(id, LENS, at(2)), state: 'completed', endedAt: at(3), outcome: 'completed' });
+        await repository.reconcileExpiredLeases(at(6));
+        await repository.claimNext('new-owner', at(7), at(100_000));
+        // The resume skips the completed lens and runs triage only.
+        await repository.saveStage(row(id, 'triage', at(8), 1));
+        await laneRun(repository, id, 'triage', 'claude', run(1), 1);
+        const result = await query.getRun(id);
+        expect(result?.stages).toEqual([expect.objectContaining({ name: 'lenses', status: 'succeeded', usage: expect.objectContaining({ inputTokens: 10, runs: 1 }) }),
+          expect.objectContaining({ name: 'triage', usage: expect.objectContaining({ inputTokens: 1, runs: 1 }) })]);
+        expect(result?.usage).toMatchObject({ inputTokens: 11, runs: 2, tokensPartial: false });
+      } finally { db.close(); }
+    });
   });
 });

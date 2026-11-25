@@ -3,11 +3,14 @@ import {
   OUTCOME_TASK_KINDS,
   TASK_TYPES,
   PHASE_KINDS,
+  type LaneLimitState,
   type OutcomeRoutingSource,
+  type ProviderAccountUsageStatus,
 } from '@ptah-extension/shared';
 import type { LaneModelEntry } from '../lane-model-listing.port';
 import {
   MAX_DECISION_REQUESTS,
+  ROUTING_RULE_ID_PATTERN,
   SCORE_MAX,
   SCORE_MIN,
 } from '../routing-constants';
@@ -22,6 +25,10 @@ export const FALLBACK_CAUSES = [
   'low-confidence',
   'payload-too-large',
   'question-limit',
+  'deadline',
+  'model-cold',
+  'model-busy',
+  'question-cap',
 ] as const;
 export const EXCLUSION_RULES = [
   'at-limit',
@@ -63,14 +70,83 @@ const ModelProposalSchema = z
   })
   .strict()
   .nullable();
-const ExcludedSchema = z
-  .object({
-    phaseId: z.string(),
-    candidate: z.string(),
-    rule: z.enum(EXCLUSION_RULES),
-    capability: z.literal('browser').optional(),
-  })
-  .strict();
+const USER_RULE_PREFIX = 'user-rule:';
+const ExclusionRuleSchema = z.union([
+  z.enum(EXCLUSION_RULES),
+  z.templateLiteral([USER_RULE_PREFIX, z.string()]).refine(
+    (rule) => ROUTING_RULE_ID_PATTERN.test(rule.slice(USER_RULE_PREFIX.length)),
+    'Invalid routing rule id',
+  ),
+]);
+const PrunedCauseSchema = z.enum(['below-band', 'option-cap', 'payload-fit']);
+const PreferenceSourceSchema = z.enum(['rule', 'call', 'configured']);
+const ModelListStatusSchema = z.enum(['ok', 'timeout', 'error', 'empty', 'unregistered']);
+
+const LimitEvidenceSchema = z.object({
+  state: z.enum(['at-limit', 'near-limit', 'confirmed-room', 'unknown'] satisfies LaneLimitState[]),
+  lookup: z.enum(['ok', 'no-owner', 'timeout', 'failed']).optional(),
+  status: z.enum([
+    'available',
+    'unsupported-auth',
+    'unsupported-config',
+    'provider-unsupported',
+    'cli-unavailable',
+    'cli-version-unsupported',
+    'service-unavailable',
+    'stale',
+    'no-usage-source',
+  ] satisfies ProviderAccountUsageStatus[]).nullable(),
+  readAt: z.number().nullable(),
+}).strict();
+
+const ScorePartsSchema = z.object({
+  prior: z.number(),
+  learned: z.number(),
+  preference: z.number(),
+  limit: z.number(),
+  exploration: z.number().optional(),
+  priorSource: z.enum(['user', 'seed', 'neutral']).optional(),
+  sampleCount: z.number().int().nonnegative().optional(),
+  override: z.number().optional(),
+  overrideLabel: z.string().min(1).max(120).optional(),
+}).strict();
+
+const CandidateTraceSchema = z.object({
+  candidate: z.string(),
+  displayName: z.string(),
+  total: z.number().nullable(),
+  parts: ScorePartsSchema.optional(),
+  disposition: z.enum(['chosen', 'ranked', 'excluded']),
+  rule: ExclusionRuleSchema.optional(),
+  cause: PrunedCauseSchema.optional(),
+  limitEvidence: LimitEvidenceSchema.optional(),
+  modelListStatus: ModelListStatusSchema.optional(),
+  preferenceSource: PreferenceSourceSchema.optional(),
+  overriddenPreferenceSources: z.array(PreferenceSourceSchema).optional(),
+}).strict();
+
+const traceFields = {
+  candidates: z.array(CandidateTraceSchema).optional(),
+  explanation: z.string().optional(),
+  traceOmitted: z.number().int().nonnegative().optional(),
+};
+
+const ExclusionFieldsSchema = z.object({
+  candidate: z.string(),
+  rule: ExclusionRuleSchema,
+  capability: z.literal('browser').optional(),
+  cause: PrunedCauseSchema.optional(),
+}).strict();
+
+const ExcludedSchema = ExclusionFieldsSchema.extend({ phaseId: z.string() });
+
+export type UserRuleExclusion = `user-rule:${string}`;
+export type PrunedCause = z.infer<typeof PrunedCauseSchema>;
+export type PreferenceSource = z.infer<typeof PreferenceSourceSchema>;
+export type ModelListStatus = z.infer<typeof ModelListStatusSchema>;
+export type LimitEvidence = z.infer<typeof LimitEvidenceSchema>;
+export type ScoreParts = z.infer<typeof ScorePartsSchema>;
+export type CandidateTrace = z.infer<typeof CandidateTraceSchema>;
 
 /** A lane is spawned by `cli` or `ptahCliId`; a subagent by its `role`. */
 const ChosenExecutorSchema = z
@@ -132,6 +208,7 @@ export const ChosenEntrySchema = z
     fallbackCause: FallbackCauseSchema,
     modelProposal: ModelProposalSchema,
     reason: z.string(),
+    ...traceFields,
   })
   .strict();
 
@@ -151,16 +228,8 @@ export const UnavailableEntrySchema = z
       'pin-unavailable',
       'missing-capability',
     ]),
-    excludedBy: z.array(
-      z
-        .object({
-          candidate: z.string(),
-          rule: z.enum(EXCLUSION_RULES),
-          capability: z.literal('browser').optional(),
-        })
-        .strict(),
-    ),
-    pinRule: z.enum(EXCLUSION_RULES).nullable(),
+    excludedBy: z.array(ExclusionFieldsSchema),
+    pinRule: ExclusionRuleSchema.nullable(),
     needsDisclosedFallback: z.boolean(),
     source: z.enum(UNAVAILABLE_SOURCES),
     model: z.null(),
@@ -171,6 +240,7 @@ export const UnavailableEntrySchema = z
     confidence: z.null(),
     fallbackCause: z.null(),
     reason: z.string(),
+    ...traceFields,
   })
   .strict()
   .superRefine((entry, ctx) => {

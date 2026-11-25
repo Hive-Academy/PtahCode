@@ -258,6 +258,11 @@ export interface AcpSession {
    * current one.
    */
   getModels(): readonly AcpModelEntry[];
+  /**
+   * The latest `available_commands_update` of this session, in the agent's
+   * order (empty until one arrives). Each update replaces the whole list.
+   */
+  getAvailableCommands(): readonly AcpAvailableCommand[];
   /** Resolves when the current agent process ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
   /**
@@ -287,6 +292,40 @@ export interface AcpSession {
 
 /** One model the session offers (see {@link AcpSession.getModels}). */
 export type AcpModelEntry = AcpModelEntryShape;
+
+/** One slash command an agent advertised (`available_commands_update`). */
+export interface AcpAvailableCommand {
+  readonly name: string;
+  readonly description?: string;
+  /** `_meta.path` when the agent sent one (Grok skills end in `SKILL.md`). */
+  readonly path?: string;
+}
+
+/**
+ * The command list of an `available_commands_update`, read defensively:
+ * an entry without a string name is skipped; `undefined` when the update
+ * carries no list at all.
+ */
+export function readAvailableCommands(update: unknown): AcpAvailableCommand[] | undefined {
+  if (!isRecord(update) || update['sessionUpdate'] !== 'available_commands_update') return undefined;
+  const list = update['availableCommands'];
+  if (!Array.isArray(list)) return undefined;
+  const commands: AcpAvailableCommand[] = [];
+  for (const entry of list) {
+    if (!isRecord(entry)) continue;
+    const name = entry['name'];
+    if (typeof name !== 'string' || !name) continue;
+    const description = entry['description'];
+    const meta = entry['_meta'];
+    const path = isRecord(meta) ? meta['path'] : undefined;
+    commands.push({
+      name,
+      ...(typeof description === 'string' && description ? { description } : {}),
+      ...(typeof path === 'string' && path ? { path } : {}),
+    });
+  }
+  return commands;
+}
 
 /**
  * The delimited block that carries a session's instructions in front of its
@@ -378,6 +417,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let advertisedModes: readonly string[] = [];
   /** `models` of the session reply (`session/new|resume|load`), read defensively. */
   let advertisedModels: readonly AcpModelEntry[] = [];
+  /** Latest `available_commands_update` list (session state, not history). */
+  let availableCommands: readonly AcpAvailableCommand[] = [];
   /**
    * Instructions still owed to a new session that took none on `session/new`:
    * sent in front of its first prompt, then cleared.
@@ -425,6 +466,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   /** Approvals waiting on the sink, so an interrupt can let them answer before `session/cancel`. */
   const pendingApprovals = new Set<Promise<unknown>>();
   const reportedExtensionMethods = new Set<string>();
+  let reportedMalformedUsage = false;
 
   /** The current process generation; replaced only by a respawn. */
   let gen!: Generation;
@@ -542,6 +584,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     sessionUpdate: async (notification) => {
       if (dropStale(target, 'session/update')) return;
       if (!isOwnSession(notification.sessionId)) return;
+      // The command list is session state, not history: an update sent while
+      // `session/load` replays is still the agent's current list.
+      const commands = readAvailableCommands(notification.update);
+      if (commands) availableCommands = commands;
       if (replayCollector) {
         // Everything `session/load` sends before it answers is history.
         replayCollector.add(replayMapper.map(notification.update));
@@ -596,6 +642,35 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     },
     extNotification: async (method, params) => {
       if (dropStale(target, method)) return;
+      // Per-call usage counts only for the running prompt of this session:
+      // replay (`session/load`) and another session's frames are ignored.
+      if (
+        promptInFlight &&
+        currentTurnId &&
+        sessionId !== undefined &&
+        params['sessionId'] === sessionId
+      ) {
+        const callUsage = profile.extensions?.usage?.(method, params, (fieldPaths) => {
+          // M2: one warning per session, so a vendor shape change is visible
+          // without a line per frame. Field paths only, never frame values.
+          if (reportedMalformedUsage) return;
+          reportedMalformedUsage = true;
+          logger?.warn('[AcpSessionHandle] usage notification did not parse; live usage is off', {
+            ...logContext,
+            method,
+            fieldPaths: fieldPaths.slice(0, 8),
+          });
+        });
+        if (callUsage) {
+          const model = callUsage.model ?? sessionModel();
+          emit({
+            type: 'usageProgress',
+            provider: name,
+            turnId: currentTurnId,
+            usage: model ? { ...callUsage, model } : callUsage,
+          });
+        }
+      }
       if (profile.extensions?.notification?.(method, params, logger)) return;
       logger?.debug('[AcpSessionHandle] unsupported extension notification', {
         ...logContext,
@@ -1781,6 +1856,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     getAgentCapabilities: () => gen.init?.agentCapabilities ?? undefined,
     getModes,
     getModels,
+    getAvailableCommands: () => availableCommands,
     get exited() {
       return gen.transport.exited;
     },

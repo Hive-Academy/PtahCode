@@ -2,6 +2,7 @@
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  messageOutcomeText,
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
@@ -144,7 +145,7 @@ export class AgentFollowUpQueueService {
       if (this.revisions.get(agentId) !== revision) return;
       const outcome = await this.store.sendMessage(agentId, text, 'queue', undefined, idempotencyKey);
       if (outcome.mode === 'unsupported' || !outcome.receipt) {
-        this.fail(agentId, text, outcome.detail ?? GENERIC_FAILURE);
+        this.fail(agentId, text, messageOutcomeText(outcome, GENERIC_FAILURE));
         this._queued.update((map) => withoutEntry(map, agentId));
         return;
       }
@@ -191,7 +192,7 @@ export class AgentFollowUpQueueService {
     this._errors.update((map) => withoutEntry(map, agent.agentId));
     try {
       const outcome = await this.store.sendMessage(agent.agentId, message, 'queue', undefined, this.store.newIdempotencyKey());
-      if (outcome.mode === 'unsupported' || !outcome.receipt) this.fail(agent.agentId, message, outcome.detail ?? GENERIC_FAILURE);
+      if (outcome.mode === 'unsupported' || !outcome.receipt) this.fail(agent.agentId, message, messageOutcomeText(outcome, GENERIC_FAILURE));
       else this.accepted.set(agent.agentId, { id: outcome.receipt.id, text: message });
     } catch (error: unknown) {
       this.fail(agent.agentId, message, error instanceof Error ? error.message : GENERIC_FAILURE);

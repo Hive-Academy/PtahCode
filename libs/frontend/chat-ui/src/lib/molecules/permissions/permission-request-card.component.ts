@@ -73,6 +73,19 @@ import {
         <!-- Title -->
         <span class="font-semibold text-base-content-muted">Permission</span>
 
+        <!-- Lane label (lane surfaces only) -->
+        @if (laneLabelText(); as lane) {
+        <span
+          ptahBadge size="xs" tone="accent" appearance="outline"
+          class="px-1.5 max-w-[12rem] flex-shrink-0"
+          data-testid="lane-label"
+          [attr.title]="'Lane: ' + lane"
+        >
+          <span class="sr-only">Lane: </span>
+          <span class="ptah-badge-text">{{ lane }}</span>
+        </span>
+        }
+
         <!-- Tool badge with icon -->
         <span
           ptahBadge size="xs" [tone]="getToolBadgeTone()"
@@ -152,6 +165,12 @@ import {
 })
 export class PermissionRequestCardComponent {
   readonly request = input.required<PermissionRequest>();
+  /**
+   * Display name of the lane that raised this prompt. Lane surfaces set it;
+   * main chat leaves it unset and the card renders exactly as before.
+   */
+  readonly laneLabel = input<string | null | undefined>(undefined);
+  protected readonly laneLabelText = computed(() => this.laneLabel()?.trim() || null);
   readonly responded = output<PermissionResponse>();
   protected readonly ShieldAlertIcon = ShieldAlert;
   protected readonly FileIcon = File;

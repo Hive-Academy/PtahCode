@@ -10,6 +10,12 @@ import type {
   ParentDeliveryView,
 } from '../agent-process.types';
 import { RPC_METHOD_NAMES } from '../rpc.types';
+import type { RpcMethodRegistry } from '../rpc.types';
+import type { AgentGetQueuedMessageBodyResult } from '../rpc/rpc-agents.types';
+import type {
+  AgentPermissionDecision,
+  LanePermissionResponse,
+} from '../agent-permission.types';
 import {
   AgentDeliveryReceiptSchema,
   AgentMonitorMessageReceiptPayloadSchema,
@@ -35,7 +41,9 @@ const legacyReceipt: AgentDeliveryReceipt = {
   turnOutcome: 'completed',
 };
 
-function extendedReceipt(state: AgentDeliveryReceiptState): AgentDeliveryReceipt {
+function extendedReceipt(
+  state: AgentDeliveryReceiptState,
+): AgentDeliveryReceipt {
   return {
     ...legacyReceipt,
     state,
@@ -87,17 +95,25 @@ describe('agent messaging schemas', () => {
     const receipt = extendedReceipt(state);
 
     expect(AgentDeliveryReceiptSchema.parse(receipt)).toEqual(receipt);
-    expect(
-      AgentMonitorMessageReceiptPayloadSchema.parse({ receipt }),
-    ).toEqual({ receipt });
+    expect(AgentMonitorMessageReceiptPayloadSchema.parse({ receipt })).toEqual({
+      receipt,
+    });
   });
 
   it('keeps the legacy receipt shape compatible', () => {
-    expect(AgentDeliveryReceiptSchema.parse(legacyReceipt)).toEqual(legacyReceipt);
+    expect(AgentDeliveryReceiptSchema.parse(legacyReceipt)).toEqual(
+      legacyReceipt,
+    );
   });
 
   it('accepts a lane sender without sender metadata', () => {
     const receipt = { ...legacyReceipt, sender: 'lane' };
+
+    expect(AgentDeliveryReceiptSchema.parse(receipt)).toEqual(receipt);
+  });
+
+  it('accepts a receipt delivered as a provider command', () => {
+    const receipt = { ...legacyReceipt, rawDelivery: true, ackState: 'unavailable' };
 
     expect(AgentDeliveryReceiptSchema.parse(receipt)).toEqual(receipt);
   });
@@ -146,7 +162,8 @@ describe('agent messaging schemas', () => {
 
   it('rejects unknown receipt keys and invalid field bounds', () => {
     expect(
-      AgentDeliveryReceiptSchema.safeParse({ ...legacyReceipt, extra: true }).success,
+      AgentDeliveryReceiptSchema.safeParse({ ...legacyReceipt, extra: true })
+        .success,
     ).toBe(false);
     expect(
       AgentMonitorMessageReceiptPayloadSchema.safeParse({
@@ -182,21 +199,30 @@ describe('agent messaging schemas', () => {
   ] as const)('round-trips an extended %s parent payload', (state) => {
     const payload = parentDelivery(state);
 
-    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(payload);
+    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(
+      payload,
+    );
   });
 
   it('rejects the removed parent expired state and accepts the not-saved removal payload', () => {
     const expired = { ...parentDelivery('pending'), state: 'expired' };
-    expect(AgentMonitorParentDeliveryPayloadSchema.safeParse(expired).success).toBe(false);
+    expect(
+      AgentMonitorParentDeliveryPayloadSchema.safeParse(expired).success,
+    ).toBe(false);
 
     const payload = {
       ...parentDelivery('not-saved'),
       state: 'not-saved',
       removed: true,
     };
-    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(payload);
+    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(
+      payload,
+    );
     expect(
-      AgentMonitorParentDeliveryPayloadSchema.safeParse({ ...payload, removed: false }).success,
+      AgentMonitorParentDeliveryPayloadSchema.safeParse({
+        ...payload,
+        removed: false,
+      }).success,
     ).toBe(false);
   });
 
@@ -206,7 +232,9 @@ describe('agent messaging schemas', () => {
   ])('accepts the current parent delivery id format %s', (deliveryId) => {
     const payload = { ...parentDelivery('pending'), deliveryId };
 
-    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(payload);
+    expect(AgentMonitorParentDeliveryPayloadSchema.parse(payload)).toEqual(
+      payload,
+    );
   });
 
   it('accepts host-restart and rejects host-restarted as stop reasons', () => {
@@ -241,6 +269,7 @@ describe('agent messaging RPC contracts', () => {
         'agent:sendMessage',
         'agent:listMessageReceipts',
         'agent:getQueuedMessageBody',
+        'agent:getLaneComposerOptions',
         'agent:retryMessage',
         'agent:cancelMessage',
         'agent:listParentDeliveries',
@@ -248,6 +277,44 @@ describe('agent messaging RPC contracts', () => {
         'agent:cancelParentDelivery',
       ]),
     );
+  });
+
+  it('types agent:permissionResponse params as a superset of the bridge decision', () => {
+    const legacy: AgentPermissionDecision = {
+      requestId: 'req-1',
+      decision: 'deny',
+      reason: 'User denied',
+    };
+    const fromLegacy: RpcMethodRegistry['agent:permissionResponse']['params'] =
+      legacy;
+    const widened: LanePermissionResponse = {
+      requestId: 'req-2',
+      decision: 'deny_with_message',
+      reason: 'Use the staging bucket instead.',
+      modifiedInput: { path: 'staging/' },
+    };
+    const params: RpcMethodRegistry['agent:permissionResponse']['params'] =
+      widened;
+    expect(fromLegacy.decision).toBe('deny');
+    expect(params.decision).toBe('deny_with_message');
+  });
+
+  it('types agent:getLaneComposerOptions and the queued body turn', () => {
+    const result: RpcMethodRegistry['agent:getLaneComposerOptions']['result'] =
+      {
+        models: [{ id: 'model-a', name: 'Model A' }],
+        efforts: ['low', 'high'],
+        currentModel: 'model-a',
+        commands: [{ name: 'review', group: 'skill' }],
+      };
+    const params: RpcMethodRegistry['agent:getLaneComposerOptions']['params'] =
+      {
+        agentId,
+      };
+    const textOnly: AgentGetQueuedMessageBodyResult = { text: 'Continue.' };
+    expect(params.agentId).toBe(agentId);
+    expect(result.commands[0].group).toBe('skill');
+    expect(textOnly.turn).toBeUndefined();
   });
 
   it('re-exports the shared message limits through agent-process.types', () => {

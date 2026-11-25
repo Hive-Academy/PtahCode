@@ -132,6 +132,24 @@ describe('LoopbackOAuthCallbackListener', () => {
     await expect(pending).rejects.toThrow(/access_denied/i);
   });
 
+  it('names the error_description the authorization server sent', async () => {
+    const { provider, invoke } = makeFakeHttpProvider();
+    const listener = new LoopbackOAuthCallbackListener(provider);
+    const handle = await listener.start('st');
+
+    const pending = handle.waitForCode(1000);
+    const description = encodeURIComponent(
+      "The OAuth 2.0 Client is not allowed to request scope 'private_metadata'\n",
+    );
+    invoke(
+      `http://127.0.0.1:51820/callback?error=invalid_scope&error_description=${description}&state=st`,
+    );
+
+    await expect(pending).rejects.toThrow(
+      "Authorization denied: invalid_scope - The OAuth 2.0 Client is not allowed to request scope 'private_metadata'",
+    );
+  });
+
   it('rejects when no authorization code is returned', async () => {
     const { provider, invoke } = makeFakeHttpProvider();
     const listener = new LoopbackOAuthCallbackListener(provider);

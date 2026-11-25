@@ -45,6 +45,7 @@ import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type {
   AcpRequestFailure,
   AcpSessionConfigEntry,
+  AcpSessionConfigInput,
   AcpSessionOptions,
   AcpSpawnSpec,
   AcpVendorProfile,
@@ -324,7 +325,7 @@ export const antigravityAcpProfile: AcpVendorProfile = {
     return kind === 'switch_mode' ? ANTIGRAVITY_PLAN_EXIT_TITLE : undefined;
   },
 
-  sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {
+  sessionConfig(options: AcpSessionConfigInput): readonly AcpSessionConfigEntry[] {
     const entries: AcpSessionConfigEntry[] = [];
     if (options.model) {
       // Binding: a model agy rejects fails the turn instead of silently

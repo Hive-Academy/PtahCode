@@ -1,7 +1,8 @@
-import type { AgentProcessInfo } from '@ptah-extension/shared';
+import type { AgentProcessInfo, InlineImageAttachment } from '@ptah-extension/shared';
 import type { AgentProcessManager } from '../../agent-process-manager.service';
 import type { ParentLaneLevel } from '../parent-lane-level';
 import { LaneAccountResumeError } from '../../lane-resume-gate';
+import { LaneSpawnPolicyError } from '../../lane-spawn-policy';
 import {
   LaneResumeError,
   type LaneResumer,
@@ -21,6 +22,8 @@ export class SystemCliLaneResumer implements LaneResumer {
   async resume(
     info: AgentProcessInfo,
     task: string,
+    files?: readonly string[],
+    images?: readonly InlineImageAttachment[],
   ): Promise<LaneResumeResult> {
     if (!info.cliSessionId) {
       throw new LaneResumeError(
@@ -35,6 +38,11 @@ export class SystemCliLaneResumer implements LaneResumer {
         task,
         workingDirectory: info.workingDirectory,
         resumeSessionId: info.cliSessionId,
+        // The resumed process starts with the lane's current settings (A11).
+        ...(info.model ? { model: info.model } : {}),
+        ...(info.reasoningEffort ? { effort: info.reasoningEffort } : {}),
+        ...(files && files.length > 0 ? { files: [...files] } : {}),
+        ...(images && images.length > 0 ? { turnImages: images } : {}),
         parentSessionId: info.parentSessionId,
         ...(this.parentLevel && info.parentSessionId
           ? { parentLevel: this.parentLevel(info.parentSessionId) } : {}),
@@ -51,6 +59,9 @@ export class SystemCliLaneResumer implements LaneResumer {
       ) {
         throw error;
       }
+      // Fixed host text naming the policy source and the CLI's own reason.
+      if (error instanceof LaneSpawnPolicyError)
+        throw new LaneResumeError('policy-refused', error.message);
       throw new LaneResumeError(
         'spawn-failed',
         error instanceof Error ? error.message : String(error),

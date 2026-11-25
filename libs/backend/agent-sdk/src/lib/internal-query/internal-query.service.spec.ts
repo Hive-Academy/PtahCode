@@ -172,6 +172,15 @@ describe('InternalQueryService', () => {
       expect(input.toolAccess).toBe('none');
     });
 
+    it('forwards the connector opt-in to the runner', async () => {
+      const h = makeRunnerHarness();
+
+      await h.service.execute(makeConfig({ includeConnectors: true }));
+
+      const [input] = h.runner.runOneShot.mock.calls[0] as [OneShotRunInput];
+      expect(input.includeConnectors).toBe(true);
+    });
+
     it('forwards optional fields as undefined when omitted from the config', async () => {
       const h = makeRunnerHarness();
 
@@ -185,6 +194,7 @@ describe('InternalQueryService', () => {
       expect(input.outputFormat).toBeUndefined();
       expect(input.abortController).toBeUndefined();
       expect(input.toolAccess).toBeUndefined();
+      expect(input.includeConnectors).toBeUndefined();
     });
 
     it('propagates rejections thrown by the runner', async () => {

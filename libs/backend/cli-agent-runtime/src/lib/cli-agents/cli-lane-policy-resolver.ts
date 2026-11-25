@@ -110,7 +110,7 @@ export function resolveCliLanePolicy(input: {
       field: 'permission',
       cli: input.cli,
       requested,
-      reason: `The ${input.cli} adapter does not support plan and no explicit permission was provided.`,
+      reason: `The ${input.cli} adapter supports no verified permission mode for a built-in default and no explicit permission was provided.`,
     });
   }
   return validateResolvedPolicy(input.cli, input.manifest, requested);

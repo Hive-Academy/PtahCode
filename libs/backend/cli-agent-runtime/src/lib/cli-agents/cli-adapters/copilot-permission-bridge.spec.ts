@@ -1,4 +1,5 @@
 import {
+  COPILOT_EDIT_REFUSED,
   COPILOT_PERMISSION_DELIVERY_TIMEOUT_MS,
   COPILOT_PERMISSION_OWNED_TIMEOUT_MS,
   CopilotPermissionBridge,
@@ -104,5 +105,52 @@ describe('CopilotPermissionBridge pending requests', () => {
     bridge.resolvePermission(requestId, { requestId, decision: 'allow' });
     await pending;
     expect(bridge.pendingPermissions()).toEqual([]);
+  });
+});
+
+describe('CopilotPermissionBridge lane responses', () => {
+  function pendingRequest() {
+    const bridge = new CopilotPermissionBridge();
+    bridge.setAutoApprove(false);
+    let requestId = '';
+    bridge.events.on('permission-request', (payload: { requestId: string }) => {
+      requestId = payload.requestId;
+    });
+    const tool = bridge.requestToolPermission({ agentId: 'lane', toolName: 'Write', toolArgs: {} });
+    const file = () => bridge.requestFilePermission({ agentId: 'lane', kind: 'shell', details: {} });
+    return { bridge, tool, file, id: () => requestId };
+  }
+
+  it('allows the call for always_allow', async () => {
+    const { bridge, tool, id } = pendingRequest();
+    expect(bridge.resolveLaneResponse({ requestId: id(), decision: 'always_allow' })).toBe('resolved');
+    await expect(tool).resolves.toMatchObject({ permissionDecision: 'allow' });
+  });
+
+  it('approves a file permission for always_allow', async () => {
+    const { bridge, file, id } = pendingRequest();
+    const answer = file();
+    expect(bridge.resolveLaneResponse({ requestId: id(), decision: 'always_allow' })).toBe('resolved');
+    await expect(answer).resolves.toEqual({ kind: 'approved' });
+  });
+
+  it('denies with the message for deny_with_message', async () => {
+    const { bridge, tool, id } = pendingRequest();
+    bridge.resolveLaneResponse({ requestId: id(), decision: 'deny_with_message', reason: 'Use the other file' });
+    await expect(tool).resolves.toEqual({ permissionDecision: 'deny', permissionDecisionReason: 'Use the other file' });
+  });
+
+  it('refuses an approval with edited input and keeps the request pending', async () => {
+    const { bridge, tool, id } = pendingRequest();
+    expect(bridge.resolveLaneResponse({ requestId: id(), decision: 'allow', modifiedInput: { path: 'b.ts' } }))
+      .toBe('edit-refused');
+    expect(bridge.hasPendingRequest(id())).toBe(true);
+    expect(COPILOT_EDIT_REFUSED).toMatch(/cannot run a tool with edited input/);
+    bridge.resolveLaneResponse({ requestId: id(), decision: 'deny', modifiedInput: { path: 'b.ts' } });
+    await expect(tool).resolves.toMatchObject({ permissionDecision: 'deny' });
+  });
+
+  it('reports an unknown request as not pending', () => {
+    expect(new CopilotPermissionBridge().resolveLaneResponse({ requestId: 'nope', decision: 'allow' })).toBe('not-pending');
   });
 });

@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import type {
   CliOutputSegment,
+  ExecutionNode,
   FlatStreamEventUnion,
 } from '@ptah-extension/shared';
 import { addCliUsage, type CliUsageTotals } from '@ptah-extension/shared';
@@ -23,13 +24,53 @@ import {
 } from '@ptah-extension/chat-ui';
 import { LaneTranscriptComponent } from '../../organisms/transcript/lane-transcript.component';
 import { LANE_COLUMN_CLASS } from '../execution-header/lane-column';
-import { AgentMonitorTreeBuilderService } from '../../../services/agent-monitor-tree-builder.service';
+import {
+  AgentMonitorTreeBuilderService,
+  LANE_USER_ECHO_NODE_PREFIX,
+} from '../../../services/agent-monitor-tree-builder.service';
 import type { CliLaneUsage } from '../../../utils/lane-stats.adapters';
 import {
   isUsageSegment,
   formatTokens,
 } from './stats-bar.utils';
 import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
+
+function isLaneUserEcho(node: ExecutionNode): boolean {
+  return node.type === 'text' && node.id.startsWith(LANE_USER_ECHO_NODE_PREFIX);
+}
+
+/**
+ * Joins the event tree and the segment-only nodes. With text deltas the
+ * assistant text carries event times, so each timed user echo goes before
+ * the first event node that starts after its send time: the transcript then
+ * groups the reply after the follow-up, not before it. The other segment
+ * nodes (untimed) follow the event tree, as do all segment nodes on a lane
+ * whose assistant text exists only as segments, so their order holds.
+ */
+function withUserEchoes(
+  eventNodes: readonly ExecutionNode[],
+  segmentNodes: readonly ExecutionNode[],
+  hasTextDeltas: boolean,
+): ExecutionNode[] {
+  if (!hasTextDeltas) return [...eventNodes, ...segmentNodes];
+  const merged = [...eventNodes];
+  const rest: ExecutionNode[] = [];
+  let from = 0;
+  for (const node of segmentNodes) {
+    const sentAt = node.startTime;
+    if (!isLaneUserEcho(node) || sentAt === undefined) {
+      rest.push(node);
+      continue;
+    }
+    let index = merged.findIndex(
+      (other, i) => i >= from && !isLaneUserEcho(other) && (other.startTime ?? -Infinity) > sentAt,
+    );
+    if (index < 0) index = merged.length;
+    merged.splice(index, 0, node);
+    from = index + 1;
+  }
+  return [...merged, ...rest];
+}
 
 @Component({
   selector: 'ptah-cli-agent-output',
@@ -177,22 +218,25 @@ export class CliAgentOutputComponent {
     const events = this.streamEvents();
     const hasTextDeltas = events.some((event) => event.eventType === 'text_delta');
     const tree = events.length > 0
-      ? [
-          ...this.treeBuilder.buildTree(this.agentId(), events),
+      ? withUserEchoes(
+          this.treeBuilder.buildTree(this.agentId(), events),
           // The CLI emits peer turns and terminal/crash errors as segments only.
           // Keep them beside the event tree without repeating ordinary stdout.
           // Without text deltas, the assistant text also exists only as segments.
-          ...this.treeBuilder.buildTreeFromSegments(
+          this.treeBuilder.buildTreeFromSegments(
             this.agentId(),
             this.treeSegments().filter(
               (segment) =>
                 segment.type === 'error' ||
+                // The user echo exists only as a segment (the SDK does not echo it).
+                segment.type === 'user' ||
                 (!hasTextDeltas && segment.type === 'text') ||
                 (segment.type === 'info' &&
                   segment.content.startsWith('Message from unverified peer')),
             ),
           ),
-        ]
+          hasTextDeltas,
+        )
       : this.treeBuilder.buildTreeFromSegments(
           this.agentId(),
           this.treeSegments(),
@@ -203,10 +247,15 @@ export class CliAgentOutputComponent {
     return tree;
   });
 
-  /** Stdout is the output only for a lane that emits no structured content. */
+  /**
+   * Stdout is the output only for a lane that emits no structured content.
+   * A user echo is what the user sent, not provider output, so it does not
+   * hide the stdout.
+   */
   protected readonly showStdoutFallback = computed(
     () =>
-      this.stdoutSegments().length > 0 && this.executionNodes().length === 0,
+      this.stdoutSegments().length > 0 &&
+      !this.executionNodes().some((node) => !isLaneUserEcho(node)),
   );
 
   /** Auto-scroll container reference */

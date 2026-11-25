@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, Signal, effect, inject, linkedSignal, untracked } from '@angular/core';
+import { DestroyRef, Injectable, Signal, computed, effect, inject, linkedSignal, untracked } from '@angular/core';
 import { CLOCK_COARSE_MS, ClockService } from './clock.service';
 
 export type WallClockCadence = 'second' | 'coarse';
@@ -37,8 +37,12 @@ export function injectWallClock(cadence: WallClockCadence, active?: () => boolea
   const clock = inject(WallClockService);
   const destroyRef = inject(DestroyRef);
   if (active) {
+    // Through a computed: only a change of the boolean releases or re-acquires.
+    // acquire() writes the clock, so an active() that reads the clock (or a value
+    // rebuilt from it) would otherwise re-run this effect on its own write (NG0103).
+    const isActive = computed(active);
     effect((onCleanup) => {
-      if (active()) onCleanup(untracked(() => clock.acquire(cadence)));
+      if (isActive()) onCleanup(untracked(() => clock.acquire(cadence)));
     });
   } else {
     destroyRef.onDestroy(clock.acquire(cadence));

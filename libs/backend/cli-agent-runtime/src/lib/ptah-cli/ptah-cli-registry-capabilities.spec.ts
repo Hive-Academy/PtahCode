@@ -91,6 +91,13 @@ function specTierPreferences(
 
 describe('Ptah CLI provider manifest', () => {
   const registry = Object.create(PtahCliRegistry.prototype) as PtahCliRegistry;
+  // The manifest reads the real provider entries (image support, S1).
+  beforeEach(() => {
+    jest.mocked(getAnthropicProvider).mockImplementation(
+      jest.requireActual<typeof import('@ptah-extension/agent-sdk')>('@ptah-extension/agent-sdk')
+        .getAnthropicProvider,
+    );
+  });
 
   it('uses Claude SDK permission mappings and refuses network denial', () => {
     const manifest = registry.capabilities('claude-cli');
@@ -102,6 +109,40 @@ describe('Ptah CLI provider manifest', () => {
 
   it('marks providers without an owner reader as having no reliable source', () => {
     expect(registry.capabilities('z-ai').limitReader.state).toBe('no-reliable-source');
+  });
+
+  it('declares interrupt, next-turn settings, images, path-text files, commands and live usage', () => {
+    const manifest = registry.capabilities('claude-cli');
+    expect(manifest.messaging.interrupt.state).toBe('supported');
+    expect(manifest.messaging.steer.state).toBe('unsupported');
+    expect(manifest.turnInput).toEqual({
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported', onSteer: false },
+      files: { state: 'supported', delivery: 'path-text' },
+      commands: { state: 'supported', blocked: [] },
+      skills: { state: 'supported' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'live' });
+    expect(manifest.prompts?.approvals.state).toBe('supported');
+  });
+
+  it('offers images only on providers whose every model reads them (S1)', () => {
+    for (const providerId of ['claude-cli', 'anthropic-api'])
+      expect(registry.capabilities(providerId).turnInput?.images).toEqual({ state: 'supported', onSteer: false });
+    for (const providerId of ['openrouter', 'z-ai', 'ollama', 'no-such-provider'])
+      expect(registry.capabilities(providerId).turnInput?.images).toEqual({
+        state: 'unsupported',
+        reason: 'This provider does not report which of its models accept images.',
+      });
+  });
+
+  it('states that approval prompts do not reach Ptah from a yolo spawn', () => {
+    expect(registry.capabilities('claude-cli', 'yolo').prompts?.approvals).toEqual({
+      state: 'unsupported',
+      reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.',
+    });
+    expect(registry.capabilities('claude-cli', 'ask').prompts?.approvals.state).toBe('supported');
   });
 });
 import { PtahCliSpawnOptions } from './helpers/ptah-cli-spawn-options.service';

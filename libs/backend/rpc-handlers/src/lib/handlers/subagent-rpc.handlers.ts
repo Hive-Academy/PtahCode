@@ -9,7 +9,6 @@
  *                            resume banner (the model still hears once)
  * - subagent:send-message  — Push a user message into a running subagent
  * - subagent:stop          — Stop a specific subagent by taskId
- * - subagent:interrupt     — Interrupt the entire session
  * - subagent:background    — Move in-flight foreground task(s) to background
  * - subagent:history-page  — Read a bounded page of structured subagent history
  *
@@ -37,7 +36,6 @@ import {
   SubagentQueryResult,
   SubagentSendMessageParams,
   SubagentStopParams,
-  SubagentInterruptParams,
   SubagentBackgroundParams,
   SubagentBackgroundResult,
   SubagentCommandResult,
@@ -72,7 +70,6 @@ import {
   DismissResumableSubagentsSchema,
   SubagentSendMessageSchema,
   SubagentStopSchema,
-  SubagentInterruptSchema,
   SubagentBackgroundSchema,
   SubagentHistoryPageSchema,
 } from './subagent-rpc.schema';
@@ -90,9 +87,6 @@ import {
  *
  * // Frontend: Stop a specific subagent
  * await rpcService.call('subagent:stop', { sessionId, taskId });
- *
- * // Frontend: Interrupt the whole session
- * await rpcService.call('subagent:interrupt', { sessionId });
  *
  * // Frontend: Push in-flight foreground task(s) to the background
  * const { backgrounded } = await rpcService.call('subagent:background', { sessionId, toolUseId });
@@ -114,7 +108,6 @@ export class SubagentRpcHandlers {
     'chat:dismiss-resumable-subagents',
     'subagent:send-message',
     'subagent:stop',
-    'subagent:interrupt',
     'subagent:background',
     'subagent:history-page',
   ] as const satisfies readonly RpcMethodName[];
@@ -232,7 +225,6 @@ export class SubagentRpcHandlers {
     this.registerDismissResumable();
     this.registerSendMessage();
     this.registerStop();
-    this.registerInterrupt();
     this.registerBackground();
     this.registerHistoryPage();
 
@@ -466,31 +458,6 @@ export class SubagentRpcHandlers {
         return { ok: true };
       },
     );
-  }
-
-  /**
-   * subagent:interrupt — Interrupt the entire session, stopping all subagents.
-   */
-  private registerInterrupt(): void {
-    this.rpcHandler.registerMethod<
-      SubagentInterruptParams,
-      SubagentCommandResult
-    >('subagent:interrupt', async (params) => {
-      const parsed = SubagentInterruptSchema.safeParse(params);
-      if (!parsed.success) {
-        throw new RpcUserError(
-          `subagent:interrupt: invalid params — ${parsed.error.message}`,
-          'INVALID_PARAMS',
-        );
-      }
-
-      const { sessionId } = parsed.data;
-
-      this.logger.debug('RPC: subagent:interrupt called', { sessionId });
-
-      await this.dispatcher.interruptSession(sessionId);
-      return { ok: true };
-    });
   }
 
   /**

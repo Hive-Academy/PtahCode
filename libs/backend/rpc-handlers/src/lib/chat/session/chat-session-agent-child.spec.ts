@@ -246,16 +246,6 @@ function makeHarness(
     undefined,
     modelCatalog as never,
   );
-  // The Smithery / OAuth override resolvers read installed manifests from
-  // disk; neither is under test here, so the merge contributes nothing.
-  jest
-    .spyOn(
-      service as unknown as {
-        buildMcpServersOverride: (caller: unknown) => Promise<unknown>;
-      },
-      'buildMcpServersOverride',
-    )
-    .mockImplementation(async (caller: unknown) => caller);
   return {
     service,
     modelCatalog,

@@ -73,6 +73,13 @@ jest.mock('./provider-session/provider-session-lane-handle', () => {
 });
 
 import { GrokCliAdapter, parseGrokModels } from './grok-cli.adapter';
+import { grokAcpProfile } from '@ptah-extension/acp-runtime';
+import type { AgentMessagePreview, AgentProcessInfo } from '@ptah-extension/shared';
+import type { SdkHandle } from './cli-adapter.interface';
+import { blockedLaneCommand } from './lane-command-filter';
+import { resolveEffectiveLaneCapabilities } from '../messaging/agent-effective-capabilities';
+import { turnInputRefusal } from '../messaging/agent-delivery-planner';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 
 /** `grok models` as grok 1.0.46 printed it (`grok-probe.md` §6). */
 const PROBED_MODELS_OUTPUT = [
@@ -158,8 +165,76 @@ describe('GrokCliAdapter', () => {
       expect(adapter.capabilities().permissionModes.plan?.state).toBe('unsupported');
     });
 
+    it('defaults a lane with no explicit mode to its only verified mode, yolo with network', () => {
+      expect(resolveCliLanePolicy({ cli: 'grok', manifest: adapter.capabilities(), saved: {}, request: {} }))
+        .toMatchObject({ permission: 'yolo', network: 'allow',
+          permissionSource: 'built-in', networkSource: 'built-in' });
+    });
+
     it('strips ANSI codes from raw output', () => {
       expect(adapter.parseOutput('\u001b[32mok\u001b[0m')).toBe('ok');
+    });
+
+    it('serves a stopped lane the effort levels a live lane would, for any model', () => {
+      expect(adapter.laneEfforts()).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(adapter.laneEfforts('grok-4.7')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    });
+  });
+
+  describe('lane turn input (B8, D18)', () => {
+    const info = { agentId: 'grok-lane', cli: 'grok', displayName: 'Grok' } as unknown as AgentProcessInfo;
+    const liveHandle = {
+      abort: new AbortController(),
+      done: Promise.resolve(0),
+      onOutput: () => undefined,
+      applyTurnSettings: async () => ({ appliesAt: 'next-turn' as const }),
+      listTurnOptions: async () => ({ models: [], efforts: [], commands: [] }),
+      turnInputSupport: () => ({}),
+    } as SdkHandle;
+
+    it('declares the ACP turn input, live usage and no lane prompts', () => {
+      const manifest = adapter.capabilities();
+      expect(manifest.turnInput).toEqual({
+        model: { state: 'supported', appliesAt: 'next-turn' },
+        effort: { state: 'supported', appliesAt: 'next-turn' },
+        images: { state: 'supported', onSteer: false },
+        files: { state: 'supported', delivery: 'reference' },
+        commands: { state: 'supported', blocked: ['always-approve'] },
+        skills: { state: 'supported' },
+      });
+      expect(manifest.turnInput?.commands.blocked).toEqual(grokAcpProfile.hiddenLaneCommands);
+      // Per-call `response_completed` usage streams during the turn.
+      expect(manifest.usage).toEqual({ timing: 'live' });
+      expect(manifest.prompts?.approvals).toEqual({
+        state: 'unsupported',
+        reason: 'Grok exposes no native per-lane ask flag.',
+      });
+    });
+
+    it.each(['/always-approve on', '  /always-approve', '\n/Always-Approve off', '/ALWAYS-APPROVE'])(
+      'refuses %j on live and restored Grok lanes',
+      (text) => {
+        const manifest = adapter.capabilities();
+        for (const caps of [
+          resolveEffectiveLaneCapabilities(info, manifest, liveHandle),
+          resolveEffectiveLaneCapabilities(info, manifest),
+        ]) {
+          expect(caps.turnInput?.commands.blocked).toEqual(['always-approve']);
+          expect(blockedLaneCommand(text, caps.turnInput?.commands.blocked ?? [])).toBe('always-approve');
+          const plan = { mode: 'queue-next-turn', usesResume: caps.source === 'restored-record', effectiveCapabilities: caps } as unknown as AgentMessagePreview;
+          expect(turnInputRefusal(plan, text, undefined)).toEqual({
+            code: 'turn-input-unsupported',
+            reason: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+          });
+        }
+      },
+    );
+
+    it('does not refuse ordinary text or a longer command name', () => {
+      const blocked = adapter.capabilities().turnInput?.commands.blocked ?? [];
+      expect(blockedLaneCommand('please /always-approve', blocked)).toBeUndefined();
+      expect(blockedLaneCommand('/always-approved', blocked)).toBeUndefined();
+      expect(blockedLaneCommand('/compact', blocked)).toBeUndefined();
     });
   });
 

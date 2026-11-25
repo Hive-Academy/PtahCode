@@ -15,7 +15,11 @@ import type {
   CliDetectionResult,
   CliOutputSegment,
   FlatStreamEventUnion,
+  LaneComposerCommandOption,
   LaneNetworkMode,
+  LaneTurnContent,
+  LaneTurnInputCapabilities,
+  LaneTurnSettings,
   LanePermissionMode,
   ProviderAccountBinding,
 } from '@ptah-extension/shared';
@@ -72,6 +76,36 @@ export interface CliModelInfo {
   readonly isFallback?: boolean;
 }
 
+/** What a lane offers its composer for the next turn (`agent:getLaneComposerOptions`). */
+export interface LaneTurnOptionsCatalog {
+  readonly models: readonly CliModelInfo[];
+  readonly efforts: readonly string[];
+  readonly currentModel?: string;
+  readonly currentEffort?: string;
+  readonly commands: readonly LaneComposerCommandOption[];
+}
+
+/** Settings a lane accepted, and when they take effect. */
+export interface LaneTurnSettingsResult {
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+  readonly appliesAt: 'next-turn' | 'next-spawn';
+}
+
+/**
+ * Rejection of {@link SdkHandle.applyTurnSettings}: the provider refused a
+ * setting, and nothing was sent. `reason` is fixed text the UI may show.
+ */
+export class LaneTurnSettingRefusal extends Error {
+  constructor(
+    readonly field: 'model' | 'reasoningEffort',
+    readonly reason: string,
+  ) {
+    super(reason);
+    this.name = 'LaneTurnSettingRefusal';
+  }
+}
+
 /** Constructible before Claude joins the public system detection roster. */
 export interface ClaudeCliAdapterContract extends Omit<
   CliAdapter,
@@ -85,6 +119,8 @@ export interface ClaudeCliCommandOptions extends CliCommandOptions {
   readonly parentSessionId?: string;
   /** Selection only: never an environment bag or a caller-certified route. */
   readonly accountAdmission?: import('@ptah-extension/auth-providers-tokens').ClaudeAccountAdmissionRequest;
+  /** Images of a cold resume's first turn (`SpawnAgentRequest.turnImages`). */
+  readonly turnImages?: readonly import('@ptah-extension/shared').InlineImageAttachment[];
 }
 
 /**
@@ -253,13 +289,39 @@ export interface SdkHandle extends LaneAccountBindingFields {
    *  Only Ptah CLI adapter implements this (session ID arrives via system init). */
   readonly onSessionResolved?: (callback: (sessionId: string) => void) => void;
   readonly supportsContinuation?: () => boolean;
-  readonly continue?: (message: string) => Promise<ContinuationOutcome>;
+  /** Start the next turn. `content` carries images and file references the turn input allows. */
+  readonly continue?: (
+    message: string,
+    content?: LaneTurnContent,
+  ) => Promise<ContinuationOutcome>;
   /** Send a mid-run steering message to a still-running agent that owns a live
    *  input channel (e.g. Pi RPC mode writes a {"type":"steer"} request to the
    *  child's stdin). AgentProcessManager.steer() routes SDK-based agents here
    *  in preference to the legacy `tracked.process.stdin` path.
    *  No-op if the run no longer has a writable channel. */
-  readonly steer?: (message: string) => void | Promise<void>;
+  readonly steer?: (
+    message: string,
+    content?: LaneTurnContent,
+  ) => void | Promise<void>;
+  /**
+   * Whether a steer is safe right now (for example only while a tool call is
+   * in flight). `false` hides steer even though {@link steer} exists.
+   */
+  readonly supportsSteer?: () => boolean;
+  /**
+   * Apply model / reasoning effort for the next turn. Rejects with a
+   * {@link LaneTurnSettingRefusal} when the provider refuses a value.
+   */
+  readonly applyTurnSettings?: (
+    settings: LaneTurnSettings,
+  ) => Promise<LaneTurnSettingsResult>;
+  /**
+   * Live gates on the manifest's turn input (for example whether an ACP agent
+   * advertised image input). A gate can only narrow support, never add it.
+   */
+  readonly turnInputSupport?: () => Partial<LaneTurnInputCapabilities>;
+  /** Models, efforts and commands this lane offers now. */
+  readonly listTurnOptions?: () => Promise<LaneTurnOptionsCatalog>;
   /**
    * True only when this handle denies every new tool call while the `laneToolGate` it was
    * launched with returns a notice (certified for all owned tool paths).
@@ -342,6 +404,12 @@ export interface ContinuationOutcome {
   readonly done: Promise<number>;
 }
 
+/** What {@link CliAdapter.stoppedLaneCatalog} serves. */
+export interface StoppedLaneCatalog {
+  readonly models: CliModelInfo[];
+  readonly efforts: readonly string[];
+}
+
 export interface CliAdapter {
   /** Optional until the host's named account admission is certified. */
   readonly accountBindings?: LaneAccountBindingPort;
@@ -360,8 +428,10 @@ export interface CliAdapter {
    * Which messaging mechanisms this CLI supports for a message aimed at a live
    * agent. Required — an adapter that does not answer it is a compile error, so
    * a new adapter cannot silently inherit "no messaging at all".
+   * `permission` is the lane's effective spawn mode when known; an adapter
+   * whose prompt routes depend on it (Claude: no approvals in `yolo`) uses it.
    */
-  capabilities(): CliAdapterManifest;
+  capabilities(permission?: LanePermissionMode): CliAdapterManifest;
 
   /**
    * Where this CLI receives a resolved workspace role. Required — an adapter
@@ -396,6 +466,23 @@ export interface CliAdapter {
    * Returns curated/dynamic model list, or null if not supported.
    */
   listModels?(): Promise<CliModelInfo[]>;
+
+  /**
+   * Optional: the reasoning effort levels this CLI's lanes accept, when the
+   * list is known without a running lane. Served to the composer of a
+   * stopped or restored lane that has no cached catalog. `model` is the lane
+   * record's model, for a CLI whose levels depend on it; others ignore it.
+   */
+  laneEfforts?(model?: string): readonly string[];
+
+  /**
+   * Optional: models and effort levels for a stopped lane's composer from one
+   * live catalog read, for a CLI whose levels come only from that catalog.
+   * When present the coordinator uses it instead of `listModels` and
+   * `laneEfforts`. Rejects when the read fails, so the coordinator reports an
+   * error instead of a false empty list.
+   */
+  stoppedLaneCatalog?(): Promise<StoppedLaneCatalog>;
 
   /**
    * Optional: Ensure OAuth tokens are fresh (for adapters that use OAuth).

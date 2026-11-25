@@ -48,6 +48,12 @@ function sameMembers(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
   return true;
 }
 
+/**
+ * Id prefix of the node a `user` echo segment becomes. The lane transcript
+ * turns such a node into a user bubble (`laneTranscriptMessages`).
+ */
+export const LANE_USER_ECHO_NODE_PREFIX = 'seg-user-';
+
 /** Maximum recursion depth for nested agent tree building */
 const MAX_DEPTH = 10;
 
@@ -470,6 +476,22 @@ export class AgentMonitorTreeBuilderService {
               status: 'complete',
               content: fenceCodeBlock(segment.content, 'text'),
               error: segment.content,
+            }),
+          );
+          break;
+        }
+
+        case 'user': {
+          // What the user sent: its own node, so it never merges into prose.
+          if (textBuffer) flushText();
+          if (thinkingBuffer) flushThinking();
+          nodes.push(
+            createExecutionNode({
+              id: `${LANE_USER_ECHO_NODE_PREFIX}${i}`,
+              type: 'text',
+              status: 'complete',
+              content: segment.content,
+              ...(segment.sentAt !== undefined ? { startTime: segment.sentAt } : {}),
             }),
           );
           break;

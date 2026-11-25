@@ -40,6 +40,7 @@ import {
   stopHttpServer,
 } from './http-server.handler';
 import { McpCallerTokenRegistry } from './mcp-caller-token-registry';
+import { McpNotificationHub } from './mcp-notification-hub';
 import {
   MCP_AUTH_REQUIRED_MESSAGE,
   MCP_CREDENTIAL_INVALID_MESSAGE,
@@ -476,7 +477,7 @@ describe('HTTP request handling', () => {
     expect(parsed.result).toEqual({ echoed: 'tools/list' });
   });
 
-  it('returns 204 for JSON-RPC notifications (no id field)', async () => {
+  it('returns 202 with no body for a JSON-RPC notification (no id field)', async () => {
     const { status, body } = await fetchPath(
       port,
       'POST',
@@ -486,9 +487,74 @@ describe('HTTP request handling', () => {
         method: 'notifications/initialized',
       }),
     );
-    expect(status).toBe(204);
+    expect(status).toBe(202);
     expect(body).toBe('');
     expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('returns 202 with no body for a batch of only notifications and responses', async () => {
+    const { status, body } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify([
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } },
+        { jsonrpc: '2.0', id: 'srv-1', result: {} },
+        { jsonrpc: '2.0', id: 'srv-2', error: { code: -32601, message: 'nope' } },
+      ]),
+    );
+    expect(status).toBe(202);
+    expect(body).toBe('');
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('returns 202 with no body for a single JSON-RPC response', async () => {
+    const { status, body } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify({ jsonrpc: '2.0', id: 'srv-1', result: { ok: true } }),
+    );
+    expect(status).toBe(202);
+    expect(body).toBe('');
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('keeps 400 Invalid Request for a mixed batch and an empty batch', async () => {
+    for (const batch of [
+      [
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 7, method: 'tools/list' },
+      ],
+      [],
+    ]) {
+      const { status, body } = await fetchPath(
+        port,
+        'POST',
+        '/',
+        JSON.stringify(batch),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: 'Invalid Request' },
+      });
+    }
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a body with an id and a method as a request, not a response', async () => {
+    const { status } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify({ jsonrpc: '2.0', id: 'srv-1', method: 'x', result: {} }),
+    );
+    // Has an id and a method: a request. Its stray `result` passes through
+    // the envelope, so it is dispatched like any request.
+    expect(status).toBe(200);
   });
 
   it('stamps _callerSessionId from /session/{id} URL onto request', async () => {
@@ -1352,5 +1418,233 @@ describe('HTTP caller authentication', () => {
       id: 7,
       error: { code: -32003, message: MCP_TOOL_DENIED_MESSAGE },
     });
+  });
+});
+
+describe('GET SSE notification stream', () => {
+  let server: http.Server | null = null;
+  let port = 0;
+  let hub: McpNotificationHub | undefined;
+  const logger = createLogger();
+  const state = createStateStorage();
+  const binding = {
+    kind: 'agent' as const,
+    agentId: 'lane-a',
+    capability: 'privileged' as const,
+  };
+  const onMCPRequest = jest.fn(async (request: MCPRequest) => ({
+    jsonrpc: '2.0' as const,
+    id: request.id,
+    result: {
+      protocolVersion: '2024-11-05',
+      capabilities: { tools: {} },
+      serverInfo: { name: 'ptah', version: '1.0.0' },
+    },
+  }));
+  const initializeBody = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+  });
+
+  afterEach(async () => {
+    hub?.closeAll();
+    hub = undefined;
+    if (server) {
+      await stopHttpServer(server, state, logger);
+      server = null;
+    }
+    onMCPRequest.mockClear();
+  });
+
+  async function listen(withHub: boolean): Promise<string> {
+    const registry = new McpCallerTokenRegistry({ logger: createLogger() });
+    const token = registry.issue(binding, 'lane-a', 60_000);
+    hub = withHub
+      ? new McpNotificationHub({ logger, debounceMs: 0 })
+      : undefined;
+    const result = await startHttpServer({
+      port: 0,
+      logger,
+      workspaceState: state,
+      onMCPRequest,
+      authenticate: (input) => registry.authorize(input),
+      ...(hub === undefined ? {} : { notificationHub: hub }),
+    });
+    server = result.server;
+    port = result.port;
+    return token;
+  }
+
+  /** Open a GET stream and resolve once the response headers arrive. */
+  function openStream(
+    path: string,
+    headers: http.OutgoingHttpHeaders,
+  ): Promise<{
+    req: http.ClientRequest;
+    res: http.IncomingMessage;
+    nextData: () => Promise<string>;
+  }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: 'localhost', port, method: 'GET', path, headers },
+        (res) => {
+          const queue: string[] = [];
+          let waiter: ((chunk: string) => void) | undefined;
+          res.setEncoding('utf8');
+          res.on('data', (chunk: string) => {
+            if (waiter) {
+              const w = waiter;
+              waiter = undefined;
+              w(chunk);
+            } else queue.push(chunk);
+          });
+          resolve({
+            req,
+            res,
+            nextData: () =>
+              new Promise((r) => {
+                const queued = queue.shift();
+                if (queued !== undefined) r(queued);
+                else waiter = r;
+              }),
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  async function waitFor(check: () => boolean): Promise<void> {
+    for (let i = 0; i < 100 && !check(); i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(check()).toBe(true);
+  }
+
+  it('streams list_changed to an authenticated GET and releases it on close', async () => {
+    const token = await listen(true);
+    const { req, res, nextData } = await openStream('/agent/lane-a', {
+      accept: 'text/event-stream',
+      authorization: `Bearer ${token}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/event-stream');
+    expect(res.headers['mcp-session-id']).toBeUndefined();
+    await waitFor(() => hub?.streamCount === 1);
+
+    hub?.notifyToolsChanged();
+    const frame = await nextData();
+    expect(frame).toBe(
+      'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n',
+    );
+    expect(onMCPRequest).not.toHaveBeenCalled();
+
+    req.destroy();
+    await waitFor(() => hub?.streamCount === 0);
+    expect(hub?.keepAliveActive).toBe(false);
+  });
+
+  it('after initialize, 202s initialized and delivers list_changed on the GET stream', async () => {
+    const token = await listen(true);
+    const authorization = `Bearer ${token}`;
+    const initialize = await fetchPath(port, 'POST', '/agent/lane-a', initializeBody, {
+      authorization,
+    });
+    expect(initialize.status).toBe(200);
+    expect(JSON.parse(initialize.body).result.capabilities.tools).toEqual({
+      listChanged: true,
+    });
+
+    const initialized = await fetchPath(
+      port,
+      'POST',
+      '/agent/lane-a',
+      JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      { authorization },
+    );
+    expect(initialized.status).toBe(202);
+    expect(initialized.body).toBe('');
+
+    const { req, res, nextData } = await openStream('/agent/lane-a', {
+      accept: 'text/event-stream',
+      authorization,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/event-stream');
+    await waitFor(() => hub?.streamCount === 1);
+
+    // HttpMcpServerService subscribes `gateway.onToolsChanged` to exactly
+    // this call (http-mcp-server.service.ts; pinned in its spec).
+    hub?.notifyToolsChanged();
+    expect(await nextData()).toBe(
+      'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n',
+    );
+
+    req.destroy();
+    await waitFor(() => hub?.streamCount === 0);
+  });
+
+  it('answers an unauthenticated GET with 401 and opens no stream', async () => {
+    await listen(true);
+    for (const authorization of [undefined, `Bearer ${'c'.repeat(43)}`]) {
+      const { status, headers } = await fetchPath(
+        port,
+        'GET',
+        '/agent/lane-a',
+        undefined,
+        {
+          accept: 'text/event-stream',
+          ...(authorization === undefined ? {} : { authorization }),
+        },
+      );
+      expect(status).toBe(401);
+      expect(headers['content-type']).toBe('application/json');
+    }
+    expect(hub?.streamCount).toBe(0);
+  });
+
+  it('rejects a valid token on another identity with 403', async () => {
+    const token = await listen(true);
+    const { status } = await fetchPath(port, 'GET', '/agent/other', undefined, {
+      accept: 'text/event-stream',
+      authorization: `Bearer ${token}`,
+    });
+    expect(status).toBe(403);
+    expect(hub?.streamCount).toBe(0);
+  });
+
+  it('keeps GET as 405 and the health probe when no hub is bound', async () => {
+    const token = await listen(false);
+    const sse = await fetchPath(port, 'GET', '/agent/lane-a', undefined, {
+      accept: 'text/event-stream',
+      authorization: `Bearer ${token}`,
+    });
+    expect(sse.status).toBe(405);
+    const health = await fetchPath(port, 'GET', '/health', undefined, {
+      accept: 'text/event-stream',
+    });
+    expect(health.status).toBe(200);
+  });
+
+  it('advertises tools.listChanged on initialize only when a hub is bound', async () => {
+    const token = await listen(true);
+    const withHub = await fetchPath(port, 'POST', '/agent/lane-a', initializeBody, {
+      authorization: `Bearer ${token}`,
+    });
+    expect(JSON.parse(withHub.body).result.capabilities.tools).toEqual({
+      listChanged: true,
+    });
+
+    hub?.closeAll();
+    if (server) await stopHttpServer(server, state, logger);
+    server = null;
+
+    const bareToken = await listen(false);
+    const bare = await fetchPath(port, 'POST', '/agent/lane-a', initializeBody, {
+      authorization: `Bearer ${bareToken}`,
+    });
+    expect(JSON.parse(bare.body).result.capabilities.tools).toEqual({});
   });
 });

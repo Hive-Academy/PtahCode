@@ -120,6 +120,7 @@ export function recordLaneUsageOutcome(
   nativeThreadId: string | null = null,
   trigger?: UsageReconciliationTrigger,
   turnStartedAt?: string,
+  workspaceKeyOverride?: string,
 ): void {
   const runId = String(info.agentId);
   const eventKey = `${runId}:${completedAt}`;
@@ -193,7 +194,8 @@ export function recordLaneUsageOutcome(
       totalCostAuthority: costAuthority,
       pricingVersion: null,
       // The raw path: the ledger keeps POSIX case on case-sensitive hosts.
-      workspaceKey: info.workingDirectory,
+      // A host-internal caller may key the lane under another workspace root.
+      workspaceKey: workspaceKeyOverride ?? info.workingDirectory,
       host: 'cli',
       source: 'live',
       missingReason,

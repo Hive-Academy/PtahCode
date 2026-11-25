@@ -98,6 +98,21 @@ export function projectToCliSegments(
         },
       ];
     }
+    case 'usageProgress':
+      // One model call: a `message`-scope increment for the card. No turn
+      // telemetry, because the turn has not completed; the turn's `usage`
+      // follows as the `turn` correction (Codex precedent, E25).
+      return [
+        {
+          type: 'info',
+          content: `${event.provider} usage update.`,
+          usageScope: 'message',
+          usage: {
+            ...event.usage,
+            model: event.usage.model ?? `${event.provider}/unknown`,
+          },
+        },
+      ];
     case 'info':
       return [{ type: 'info', content: event.message }];
     case 'error':

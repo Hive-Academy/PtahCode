@@ -4,7 +4,7 @@
  * Grok 1.0.46 sent in the `grok-p3-*` probe transcripts (envelopes
  * `{ms, dir, msg}`), paired with the request each one answered.
  */
-import { readFileSync } from 'fs';
+import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type {
   AcpRequestFailure,
@@ -223,6 +223,103 @@ describe('grokAcpProfile', () => {
     expect(extract(null)).toBeUndefined();
   });
 
+  describe('extensions.usage (per-call response_completed usage)', () => {
+    const usageOf = (method: string, params: Record<string, unknown>) => {
+      const hook = grokAcpProfile.extensions?.usage;
+      if (!hook) throw new Error('extensions.usage missing');
+      return hook(method, params);
+    };
+    const recordedCalls = (file: string) =>
+      readEnvelopes(file)
+        .filter((e) => e.dir === 'in' && e.msg?.method === '_x.ai/session_notification')
+        .map((e) => usageOf('_x.ai/session_notification', e.msg?.params ?? {}))
+        .filter((usage) => usage !== undefined);
+    /** The `_meta.usage` turn totals of every answered `session/prompt`. */
+    const turnTotals = (file: string) => {
+      const envelopes = readEnvelopes(file);
+      const promptIds = new Set(
+        envelopes
+          .filter((e) => e.dir === 'out' && e.msg?.method === 'session/prompt')
+          .map((e) => e.msg?.id),
+      );
+      return envelopes
+        .filter((e) => e.dir === 'in' && e.msg?.method === undefined && promptIds.has(e.msg?.id))
+        .map((e) => (e.msg?.result?.['_meta'] as { usage?: { inputTokens: number; outputTokens: number } } | undefined)?.usage)
+        .filter((usage) => usage !== undefined);
+    };
+    const sum = (rows: ReadonlyArray<{ inputTokens: number; outputTokens: number }>) =>
+      rows.reduce(
+        (total, row) => ({
+          inputTokens: total.inputTokens + row.inputTokens,
+          outputTokens: total.outputTokens + row.outputTokens,
+        }),
+        { inputTokens: 0, outputTokens: 0 },
+      );
+
+    it('maps the three model calls of the p1 fixture to the turn total', () => {
+      const calls = recordedCalls('grok-p1-ptah-mcp-search-use-tool.ndjson');
+      expect(calls).toEqual([
+        { inputTokens: 18267, outputTokens: 168 },
+        { inputTokens: 25092, outputTokens: 227 },
+        { inputTokens: 25665, outputTokens: 78 },
+      ]);
+      expect(sum(calls)).toEqual({ inputTokens: 69024, outputTokens: 473 });
+    });
+
+    it.each(
+      readdirSync(FIXTURES).filter((file) => file.startsWith('grok-') && file.endsWith('.ndjson')),
+    )('sums the per-call usage of %s to its reported turn totals', (file) => {
+      const totals = turnTotals(file);
+      const calls = recordedCalls(file);
+      if (totals.length === 0) {
+        // No reported turn total (a refused or failed turn): nothing to match.
+        return;
+      }
+      expect(sum(calls)).toEqual(sum(totals));
+    });
+
+    it('reads nothing from other notifications or malformed counters', () => {
+      expect(usageOf('_x.ai/session_notification', { update: { sessionUpdate: 'turn_completed' } })).toBeUndefined();
+      expect(usageOf('_x.ai/queue/changed', { update: { sessionUpdate: 'response_completed', usage: { input_tokens: 1, output_tokens: 1 } } })).toBeUndefined();
+      expect(usageOf('_x.ai/mcp/servers_updated', { mcpServers: [] })).toBeUndefined();
+      for (const usage of [
+        { input_tokens: -1, output_tokens: 1 },
+        { input_tokens: 1.5, output_tokens: 1 },
+        { input_tokens: '1', output_tokens: 1 },
+        { output_tokens: 1 },
+        { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: -2 },
+      ]) {
+        expect(usageOf('_x.ai/session_notification', { update: { sessionUpdate: 'response_completed', usage } })).toBeUndefined();
+      }
+      expect(usageOf('_x.ai/session_notification', {})).toBeUndefined();
+    });
+
+    it('reports a malformed response_completed frame, and no other frame (M2)', () => {
+      const hook = grokAcpProfile.extensions?.usage;
+      if (!hook) throw new Error('extensions.usage missing');
+      const malformed = jest.fn();
+      hook('_x.ai/session_notification', { update: { sessionUpdate: 'turn_completed' } }, malformed);
+      hook('_x.ai/session_notification', {}, malformed);
+      hook('_x.ai/mcp/servers_updated', { update: { sessionUpdate: 'response_completed' } }, malformed);
+      expect(malformed).not.toHaveBeenCalled();
+      expect(
+        hook('_x.ai/session_notification', { update: { sessionUpdate: 'response_completed', usage: { output_tokens: 1 } } }, malformed),
+      ).toBeUndefined();
+      expect(malformed).toHaveBeenCalledWith(['update.usage.input_tokens']);
+    });
+
+    it('counts cache-creation input like cached input', () => {
+      expect(
+        usageOf('_x.ai/session_notification', {
+          update: {
+            sessionUpdate: 'response_completed',
+            usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 5, cache_creation_input_tokens: 2 },
+          },
+        }),
+      ).toEqual({ inputTokens: 17, outputTokens: 3 });
+    });
+  });
+
   describe('describeError (grok-p3 fixture payloads)', () => {
     const describe_ = grokAcpProfile.describeError;
     if (!describe_) throw new Error('describeError missing');
@@ -402,5 +499,18 @@ describe('grokAcpProfile', () => {
         ),
       ).toBeUndefined();
     });
+  });
+});
+
+describe('grokAcpProfile.hiddenLaneCommands', () => {
+  it('hides only the permission-policy command Grok advertises', () => {
+    expect(grokAcpProfile.hiddenLaneCommands).toEqual(['always-approve']);
+    const advertised = readEnvelopes('grok-plain-turn.ndjson')
+      .map((envelope) => envelope.msg?.params?.['update'])
+      .filter((update): update is { sessionUpdate: string; availableCommands: { name: string }[] } =>
+        typeof update === 'object' && update !== null &&
+        (update as { sessionUpdate?: unknown }).sessionUpdate === 'available_commands_update')
+      .at(-1)?.availableCommands.map((command) => command.name) ?? [];
+    expect(advertised).toContain('always-approve');
   });
 });

@@ -11,8 +11,14 @@ import type {
 } from '../cli-lane-defaults.types';
 import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
-import type { AgentPermissionDecision } from '../agent-permission.types';
+import type {
+  AgentPermissionDecision,
+  LanePermissionResponse,
+} from '../agent-permission.types';
+import type { LaneTurnRequest } from '../agent-messaging.types';
 import type { EffortLevel } from '../ai-provider.types';
+import type { PhaseKind } from '../phase-contract.types';
+import type { TaskType } from '../task-spec.types';
 import type {
   AgentDeliveryReceipt,
   AgentId,
@@ -30,6 +36,7 @@ import type { CapabilityScope } from '../mcp-directory.types';
 import type {
   ModelListFailureReason,
   ProviderModelListSource,
+  ProviderModelTier,
 } from './rpc-providers.types';
 
 export type AgentSendMessageParams = AgentMessageRequest;
@@ -51,6 +58,41 @@ export interface AgentGetQueuedMessageBodyParams {
 
 export interface AgentGetQueuedMessageBodyResult {
   readonly text: string;
+  /**
+   * Per-turn settings and content of the held message. Images are present
+   * only while the host still holds them. Absent for a text-only message.
+   */
+  readonly turn?: LaneTurnRequest;
+}
+
+export interface AgentGetLaneComposerOptionsParams {
+  readonly agentId: AgentId;
+}
+
+/** One slash entry a lane accepts in its composer. */
+export interface LaneComposerCommandOption {
+  readonly name: string;
+  readonly description?: string;
+  readonly group: 'command' | 'skill';
+}
+
+/**
+ * Turn options a lane offers its composer: models, reasoning efforts and
+ * slash commands. A failed lookup returns the lists the host still has
+ * (possibly empty) with `error` set; the method does not throw.
+ */
+export interface AgentGetLaneComposerOptionsResult {
+  readonly models: readonly CliModelOption[];
+  readonly efforts: readonly string[];
+  readonly currentModel?: string;
+  readonly currentEffort?: string;
+  readonly commands: readonly LaneComposerCommandOption[];
+  readonly error?: string;
+  /**
+   * Set for a stopped or restored lane with no cached catalog: which lists
+   * load only once the lane runs, in words the composer shows.
+   */
+  readonly unavailableReason?: string;
 }
 
 export interface AgentRetryMessageParams {
@@ -304,6 +346,51 @@ export const DECISION_MODEL_TIMEOUT_SETTING_KEY =
   'agentOrchestration.decisionModelTimeoutMs';
 export const DECISION_MODEL_TIMEOUT_MIN_MS = 1_000;
 export const DECISION_MODEL_TIMEOUT_MAX_MS = 60_000;
+
+/**
+ * File-based setting (section `ptah`) holding ordered user routing rules.
+ * Validated by `@ptah-extension/lane-routing`; this is the shared plain type.
+ */
+export const ROUTING_RULES_SETTING_KEY = 'agentOrchestration.routingRules';
+
+/** One value or an array of values (OR inside a match field). */
+export type RoutingRuleMatchValue<T> = T | readonly T[];
+
+/** Canonical phase shapes matching `@ptah-extension/lane-routing`'s `PhaseShape`. */
+export type RoutingRulePhaseShape =
+  | 'mechanical'
+  | 'logic'
+  | 'contract'
+  | 'test'
+  | 'docs'
+  | 'review';
+
+/**
+ * Phase selector for a {@link RoutingRule}. Specified fields combine with AND;
+ * an array inside a field combines with OR; an empty object matches every phase.
+ */
+export interface RoutingRuleMatch {
+  readonly kind?: RoutingRuleMatchValue<PhaseKind>;
+  readonly shape?: RoutingRuleMatchValue<RoutingRulePhaseShape>;
+  readonly taskType?: RoutingRuleMatchValue<TaskType>;
+  readonly role?: RoutingRuleMatchValue<string>;
+}
+
+/** Policy and candidate overrides applied when a {@link RoutingRule} matches. */
+export interface RoutingRuleSet {
+  readonly minTier?: ProviderModelTier;
+  readonly maxTier?: ProviderModelTier;
+  readonly effort?: EffortLevel;
+  readonly prefer?: readonly string[];
+  readonly exclude?: readonly string[];
+}
+
+/** One user-authored routing rule in `ptah.agentOrchestration.routingRules`. */
+export interface RoutingRule {
+  readonly id: string;
+  readonly match: RoutingRuleMatch;
+  readonly set: RoutingRuleSet;
+}
 
 /**
  * `agent:setConfig` error when the decision-model selection write failed and
@@ -715,35 +802,6 @@ export interface AgentSetConfigParams {
   decisionModelCustomApiKey?: string;
 }
 
-/**
- * Why `agent:continue` refused.
- *
- * The wire copy of `AgentContinueError`'s code in
- * `@ptah-extension/cli-agent-runtime`. Backend libs may not be imported from
- * here (this is the foundation layer), so the two unions are kept in step by
- * intent — a code added there and not here fails `agent-rpc.handlers.ts` at
- * compile time, which is the guard.
- */
-export type AgentContinueErrorCode =
-  | 'not_found'
-  | 'invalid_params'
-  | 'unsupported'
-  | 'busy'
-  /**
-   * The agent record is still live and still readable, but its CLI subprocess
-   * was released after idling to free memory. In-process continuation is gone;
-   * the conversation is not. Recover by resuming `cliSessionId` — the same
-   * fallback `not_found` takes (TASK_2026_323 B11).
-   */
-  | 'released'
-  /**
-   * The lane's named Claude account was refused at continuation (route
-   * changed, unsupported source or identity not proved). The agent is not
-   * continued on another account.
-   */
-  | 'account_refused'
-  | 'unknown';
-
 /** Parameters for ptahCli:list RPC method */
 export type PtahCliListParams = Record<string, never>;
 
@@ -851,4 +909,4 @@ export interface PtahCliListModelsResult {
   notice?: string;
   error?: string;
 }
-export type { AgentPermissionDecision };
+export type { AgentPermissionDecision, LanePermissionResponse };

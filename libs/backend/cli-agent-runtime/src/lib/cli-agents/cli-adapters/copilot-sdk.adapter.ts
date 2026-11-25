@@ -43,15 +43,22 @@ import type {
   CliAdapterManifest,
   CliDetectionResult,
   CliOutputSegment,
+  LaneTurnSettings,
 } from '@ptah-extension/shared';
-import type {
-  CliAdapter,
-  CliCommandOptions,
-  CliModelInfo,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliAdapter,
+  type CliCommandOptions,
+  type CliModelInfo,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
+
+/** `copilot --effort` values; the lane spawn policy maps chat efforts onto the same scale. */
+const COPILOT_LANE_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh'];
 import {
   applyLaneArgvPolicy,
   translateLaneSpawnPolicy,
@@ -73,6 +80,7 @@ import {
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { classifyCliStderr } from './cli-stderr-severity';
+import { UnverifiedLaneModel } from './lane-unverified-model';
 import type { CopilotPermissionBridge } from './copilot-permission-bridge';
 
 /** Shell/command execution tool names across providers */
@@ -227,6 +235,20 @@ export class CopilotSdkAdapter implements CliAdapter {
       },
       limitReader: { state: 'no-reliable-source', reason: 'No reliable noninteractive plan-limit source exists.' },
       mcp: { state: 'supported' },
+      turnInput: {
+        // Spawn flags: a fresh `copilot -p` process takes them on the next turn.
+        model: { state: 'supported', appliesAt: 'next-spawn' },
+        effort: { state: 'supported', appliesAt: 'next-spawn' },
+        images: { state: 'unsupported', reason: 'Copilot image input is not confirmed for -p mode.' },
+        files: { state: 'unsupported', reason: 'Copilot file attachments are not confirmed for -p mode.' },
+        commands: { state: 'unsupported', reason: 'Copilot lanes take no slash commands in -p mode.' },
+        skills: { state: 'unsupported', reason: 'Copilot lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'live' },
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'Noninteractive Copilot approvals have no Ptah session route.' },
+        questions: { state: 'unsupported', reason: 'Noninteractive Copilot questions have no Ptah session route.' },
+      },
     };
   }
 
@@ -239,6 +261,11 @@ export class CopilotSdkAdapter implements CliAdapter {
    * reports none. Copilot model lists come from live sources instead: the
    * host LM API and the signed-in account's `/models` endpoint.
    */
+  /** The fixed effort list its lanes accept, also for a stopped lane. */
+  laneEfforts(): readonly string[] {
+    return COPILOT_LANE_EFFORTS;
+  }
+
   async listModels(): Promise<CliModelInfo[]> {
     return [];
   }
@@ -321,6 +348,14 @@ export class CopilotSdkAdapter implements CliAdapter {
     };
     abortController.signal.addEventListener('abort', onAbort);
 
+    /** Model and effort the next spawned turn uses (`applyTurnSettings`, next-spawn). */
+    const nextTurn: { model?: string; reasoningEffort?: string } = {};
+    const unverifiedModel = new UnverifiedLaneModel('Copilot', (item) => segment.emit(item));
+    /** Drops a failed turn's unchecked model (M3); an aborted turn proves nothing. */
+    const settleTurnModel = (turnModel: string | undefined, exitCode: number): void => {
+      if (abortController.signal.aborted) return;
+      if (unverifiedModel.settle(turnModel, exitCode === 0)) nextTurn.model = undefined;
+    };
     const runTurn = (
       prompt: string,
       resumeSessionId?: string,
@@ -339,12 +374,15 @@ export class CopilotSdkAdapter implements CliAdapter {
         args.push(`--resume=${resumeSessionId}`);
       }
 
-      if (options.model) {
-        args.push('--model', options.model);
+      const turnModel = nextTurn.model;
+      const model = turnModel ?? options.model;
+      if (model) {
+        args.push('--model', model);
       }
 
-      if (options.reasoningEffort) {
-        args.push('--effort', options.reasoningEffort);
+      const effort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+      if (effort) {
+        args.push('--effort', effort);
       }
       if (options.mcpPort && options.mcpToken) {
         const mcpConfig = JSON.stringify({
@@ -396,8 +434,9 @@ export class CopilotSdkAdapter implements CliAdapter {
       let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
         if (item.usage) turnUsages.push(item.usage);
-        // Intermediate message usage feeds the aggregate but is not a turn total.
-        segment.emit(item.usage ? { ...item, usage: undefined } : item);
+        // Per-request usage goes out live as `message` increments; the turn
+        // telemetry below is the `turn` total that corrects them (B4).
+        segment.emit(item.usage ? { ...item, usageScope: 'message' } : item);
       };
       let lineBuf = '';
       let stderrBuf = '';
@@ -503,7 +542,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             } : undefined;
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
-              ...(usage ? { usage } : {}),
+              ...(usage ? { usage, usageScope: 'turn' as const } : {}),
               turnTelemetry: completedTurnTelemetry({
                 ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
                   sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
@@ -513,6 +552,7 @@ export class CopilotSdkAdapter implements CliAdapter {
               }),
             });
           }
+          settleTurnModel(turnModel, exitCode);
           resolve(exitCode);
         });
 
@@ -523,6 +563,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             content: `Copilot CLI Error: ${err.message}`,
           });
           activeChild = undefined;
+          settleTurnModel(turnModel, 1);
           resolve(1);
         });
       });
@@ -545,6 +586,34 @@ export class CopilotSdkAdapter implements CliAdapter {
       supportsContinuation: () => capturedSessionId != null,
       continue: (message: string): Promise<ContinuationOutcome> =>
         Promise.resolve({ done: runTurn(message, capturedSessionId) }),
+      applyTurnSettings: async (settings: LaneTurnSettings): Promise<LaneTurnSettingsResult> => {
+        const { model, reasoningEffort } = settings;
+        if (reasoningEffort !== undefined && !COPILOT_LANE_EFFORTS.includes(reasoningEffort))
+          throw new LaneTurnSettingRefusal('reasoningEffort', `Copilot has no effort level "${reasoningEffort}".`);
+        if (model !== undefined) {
+          // Copilot lists no models today, so the model is taken unchecked
+          // and the lane says so (M3).
+          unverifiedModel.accept(model, await this.listModels());
+          nextTurn.model = model;
+        }
+        if (reasoningEffort !== undefined) nextTurn.reasoningEffort = reasoningEffort;
+        return {
+          ...(model !== undefined ? { model } : {}),
+          ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+          appliesAt: 'next-spawn',
+        };
+      },
+      listTurnOptions: async (): Promise<LaneTurnOptionsCatalog> => {
+        const currentModel = nextTurn.model ?? options.model;
+        const currentEffort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+        return {
+          models: await this.listModels(),
+          efforts: [...COPILOT_LANE_EFFORTS],
+          ...(currentModel ? { currentModel } : {}),
+          ...(currentEffort ? { currentEffort } : {}),
+          commands: [],
+        };
+      },
     };
   }
 

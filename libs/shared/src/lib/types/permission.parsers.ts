@@ -162,6 +162,13 @@ export function parseAskUserQuestionRequest(
   ) {
     return null;
   }
+  if (
+    !readOptional(payload, 'agentId', isWireString, (v) => {
+      out['agentId'] = v;
+    })
+  ) {
+    return null;
+  }
 
   return out as unknown as AskUserQuestionRequest;
 }

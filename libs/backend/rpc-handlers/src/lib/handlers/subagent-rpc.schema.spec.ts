@@ -1,11 +1,10 @@
 /**
  * SubagentRpcSchema — unit specs.
  *
- * Surface under test: Zod schemas for the four command RPC methods
- * (`subagent:send-message`, `subagent:stop`, `subagent:interrupt`,
- * `subagent:background`) and, since TASK_2026_296, `chat:subagent-query`.
+ * Surface under test: Zod schemas for the three command RPC methods
+ * (`subagent:send-message`, `subagent:stop`, `subagent:background`) and, since TASK_2026_296, `chat:subagent-query`.
  *
- * The query schema is deliberately weaker than its four siblings: shape only,
+ * The query schema is deliberately weaker than its three siblings: shape only,
  * no `.min(1)`. The block below pins that weakness as intentional, because
  * "tighten it to match the others" is the single change most likely to be
  * proposed here and it would reintroduce a fixed cross-session leak.
@@ -17,7 +16,6 @@ import {
   SubagentQuerySchema,
   SubagentSendMessageSchema,
   SubagentStopSchema,
-  SubagentInterruptSchema,
   SubagentBackgroundSchema,
 } from './subagent-rpc.schema';
 
@@ -145,25 +143,6 @@ describe('SubagentStopSchema', () => {
       sessionId: 'sess-abc',
       taskId: '',
     });
-    expect(result.success).toBe(false);
-  });
-});
-
-describe('SubagentInterruptSchema', () => {
-  it('accepts valid params', () => {
-    const result = SubagentInterruptSchema.safeParse({
-      sessionId: 'sess-abc',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('rejects empty sessionId', () => {
-    const result = SubagentInterruptSchema.safeParse({ sessionId: '' });
-    expect(result.success).toBe(false);
-  });
-
-  it('rejects missing sessionId', () => {
-    const result = SubagentInterruptSchema.safeParse({});
     expect(result.success).toBe(false);
   });
 });

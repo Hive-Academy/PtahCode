@@ -19,6 +19,7 @@ import type {
   AgentMessageOutcome,
   AgentMessagePreview,
   AgentMonitorParentDeliveryPayload,
+  LaneTurnRequest,
   ParentDeliveryState,
   ParentDeliveryView,
 } from '@ptah-extension/shared';
@@ -76,6 +77,14 @@ export interface DeliveryStatus {
 
 const RECEIPTS_CAP = 1024;
 const PARENT_DELIVERIES_CAP = 1024;
+/** Failed receipts a lane composer already put back; bounded like the receipts. */
+const RESTORED_CAP = 1024;
+/**
+ * Failures a plain Retry cannot fix: the lane refused the settings or the
+ * input, and the same envelope would be refused again. The user changes the
+ * draft the composer restored and sends it anew.
+ */
+const NOT_RETRYABLE_REASONS: ReadonlySet<string> = new Set(['turn-options-refused', 'turn-input-unsupported']);
 
 const RECEIPT_RANK: Readonly<Record<AgentDeliveryReceipt['state'], number>> = {
   accepted: 0,
@@ -147,6 +156,10 @@ const REASON_TEXT: Readonly<Partial<Record<string, string>>> = {
   'body-too-large': 'message too large',
   'storage-unavailable': 'storage unavailable',
   'dispatch-interrupted': 'sending was interrupted',
+  'turn-options-refused': 'lane refused the model or effort',
+  'turn-input-unsupported': 'lane cannot take this attachment or command',
+  'attachments-unavailable': 'attachments no longer held',
+  'attachments-capacity': 'attachment storage full',
 };
 
 const CANCEL: DeliveryAction = { kind: 'cancel', label: 'Cancel', confirmDuplicateRisk: false };
@@ -231,6 +244,40 @@ function capped<T>(map: Map<string, T>, cap: number, isFinal: (item: T) => boole
 
 type PreviewMap = ReadonlyMap<string, Readonly<Partial<Record<AgentMessageDelivery, AgentMessagePreview>>>>;
 
+/** An undelivered message read back for a lane composer: its text and, when it had one, its turn. */
+export interface RecoveredLaneMessage {
+  readonly text: string;
+  readonly turn?: LaneTurnRequest;
+}
+
+/**
+ * Fold a later recovery into one already waiting: texts join on a new line,
+ * files and images are kept from both without duplicates, and the later
+ * message's model and effort win. `turn` stays absent when neither had one.
+ */
+function mergeRecovered(prior: RecoveredLaneMessage, next: RecoveredLaneMessage): RecoveredLaneMessage {
+  const text = `${prior.text}\n${next.text}`;
+  if (!prior.turn) return next.turn ? { text, turn: next.turn } : { text };
+  if (!next.turn) return { text, turn: prior.turn };
+  const files = [...new Set([...(prior.turn.files ?? []), ...(next.turn.files ?? [])])];
+  const seenImages = new Set<string>();
+  const images = [...(prior.turn.images ?? []), ...(next.turn.images ?? [])].filter((image) => {
+    const key = `${image.mediaType}:${image.data}`;
+    if (seenImages.has(key)) return false;
+    seenImages.add(key);
+    return true;
+  });
+  const model = next.turn.model ?? prior.turn.model;
+  const reasoningEffort = next.turn.reasoningEffort ?? prior.turn.reasoningEffort;
+  const turn: LaneTurnRequest = {
+    ...(model !== undefined ? { model } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(files.length > 0 ? { files } : {}),
+    ...(images.length > 0 ? { images } : {}),
+  };
+  return { text, turn };
+}
+
 @Injectable({ providedIn: 'root' })
 export class AgentDeliveryStore {
   private readonly rpc = inject(ClaudeRpcService);
@@ -242,8 +289,10 @@ export class AgentDeliveryStore {
   /** Parent deliveries by delivery id; insertion order is update order. */
   private readonly _parentDeliveries = signal<ReadonlyMap<string, ParentDeliveryItem>>(new Map());
   private readonly _previews = signal<PreviewMap>(new Map());
-  /** Text recovered from the backend body store, waiting for the lane composer. */
-  private readonly _recovered = signal<ReadonlyMap<string, string>>(new Map());
+  /** Messages recovered from the backend body store, waiting for the lane composer. */
+  private readonly _recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
+  /** Receipt ids whose message a composer already restored; their row offers no Recover text. */
+  private readonly _restored = signal<ReadonlySet<string>>(new Set());
 
   /** Receipts grouped by lane: the resolved lane after a cold resume, and the lane addressed. */
   readonly receipts = computed<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(() => {
@@ -371,9 +420,27 @@ export class AgentDeliveryStore {
     return undefined;
   }
 
+  /**
+   * A lane composer put this failed message back into its draft (text,
+   * attachments and pick). Recover text would add a second copy, so the
+   * thread row stops offering it.
+   */
+  markRestored(messageId: string): void {
+    if (this._restored().has(messageId)) return;
+    this._restored.update((current) => {
+      const next = new Set(current).add(messageId);
+      for (const id of next) {
+        if (next.size <= RESTORED_CAP) break;
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
   receiptStatus(receipt: AgentDeliveryReceipt): DeliveryStatus {
     const confirmRetry = receipt.everDispatched === true || receipt.state === 'outcome-unknown';
-    const recoverable = receipt.hasRecoverableBody !== false;
+    const recoverable = receipt.hasRecoverableBody !== false && !this._restored().has(receipt.id);
+    const retriable = !(receipt.reason && NOT_RETRYABLE_REASONS.has(receipt.reason));
     const cancel = CANCELLABLE_RECEIPT_STATES.has(receipt.state) ? [CANCEL] : [];
     const aged = (label: string, actions: readonly DeliveryAction[], attention = true) =>
       this.status(label, receipt.createdAt, actions, attention, receipt);
@@ -402,7 +469,7 @@ export class AgentDeliveryStore {
           [retry(true), ...(recoverable ? [RECOVER] : []), ...cancel]);
       case 'failed':
         return aged(`Not delivered: ${this.reasonText(receipt)}`,
-          [retry(confirmRetry), ...(recoverable ? [RECOVER] : []), ...cancel]);
+          [...(retriable ? [retry(confirmRetry)] : []), ...(recoverable ? [RECOVER] : []), ...cancel]);
       case 'interrupted-undelivered':
         return aged('Interrupted — not sent',
           [retry(confirmRetry), ...(recoverable ? [RECOVER] : []), ...cancel]);
@@ -421,9 +488,15 @@ export class AgentDeliveryStore {
 
   /** Exact user-facing label for a lane message acknowledgment state. */
   static ackLabel(
-    input: Pick<AgentDeliveryReceipt, 'ackState' | 'ackNote'> | AgentMessageAckState | null | undefined,
+    input:
+      | (Pick<AgentDeliveryReceipt, 'ackState' | 'ackNote'> & Partial<Pick<AgentDeliveryReceipt, 'rawDelivery'>>)
+      | AgentMessageAckState
+      | null
+      | undefined,
     ackNote?: string,
   ): string | null {
+    // A raw `/command` carries no Ptah header, so the lane never acks it.
+    if (typeof input === 'object' && input?.rawDelivery === true) return 'Delivered as a command';
     const state = typeof input === 'string' ? input : input?.ackState;
     const note = (typeof input === 'string' ? ackNote : input?.ackNote ?? ackNote)?.trim();
     switch (state) {
@@ -513,9 +586,11 @@ export class AgentDeliveryStore {
     delivery: AgentMessageDelivery = 'queue',
     allowPartialTurnLoss?: boolean,
     idempotencyKey: string = this.newIdempotencyKey(),
+    turn?: LaneTurnRequest,
   ): Promise<AgentMessageOutcome> {
     const result = await this.rpc.call('agent:sendMessage', {
       agentId: AgentId.from(agentId), message: text, delivery, allowPartialTurnLoss, idempotencyKey,
+      ...(turn ? { turn } : {}),
     });
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message send failed');
     if (result.data.receipt) this.onMessageReceipt(result.data.receipt);
@@ -540,9 +615,21 @@ export class AgentDeliveryStore {
 
   /** Read an undelivered message's text back from the backend body store. */
   async recoverQueuedText(agentId: string, messageId: string): Promise<string> {
+    return (await this.recoverQueuedMessage(agentId, messageId)).text;
+  }
+
+  /**
+   * Read an undelivered message back with its turn snapshot (model, effort and
+   * the attachments the host still holds). `turn` is absent for a text-only message.
+   */
+  async recoverQueuedMessage(
+    agentId: string,
+    messageId: string,
+  ): Promise<RecoveredLaneMessage> {
     const result = await this.rpc.call('agent:getQueuedMessageBody', { agentId: AgentId.from(agentId), messageId });
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message text is no longer available');
-    return result.data.text;
+    const { text, turn } = result.data;
+    return turn ? { text, turn } : { text };
   }
 
   /**
@@ -577,27 +664,39 @@ export class AgentDeliveryStore {
     else if (kind === 'cancel') await this.cancelParentDelivery(deliveryId);
   }
 
-  /** Recover the text and hand it to a lane's composer (see `takeRecovered`). */
+  /**
+   * Recover the message with its turn (files, images, model, effort) and hand
+   * it to a lane's composer (see `takeRecoveredMessage`).
+   */
   async recoverIntoComposer(composerAgentId: string, agentId: string, messageId: string): Promise<void> {
-    const text = await this.recoverQueuedText(agentId, messageId);
+    this.holdForComposer(composerAgentId, await this.recoverQueuedMessage(agentId, messageId));
+  }
+
+  /**
+   * Keep a message for a lane's composer until one shows that lane (see
+   * `takeRecoveredMessage`). A composer hands over a message that came back
+   * after it switched to another lane, so the message is never lost. A
+   * message already waiting is merged with this one.
+   */
+  holdForComposer(composerAgentId: string, message: RecoveredLaneMessage): void {
     this._recovered.update((current) => {
       const next = new Map(current);
       const prior = next.get(composerAgentId);
-      next.set(composerAgentId, prior ? `${prior}\n${text}` : text);
+      next.set(composerAgentId, prior ? mergeRecovered(prior, message) : message);
       return next;
     });
   }
 
-  /** Take recovered text for a lane's composer; returns null when none waits. */
-  takeRecovered(agentId: string): string | null {
-    const text = this._recovered().get(agentId);
-    if (text === undefined) return null;
+  /** Take the recovered message for a lane's composer; returns null when none waits. */
+  takeRecoveredMessage(agentId: string): RecoveredLaneMessage | null {
+    const message = this._recovered().get(agentId);
+    if (message === undefined) return null;
     this._recovered.update((current) => {
       const next = new Map(current);
       next.delete(agentId);
       return next;
     });
-    return text;
+    return message;
   }
 
   async retryParentDelivery(deliveryId: ParentDeliveryView['deliveryId'], confirmDuplicateRisk = false): Promise<ParentDeliveryView> {

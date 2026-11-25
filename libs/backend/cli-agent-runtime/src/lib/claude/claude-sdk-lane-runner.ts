@@ -16,9 +16,20 @@ import type {
   SDKUserMessage,
   SessionMetadata,
 } from '@ptah-extension/agent-sdk';
-import type {
-  ProviderAccountBinding,
-  ProviderAccountIdentityEvidence,
+import {
+  EFFORT_LEVELS,
+  resolveImageMediaType,
+  type EffortLevel,
+  type LaneCapabilitySupport,
+  type LaneComposerCommandOption,
+  type LaneImageInputSupport,
+  type LanePermissionMode,
+  type LanePromptCapabilities,
+  type LaneTurnContent,
+  type LaneTurnInputCapabilities,
+  type LaneTurnSettings,
+  type ProviderAccountBinding,
+  type ProviderAccountIdentityEvidence,
 } from '@ptah-extension/shared';
 import type {
   ClaudeAccountNamedRoute,
@@ -30,10 +41,16 @@ import type {
   ProviderAccountPortRefusal,
 } from '@ptah-extension/auth-providers-tokens';
 import { claudeActualLaunch } from './claude-sdk-lane-options';
-import type {
-  LaneAccountBindingPort,
-  LaneAccountReference,
+import {
+  LaneTurnSettingRefusal,
+  type CliModelInfo,
+  type LaneAccountBindingPort,
+  type LaneAccountReference,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
 } from '../cli-agents/cli-adapters/cli-adapter.interface';
+import { filterLaneCommands } from '../cli-agents/cli-adapters/lane-command-filter';
+import { withFileReferences } from '../cli-agents/messaging/lane-resumers/ptah-cli-lane-resumer';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   Options,
@@ -49,7 +66,139 @@ import {
   isPlanBilledLaneProvider,
   type PtahCliLanePlanLimits,
 } from '../ptah-cli/helpers/ptah-cli-lane-plan-limits';
-import type { PromptMailbox } from '../ptah-cli/helpers/ptah-cli-prompt-mailbox';
+import {
+  toUserMessage,
+  type PromptMailbox,
+  type PromptTurn,
+  type PromptTurnContent,
+} from '../ptah-cli/helpers/ptah-cli-prompt-mailbox';
+
+/** D17: the SDK's interrupt must settle within 3 s or the router reports `interrupt-failed`. */
+const CLAUDE_INTERRUPT_TIMEOUT_MS = 3_000;
+/** `setModel` / `applyFlagSettings` bound (B5). */
+const CLAUDE_SETTINGS_TIMEOUT_MS = 10_000;
+/** `supportedModels` / `supportedCommands` bound, each (D17). */
+const CLAUDE_CATALOG_TIMEOUT_MS = 5_000;
+export const CLAUDE_INTERRUPT_TIMEOUT_TEXT = 'Claude did not stop the turn in 3 s';
+export const CLAUDE_LATE_INTERRUPT_TEXT =
+  'The turn ended after a late interrupt; your message was not sent.';
+/** Info segment when a steer was not folded into the turn it was sent to (B6). */
+export const CLAUDE_STEER_MISSED_TEXT = 'A message may start the next turn.';
+const CLAUDE_STEER_REFUSED_TEXT =
+  'Claude takes a message mid-turn only while one of its tools runs.';
+const CLAUDE_TURN_OPTIONS_ERROR = 'Lane options could not be read.';
+/**
+ * Claude commands hidden from lanes (D18). Empty until a permission-policy
+ * command is proven to exist for Claude lanes.
+ */
+export const CLAUDE_HIDDEN_LANE_COMMANDS: readonly string[] = [];
+
+/**
+ * Per-turn input of every Claude SDK lane (Claude and Ptah CLI, B5). Each
+ * supported item has its handle operation (Req 4.3): `applyTurnSettings`,
+ * `continue` with content, `turnInputSupport`, `listTurnOptions`.
+ */
+export const CLAUDE_SDK_LANE_TURN_INPUT: LaneTurnInputCapabilities = {
+  model: { state: 'supported', appliesAt: 'next-turn' },
+  effort: { state: 'supported', appliesAt: 'next-turn' },
+  images: { state: 'supported', onSteer: false },
+  files: { state: 'supported', delivery: 'path-text' },
+  commands: { state: 'supported', blocked: CLAUDE_HIDDEN_LANE_COMMANDS },
+  skills: { state: 'supported' },
+};
+
+/** Reason a Ptah CLI lane on a provider without known image support gives (S1). */
+export const CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT =
+  'This provider does not report which of its models accept images.';
+
+/**
+ * The Claude SDK turn input with images narrowed to `images`. A Ptah CLI lane
+ * passes its provider's image support; the native Claude lane keeps the
+ * default.
+ */
+export function claudeSdkLaneTurnInput(
+  images: LaneImageInputSupport,
+): LaneTurnInputCapabilities {
+  return { ...CLAUDE_SDK_LANE_TURN_INPUT, images };
+}
+
+/** Fixed refusal texts of `applyTurnSettings` (M7): no provider text reaches a caller. */
+const CLAUDE_MODEL_REFUSED_TEXT = 'Claude did not accept the model.';
+const CLAUDE_EFFORT_REFUSED_TEXT = 'Claude did not accept the effort level.';
+const CLAUDE_EFFORT_REFUSED_MODEL_KEPT_TEXT =
+  'Claude did not accept the effort level; the model change could not be undone.';
+
+/**
+ * Approval prompts reach the host through `canUseTool`. In `yolo` (native
+ * `bypassPermissions`) every tool runs without one; `ask`, `auto-edit` and
+ * `plan` still ask for the tools they do not auto-allow. `AskUserQuestion`
+ * reaches the host in every mode (B11). Without a known mode the CLI's own
+ * capability is reported.
+ */
+export function claudeSdkLanePrompts(
+  permission?: LanePermissionMode,
+): LanePromptCapabilities {
+  return {
+    approvals: permission === 'yolo'
+      ? { state: 'unsupported', reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.' }
+      : { state: 'supported' },
+    questions: { state: 'supported' },
+  };
+}
+
+/** Rejects with `text` when `call` has not settled within `ms`. */
+function boundedCall<T>(call: Promise<T>, ms: number, text: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    call,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(text)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function isEffortLevel(value: string): value is EffortLevel {
+  return (EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * The user turn's content (B5): plain text, or text plus base64 image
+ * blocks. Attached files go into the text as paths (`path-text`, D14). An
+ * image whose media type cannot be resolved rejects the turn; it is never
+ * dropped silently.
+ */
+export function claudeLaneTurnContent(
+  message: string,
+  content?: LaneTurnContent,
+): PromptTurnContent {
+  const text = withFileReferences(message, content?.files);
+  const images = content?.images ?? [];
+  if (images.length === 0) return text;
+  const blocks: Exclude<PromptTurnContent, string> = [{ type: 'text', text }];
+  for (const image of images) {
+    const mediaType = resolveImageMediaType(image.mediaType, image.data);
+    if (mediaType === null)
+      throw new Error('An attached image is not a PNG, JPEG, GIF or WebP image.');
+    blocks.push({
+      type: 'image',
+      source: { type: 'base64', media_type: mediaType, data: image.data },
+    });
+  }
+  return blocks;
+}
+
+/** Claude's built-in commands are commands; every other entry is a skill or user command (D10). */
+function laneCommandOption(command: {
+  name: string;
+  description?: string;
+  builtin?: boolean;
+}): LaneComposerCommandOption {
+  return {
+    name: command.name,
+    ...(command.description ? { description: command.description } : {}),
+    group: command.builtin ? 'command' : 'skill',
+  };
+}
 
 type LaneQueryFunction = Awaited<
   ReturnType<SdkModuleLoader['getQueryFunction']>
@@ -74,6 +223,27 @@ export interface ClaudeSdkLaneRunContext {
   emitStreamEvent: PtahCliStreamLoopConfig['emitStreamEvent'];
   disposeCallbacks: () => void;
   stopProxy: () => Promise<void>;
+  /**
+   * The lane manifest's `messaging.steer` (B6). Steer is exposed only when it
+   * is `supported`; absent keeps the fold-in dormant.
+   */
+  manifestSteer?: LaneCapabilitySupport;
+  /**
+   * The manifest's `turnInput.images` (S1). Absent means supported (the
+   * native Claude lane); an unsupported value refuses image turns.
+   */
+  imageInput?: LaneImageInputSupport;
+}
+
+/** One turn sent to the CLI whose result frame has not arrived yet. */
+interface InFlightTurn {
+  /**
+   * The prompt's uuid; absent for the spawn's first turn. A missed steer's
+   * placeholder carries the steer's uuid, so a frame that lists it (two
+   * missed steers run as one turn) drops the placeholder as folded.
+   */
+  readonly uuid?: string;
+  readonly resolve: (exitCode: number) => void;
 }
 
 /** One native query and stream loop per spawn; no provider/config fabrication. */
@@ -134,12 +304,62 @@ export class ClaudeSdkLaneRunner {
     }
     let resolvedSessionId: string | null = null;
     const sessionResolvedCallbacks: Array<(sessionId: string) => void> = [];
-    const pendingTurns: Array<(exitCode: number) => void> = [];
-    const enqueueTurn = (): Promise<number> =>
-      new Promise<number>((resolve) => {
-        pendingTurns.push(resolve);
+    // Turn bookkeeping (B5, M4): a turn is in flight from its enqueue to its
+    // result frame. A result frame with no turn in flight (a CLI-initiated
+    // result, such as a background task notification) settles nothing.
+    const inFlight: InFlightTurn[] = [];
+    const enqueueTurn = (uuid?: string): { entry: InFlightTurn; done: Promise<number> } => {
+      let entry!: InFlightTurn;
+      const done = new Promise<number>((resolve) => {
+        entry = uuid ? { uuid, resolve } : { resolve };
       });
-    const turn1Done = enqueueTurn();
+      inFlight.push(entry);
+      return { entry, done };
+    };
+    const dropTurn = (entry: InFlightTurn): void => {
+      const index = inFlight.indexOf(entry);
+      if (index >= 0) inFlight.splice(index, 1);
+    };
+    const turn1Done = enqueueTurn().done;
+    /** The turns the current result frame settles, handed to `onTurnComplete`. */
+    let settling: InFlightTurn[] | undefined;
+    let interruptPending: { turn: InFlightTurn; timedOut: boolean } | undefined;
+    // Steer fold-in (B6): main-thread tool calls without their result, and
+    // the steers pushed since the last result frame, by uuid. Each keeps its
+    // anchor: the last turn in flight when it was pushed, which the CLI runs
+    // before the steer when it does not fold it in (M6 c). A steer that a
+    // frame without `user_message_uuids` passed is unproven: that frame may
+    // have folded it in, so a later frame cannot prove it missed.
+    let toolInFlight = false;
+    const pendingSteers = new Map<string, { anchor?: InFlightTurn; unproven: boolean }>();
+    /** Every steer uuid sent to the CLI, until a result frame lists it. */
+    const sentSteers = new Set<string>();
+    /**
+     * M3: set by the first result frame that carries `user_message_uuids`.
+     * Until then the CLI has not shown that it reports them (an older CLI
+     * never does), so a steer's fate could not be checked and steer is not
+     * offered.
+     */
+    let reportsMessageUuids = false;
+    let currentModel: string | undefined = options.model;
+    let currentEffort: string | undefined =
+      typeof options.effort === 'string' ? options.effort : undefined;
+    const settingRefusal = (
+      field: LaneTurnSettingRefusal['field'],
+      fixed: string,
+      error: unknown,
+    ): LaneTurnSettingRefusal => {
+      // The caller gets fixed text only (M7). Named lanes log no provider
+      // text either: it can carry account paths.
+      if (context.named)
+        this.logger.warn('[ClaudeLane] Claude refused a turn setting.', { field });
+      else
+        this.logger.warn('[ClaudeLane] Claude refused a turn setting.', {
+          field,
+          detail: error instanceof Error ? error.message.slice(0, 200) : String(error),
+        });
+      return new LaneTurnSettingRefusal(field, fixed);
+    };
     const attachAgentId = (agentId: string): void => {
       agentIdHolder.value = agentId;
       lanePlanLimits.attach(agentId);
@@ -164,18 +384,250 @@ export class ClaudeSdkLaneRunner {
       // has settled (bounded at 3 s), so the exit it triggers is classified
       // and persisted with the owner (Batch 11 carry-forward).
       onTurnComplete: (exitCode: number) => {
-        const resolve = pendingTurns.shift();
-        if (resolve) {
-          void lanePlanLimits.settled.then(() => resolve(exitCode));
-        }
+        // Without a preceding `onTurnResult` the frame settles the oldest turn.
+        const head = settling === undefined ? inFlight.shift() : undefined;
+        const settled = settling ?? (head ? [head] : []);
+        settling = undefined;
+        if (settled.length > 0)
+          void lanePlanLimits.settled.then(() => {
+            for (const turn of settled) turn.resolve(exitCode);
+          });
+      },
+      onToolInFlightChange: (toolRunning) => {
+        toolInFlight = toolRunning;
+      },
+      onTurnResult: ({ subtype, userMessageUuids }) => {
+        if (userMessageUuids !== undefined) reportsMessageUuids = true;
+        reconcileSteers(userMessageUuids);
+        settling = settledByResult(userMessageUuids);
+        for (const turn of settling) dropTurn(turn);
+        // Unsolicited (M4) or a steer's own turn: no queued turn ends here.
+        if (settling.length === 0) return { interrupted: false };
+        // The flag clears on the result frame of the turn it targets,
+        // whatever its outcome.
+        const flag = interruptPending;
+        const flagSettles = flag !== undefined && settling.includes(flag.turn);
+        if (flagSettles) interruptPending = undefined;
+        const interrupted = flagSettles && subtype === 'error_during_execution' && !closed;
+        if (interrupted && flag?.timedOut)
+          emitSegment({ type: 'info', content: CLAUDE_LATE_INTERRUPT_TEXT });
+        return { interrupted };
       },
       onPlanLimitSignal: (signal) => lanePlanLimits.onSignal(signal),
       planBilledSuccess: isPlanBilledLaneProvider(providerId),
     });
+    /**
+     * The in-flight turns a result frame ends. The CLI lists the uuid of
+     * every prompt a turn consumed, so a frame that lists uuids ends the
+     * turns it lists, wherever they sit in `inFlight`: a turn the named gate
+     * committed out of push order, or a missed steer's placeholder, settles
+     * on its own frame and no other. The head ends as well when it has no
+     * uuid (the spawn's turn). A frame that lists no in-flight turn but lists
+     * a steer is that steer's own turn and ends none. Any other frame, and
+     * every frame without the field, ends the head, in push order (none when
+     * no turn is in flight, M4).
+     */
+    const settledByResult = (consumed?: readonly string[]): InFlightTurn[] => {
+      const head = inFlight[0];
+      if (consumed === undefined) return head ? [head] : [];
+      const listed = new Set(consumed);
+      const listsSteer = consumed.some((uuid) => sentSteers.has(uuid));
+      for (const uuid of consumed) sentSteers.delete(uuid);
+      if (!head) return [];
+      const matched = inFlight.filter((turn) => turn.uuid !== undefined && listed.has(turn.uuid));
+      if (head.uuid === undefined) return [head, ...matched];
+      if (matched.length > 0) return matched;
+      return listsSteer ? [] : [head];
+    };
     let finished = false;
+    const turnRunning = (): boolean =>
+      !closed && !finished && inFlight.length > 0;
+    /**
+     * Steer rule (M3, consistent with the parent task's M6): a steer is
+     * offered only after this lane's CLI has carried `user_message_uuids` on
+     * a result frame. An older CLI that never reports them gets no steer at
+     * all, so nothing is guessed: no steer is assumed folded (which would let
+     * a missed steer's own frame settle a real turn early) and none is
+     * counted missed. The lane's first turn has no proof yet, so steer starts
+     * from its second turn.
+     */
+    const supportsSteer = (): boolean =>
+      reportsMessageUuids && toolInFlight && turnRunning();
+    /**
+     * A steer the result frame does not list was not folded in: the CLI runs
+     * it as its own turn, in push order, right after the turn that was last
+     * when it was pushed. Each missed steer gets a placeholder turn of its
+     * own, carrying its uuid, placed after its anchor and after the missed
+     * steers pushed before it, so no real turn's `done` is settled by a
+     * steer's frame. Each placeholder settles on the frame that lists its
+     * uuid (`settledByResult`), so its position keeps push order only. When
+     * the CLI runs several missed steers as one turn, that frame lists their
+     * uuids and settles every placeholder it lists. A frame without
+     * `user_message_uuids` (unexpected once the CLI has reported them) proves
+     * nothing: the steers stay pending, neither folded nor missed, and become
+     * unproven, because that frame may have folded them in. The next frame
+     * that lists uuids ends their wait. A listed steer was folded in. An
+     * unproven steer it does not list gets no placeholder and no missed-steer
+     * notice; should it still run as its own turn, that frame lists only the
+     * steer and `settledByResult` ends no real turn for it. This runs before
+     * the frame settles turns, so an anchor still in flight puts the
+     * placeholder after it; an anchor already gone puts it right after the
+     * head.
+     */
+    const reconcileSteers = (consumed?: readonly string[]): void => {
+      if (pendingSteers.size === 0) return;
+      if (consumed === undefined) {
+        for (const steer of pendingSteers.values()) steer.unproven = true;
+        return;
+      }
+      const steers = [...pendingSteers];
+      pendingSteers.clear();
+      const listed = new Set(consumed);
+      const missed = steers.filter(([uuid, steer]) => !listed.has(uuid) && !steer.unproven);
+      if (missed.length === 0) return;
+      emitSegment({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+      let previous: InFlightTurn | undefined;
+      for (const [uuid, { anchor: anchorTurn }] of missed) {
+        const anchor = anchorTurn ? inFlight.indexOf(anchorTurn) : -1;
+        const afterPrevious = previous ? inFlight.indexOf(previous) + 1 : 0;
+        const index = Math.max(anchor >= 0 ? anchor + 1 : 1, afterPrevious);
+        previous = { uuid, resolve: () => undefined };
+        inFlight.splice(index, 0, previous);
+      }
+    };
+    /** Refuses a turn carrying images when the lane's provider cannot take them (S1). */
+    const assertImagesAccepted = (content?: LaneTurnContent): void => {
+      if ((content?.images?.length ?? 0) > 0 && context.imageInput?.state === 'unsupported')
+        throw new Error(context.imageInput.reason ?? CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT);
+    };
+    const steer = async (message: string, content?: LaneTurnContent): Promise<void> => {
+      if (!supportsSteer()) throw new Error(CLAUDE_STEER_REFUSED_TEXT);
+      if (context.named && abortController.signal.aborted) throw claudeLaneRefusal();
+      assertImagesAccepted(content);
+      // Tagged so the result frame's `user_message_uuids` proves the fold-in.
+      const turn: PromptTurn = {
+        content: claudeLaneTurnContent(message, content),
+        uuid: randomUUID(),
+      };
+      const uuid = turn.uuid as string;
+      pendingSteers.set(uuid, { anchor: inFlight[inFlight.length - 1], unproven: false });
+      sentSteers.add(uuid);
+      this.logger.info(`[ClaudeLane] steer pushed into the running turn for "${agentName}"`, {
+        messageLength: message.length,
+        imageCount: content?.images?.length ?? 0,
+        fileCount: content?.files?.length ?? 0,
+      });
+      try {
+        if (context.named)
+          await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+        else mailbox.push(turn, resolvedSessionId ?? undefined);
+      } catch (error: unknown) {
+        // A steer that never reached the CLI cannot be missed (M6 b); the
+        // caller gets the failure.
+        pendingSteers.delete(uuid);
+        sentSteers.delete(uuid);
+        throw error;
+      }
+    };
+    const applyTurnSettings = async (
+      settings: LaneTurnSettings,
+    ): Promise<LaneTurnSettingsResult> => {
+      const { model, reasoningEffort } = settings;
+      if (closed || finished)
+        throw new LaneTurnSettingRefusal(
+          model !== undefined ? 'model' : 'reasoningEffort',
+          'The Claude lane has ended.',
+        );
+      // Both fields are checked before anything is sent (M2).
+      if (reasoningEffort !== undefined && !isEffortLevel(reasoningEffort))
+        throw new LaneTurnSettingRefusal(
+          'reasoningEffort',
+          `Claude has no effort level "${reasoningEffort}".`,
+        );
+      // The flag layer has no `max` tier (E20), as in main chat: the result
+      // names the level actually applied (m4).
+      const effortLevel = reasoningEffort === 'max' ? 'xhigh' : reasoningEffort;
+      const result: LaneTurnSettingsResult = {
+        ...(model !== undefined ? { model } : {}),
+        ...(effortLevel !== undefined ? { reasoningEffort: effortLevel } : {}),
+        appliesAt: 'next-turn',
+      };
+      // Sent at once: the manager applies settings on an idle lane, or right
+      // before it interrupts the running turn, so a refusal never costs it.
+      await sendSettings(model, effortLevel);
+      return result;
+    };
+    /**
+     * Sends model then effort. An effort refusal rolls the model back, so a
+     * refusal leaves the lane's settings as they were (M2).
+     */
+    const sendSettings = async (model?: string, effortLevel?: string): Promise<void> => {
+      const previousModel = currentModel;
+      if (model !== undefined) {
+        try {
+          await boundedCall(sdkQuery.setModel(model), CLAUDE_SETTINGS_TIMEOUT_MS,
+            'Claude did not confirm the model in 10 s.');
+        } catch (error: unknown) {
+          throw settingRefusal('model', CLAUDE_MODEL_REFUSED_TEXT, error);
+        }
+      }
+      if (effortLevel !== undefined && isEffortLevel(effortLevel)) {
+        try {
+          await boundedCall(
+            sdkQuery.applyFlagSettings({ effortLevel: effortLevel === 'max' ? 'xhigh' : effortLevel }),
+            CLAUDE_SETTINGS_TIMEOUT_MS,
+            'Claude did not confirm the effort level in 10 s.',
+          );
+        } catch (error: unknown) {
+          if (model === undefined)
+            throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_TEXT, error);
+          try {
+            await boundedCall(sdkQuery.setModel(previousModel), CLAUDE_SETTINGS_TIMEOUT_MS,
+              'Claude did not confirm the model rollback in 10 s.');
+          } catch {
+            // The refusal below tells the user the model stayed changed.
+            currentModel = model;
+            throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_MODEL_KEPT_TEXT, error);
+          }
+          throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_TEXT, error);
+        }
+        currentEffort = effortLevel;
+      }
+      if (model !== undefined) currentModel = model;
+    };
+    const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
+      const [models, commands] = await Promise.allSettled([
+        boundedCall(sdkQuery.supportedModels(), CLAUDE_CATALOG_TIMEOUT_MS, 'Claude models timed out.'),
+        boundedCall(sdkQuery.supportedCommands(), CLAUDE_CATALOG_TIMEOUT_MS, 'Claude commands timed out.'),
+      ]);
+      const failed = models.status === 'rejected' || commands.status === 'rejected';
+      if (failed)
+        // Not silent: the catalog carries `error` for the composer and the failure is logged.
+        this.logger.warn('[ClaudeLane] Lane turn options could not be read.', {
+          models: models.status,
+          commands: commands.status,
+        });
+      const catalog: LaneTurnOptionsCatalog & { readonly error?: string } = {
+        models: models.status === 'fulfilled'
+          ? models.value.map((model): CliModelInfo => ({ id: model.value, name: model.displayName }))
+          : [],
+        efforts: [...EFFORT_LEVELS],
+        ...(currentModel ? { currentModel } : {}),
+        ...(currentEffort ? { currentEffort } : {}),
+        commands: commands.status === 'fulfilled'
+          ? filterLaneCommands(commands.value.map(laneCommandOption), CLAUDE_HIDDEN_LANE_COMMANDS)
+          : [],
+        ...(failed ? { error: CLAUDE_TURN_OPTIONS_ERROR } : {}),
+      };
+      return catalog;
+    };
     const finish = (exitCode: number): void => {
       if (finished) return;
       finished = true;
+      interruptPending = undefined;
+      pendingSteers.clear();
+      sentSteers.clear();
+      toolInFlight = false;
       abortController.signal.removeEventListener('abort', closeMailbox);
       closeMailbox();
       disposeCallbacks();
@@ -184,8 +636,10 @@ export class ClaudeSdkLaneRunner {
       );
       sessionResolvedCallbacks.length = 0;
       lanePlanLimits.end();
+      const remaining = [...(settling ?? []), ...inFlight.splice(0)];
+      settling = undefined;
       void lanePlanLimits.settled.then(() => {
-        while (pendingTurns.length) pendingTurns.shift()?.(exitCode);
+        for (const turn of remaining) turn.resolve(exitCode);
       });
     };
     abortSettler.settle = () => finish(1);
@@ -236,22 +690,76 @@ export class ClaudeSdkLaneRunner {
       // Called by the manager as soon as it tracks the run, which is when
       // the lane's owner can be recorded on it.
       setAgentId: attachAgentId,
-      continue: async (message: string) => {
+      continue: async (message: string, content?: LaneTurnContent) => {
         if (context.named && (closed || abortController.signal.aborted))
           throw claudeLaneRefusal();
-        const done = enqueueTurn();
-        if (context.named)
-          await context.named.enqueue(message, resolvedSessionId ?? undefined);
-        if (context.named && (closed || abortController.signal.aborted))
-          throw claudeLaneRefusal();
+        // Built before the turn is queued: an unresolvable or refused image
+        // rejects the call and nothing is sent.
+        assertImagesAccepted(content);
+        const turn: PromptTurn = {
+          content: claudeLaneTurnContent(message, content),
+          uuid: randomUUID(),
+        };
+        // Queued before the named gate so its result frame always finds it;
+        // a refusal by the gate drops it again (M5).
+        const { entry, done } = enqueueTurn(turn.uuid);
+        try {
+          if (context.named)
+            await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+          if (context.named && (closed || abortController.signal.aborted))
+            throw claudeLaneRefusal();
+        } catch (error: unknown) {
+          dropTurn(entry);
+          throw error;
+        }
+        // Counts only: no image data or file path reaches the log.
         this.logger.info(
           `[PtahCliRegistry] continue() pushing follow-up turn for "${agentName}"`,
-          { sessionId: resolvedSessionId, messageLength: message.length },
+          {
+            sessionId: resolvedSessionId,
+            messageLength: message.length,
+            imageCount: content?.images?.length ?? 0,
+            fileCount: content?.files?.length ?? 0,
+          },
         );
         if (!context.named)
-          mailbox.push(message, resolvedSessionId ?? undefined);
+          mailbox.push(turn, resolvedSessionId ?? undefined);
         return Promise.resolve({ done });
       },
+      supportsInterrupt: turnRunning,
+      interrupt: async () => {
+        const running = inFlight[0];
+        if (!turnRunning() || !running) return;
+        const pending = { turn: running, timedOut: false };
+        interruptPending = pending;
+        try {
+          await boundedCall(
+            Promise.resolve(sdkQuery.interrupt()).then(() => undefined),
+            CLAUDE_INTERRUPT_TIMEOUT_MS,
+            CLAUDE_INTERRUPT_TIMEOUT_TEXT,
+          );
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message === CLAUDE_INTERRUPT_TIMEOUT_TEXT) {
+            // The flag stays set until this turn's result frame, so a late
+            // interrupt still ends the turn with exit 0.
+            pending.timedOut = true;
+          } else if (interruptPending === pending) {
+            interruptPending = undefined;
+          }
+          throw error;
+        }
+      },
+      // Dormant until the manifest declares steer (Batch 30, after live L4).
+      ...(context.manifestSteer?.state === 'supported' ? { steer, supportsSteer } : {}),
+      applyTurnSettings,
+      // The SDK accepts image blocks on every turn; whether the model can
+      // read them is the provider's (S1), so the manifest's value is echoed.
+      turnInputSupport: () => ({
+        images: context.imageInput?.state === 'unsupported'
+          ? context.imageInput
+          : { state: 'supported' },
+      }),
+      listTurnOptions,
     };
     return { handle, setAgentId: attachAgentId };
   }
@@ -805,7 +1313,7 @@ export class ClaudeNamedLaneAdmission {
     // user message (D68): release the first turn now; nothing is forwarded
     // and no tool runs until init is verified below.
     this.step = 'released';
-    this.releasedTurn = this.userTurn(firstTurn.message, firstTurn.sessionId);
+    this.releasedTurn = this.userTurn({ content: firstTurn.message }, firstTurn.sessionId);
     if (
       !gate.push(this.releasedTurn) ||
       !gate.commit()
@@ -923,25 +1431,19 @@ export class ClaudeNamedLaneAdmission {
     this.assertOpen();
   }
 
-  private userTurn(message: string, sessionId?: string): SDKUserMessage {
-    return {
-      type: 'user',
-      uuid: randomUUID() as SDKUserMessage['uuid'],
-      message: { role: 'user', content: message },
-      parent_tool_use_id: null,
-      ...(sessionId ? { session_id: sessionId } : {}),
-    };
+  private userTurn(turn: PromptTurn, sessionId?: string): SDKUserMessage {
+    return toUserMessage(turn, sessionId);
   }
 
   /** A later turn; the first turn is released by `launch`. */
-  async enqueue(message: string, sessionId?: string): Promise<void> {
+  async enqueue(turn: PromptTurn, sessionId?: string): Promise<void> {
     try {
       await this.validateTurn();
       this.step = 'gate';
       const gate = this.gates[this.gates.length - 1];
       if (
         !this.released ||
-        !gate.push(this.userTurn(message, sessionId)) ||
+        !gate.push(this.userTurn(turn, sessionId)) ||
         !gate.commit()
       )
         throw claudeLaneRefusal();

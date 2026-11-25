@@ -16,10 +16,8 @@ import 'reflect-metadata';
 jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   CLI_AGENT_RUNTIME_TOKENS: {
     SDK_PTAH_CLI_REGISTRY: Symbol.for('PtahCliRegistry'),
-    AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
     AGENT_LANE_RESUME: Symbol.for('AgentLaneResume'),
   },
-  AgentContinueError: class AgentContinueError extends Error {},
   // Same shape as the real class (`lane-resume-gate.ts`): a fixed message
   // and the refusal code. The handler matches it with `instanceof`.
   LaneAccountResumeError: class LaneAccountResumeError extends Error {
@@ -30,6 +28,10 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   },
   MIN_CONCURRENT_AGENTS: 1,
   MAX_CONCURRENT_AGENTS: 10,
+  // The real bridge constant: a refused edit's text is asserted below.
+  COPILOT_EDIT_REFUSED: jest.requireActual(
+    '../../../../cli-agent-runtime/src/lib/cli-agents/cli-adapters/copilot-permission-bridge',
+  ).COPILOT_EDIT_REFUSED,
 }));
 
 jest.mock('@ptah-extension/agent-sdk', () => ({
@@ -136,7 +138,6 @@ interface Harness {
     reserveAgentId: jest.Mock;
     laneToolGateFor: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
-    continueConversation: jest.Mock;
     findAgentInfo: jest.Mock;
   };
   /** Stored `ptah` settings, keyed by the full key (`agentOrchestration.x`). */
@@ -144,11 +145,14 @@ interface Harness {
   setConfiguration: jest.Mock;
   /** `ProviderAccountService.lookupBySdkSession`, when the service is registered. */
   accountLookup: jest.Mock | undefined;
-  messageCoordinator: { send: jest.Mock };
 }
 
 interface HarnessOptions {
   readonly sdkPending?: AgentPermissionRequest[];
+  /** Registers an SDK permission handler whose `handleResponse` is this mock. */
+  readonly handleResponse?: jest.Mock;
+  /** A Copilot adapter with this permission bridge. */
+  readonly copilotBridge?: unknown;
   readonly laneOwner?: { agentId: string; parentSessionId?: string; startedAt: string; status: 'running' | 'completed' };
   readonly detectedClis?: CliDetectionResult[];
   /** Registers a fake account service whose lookup is this mock. */
@@ -224,7 +228,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
         resumeSessionId: input.resumeSessionId,
       }),
     ),
-    continueConversation: jest.fn().mockResolvedValue(undefined),
     findAgentInfo: jest.fn((agentId: string) => options.laneOwner?.agentId === agentId ? options.laneOwner : undefined),
   };
   const metadataStore = { createChild: jest.fn().mockResolvedValue(undefined) };
@@ -234,12 +237,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     // The real Ptah CLI resumer the runtime registers, over this harness's fakes.
     resumePtahCli: (...args: Parameters<PtahCliResumer['resumePtahCli']>) =>
       new PtahCliLaneResumer(processManager, registry, metadataStore, logger).resumePtahCli(...args),
-  };
-  const messageCoordinator = {
-    send: jest.fn(async (request: { agentId: string; message: string }) => {
-      await processManager.continueConversation(request.agentId, request.message);
-      return { mode: 'queued' as const };
-    }),
   };
 
   // Each write yields to the event loop before it lands, the way the file
@@ -271,7 +268,8 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     logger as unknown as Logger,
     rpcHandler as unknown as RpcHandler,
     {
-      getAdapter: jest.fn().mockReturnValue(undefined),
+      getAdapter: jest.fn((cli: string) =>
+        cli === 'copilot' && options.copilotBridge ? { permissionBridge: options.copilotBridge } : undefined),
       invalidateCache: jest.fn(),
       detectAll: jest.fn().mockResolvedValue(options.detectedClis ?? []),
       refresh: jest.fn().mockResolvedValue(options.detectedClis ?? []),
@@ -285,25 +283,23 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     {
       isRegistered: jest.fn(
         (token: unknown) =>
-          token === Symbol.for('AgentMessageCoordinator') ||
           token === Symbol.for('AgentLaneResume') ||
           (accountLookup !== undefined && token === ProviderAccountService) ||
           (capabilityResolver !== undefined &&
             token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER) ||
-          (options.sdkPending !== undefined && token === SDK_TOKENS.SDK_PERMISSION_HANDLER) ||
+          ((options.sdkPending !== undefined || options.handleResponse !== undefined) &&
+            token === SDK_TOKENS.SDK_PERMISSION_HANDLER) ||
           token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV,
       ),
       resolve: jest.fn((token: unknown) =>
-        token === Symbol.for('AgentMessageCoordinator')
-          ? messageCoordinator
-          : token === Symbol.for('AgentLaneResume')
+        token === Symbol.for('AgentLaneResume')
           ? resumeService
           : token === ProviderAccountService
           ? { lookupBySdkSession: accountLookup }
           : token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER
             ? capabilityResolver
             : token === SDK_TOKENS.SDK_PERMISSION_HANDLER
-              ? { getPendingCliAgentPermissions: () => options.sdkPending }
+              ? { getPendingCliAgentPermissions: () => options.sdkPending, handleResponse: options.handleResponse }
             : token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV
               ? authEnv
               : undefined,
@@ -341,7 +337,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     settings,
     setConfiguration,
     accountLookup,
-    messageCoordinator,
   };
 }
 
@@ -583,133 +578,6 @@ function expectNoLeak(result: unknown): void {
     expect(wire).not.toContain(leak);
   }
 }
-
-type ContinueResult = { success: boolean; error?: string; code?: string };
-const CONTINUE_AGENT_ID = '11111111-1111-4111-8111-111111111111';
-
-describe('AgentRpcHandlers — agent:continue account refusal (D28)', () => {
-  it('marks a renderer continue message as user sent', async () => {
-    const h = makeHarness();
-    await call<ContinueResult>(h, 'agent:continue', { agentId: CONTINUE_AGENT_ID, message: 'next step' });
-    expect(h.messageCoordinator.send).toHaveBeenCalledWith(
-      { agentId: CONTINUE_AGENT_ID, message: 'next step', delivery: 'queue' }, { kind: 'user' },
-    );
-  });
-  it('preserves message whitespace and caps continue input at the RPC boundary', async () => {
-    const h = makeHarness();
-    await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID, message: '  next step\n',
-    });
-    expect(h.messageCoordinator.send).toHaveBeenCalledWith(
-      { agentId: CONTINUE_AGENT_ID, message: '  next step\n', delivery: 'queue' }, { kind: 'user' },
-    );
-    await expect(call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID, message: 'x'.repeat(32769),
-    })).resolves.toEqual({ success: false, code: 'invalid_params', error: 'Invalid agent message parameters.' });
-    expect(h.messageCoordinator.send).toHaveBeenCalledTimes(1);
-  });
-  it('maps LaneAccountResumeError to account_refused with fixed text', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('unavailable-storage'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'account_refused',
-      error: LANE_ACCOUNT_REFUSED_ERROR,
-    });
-    expectNoLeak(result);
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'unavailable-storage' },
-    );
-    expect(h.logger.error).not.toHaveBeenCalled();
-  });
-
-  it('keeps the specific refusal code in the log, not the reply', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('identity-unproved'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'account_refused',
-      error: LANE_ACCOUNT_REFUSED_ERROR,
-    });
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'identity-unproved' },
-    );
-  });
-
-  it('logs a non-whitelisted code as unavailable-storage', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('C:/secret/path'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result.code).toBe('account_refused');
-    expect(
-      JSON.stringify((h.logger.warn as jest.Mock).mock.calls),
-    ).not.toContain('secret');
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'unavailable-storage' },
-    );
-  });
-
-  it('treats an error only named LaneAccountResumeError as an ordinary failure', async () => {
-    const h = makeHarness();
-    const impostor = Object.assign(new Error('C:/secret/path'), {
-      code: 'identity-unproved',
-    });
-    impostor.name = 'LaneAccountResumeError';
-    h.processManager.continueConversation.mockRejectedValueOnce(impostor);
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'unknown',
-      error: 'Failed to continue agent conversation',
-    });
-  });
-
-  it('leaves an ambient (unbound) continue unchanged', async () => {
-    const h = makeHarness();
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({ success: true });
-    expect(h.processManager.continueConversation).toHaveBeenCalledWith(
-      CONTINUE_AGENT_ID,
-      'next step',
-    );
-  });
-});
 
 /**
  * TASK_2026_712 Batch 28a: Claude system-lane config keys. Before this batch
@@ -1746,5 +1614,74 @@ describe('AgentRpcHandlers — agent:setClaudeBuiltin (TASK_2026_853 R2)', () =>
       enabledTools: ['DesignSync'],
       enabledSkills: [],
     });
+  });
+});
+
+describe('AgentRpcHandlers — agent:permissionResponse (D22, S1/S2)', () => {
+  type Bridge = {
+    requestToolPermission(params: { agentId: string; toolName: string; toolArgs: unknown }): Promise<{ permissionDecision: 'allow' | 'deny' }>;
+    setAutoApprove(value: boolean): void;
+    hasPendingRequest(id: string): boolean;
+    events: { on(event: string, listener: (payload: { requestId: string }) => void): void };
+  };
+  const { CopilotPermissionBridge, COPILOT_EDIT_REFUSED } = jest.requireActual(
+    '../../../../cli-agent-runtime/src/lib/cli-agents/cli-adapters/copilot-permission-bridge',
+  ) as { CopilotPermissionBridge: new () => Bridge; COPILOT_EDIT_REFUSED: string };
+
+  function copilotRequest() {
+    const bridge = new CopilotPermissionBridge();
+    bridge.setAutoApprove(false);
+    let requestId = '';
+    bridge.events.on('permission-request', (payload) => { requestId = payload.requestId; });
+    const answer = bridge.requestToolPermission({ agentId: 'lane', toolName: 'Write', toolArgs: {} });
+    return { bridge, answer, requestId: () => requestId };
+  }
+
+  it('forwards every decision and the edited input to the SDK handler', async () => {
+    const handleResponse = jest.fn().mockReturnValue(true);
+    const h = makeHarness({ handleResponse });
+    const result = await call<{ success: boolean }>(h, 'agent:permissionResponse', {
+      requestId: 'req-1', decision: 'always_allow', modifiedInput: { command: 'ls' },
+    });
+    expect(result.success).toBe(true);
+    expect(handleResponse).toHaveBeenCalledWith('req-1', {
+      id: 'req-1', decision: 'always_allow', reason: undefined, modifiedInput: { command: 'ls' },
+    });
+  });
+
+  it.each([
+    ['an unknown decision', { requestId: 'r', decision: 'maybe' }],
+    ['an empty request id', { requestId: '', decision: 'allow' }],
+    ['a 501-character reason', { requestId: 'r', decision: 'deny', reason: 'x'.repeat(501) }],
+    ['an unknown field', { requestId: 'r', decision: 'allow', extra: true }],
+    ['an array modifiedInput', { requestId: 'r', decision: 'allow', modifiedInput: ['a'] }],
+    ['an oversized modifiedInput', { requestId: 'r', decision: 'allow', modifiedInput: { text: 'x'.repeat(100_001) } }],
+    ['a prototype key', { requestId: 'r', decision: 'allow', modifiedInput: JSON.parse('{"a":{"__proto__":{"x":1}}}') }],
+  ])('rejects %s without touching any handler', async (_label, params) => {
+    const handleResponse = jest.fn().mockReturnValue(true);
+    const h = makeHarness({ handleResponse });
+    const result = await call<{ success: boolean; error?: string }>(h, 'agent:permissionResponse', params);
+    expect(result).toEqual({ success: false, error: 'Invalid permission response.' });
+    expect(handleResponse).not.toHaveBeenCalled();
+  });
+
+  it('lets the Copilot bridge allow the call for always_allow (Req 5.7)', async () => {
+    const { bridge, answer, requestId } = copilotRequest();
+    const h = makeHarness({ copilotBridge: bridge });
+    const result = await call<{ success: boolean }>(h, 'agent:permissionResponse', {
+      requestId: requestId(), decision: 'always_allow',
+    });
+    expect(result.success).toBe(true);
+    await expect(answer).resolves.toMatchObject({ permissionDecision: 'allow' });
+  });
+
+  it('refuses an edited approval on Copilot visibly and keeps the request pending', async () => {
+    const { bridge, requestId } = copilotRequest();
+    const h = makeHarness({ copilotBridge: bridge });
+    const result = await call<{ success: boolean; error?: string }>(h, 'agent:permissionResponse', {
+      requestId: requestId(), decision: 'allow', modifiedInput: { path: 'other.ts' },
+    });
+    expect(result).toEqual({ success: false, error: COPILOT_EDIT_REFUSED });
+    expect(bridge.hasPendingRequest(requestId())).toBe(true);
   });
 });

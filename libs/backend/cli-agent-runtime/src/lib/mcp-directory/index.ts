@@ -109,6 +109,7 @@ export {
 export type {
   FetchLike,
   AuthServerMetadata,
+  ProtectedResourceDiscovery,
   RegisteredClient,
 } from './oauth/mcp-oauth-metadata';
 /**
@@ -138,3 +139,11 @@ export type {
   ClaudeUserMcpReaderOptions,
   ClaudeUserMcpScope,
 } from './claude-user-mcp.reader';
+/**
+ * The MCP gateway (TASK_2026_979): serves the user's MCP servers through
+ * Ptah's `ptah` server. Hosts consume it through `PLATFORM_TOKENS.MCP_GATEWAY`
+ * (`IMcpGateway`); the class is exported for composition and specs.
+ */
+export { McpGateway } from './gateway/mcp-gateway.service';
+export type { McpGatewayDeps } from './gateway/mcp-gateway.service';
+export { refreshBoundMcpGateway } from './gateway/refresh-bound-gateway';

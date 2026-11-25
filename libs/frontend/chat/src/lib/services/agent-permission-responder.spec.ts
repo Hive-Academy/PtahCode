@@ -66,6 +66,31 @@ describe('AgentPermissionResponder', () => {
     expect(responder.respondLane('agent', 'first', 'deny')).toBe(true);
   });
 
+  it('shows the host refusal text and keeps the request answerable', async () => {
+    const refusal = 'Copilot lanes cannot run a tool with edited input. Allow or deny it without editing.';
+    call.mockResolvedValueOnce({ success: true, data: { success: false, error: refusal } });
+    const onRefused = jest.fn();
+    expect(responder.respondLane('agent', 'first', 'allow', undefined, { path: 'a' }, onRefused)).toBe(true);
+    await settle();
+    expect(showError).toHaveBeenCalledWith(refusal);
+    expect(showError).not.toHaveBeenCalledWith(expect.stringContaining('no longer pending'));
+    expect(onRefused).toHaveBeenCalledWith(refusal);
+    expect(clearPermission).not.toHaveBeenCalled();
+    expect(responder.respondLane('agent', 'first', 'allow')).toBe(true);
+  });
+
+  it('keeps the not-pending banner for an unmatched request', async () => {
+    call.mockResolvedValueOnce({
+      success: true,
+      data: { success: false, error: 'No pending permission request matched this response' },
+    });
+    const onRefused = jest.fn();
+    responder.respondLane('agent', 'first', 'allow', undefined, undefined, onRefused);
+    await settle();
+    expect(showError).toHaveBeenCalledWith('This permission request is no longer pending. Refresh the lane to see its current state.');
+    expect(onRefused).not.toHaveBeenCalled();
+  });
+
   it('shows a retryable error when the answer cannot be delivered', async () => {
     call.mockRejectedValueOnce(new Error('transport unavailable'));
     call.mockResolvedValueOnce({ success: true, data: [{ requestId: 'first' }] });
@@ -127,6 +152,25 @@ describe('AgentPermissionResponder', () => {
     queue.splice(0, queue.length);
     expect(responder.respondLane('agent', 'first', 'allow')).toBe(false);
     expect(call).not.toHaveBeenCalled();
+  });
+
+  it('sends always_allow with the edited tool input as a LanePermissionResponse', () => {
+    expect(responder.respondLane('agent', 'first', 'always_allow', undefined, { command: 'npm test' })).toBe(true);
+    expect(call).toHaveBeenCalledWith('agent:permissionResponse',
+      { requestId: 'first', decision: 'always_allow', modifiedInput: { command: 'npm test' } });
+  });
+
+  it('sends deny_with_message with the typed reason', () => {
+    expect(responder.respondLane('agent', 'first', 'deny_with_message', 'Use the lint target')).toBe(true);
+    expect(call).toHaveBeenCalledWith('agent:permissionResponse',
+      { requestId: 'first', decision: 'deny_with_message', reason: 'Use the lint target' });
+  });
+
+  it('refuses a second answer after the first was acknowledged', async () => {
+    expect(responder.respondLane('agent', 'first', 'always_allow')).toBe(true);
+    await settle();
+    expect(responder.respondLane('agent', 'first', 'deny')).toBe(false);
+    expect(call).toHaveBeenCalledTimes(1);
   });
 
   it('forwards the deciding tab for session permissions', () => {

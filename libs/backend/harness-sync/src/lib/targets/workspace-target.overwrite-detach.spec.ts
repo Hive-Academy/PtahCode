@@ -122,7 +122,6 @@ describe('WorkspaceHarnessTarget — keep edits, detach before replacing (TASK_2
           getWorkspacePluginConfig: () => ({}),
         }),
         undefined,
-        undefined,
         () => ({ layersForPath: () => layers }),
       ),
       [target],

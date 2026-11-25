@@ -34,6 +34,14 @@ describe(QuestionCardComponent.name, () => {
     TestBed.tick();
   };
 
+  const renderWithLane = (laneLabel: string, value: AskUserQuestionRequest): void => {
+    fixture = TestBed.createComponent(QuestionCardComponent);
+    fixture.componentRef.setInput('request', value);
+    fixture.componentRef.setInput('laneLabel', laneLabel);
+    fixture.detectChanges();
+    TestBed.tick();
+  };
+
   beforeEach(async () => {
     jest.useFakeTimers({
       doNotFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'],
@@ -100,5 +108,31 @@ describe(QuestionCardComponent.name, () => {
     expect(fixture.nativeElement.textContent).toContain('No timeout');
     expect(acquire).not.toHaveBeenCalled();
     expect(clockIntervals).toHaveLength(0);
+  });
+
+  it('renders no lane badge when no lane label is given (main chat)', () => {
+    render(request(0));
+
+    expect(fixture.nativeElement.querySelector('[data-testid="lane-label"]')).toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain('Lane:');
+  });
+
+  it('renders the lane label as an outline accent badge right after the title', () => {
+    renderWithLane('  Codex lane  ', request(0));
+
+    const badge: HTMLElement | null = fixture.nativeElement.querySelector('[data-testid="lane-label"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.hasAttribute('data-ptah-badge')).toBe(true);
+    expect(badge?.getAttribute('data-tone')).toBe('accent');
+    expect(badge?.getAttribute('data-appearance')).toBe('outline');
+    expect(badge?.getAttribute('title')).toBe('Lane: Codex lane');
+    expect(badge?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Lane: Codex lane');
+    expect(badge?.previousElementSibling?.textContent?.trim()).toBe('Input needed');
+  });
+
+  it('treats a blank lane label as absent', () => {
+    renderWithLane('   ', request(0));
+
+    expect(fixture.nativeElement.querySelector('[data-testid="lane-label"]')).toBeNull();
   });
 });

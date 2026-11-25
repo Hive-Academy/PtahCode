@@ -287,12 +287,7 @@ describe('ModelSelectorComponent session model', () => {
     // The label names the Haiku model, not "Default (recommended)".
     expect(component.effectiveModel()).toBe('haiku');
     expect(component.effectiveModelDisplay()).toBe('claude-haiku-5-5');
-    expect(
-      component
-        .effectiveAvailableModels()
-        .filter((m) => m.isSelected)
-        .map((m) => m.id),
-    ).toEqual(['claude-haiku-5-5']);
+    expect(component.selectedModelId()).toBe('claude-haiku-5-5');
   });
 
   it('keeps a session model that the list does not offer instead of showing the default', () => {
@@ -322,7 +317,10 @@ describe('ModelSelectorComponent session model', () => {
     component.selectModel('opus');
 
     expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledTimes(1);
-    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(tabA, 'opus');
+    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(
+      tabA,
+      'opus',
+    );
     expect(stubs.modelState.switchModel).not.toHaveBeenCalled();
   });
 
@@ -337,82 +335,11 @@ describe('ModelSelectorComponent session model', () => {
 
     component.selectModel('opus');
 
-    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(tabA, 'opus');
+    expect(stubs.tabManager.setOverrideModel).toHaveBeenCalledWith(
+      tabA,
+      'opus',
+    );
     expect(stubs.modelState.switchModel).not.toHaveBeenCalled();
-  });
-});
-
-describe('ModelSelectorComponent.modelGroups', () => {
-  it('splits rows into primaryModels and otherModels keeping list order', () => {
-    const { component } = makeHarness({
-      tabs: [],
-      availableIds: ['default', 'opus-4-5', 'sonnet', 'sonnet-4-5'],
-      otherIds: ['opus-4-5', 'sonnet-4-5'],
-    });
-
-    expect(component.primaryModels().map((model) => model.id)).toEqual([
-      'default',
-      'sonnet',
-    ]);
-    expect(component.otherModels().map((model) => model.id)).toEqual([
-      'opus-4-5',
-      'sonnet-4-5',
-    ]);
-  });
-
-  it('defaults the Other versions section to closed, open when the selected model is other-group', () => {
-    const primarySelected = makeHarness({
-      tabs: [],
-      availableIds: ['default', 'opus-4-5'],
-      otherIds: ['opus-4-5'],
-      currentModel: 'default',
-    });
-    expect(primarySelected.component.isOtherSectionOpen()).toBe(false);
-
-    const otherSelected = makeHarness({
-      tabs: [],
-      availableIds: ['default', 'opus-4-5'],
-      otherIds: ['opus-4-5'],
-      currentModel: 'opus-4-5',
-    });
-    expect(otherSelected.component.isOtherSectionOpen()).toBe(true);
-  });
-
-  it('toggles the section without selecting a model', () => {
-    const { component, stubs } = makeHarness({
-      tabs: [],
-      availableIds: ['default', 'opus-4-5'],
-      otherIds: ['opus-4-5'],
-      currentModel: 'default',
-    });
-
-    component.toggleOtherVersions();
-    expect(component.isOtherSectionOpen()).toBe(true);
-
-    component.toggleOtherVersions();
-    expect(component.isOtherSectionOpen()).toBe(false);
-
-    expect(stubs.modelState.switchModel).not.toHaveBeenCalled();
-    expect(stubs.tabManager.setOverrideModel).not.toHaveBeenCalled();
-  });
-
-  it('resets an explicit section choice when the dropdown reopens', () => {
-    const { component } = makeHarness({
-      tabs: [],
-      availableIds: ['default', 'opus-4-5'],
-      otherIds: ['opus-4-5'],
-      currentModel: 'opus-4-5',
-    });
-
-    // Default: the selected row stays visible.
-    expect(component.isOtherSectionOpen()).toBe(true);
-
-    component.toggleOtherVersions();
-    expect(component.isOtherSectionOpen()).toBe(false);
-
-    // Reopening returns to the default instead of the explicit choice.
-    component.toggleDropdown();
-    expect(component.isOtherSectionOpen()).toBe(true);
   });
 });
 

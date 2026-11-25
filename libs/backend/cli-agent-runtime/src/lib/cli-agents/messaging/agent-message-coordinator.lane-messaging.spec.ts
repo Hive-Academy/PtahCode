@@ -5,9 +5,12 @@
  */
 import { AgentId, type AgentMessageSender } from '@ptah-extension/shared';
 import { AgentMessageError } from '../agent-message-router.service';
-import { AgentMessageCoordinator } from './agent-message-coordinator.service';
+import { ATTACHMENTS_CAPACITY_TEXT, AgentMessageCoordinator } from './agent-message-coordinator.service';
 import { LaneMessagePolicy, type VerifiedLaneSender } from './lane-message.policy';
-import { harness, idOf } from './__fixtures__/agent-message-harness';
+import { harness, idOf, manifest } from './__fixtures__/agent-message-harness';
+import { AgentMessageAttachmentCapacityError, AgentMessageAttachmentStore } from './agent-message-attachment.store';
+import type { CliAdapterManifest } from '@ptah-extension/shared';
+import type { SdkHandle } from '../cli-adapters/cli-adapter.interface';
 
 const WS = 'ws-key-1';
 
@@ -125,6 +128,286 @@ describe('AgentMessageCoordinator — lane to lane', () => {
       const id = idOf(await coordinator.send({ agentId: h.agentId, message: 'hi' }, laneSender(), binding()));
       await expect(coordinator.getReceipt(h.agentId, id, { kind: 'lane', agentId: h.agentId, verified: false }))
         .rejects.toMatchObject({ code: 'not_found' });
+    });
+  });
+});
+
+describe('AgentMessageCoordinator — turn input refusals and options', () => {
+  const grokTurnInput: NonNullable<CliAdapterManifest['turnInput']> = {
+    model: { state: 'supported', appliesAt: 'next-turn' },
+    effort: { state: 'supported', appliesAt: 'next-turn' },
+    images: { state: 'unsupported', reason: 'Grok did not advertise image input.' },
+    files: { state: 'supported', delivery: 'reference' },
+    commands: { state: 'supported', blocked: ['always-approve'] },
+    skills: { state: 'supported' },
+  };
+  const grok: CliAdapterManifest = { ...manifest, turnInput: grokTurnInput };
+  const handleOf = (h: ReturnType<typeof harness>): SdkHandle => {
+    if (!h.tracked.sdkHandle) throw new Error('lane has no live handle');
+    return h.tracked.sdkHandle;
+  };
+  const user = { kind: 'user' } as const;
+  const image = { data: 'aGk=', mediaType: 'image/png' };
+
+  function setupTurn(attachments: AgentMessageAttachmentStore | null = new AgentMessageAttachmentStore()) {
+    const h = harness();
+    h.coordinator.dispose();
+    h.setInfo({ cli: 'grok', displayName: 'Grok', potentialCapabilities: grok });
+    h.tracked.sdkHandle = { ...handleOf(h), applyTurnSettings: jest.fn() };
+    const coordinator = new AgentMessageCoordinator({
+      manager: h.manager, detection: h.detection, store: h.store, aliases: h.aliases, resume: h.resume,
+      scheduler: h.scheduler, ack: h.ack, logger: h.logger, attachments,
+    });
+    return { h, coordinator, attachments, persisted: () => h.storage.states().size };
+  }
+
+  it('refuses an unsupported image with no envelope stored', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported', detail: 'Grok did not advertise image input.',
+    });
+    expect(outcome.messageId).toBeUndefined();
+    expect(persisted()).toBe(0);
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+  });
+
+  it('refuses a model change on a steer with turn-options-refused and stores nothing', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({
+      agentId: h.agentId, message: 'now', delivery: 'now', turn: { model: 'grok-4-fast' },
+    }, user);
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'turn-options-refused' });
+    expect(persisted()).toBe(0);
+  });
+
+  it('refuses /always-approve on a live Grok lane with no envelope stored', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    const outcome = await coordinator.send({ agentId: h.agentId, message: '  /always-approve on' }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported',
+      detail: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+    });
+    expect(persisted()).toBe(0);
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+  });
+
+  it('refuses /always-approve on a restored (stopped) Grok record and never resumes', async () => {
+    const { h, coordinator, persisted } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    expect(coordinator.preview({ agentId: h.agentId }).usesResume).toBe(true);
+    const outcome = await coordinator.send({ agentId: h.agentId, message: '/always-approve on' }, user);
+    expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'turn-input-unsupported' });
+    expect(h.resume.resume).not.toHaveBeenCalled();
+    expect(persisted()).toBe(0);
+  });
+
+  it('holds images beside the envelope and returns them with the body', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const outcome = await coordinator.send({
+      agentId: h.agentId, message: 'look', turn: { images: [image], files: ['a.ts'], model: 'grok-4' },
+    }, user);
+    expect(outcome.mode).toBe('queue-next-turn');
+    const id = idOf(outcome);
+    expect(await h.store.get(id)).toMatchObject({ turn: { imageCount: 1, files: ['a.ts'], model: 'grok-4' } });
+    expect(attachments?.take(id)).toEqual([image]);
+    await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({
+      text: 'look', turn: { model: 'grok-4', files: ['a.ts'], images: [image] },
+    });
+    await expect(coordinator.getBody(h.agentId, id, user)).resolves.toBe('look');
+  });
+
+  it('returns a failed message with its images and keeps them for Retry (P5 S2)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const id = idOf(await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user));
+    await h.store.transition(id, { state: 'failed', reason: 'turn-input-unsupported' });
+    await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({
+      text: 'look', turn: { images: [image] },
+    });
+    // A second read (or a Retry) still finds them; the TTL or a cancel releases them.
+    expect(attachments?.take(id)).toEqual([image]);
+  });
+
+  it('refuses a send past the attachment cap with user text, not the reason code (S1)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const full = new AgentMessageAttachmentStore();
+    jest.spyOn(full, 'hold').mockImplementation(() => { throw new AgentMessageAttachmentCapacityError(); });
+    const { h, coordinator, persisted } = setupTurn(full);
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'attachments-capacity', detail: ATTACHMENTS_CAPACITY_TEXT,
+    });
+    expect(persisted()).toBe(0);
+  });
+
+  it('releases held images when the limit gate throws before the envelope exists (M2)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const h = harness();
+    h.coordinator.dispose();
+    h.setInfo({ cli: 'grok', displayName: 'Grok', potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const attachments = new AgentMessageAttachmentStore();
+    const coordinator = new AgentMessageCoordinator({
+      manager: h.manager, detection: h.detection, store: h.store, aliases: h.aliases, resume: h.resume,
+      scheduler: h.scheduler, ack: h.ack, logger: h.logger, attachments,
+      limitGate: { check: jest.fn().mockRejectedValue(new Error('limit lookup failed')) },
+    });
+    await expect(coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user))
+      .rejects.toThrow('limit lookup failed');
+    expect(attachments.heldBytes()).toBe(0);
+  });
+
+  it('serves the live catalog without hidden commands and keeps it for a stopped lane', async () => {
+    const { h, coordinator } = setupTurn();
+    h.setInfo({ model: 'grok-4' });
+    h.tracked.sdkHandle = {
+      ...handleOf(h),
+      listTurnOptions: async () => ({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'],
+        commands: [
+          { name: 'compact', group: 'command' as const },
+          { name: 'always-approve', group: 'command' as const },
+          { name: 'code-review', group: 'skill' as const },
+        ],
+      }),
+    };
+    const live = await coordinator.turnOptions(h.agentId);
+    expect(live).toMatchObject({ currentModel: 'grok-4', efforts: ['low', 'high'] });
+    expect(live.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+    expect(live.error).toBeUndefined();
+
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stopped = await coordinator.turnOptions(h.agentId);
+    expect(stopped.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+  });
+
+  it('serves a stopped lane with no cached catalog the adapter efforts and a reason (S2)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({
+      listModels: async () => [{ id: 'grok-4', name: 'Grok 4' }],
+      laneEfforts: () => ['low', 'high'],
+    });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toEqual({
+      models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'], commands: [],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [] });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [], commands: [],
+      unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
+    });
+  });
+
+  it("derives a stopped lane's efforts for the record's model", async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped', model: 'grok-4' });
+    const laneEfforts = jest.fn((model?: string) => (model === 'grok-4' ? ['low', 'high'] : []));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [], laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      currentModel: 'grok-4', efforts: ['low', 'high'],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    expect(laneEfforts).toHaveBeenCalledWith('grok-4');
+  });
+
+  it('serves a stopped Codex lane models and efforts from one catalog read (D4)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => ({
+      models: [{ id: 'gpt-5', name: 'GPT-5 (Codex default)' }], efforts: ['low', 'medium', 'high'],
+    }));
+    const listModels = jest.fn(async () => []);
+    const laneEfforts = jest.fn(() => ['max']);
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog, listModels, laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toEqual({
+      models: [{ id: 'gpt-5', name: 'GPT-5 (Codex default)' }], efforts: ['low', 'medium', 'high'], commands: [],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    expect(stoppedLaneCatalog).toHaveBeenCalledTimes(1);
+    expect(listModels).not.toHaveBeenCalled();
+    expect(laneEfforts).not.toHaveBeenCalled();
+    stoppedLaneCatalog.mockResolvedValueOnce({ models: [], efforts: [] });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [], unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
+    });
+  });
+
+  it('reports an error, not an empty catalog, when a stopped Codex catalog read fails (S1)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => {
+      throw new Error('Codex executable is unavailable');
+    });
+    const laneEfforts = jest.fn(() => ['max']);
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog, laneEfforts });
+    const view = await coordinator.turnOptions(h.agentId);
+    expect(view).toMatchObject({
+      models: [], efforts: [], commands: [], error: 'Lane options could not be read.',
+    });
+    expect(view.unavailableReason).toBeUndefined();
+    expect(laneEfforts).not.toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      '[AgentMessageCoordinator] Lane turn options unavailable', expect.any(Object),
+    );
+  });
+
+  it('says a model with its own effort level offers none, instead of promising efforts later (M1)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped', model: 'gemini-3-pro-high' });
+    const laneEfforts = jest.fn((model?: string) => (model?.endsWith('-high') ? [] : ['low', 'high']));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [], laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [],
+      unavailableReason: 'This model sets its own effort level. Commands and skills appear when the lane is running.',
+    });
+    h.setInfo({ status: 'stopped', model: 'gemini-3-pro' });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: ['low', 'high'], unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+  });
+
+  it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {
+    const { h, coordinator } = setupTurn();
+    const listTurnOptions = jest.fn(async () => ({
+      models: [], efforts: [], commands: [{ name: 'compact', group: 'command' as const }],
+    }));
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+    await coordinator.turnOptions(h.agentId);
+    await coordinator.send({ agentId: h.agentId, message: '/compact' }, user);
+    expect(listTurnOptions).toHaveBeenCalledTimes(1);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/compact', expect.anything(), expect.any(String),
+      false, expect.objectContaining({ noSteer: true }));
+  });
+
+  it('returns an error result, never a throw, when the lookup fails', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions: async () => { throw new Error('boom'); } };
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      models: [], commands: [], error: 'Lane options could not be read.',
     });
   });
 });

@@ -77,7 +77,7 @@ describe('unified CLI agent output', () => {
         },
         DisplayDockState,
         { provide: TabManagerService, useValue: { activeTabId: signal(null) } },
-        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecovered: () => null,
+        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecoveredMessage: () => null,
           composerState: () => ({ queue: { mode: 'queue-next-turn' }, now: { mode: 'steer' } }), previewMessage: jest.fn().mockResolvedValue(undefined),
           receiptLabel: () => 'Queued', receiptStatus: () => ({ label: 'Queued' }), newIdempotencyKey: () => 'key' } },
         {
@@ -429,6 +429,37 @@ describe('unified CLI agent output', () => {
     expect(
       fixture.componentInstance.executionNodes().map((node) => node.content),
     ).toEqual(['First second']);
+  });
+
+  it('places a timed user echo among the event nodes by its send time (PR 1509)', () => {
+    const turn = (id: string, at: number, text: string): FlatStreamEventUnion[] => [
+      { id: `${id}-start`, eventType: 'message_start', messageId: id, role: 'assistant', timestamp: at },
+      { id: `${id}-delta`, eventType: 'text_delta', messageId: id, blockIndex: 0, delta: text, timestamp: at + 1 },
+    ];
+    const fixture = TestBed.createComponent(CliAgentOutputComponent);
+    fixture.componentRef.setInput('agentId', 'echo-order-agent');
+    fixture.componentRef.setInput('segments', [{ type: 'user', content: 'follow-up', sentAt: 200 }]);
+    fixture.componentRef.setInput('streamEvents', [...turn('m1', 100, 'reply one'), ...turn('m2', 300, 'reply two')]);
+    expect(fixture.componentInstance.executionNodes().map((node) => node.content)).toEqual([
+      'reply one',
+      'follow-up',
+      'reply two',
+    ]);
+  });
+
+  it('keeps the stdout fallback when the only node is a user echo (PR 1509)', () => {
+    const fixture = TestBed.createComponent(CliAgentOutputComponent);
+    fixture.componentRef.setInput('agentId', 'stdout-echo-agent');
+    fixture.componentRef.setInput('segments', [{ type: 'user', content: 'hello', sentAt: 5 }]);
+    fixture.componentRef.setInput('stdoutSegments', [{ type: 'text', content: 'Raw provider output' }]);
+    const view = fixture.componentInstance as unknown as { showStdoutFallback(): boolean };
+    expect(fixture.componentInstance.executionNodes()).toHaveLength(1);
+    expect(view.showStdoutFallback()).toBe(true);
+    fixture.componentRef.setInput('segments', [
+      { type: 'user', content: 'hello', sentAt: 5 },
+      { type: 'text', content: 'Structured reply' },
+    ]);
+    expect(view.showStdoutFallback()).toBe(false);
   });
 
   it('renders replacement text when coalescing keeps the segment count unchanged', async () => {

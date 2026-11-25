@@ -57,7 +57,6 @@ import {
   createCopilotTarget,
   createCursorTarget,
   createOpencodeTarget,
-  createVscodeMcpTarget,
   type RivalTargetDeps,
 } from '../targets/rival-targets';
 import { HARNESS_SYNC_TOKENS } from './tokens';
@@ -107,7 +106,6 @@ export {
   createCopilotTarget as copilotTargetFactory,
   createCursorTarget as cursorTargetFactory,
   createOpencodeTarget as opencodeTargetFactory,
-  createVscodeMcpTarget as vscodeMcpTargetFactory,
 };
 
 /**
@@ -122,7 +120,6 @@ export const ALL_HARNESS_TARGET_FACTORIES: HarnessTargetFactory[] = [
   createCursorTarget,
   createAntigravityTarget,
   createOpencodeTarget,
-  createVscodeMcpTarget,
 ];
 
 export function registerHarnessSyncServices(

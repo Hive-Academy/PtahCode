@@ -116,7 +116,6 @@ describe('HarnessDestinationScanner', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [],
     };
   }
 

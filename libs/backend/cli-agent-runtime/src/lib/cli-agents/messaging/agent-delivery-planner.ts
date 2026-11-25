@@ -1,4 +1,12 @@
-import type { AgentMessageDelivery, AgentMessagePreview, AgentProcessInfo, EffectiveLaneCapabilities } from '@ptah-extension/shared';
+import type {
+  AgentMessageDelivery,
+  AgentMessagePreview,
+  AgentProcessInfo,
+  EffectiveLaneCapabilities,
+  LaneTurnRequest,
+  LaneTurnSettings,
+} from '@ptah-extension/shared';
+import { blockedLaneCommand, blockedLaneCommandReason } from '../cli-adapters/lane-command-filter';
 
 export interface AgentDeliveryPlanInput {
   readonly agentId: AgentMessagePreview['agentId'];
@@ -15,7 +23,7 @@ export function planAgentDelivery(input: AgentDeliveryPlanInput): AgentMessagePr
   const has = (key: keyof typeof messaging) => messaging[key].state === 'supported';
   const base = { agentId, delivery, effectiveCapabilities };
   const refuse = (reason: string): AgentMessagePreview => ({ ...base, mode: 'unsupported', supported: false, usesResume: false, reason });
-  // Stable code: `agent:continue` maps `not_found` to its typed RPC error.
+  // Stable code: the message coordinator maps `not_found` to its typed refusal reason.
   if (!info) return refuse('not_found');
   if (info.status === 'starting')
     return refuse('The lane is starting; try again when its handle is ready.');
@@ -41,4 +49,58 @@ export function planAgentDelivery(input: AgentDeliveryPlanInput): AgentMessagePr
     lossDisclosure: { kind: 'partial-turn-work-lost', confirmationRequired: true, text: 'Interrupting discards unfinished work from the current turn.' },
   };
   return refuse('The live handle cannot steer or interrupt and continue this turn.');
+}
+
+/** Why a turn request cannot go with this plan. Nothing is stored for a refusal. */
+export interface TurnInputRefusal {
+  readonly code: 'turn-input-unsupported' | 'turn-options-refused';
+  readonly reason: string;
+}
+
+/** Reason used when the plan carries no resolved turn input yet. */
+export const TURN_INPUT_NOT_REPORTED = 'Lane did not report its options.';
+
+/**
+ * Refusal for the turn input of one send, checked against the plan's resolved
+ * `turnInput`; undefined when everything can go. Settings equal to `current`
+ * are not a change and are never refused.
+ *
+ * Order: a blocked `/command` first (it applies on live and cold plans alike),
+ * then images, files, model and effort.
+ */
+export function turnInputRefusal(
+  plan: AgentMessagePreview,
+  message: string,
+  turn: LaneTurnRequest | undefined,
+  current: LaneTurnSettings = {},
+): TurnInputRefusal | undefined {
+  const input = plan.effectiveCapabilities.turnInput;
+  const blocked = blockedLaneCommand(message, input?.commands.blocked ?? []);
+  if (blocked) return { code: 'turn-input-unsupported', reason: blockedLaneCommandReason(blocked) };
+  if (!turn) return undefined;
+  const unsupported = (reason: string): TurnInputRefusal => ({ code: 'turn-input-unsupported', reason });
+  const model = turn.model !== undefined && turn.model !== current.model;
+  const effort = turn.reasoningEffort !== undefined && turn.reasoningEffort !== current.reasoningEffort;
+  const images = (turn.images?.length ?? 0) > 0;
+  const files = (turn.files?.length ?? 0) > 0;
+  if (!input) return model || effort || images || files ? unsupported(TURN_INPUT_NOT_REPORTED) : undefined;
+  if (images) {
+    if (plan.usesResume) return unsupported('Images need a running lane.');
+    if (input.images.state !== 'supported') return unsupported(input.images.reason ?? 'This lane cannot take images.');
+    if (plan.mode === 'steer' && input.images.onSteer !== true)
+      return unsupported('Images cannot ride on a steer for this lane; queue the message instead.');
+  }
+  if (files && input.files.state !== 'supported')
+    return unsupported(input.files.reason ?? 'This lane cannot take attached files.');
+  if (model && input.model.state !== 'supported')
+    return unsupported(input.model.reason ?? 'This lane cannot change its model per turn.');
+  if (effort && input.effort.state !== 'supported')
+    return unsupported(input.effort.reason ?? 'This lane cannot change its reasoning effort per turn.');
+  if ((model || effort) && plan.mode === 'steer') {
+    return {
+      code: 'turn-options-refused',
+      reason: `${model ? 'A model' : 'A reasoning effort'} change applies from the next turn; use Send to queue it.`,
+    };
+  }
+  return undefined;
 }

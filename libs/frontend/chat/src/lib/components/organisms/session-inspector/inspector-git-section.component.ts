@@ -55,9 +55,10 @@ let nextGitId = 0;
   template: `
     @let git = state();
     <ptah-surface-section
+      tone="flush"
       padding="md"
       role="region"
-      class="block border-t border-surface-border [&>section]:gap-1 [&>section]:rounded-none [&>section]:border-0 [&>section]:bg-transparent [&>section]:px-3 [&>section]:py-2"
+      class="block border-t border-surface-border [&>section]:gap-1 [&>section]:px-3 [&>section]:py-2"
       [attr.aria-labelledby]="headingId"
     >
       <div section-header class="flex min-h-6 items-center justify-between gap-2">
