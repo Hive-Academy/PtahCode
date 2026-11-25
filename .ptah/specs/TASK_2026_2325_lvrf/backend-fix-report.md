@@ -367,3 +367,62 @@ Paths below are relative to the worktree `D:\projects\PtahCode\.claude-worktrees
 - eslint on the changed and new files: 0 errors.
 - Degradation audit: 0 unsuppressed sites.
 - Line endings: all LF.
+
+## 11. Final live check and PR #1512 review threads
+
+### Grok `/context` notice not shown
+- Diagnosis from `electron-main-final.log`: the turn was classified as a command turn. There is
+  no `Lane turn telemetry unavailable` line and no budget handoff, which only happen through the
+  command-turn path. The handle emits the notice as an `info` segment. It did not render because
+  a stream lane's transcript is built from flat stream events (`LaneTranscriptComponent` ->
+  `laneTranscriptMessages(nodes, events)`), and `createFlatStreamProjector` maps no `info` event
+  to a row. No stream event type carries a host notice, and making it assistant text would put
+  the words in Grok's mouth.
+- Backend change: the notice segment now carries a discriminator and a time:
+  `{ type: 'info', content: 'Grok ran /context and returned no output.', hostNotice: true, sentAt }`.
+  The new shared field is `CliOutputSegment.hostNotice?: true`.
+- **Frontend must:** in the lane transcript, render the agent's live `segments` that have
+  `hostNotice === true` as a neutral status row at `sentAt`, among the messages, the same way
+  user echoes are placed. Render only these; other `info` segments (usage lines) stay hidden.
+  Persisted output keeps the segment, so it also renders after a reload.
+
+### "Unverified" parent card after a command-only turn
+- Root cause: every settled turn of a continuation lane calls `signalLaneCompletion`, so a
+  completed raw `/context` turn sent the parent a completion envelope. It had no deliverables,
+  so the verdict was `unverified`, and it also wrote an outcome row.
+- Change:
+  - New `isRawCommandDelivery(text, rawBody)` in `lane-command-filter.ts`. The dispatcher sends a
+    raw command as the trimmed raw body with no header; every other message has the header.
+  - `continueConversation` stamps `TrackedAgent.rawCommandTurn` for each turn.
+  - `signalLaneCompletion` sends no completion envelope and writes no outcome row for a
+    *completed* raw command turn. Usage is still recorded, and a failed or stopped command turn
+    still reports.
+- Specs:
+  - `lane-command-filter.spec.ts` covers the helper.
+  - The manager spec checks that a raw `/context` turn sends no completion and the next real
+    turn sends one.
+  - The handle spec checks the `hostNotice` segment.
+
+### PR #1512 CodeRabbit threads
+1. `claude-sdk-lane-runner.ts:378`, empty configured model: **fixed**. Valid:
+   `PtahCliRegistry.spawnAgent` can pass `model: ''`. The init model is now adopted when
+   `!currentModel`. Spec: an empty model plus an init model gives `currentModel` the init model.
+2. `agent-message-router.service.ts:213` and `echoCold`, image-only echo: **fixed** in both. The
+   echo is recorded when the body is empty but the turn has images. Specs: the router echo and
+   the dispatcher cold echo for an image-only message.
+3. `local-derivation.ts:195` and `computeAgentSignals`, reviews of a `user-stop` target:
+   **fixed**. `countSummary` returns before the review switch for a `user-stop` row, and agent
+   signals compute `reviewPass` and `avgReviseRounds` without `user-stop` rows. Specs in
+   `local-derivation.spec.ts` and `agent-signals.spec.ts`.
+
+### Verification
+- `npx jest ... --runInBand --coverage=false --runTestsByPath`:
+  - cli-agent-runtime (command filter, router, dispatcher, runner, ACP handle): 293 passed.
+  - cli-agent-runtime (manager and terminal-outcomes, previous run): passed.
+  - lane-routing local-derivation: 29 passed.
+  - lane-outcomes agent-signals: 3 passed.
+- `npx tsc --noEmit`: shared, cli-agent-runtime, lane-routing and lane-outcomes lib configs, plus
+  the three backend spec configs, all clean.
+- eslint: 0 errors.
+- Degradation audit: 0 unsuppressed sites.
+- Line endings: all LF.

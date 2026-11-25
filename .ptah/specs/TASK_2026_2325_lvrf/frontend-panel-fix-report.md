@@ -415,3 +415,104 @@ All checks were run as the focused commands allowed for this task. Logs are in `
 - eslint on all changed frontend files: 0 errors, 11 warnings (existing non-null assertions and max-lines).
 - ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
 - Not run (excluded): typecheck-templates and the Electron check. F2 and F3 need a live re-check: a restored lane resumed from its tab, and a new Grok lane while it runs.
+
+## Round 6: final live check (F3 still failing, inspector current model, over-eager follow, last-run model) and PR 1512 review
+
+### 1. F3: a running Grok lane still showed only a red Stop square
+- Real render path: canvas lane view → `ptah-agent-continue-input` (`variant="composer"`). When `visible()` is false for a running lane, that component draws its lone Stop button (`COMPOSER_STOP_BUTTON_CLASS`, the red square), and no `ptah-lane-composer` is mounted. That is why no lane textarea was in the DOM.
+- Runtime data, from the code; the log has no payloads. For a Grok spawn, `agent-process-manager.service.ts:1883-1897` sets:
+  - `potentialCapabilities` = the Grok manifest (`continuation: supported`);
+  - `effectiveCapabilities` = `resolveEffectiveLaneCapabilities(info, potential, sdkHandle)`, a snapshot taken at spawn.
+- For an ACP handle, `supportsContinuation()` is `session.isSetupComplete() && !!session.getSessionId() && …` (`provider-session-lane-handle.ts:465-471`). At spawn the session is not set up yet, so the snapshot says `continuation: unsupported`. The spawn also has `supportsContinuation: false` and no `cliSessionId`.
+- Root cause:
+  - My round-5 `visible()` read `effectiveCapabilities ?? potentialCapabilities`. The effective snapshot is present, so it shadowed the declared manifest, and every condition was false until the first exit.
+  - Claude works because its handle continues at spawn (`supportsContinuation: true`).
+  - Resumed Grok lanes fail the same way.
+- Fix (`agent-continue-input.component.ts`): a running lane takes messages when either the effective snapshot or the declared manifest says steer or continuation is supported (`takesMessages(effective) || takesMessages(potential)`). The composer's delivery previews still decide what a send does.
+- Spec: "mounts the composer for a running Grok lane shaped like the real spawn payload". It uses:
+  - a manifest with interrupt, continuation and resume supported;
+  - an effective `live-handle` snapshot with everything unsupported;
+  - `supportsContinuation: false`, no session id.
+  It expects the composer with lane controls, and no lone Stop.
+
+### 2. Inspector "models used": `claude-fable-5-2` marked current
+- Root cause: "current" was `liveModelStats.model`. `deriveLiveModelStats` picks that by cost (or a sticky pick) among the latest turn's models, so it can name an older model the session no longer selects.
+- Fix:
+  - `SessionStatsInputs` gets `currentModel`. `session-stats-source.ts` fills it from the model pill's own rule: `resolveTabModel(tab ?? activeTab, ModelStateService.currentModel())`, which is tab override, then session model, then global pick.
+  - The inspector uses `currentModel || liveModelStats.model || snapshot.model`. It maps that model to the usage row that is the same model: same id, the id plus a date suffix, or a tier alias such as `haiku` after the vendor prefix; never the vendor word alone. That row is marked "current".
+  - Names go through `resolveModelDisplayName`; a raw id shows only when the catalog does not know it.
+- Specs:
+  - inspector: the pill model wins over a cost-ranked older pick; `sameModel` cases.
+  - `session-stats-source.spec.ts`: the tab override wins over the global pick. The existing suites got `ModelStateService` and `TabManagerService` providers.
+
+### 3. Follow too greedy (F2 side effect)
+- Root cause: round 5 resolved every read of the selected lane through two links: the receipts' `actualAgentId` and the monitor's successor chain. Any click on an old card that had such a link jumped to the newest lane.
+- The 4m37s and 9m59s lanes probably both landed on the 9s Opus child through those links (I could not confirm from the log): the stopped orphan through the receipt of the "Reply OK." resume, and the older lane through a link to the 4m37s lane, which itself led to the child. The mapping followed real links, but following chains on every read was wrong.
+- Fix (`canvas-detail.service.ts`):
+  - `laneKeyFor` redirects only when the selected card no longer exists. In that case it follows the monitor's replaced-card link (D3, a lane stopped in this app run). A card that exists is never redirected, so an explicit click always shows that lane.
+  - The new method `followAfterSend(tabId, agentId)` registers one follow when the user sends from a lane view. `canvas-lane-view` calls it through a new `messageAccepted` output of `agent-continue-input`, which relays the composer's `accepted`.
+  - An effect then moves the view once, when the resumed card appears. It uses the monitor link, or the newest of the user's own receipts created after the send (with 5 s skew) whose `actualAgentId` is on screen.
+  - The follow is dropped if the user picked another lane meanwhile, or after 2 minutes.
+- Specs:
+  - an explicit pick with existing links stays put;
+  - a follow after a send: an old receipt is ignored; the view waits for the card, then moves once; a parent receipt is ignored; going back by hand stays;
+  - a follow is dropped when the user moved away.
+
+### 4. Pill "claude default" on an orphan whose last turn ran Opus
+- Root cause: the pill used `record.model`, the catalog's `currentModel` and `observedModel`. A restored lane spawned before the backend fix has none of these, but its output segments can carry `usage.model`.
+- Fix: new exported `laneLastRunModel(record)` in `lane-composer.component.ts`. It returns `observedModel`, else the folded usage model, else the newest usage segment's model, and never the multi-model id. It is used for the pill, the compact bar label and the catalog re-read check.
+- Specs: the pill names Opus 5.5 from a usage segment on a stopped lane; `laneLastRunModel` cases.
+- Limit: if the restored card has no usage segments (history not loaded), the model is unknown on the frontend and the pill stays on the default.
+
+### PR 1512 review (CodeRabbit), verified against the code
+- **(a) Fixed.** Send now (`requestNow`, `requestQueuedNow`) awaits `prepareNow()`. Both now capture the lane id before the await and abort when the composer shows another lane after it. Spec: "drops Send now when the lane changes while its previews refresh".
+- **(b) Fixed.** The controller's recovered drain took every waiting message and appended each to the draft, so the text was combined and only one turn's model or effort applied.
+  - It now restores only the oldest message, and only into an empty draft and tray. The rest stay queued in the store.
+  - The next one loads after the draft is sent or cleared.
+  - The in-card note says how many wait ("N recovered messages wait. Each loads here, one at a time, when the draft is empty.").
+  - Specs: one-at-a-time with its own files, and never merged into a user's draft (controller spec, 2 tests replaced).
+- **(c) Fixed.** The rail filter in `canvas-lane-tabs.component.ts` now keeps `stopping` lanes (`isRunningAgentWord || waiting || stopping`), and `stopped` stays excluded. The clock filter is unchanged: a stopping lane's time is frozen. Spec: "keeps a stopping lane in the rail until its process exits, and drops a stopped one".
+
+### Verification (round 6)
+- Jest:
+
+  | Project | Specs | Result |
+  | --- | --- | --- |
+  | canvas | canvas-detail.service, canvas-lane-tabs, canvas-lane-view | 93/93 |
+  | chat | lane-composer, lane-delivery.controller, agent-continue-input | 136/136 |
+  | chat | session-stats-source | 19/19 |
+  | chat-ui | inspector-session-stats | 22/22 |
+
+- `npx tsc --noEmit -p libs/frontend/{chat,chat-ui,canvas}/tsconfig.lib.json`: 0 errors.
+- eslint on all changed frontend files: 0 errors, 19 warnings (existing non-null assertions and max-lines).
+- ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
+- Not run (excluded): typecheck-templates and an Electron re-check. F3 should be re-checked live with a new and a resumed Grok lane.
+
+## Round 7: host notices in lane transcripts
+
+The backend now emits host notices as `CliOutputSegment` `{ type: 'info', content, hostNotice: true, sentAt }`, for example "Grok ran /context and returned no output.".
+
+- Root cause:
+  - In a stream lane, `cli-agent-output.component.ts` merged into the event tree only those segments the event stream lacks: `error`, `user`, unverified-peer `info` and, with no text deltas, `text`. Every other `info` segment, a host notice included, was dropped.
+  - In a segments-only lane, `agent-monitor-tree-builder.service.ts` turned every `info` into an untimed fenced text node, which also left the notice without a place in time.
+- Change:
+  - **Tree builder:** an `info` segment with `hostNotice === true` becomes a timed node (`seg-notice-<i>`, the exported `LANE_HOST_NOTICE_NODE_PREFIX`, `startTime = sentAt`, plain content). Other `info` segments keep their current handling.
+  - **`cli-agent-output`:** host notices are now part of the segment set merged into the event tree. `withUserEchoes` places them by `sentAt`, exactly like user echoes. Other `info` lines (usage) stay hidden there. A notice, like an echo, is not provider output, so it never suppresses the stdout fallback.
+  - **`laneTranscriptMessages`:** a notice node becomes a `system` message, `<lane>:notice:<node>`, at its send time among the bubbles (exported `isLaneNoticeMessage`).
+  - **`LaneTranscriptComponent`:** a notice is a neutral muted row with its time (`data-testid="lane-host-notice"`), not a bubble. Turn contexts and live-turn detection use only the bubbles, so a notice never joins or reopens a turn.
+  - Live and persisted segments take the same path.
+- Other paths:
+  - The SDK sub-agent lane renders SDK trees with no CLI segments, so notices never reach it and nothing changes there.
+  - The stdout fallback is unaffected, as covered by the spec below.
+- Specs:
+  - tree builder: a notice node versus a plain info node;
+  - `cli-agent-output`: the notice placed between two replies by `sentAt` while a usage line stays hidden, and the stdout fallback kept when the notice is the only node;
+  - `lane-transcript-messages`: a `system` notice message between two bubbles;
+  - `lane-transcript`: the row is rendered with its time, and no bubble.
+
+### Verification (round 7)
+- Jest, chat project: cli-agent-output, lane-transcript-messages, agent-monitor-tree-builder, lane-transcript, agent-card-unified and lane-thread specs, 126/126 pass.
+- `npx tsc --noEmit -p libs/frontend/chat/tsconfig.lib.json`: 0 errors.
+- eslint on the 8 changed files: 0 errors, 2 warnings (existing).
+- ui-class audits: 0 over baseline. degradation audit: 0 unsuppressed sites.
+- Not run (excluded): typecheck-templates and the Electron check.
