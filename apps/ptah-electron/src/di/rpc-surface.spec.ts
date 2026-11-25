@@ -50,6 +50,9 @@ describe('Electron RPC surface', () => {
         'enhancedPrompts:cancel',
         'enhancedPrompts:getRunState',
         'wizard:get-generation-run-state',
+        'wizard:get-setup-model',
+        'wizard:set-setup-model',
+        'wizard:generate-skill-draft',
         'wizard:recommend-skills',
         'wizard:recommend-analysis-skills',
         'wizard:search-skills',
@@ -207,6 +210,8 @@ it('includes the complete Electron runtime binding in the DI census', () => {
 it('includes all shared skill service tokens in the DI census', () => {
   for (const name of [
     'SKILL_RECOMMENDATION_SERVICE',
+    'SKILL_JUDGE_SERVICE',
+    'SKILL_DRAFT_GENERATION_SERVICE',
     'SKILL_PROJECT_GUIDANCE_SERVICE',
     'SKILL_SELECTION_SERVICE',
     'SKILL_CONSENT_SERVICE',

@@ -61,6 +61,17 @@ describe('RPC handler manifest', () => {
       ]),
     );
   });
+  it.each([
+    'wizard:get-setup-model',
+    'wizard:set-setup-model',
+    'wizard:generate-skill-draft',
+  ] as const)('registers %s on the allowlisted Setup handler', (method) => {
+    expect(RPC_METHOD_NAMES).toContain(method);
+    expect(ALLOWED_METHOD_PREFIXES).toContain('wizard:');
+    const setup = RPC_HANDLER_MANIFEST.find((entry) => entry.key === 'setup');
+    expect(setup?.methods).toContain(method);
+  });
+
   it('claims every registry method exactly once', () => {
     expect(() => assertManifestInvariants(RPC_METHOD_NAMES)).not.toThrow();
   });

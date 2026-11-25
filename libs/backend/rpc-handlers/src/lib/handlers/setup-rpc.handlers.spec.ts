@@ -126,7 +126,23 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ContextEnrichmentService: class ContextEnrichmentServiceStub {},
 }));
 
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { DependencyContainer } from 'tsyringe';
+import { RpcUserError } from '@ptah-extension/vscode-core';
+import { PtahFileSettingsManager } from '@ptah-extension/platform-core';
+import {
+  SETTINGS_TOKENS,
+  WorkspaceScopeResolver,
+} from '@ptah-extension/settings-core';
+import type { IGlobalBatchSettingsStore } from '@ptah-extension/settings-core';
+import type {
+  ModelPair,
+  WizardGetSetupModelResult,
+  WizardRecommendAnalysisSkillsResult,
+  WizardSetSetupModelResult,
+} from '@ptah-extension/shared';
 import type {
   Logger,
   RpcHandler,
@@ -143,7 +159,12 @@ import {
   createMockWorkspaceProvider,
   type MockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
-import type { PluginLoaderService } from '@ptah-extension/agent-sdk';
+import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import type {
+  PluginLoaderService,
+  ResolvedSetupSnapshot,
+  SetupResolution,
+} from '@ptah-extension/agent-sdk';
 import {
   createMockLogger,
   type MockLogger,
@@ -151,6 +172,7 @@ import {
 
 import { SetupRpcHandlers } from './setup-rpc.handlers';
 import {
+  SKILL_DRAFT_GENERATION_SERVICE,
   SKILL_PROJECT_GUIDANCE_SERVICE,
   SKILL_RECOMMENDATION_SERVICE,
 } from '../di/tokens';
@@ -239,6 +261,27 @@ function createMockContainer(): MockContainer {
 // ---------------------------------------------------------------------------
 
 const WORKSPACE = '/fake/workspace';
+const SNAPSHOT: ResolvedSetupSnapshot = {
+  providerId: 'anthropic',
+  model: 'workspace-sonnet',
+  auth: { env: { ANTHROPIC_API_KEY: 'secret-snapshot' } },
+};
+const INVALID_SETUP = {
+  kind: 'invalid',
+  source: 'setup',
+  provider: 'anthropic',
+  model: 'stale',
+  cause: 'model-stale',
+} satisfies SetupResolution;
+
+function setupResolution(pair: ModelPair | null): SetupResolution {
+  return pair
+    ? {
+        kind: 'set',
+        snapshot: { ...SNAPSHOT, providerId: pair.provider, model: pair.model },
+      }
+    : { kind: 'unset', snapshot: SNAPSHOT };
+}
 
 interface Harness {
   handlers: SetupRpcHandlers;
@@ -248,6 +291,7 @@ interface Harness {
   workspace: MockWorkspaceProvider;
   container: MockContainer;
   sentry: MockSentryService;
+  resolveSetup: jest.Mock;
 }
 
 function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
@@ -259,6 +303,8 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
   });
   const container = createMockContainer();
   const sentry = createMockSentryService();
+  const resolveSetup = jest.fn().mockResolvedValue(setupResolution(null));
+  container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, { resolveSetup });
 
   const handlers = new SetupRpcHandlers(
     logger as unknown as Logger,
@@ -281,6 +327,7 @@ function makeHarness(opts: { workspaceFolders?: string[] } = {}): Harness {
     workspace,
     container,
     sentry,
+    resolveSetup,
   };
 }
 
@@ -370,6 +417,9 @@ describe('SetupRpcHandlers', () => {
           'setup-status:get-status',
           'wizard:cancel-analysis',
           'wizard:deep-analyze',
+          'wizard:get-setup-model',
+          'wizard:set-setup-model',
+          'wizard:generate-skill-draft',
           'wizard:get-project-guidance',
           'wizard:get-resumable-run',
           'wizard:analysis-status',
@@ -945,6 +995,228 @@ describe('SetupRpcHandlers', () => {
     });
   });
 
+  describe('wizard Setup model', () => {
+    it('returns the effective workspace pair without credentials when Setup is unset', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      expect(
+        await call<WizardGetSetupModelResult>(h, 'wizard:get-setup-model'),
+      ).toEqual({
+        state: {
+          kind: 'unset',
+          effective: { provider: SNAPSHOT.providerId, model: SNAPSHOT.model },
+        },
+      });
+      expect(h.resolveSetup).toHaveBeenCalledWith(WORKSPACE);
+    });
+
+    it('returns the strict blocked state and rejects invalid saves before writing', async () => {
+      const h = makeHarness();
+      h.resolveSetup.mockResolvedValue(INVALID_SETUP);
+      const validateSetupPair = jest.fn().mockResolvedValue(INVALID_SETUP);
+      h.container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+        resolveSetup: h.resolveSetup,
+        validateSetupPair,
+      });
+      const commitSetupPair = jest.fn();
+      h.container.__register(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, {
+        commitSetupPair,
+      });
+      h.handlers.register();
+      expect(await call(h, 'wizard:get-setup-model')).toEqual({
+        state: INVALID_SETUP,
+      });
+      expect(
+        await callRaw(h, 'wizard:set-setup-model', {
+          provider: ' anthropic ',
+          model: ' stale ',
+        }),
+      ).toMatchObject({ success: false, errorCode: 'SETUP_MODEL_INVALID' });
+      expect(validateSetupPair).toHaveBeenCalledWith(WORKSPACE, {
+        provider: 'anthropic',
+        model: 'stale',
+      });
+      expect(commitSetupPair).not.toHaveBeenCalled();
+    });
+
+    it('clears Setup even if the effective workspace pair is blocked', async () => {
+      const h = makeHarness();
+      const blocked = { ...INVALID_SETUP, source: 'workspace' };
+      h.resolveSetup.mockResolvedValue(blocked);
+      const commitSetupPair = jest.fn().mockResolvedValue(null);
+      h.container.__register(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, {
+        commitSetupPair,
+      });
+      h.handlers.register();
+      expect(
+        await call(h, 'wizard:set-setup-model', { provider: ' ', model: '' }),
+      ).toMatchObject({
+        committed: null,
+        state: blocked,
+        commitSeq: expect.any(Number),
+      });
+      expect(commitSetupPair).toHaveBeenCalledWith({ provider: '', model: '' });
+    });
+
+    it('concurrent wizard:set-setup-model RPCs return distinct committed receipts and monotonic commitSeq matching disk read-back', async () => {
+      const h = makeHarness();
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-rpc-'));
+      try {
+        const manager = new PtahFileSettingsManager({}, dir);
+        const store: IGlobalBatchSettingsStore = {
+          readGlobal: (key) => manager.get(key),
+          hasGlobal: (key) => manager.has(key),
+          writeGlobal: async (key, value) => {
+            await manager.set(key, value);
+          },
+          readGlobalMany: (keys) => manager.getMany(keys),
+          writeGlobalBatch: (entries) => manager.setMany(entries),
+          readSecret: async () => undefined,
+          writeSecret: async () => undefined,
+          deleteSecret: async () => undefined,
+          watchGlobal: () => ({ dispose: jest.fn() }),
+          watchSecret: () => ({ dispose: jest.fn() }),
+          flushSync: () => manager.flushSync(),
+        };
+        const scope = new WorkspaceScopeResolver(store, {
+          getActivePath: () => WORKSPACE,
+          onDidChange: () => ({ dispose: jest.fn() }),
+        });
+        const first = { provider: 'anthropic', model: 'model-a' };
+        const second = { provider: 'openrouter', model: 'model-b' };
+        h.container.__register(SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER, scope);
+        const validateSetupPair = jest.fn(
+          async (_root: string, pair: ModelPair) => setupResolution(pair),
+        );
+        let finishFirstState: (state: SetupResolution) => void = () =>
+          undefined;
+        h.resolveSetup
+          .mockImplementationOnce(
+            () =>
+              new Promise<SetupResolution>((resolve) => {
+                finishFirstState = resolve;
+              }),
+          )
+          .mockImplementation(async () => setupResolution(second));
+        h.container.__register(SDK_TOKENS.SDK_WORKSPACE_LLM_RESOLVER, {
+          resolveSetup: h.resolveSetup,
+          validateSetupPair,
+        });
+        h.handlers.register();
+        const firstCall = call<WizardSetSetupModelResult>(
+          h,
+          'wizard:set-setup-model',
+          first,
+        );
+        const secondCall = call<WizardSetSetupModelResult>(
+          h,
+          'wizard:set-setup-model',
+          second,
+        );
+        const secondResult = await secondCall;
+        finishFirstState(setupResolution(second));
+        const firstResult = await firstCall;
+        expect(firstResult.committed).toEqual(first);
+        expect(secondResult.committed).toEqual(second);
+        expect(secondResult.commitSeq).toBe(firstResult.commitSeq + 1);
+        expect(firstResult.state).toEqual({ kind: 'set', pair: second });
+        const reloaded = new PtahFileSettingsManager({}, dir);
+        expect(reloaded.getMany(['setup.provider', 'setup.model'])).toEqual({
+          'setup.provider': second.provider,
+          'setup.model': second.model,
+        });
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('wizard:generate-skill-draft', () => {
+    const draft = {
+      runId: 'run-1',
+      proposalId: 'proposal-1',
+      proposalName: 'Angular skill',
+      items: [
+        {
+          itemId: 'framework-1',
+          name: 'Angular',
+          kind: 'framework',
+          evidence: 'package.json',
+          buildReasons: ['Project conventions'],
+        },
+      ],
+    };
+
+    it('sanitizes the input and delegates with the workspace root', async () => {
+      const h = makeHarness();
+      const result = {
+        ok: false,
+        category: 'empty-output',
+        message: 'Empty draft.',
+      };
+      const generateDraft = jest.fn().mockResolvedValue(result);
+      h.container.__register(SKILL_DRAFT_GENERATION_SERVICE, { generateDraft });
+      h.handlers.register();
+      expect(
+        await call(h, 'wizard:generate-skill-draft', {
+          ...draft,
+          proposalName: ' Angular skill ',
+          items: [
+            {
+              ...draft.items[0],
+              evidence: 'package.json\u0000\r\n',
+              buildReasons: ['Project\u202e conventions'],
+            },
+          ],
+        }),
+      ).toEqual(result);
+      expect(generateDraft).toHaveBeenCalledWith(
+        {
+          ...draft,
+          items: [
+            { ...draft.items[0], buildReasons: ['Project  conventions'] },
+          ],
+        },
+        WORKSPACE,
+      );
+    });
+
+    it('returns a safe draft failure when the service rejects', async () => {
+      const h = makeHarness();
+      const generateDraft = jest
+        .fn()
+        .mockRejectedValue(new Error('private provider details'));
+      h.container.__register(SKILL_DRAFT_GENERATION_SERVICE, { generateDraft });
+      h.handlers.register();
+      expect(await call(h, 'wizard:generate-skill-draft', draft)).toEqual({
+        ok: false,
+        category: 'provider-error',
+        message: 'Could not generate the skill draft.',
+      });
+    });
+
+    it.each([
+      { ...draft, proposalName: 'a'.repeat(65) },
+      { ...draft, items: [] },
+      { ...draft, items: Array.from({ length: 31 }, () => draft.items[0]) },
+      { ...draft, items: [{ ...draft.items[0], evidence: 'a'.repeat(2001) }] },
+      {
+        ...draft,
+        items: [{ ...draft.items[0], buildReasons: ['a'.repeat(2001)] }],
+      },
+    ])('rejects a draft outside the input limits', async (params) => {
+      const h = makeHarness();
+      h.handlers.register();
+      expect(
+        await callRaw(h, 'wizard:generate-skill-draft', params),
+      ).toMatchObject({
+        success: false,
+        errorCode: 'INVALID_PARAMS',
+      });
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+  });
+
   describe('wizard:recommend-analysis-skills', () => {
     it('uses the matching saved run and its structured stack', async () => {
       const h = makeHarness();
@@ -954,7 +1226,18 @@ describe('SetupRpcHandlers', () => {
         evidence: 'package.json',
         sourcePhase: 'profile',
       };
+      const analysisPair = {
+        provider: 'analysis-provider',
+        model: 'analysis-model',
+      };
+      const judge = {
+        method: 'none',
+        counts: { decision: 0, normal: 0, notJudged: 1 },
+        items: [{ registry: 'search-failed' }],
+      };
       const recommendAnalysis = jest.fn().mockResolvedValue({
+        analysisPair,
+        judge,
         skills: [],
         detectedItems: [item],
         unmatchedItems: [],
@@ -962,25 +1245,39 @@ describe('SetupRpcHandlers', () => {
         summarySource: 'structured',
       });
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
-        loadByRunId: jest
-          .fn()
-          .mockResolvedValue({
-            manifest: { runId: 'run-1' },
-            stackSummary: { source: 'structured', items: [item] },
-          }),
+        loadByRunId: jest.fn().mockResolvedValue({
+          manifest: { runId: 'run-1' },
+          analysisPair,
+          stackSummary: { source: 'structured', items: [item] },
+        }),
       });
       h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
         recommendAnalysis,
       });
       h.handlers.register();
-      const result = await call<{ detectedItems: unknown[] }>(
+      const entry = Date.now();
+      const result = await call<WizardRecommendAnalysisSkillsResult>(
         h,
         'wizard:recommend-analysis-skills',
         { runId: 'run-1' },
       );
-      expect(result.detectedItems).toEqual([item]);
+      expect(result).toMatchObject({
+        detectedItems: [item],
+        analysisPair,
+        judge,
+      });
       expect(recommendAnalysis).toHaveBeenCalledWith(
-        expect.objectContaining({ items: [item], summarySource: 'structured' }),
+        expect.objectContaining({
+          items: [item],
+          summarySource: 'structured',
+          analysisPair,
+          resolved: SNAPSHOT,
+        }),
+      );
+      const { rpcEntry } = recommendAnalysis.mock.calls[0][0];
+      expect(rpcEntry).toBeGreaterThanOrEqual(entry);
+      expect(h.resolveSetup.mock.invocationCallOrder[0]).toBeLessThan(
+        recommendAnalysis.mock.invocationCallOrder[0],
       );
     });
 
@@ -997,6 +1294,10 @@ describe('SetupRpcHandlers', () => {
       );
       expect(result.skills).toEqual([]);
       expect(result.warning).toMatch(/not found/);
+      expect(result).toMatchObject({
+        analysisPair: null,
+        judge: { method: 'none', items: [] },
+      });
     });
 
     it('returns an empty result when the saved run has no stack summary', async () => {
@@ -1031,7 +1332,7 @@ describe('SetupRpcHandlers', () => {
       expect(result.warning).not.toMatch(/raw error/i);
     });
 
-    it('returns an empty result without exposing a storage error', async () => {
+    it('maps a saved-analysis rejection to a safe typed error', async () => {
       const h = makeHarness();
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadByRunId: jest
@@ -1039,15 +1340,119 @@ describe('SetupRpcHandlers', () => {
           .mockRejectedValue(new Error('raw error: secret path')),
       });
       h.handlers.register();
-      const result = await call<{
-        skills: unknown[];
-        detectedItems: unknown[];
-        warning: string;
-      }>(h, 'wizard:recommend-analysis-skills', { runId: 'run-1' });
-      expect(result.skills).toEqual([]);
-      expect(result.detectedItems).toEqual([]);
-      expect(result.warning).not.toMatch(/raw error|secret path/i);
+      expect(
+        await callRaw(h, 'wizard:recommend-analysis-skills', {
+          runId: 'run-1',
+        }),
+      ).toMatchObject({
+        success: false,
+        errorCode: 'ANALYSIS_LOAD_FAILED',
+        error: 'Could not read the saved analysis.',
+      });
     });
+
+    it.each([
+      INVALID_SETUP,
+      { ...INVALID_SETUP, kind: 'unavailable', cause: 'provider-unavailable' },
+    ])('blocks storage and search when Setup is $kind', async (resolution) => {
+      const h = makeHarness();
+      h.resolveSetup.mockResolvedValue(resolution);
+      h.handlers.register();
+      expect(
+        await callRaw(h, 'wizard:recommend-analysis-skills', {
+          runId: 'run-1',
+        }),
+      ).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(h.container.resolve).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      { stall: 'Setup resolution', errorCode: 'SETUP_MODEL_INVALID' },
+      { stall: 'saved-analysis load', errorCode: 'ANALYSIS_LOAD_FAILED' },
+    ])(
+      'times out $stall at the entry-anchored pre-search deadline',
+      async ({ stall, errorCode }) => {
+        jest.useFakeTimers();
+        try {
+          const h = makeHarness();
+          const loadByRunId = jest
+            .fn()
+            .mockReturnValue(new Promise(() => undefined));
+          h.container.__register(
+            AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+            { loadByRunId },
+          );
+          h.resolveSetup.mockImplementation(
+            () =>
+              new Promise((resolve) => {
+                if (stall === 'saved-analysis load') {
+                  setTimeout(() => resolve(setupResolution(null)), 2_000);
+                }
+              }),
+          );
+          h.handlers.register();
+          const pending = callRaw(h, 'wizard:recommend-analysis-skills', {
+            runId: 'run-1',
+          });
+          await jest.advanceTimersByTimeAsync(6_000);
+          expect(await pending).toMatchObject({ success: false, errorCode });
+          expect(loadByRunId).toHaveBeenCalledTimes(
+            stall === 'saved-analysis load' ? 1 : 0,
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+
+    it.each([
+      [
+        new Error('raw provider error'),
+        'SKILLS_RECOMMEND_FAILED',
+        'Could not load skill recommendations.',
+      ],
+      [
+        new RpcUserError('Typed failure', 'INVALID_PARAMS'),
+        'INVALID_PARAMS',
+        'Typed failure',
+      ],
+    ])(
+      'preserves typed recommendation errors and sanitizes unexpected failures',
+      async (error, errorCode, message) => {
+        const h = makeHarness();
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            loadByRunId: jest.fn().mockResolvedValue({
+              stackSummary: {
+                source: 'structured',
+                items: [{ name: 'Angular' }],
+              },
+            }),
+          },
+        );
+        const recommendAnalysis = jest.fn().mockRejectedValue(error);
+        h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
+          recommendAnalysis,
+        });
+        h.handlers.register();
+        expect(
+          await callRaw(h, 'wizard:recommend-analysis-skills', {
+            runId: 'run-1',
+          }),
+        ).toMatchObject({
+          success: false,
+          errorCode,
+          error: message,
+        });
+        expect(recommendAnalysis).toHaveBeenCalledWith(
+          expect.objectContaining({ analysisPair: null }),
+        );
+      },
+    );
 
     it('rejects invalid params before loading storage', async () => {
       const h = makeHarness();
@@ -1087,6 +1492,21 @@ describe('SetupRpcHandlers', () => {
       ).toEqual(loaded);
       expect(link).toHaveBeenCalledWith(WORKSPACE);
     });
+    it('maps a saved-analysis read failure to ANALYSIS_LOAD_FAILED', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadMultiPhase: jest.fn().mockRejectedValue(new Error('private path')),
+      });
+      h.handlers.register();
+      expect(
+        await callRaw(h, 'wizard:load-analysis', { filename: 'demo' }),
+      ).toMatchObject({
+        success: false,
+        errorCode: 'ANALYSIS_LOAD_FAILED',
+        error: 'Could not read the saved analysis.',
+      });
+    });
+
     it('throws when no workspace is open', async () => {
       const h = makeHarness({ workspaceFolders: [] });
       h.handlers.register();
@@ -1736,6 +2156,39 @@ Score: 90 / 100
     });
 
     // -- Test 20 ----------------------------------------------------------
+    it.each([false, true])(
+      'passes one Setup snapshot for deep analysis with resume=%s',
+      async (resume) => {
+        const { h, analyzeMock } = seedHarness();
+        h.handlers.register();
+        const response = await callRaw(h, 'wizard:deep-analyze', {
+          model: 'chat-picker-model',
+          resume,
+        });
+        expect(response.success).toBe(true);
+        expect(h.resolveSetup).toHaveBeenCalledTimes(1);
+        expect(analyzeMock).toHaveBeenCalledWith(
+          WORKSPACE,
+          expect.objectContaining({
+            setupSnapshot: SNAPSHOT,
+            resume,
+          }),
+        );
+        expect(analyzeMock.mock.calls[0][1]).not.toHaveProperty('model');
+      },
+    );
+
+    it('rejects deep analysis before launching when Setup is invalid', async () => {
+      const { h, analyzeMock } = seedHarness();
+      h.resolveSetup.mockResolvedValue(INVALID_SETUP);
+      h.handlers.register();
+      expect(await callRaw(h, 'wizard:deep-analyze')).toMatchObject({
+        success: false,
+        errorCode: 'SETUP_MODEL_INVALID',
+      });
+      expect(analyzeMock).not.toHaveBeenCalled();
+    });
+
     it('[seeding-not-fired-on-analysis-failure] writer is never called when analyzeWorkspace returns Err', async () => {
       const upsert = jest.fn();
       const { h } = seedHarness({
