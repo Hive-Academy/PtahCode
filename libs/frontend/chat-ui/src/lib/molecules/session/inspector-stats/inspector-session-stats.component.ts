@@ -4,11 +4,12 @@ import {
   computed,
   inject,
   input,
+  linkedSignal,
 } from '@angular/core';
 import { ModelStateService } from '@ptah-extension/core';
 import {
   PtahBadgeDirective,
-  PtahDisclosureComponent,
+  NativePopoverComponent,
   PtahMeterComponent,
   PtahStatComponent,
   PtahTimerComponent,
@@ -18,7 +19,7 @@ import {
   type PtahTimeInput,
 } from '@ptah-extension/ui';
 import { resolveModelDisplayName } from '@ptah-extension/shared';
-import { Bot, Boxes, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
+import { Bot, Boxes, ChevronDown, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
 import { formatExpandedUsageCost, inspectorBudgetDisplay, SDK_BUDGET_SCOPE } from '../session-budget-format';
 import { SessionModelBreakdownComponent } from '../session-model-breakdown.component';
 import { StatsTileExpansionState } from '../plan-limits/stats-tile-expansion.state';
@@ -41,7 +42,7 @@ let nextSessionId = 0;
   imports: [
     LucideAngularModule,
     PtahBadgeDirective,
-    PtahDisclosureComponent,
+    NativePopoverComponent,
     PtahMeterComponent,
     PtahStatComponent,
     PtahTimerComponent,
@@ -142,35 +143,57 @@ let nextSessionId = 0;
           <lucide-angular ptahStatIcon class="stat-icon" [img]="AgentsIcon" aria-hidden="true" />
         </ptah-stat>
 
-        <ptah-disclosure
-          class="models contents"
+        <div
+          class="metric models-cell min-w-0 border-l border-surface-border pl-2 pt-2"
           [class.models-wide]="!budget()"
-          label="Models"
-          size="sm"
-          [region]="true"
-          [open]="modelsOpen()"
-          (openChange)="setModelsOpen($event)"
-          (keydown.escape)="closeModels($event, modelsHost)"
+          data-testid="session-models"
         >
-          <span ptahDisclosureSummary class="col-span-2 grid min-w-0">
-            <span class="inline-flex items-center gap-1 text-sm font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
-              <lucide-angular class="size-3 shrink-0 text-base-content-muted" [img]="ModelsIcon" aria-hidden="true" />
-              {{ modelNames().length || '—' }}
-            </span>
-            @if (modelSummary(); as summary) {
-              <span class="truncate text-xs font-normal text-base-content-muted">{{ summary }}</span>
-            }
-          </span>
-          <div #modelsHost>
-            @if (modelsOpen()) {
-              <ptah-session-model-breakdown
-                class="block pt-2"
-                [snapshot]="stats().snapshot"
-                [sources]="metrics()"
-              />
-            }
-          </div>
-        </ptah-disclosure>
+          <ptah-native-popover
+            class="block min-w-0"
+            [isOpen]="modelsOpen()"
+            placement="bottom-end"
+            [hasBackdrop]="true"
+            backdropClass="transparent"
+            (closed)="setModelsOpen(false)"
+          >
+            <button
+              trigger
+              type="button"
+              class="models-trigger grid w-full min-w-0 gap-0.5 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              aria-haspopup="dialog"
+              [attr.aria-expanded]="modelsOpen()"
+              [attr.aria-controls]="modelsOpen() ? modelsPanelId : null"
+              (click)="setModelsOpen(!modelsOpen())"
+            >
+              <span class="flex items-center gap-1 text-xs text-base-content-muted">
+                Models
+                <lucide-angular class="size-3 shrink-0" [img]="ModelsChevron" aria-hidden="true" />
+              </span>
+              <span class="inline-flex items-center gap-1 text-sm font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
+                <lucide-angular class="size-3 shrink-0 text-base-content-muted" [img]="ModelsIcon" aria-hidden="true" />
+                {{ modelNames().length || '—' }}
+              </span>
+              @if (modelSummary(); as summary) {
+                <span class="truncate text-xs font-normal text-base-content-muted">{{ summary }}</span>
+              }
+            </button>
+            <div
+              content
+              [id]="modelsPanelId"
+              class="w-[21rem] max-w-[calc(100vw-2rem)]"
+              role="dialog"
+              aria-label="Usage by model"
+            >
+              @if (modelsOpen()) {
+                <ptah-session-model-breakdown
+                  class="block"
+                  [snapshot]="stats().snapshot"
+                  [sources]="metrics()"
+                />
+              }
+            </div>
+          </ptah-native-popover>
+        </div>
 
         @if (budget(); as view) {
           <ptah-stat
@@ -255,34 +278,9 @@ let nextSessionId = 0;
     .metric ::ng-deep [ptahStatIcon].source-swatch { top: 0.25rem; }
     .stat-icon { width: 0.75rem; height: 0.75rem; color: var(--bcm, oklch(var(--bc) / 0.6)); }
     .session-section ::ng-deep > section { padding: 0.75rem; gap: 0.5rem; }
-    .models { display: contents; }
-    .models ::ng-deep > div:first-child {
-      grid-area: 2 / 2 / 3 / 3;
-      min-width: 0;
-      border-inline-start: 1px solid var(--surface-border);
-      padding: 0.5rem;
-      align-items: start;
-    }
-    .models-wide ::ng-deep > div:first-child { grid-column-end: 4; }
-    .models ::ng-deep > div:first-child > button {
-      display: grid;
-      grid-template-columns: auto auto;
-      justify-content: start;
-      column-gap: 0.25rem;
-      row-gap: 0.125rem;
-      font-weight: normal;
-    }
-    .models ::ng-deep > div:first-child > button > svg {
-      grid-column: 2;
-      grid-row: 1;
-      width: 0.75rem;
-      height: 0.75rem;
-    }
-    .models ::ng-deep > div:first-child > button > span:nth-child(2) {
-      grid-column: 1;
-      grid-row: 1;
-    }
-    .models ::ng-deep > div:last-child { grid-area: 3 / 1 / 4 / -1; min-width: 0; }
+    .models-cell { grid-area: 2 / 2 / 3 / 3; }
+    .models-cell.models-wide { grid-column-end: 4; }
+    .models-cell ::ng-deep .popover-trigger { display: block; min-width: 0; }
     .source-swatch { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 0.125rem; }
     .sdk-swatch { background: var(--ptah-gold, var(--ptah-accent-ink)); }
     .cli-swatch { background: var(--state-ink-run); }
@@ -317,6 +315,8 @@ export class InspectorSessionStatsComponent {
   });
 
   protected readonly headingId = `ptah-session-heading-${++nextSessionId}`;
+  protected readonly modelsPanelId = `ptah-session-models-${nextSessionId}`;
+  protected readonly ModelsChevron = ChevronDown;
   protected readonly TokensIcon = Coins;
   protected readonly CostIcon = CircleDollarSign;
   protected readonly TimeIcon = Clock;
@@ -372,7 +372,11 @@ export class InspectorSessionStatsComponent {
     return count === null ? 'Agents unavailable' : `Agents: ${count}${live ? `, ${live}` : ''}`;
   });
 
-  protected readonly modelsOpen = computed(() => this.expansion.isOpen(this.sessionKey(), 'models'));
+  /**
+   * Local, and closed again on a session switch: a popover is a top-layer
+   * dialog with a backdrop, so it must never reopen on its own after a remount.
+   */
+  protected readonly modelsOpen = linkedSignal({ source: this.sessionKey, computation: () => false });
   protected readonly modelNames = computed(() => {
     const { snapshot, liveModelStats } = this.stats();
     const primary = liveModelStats?.model ?? snapshot?.model;
@@ -386,15 +390,7 @@ export class InspectorSessionStatsComponent {
   });
 
   protected setModelsOpen(open: boolean): void {
-    this.expansion.setOpen(this.sessionKey(), 'models', open);
-  }
-
-  protected closeModels(event: Event, body: HTMLElement): void {
-    if (!this.modelsOpen()) return;
-    event.preventDefault();
-    event.stopPropagation();
-    this.setModelsOpen(false);
-    body.closest('ptah-disclosure')?.querySelector('button')?.focus();
+    this.modelsOpen.set(open);
   }
 
   private metric(id: UsageMetric, total: UsageTotal) {

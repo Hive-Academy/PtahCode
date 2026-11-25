@@ -267,21 +267,19 @@ export class InspectorRequestPanelComponent {
     @if (list.length > 0) {
       <ul class="grid gap-1.5">
         @for (req of visible(); track req.requestId) {
-          <li class="flex items-start gap-1.5 text-xs text-state-need">
-            <lucide-angular [img]="ShieldIcon" class="mt-0.5 size-3 shrink-0" aria-hidden="true" />
-            <p class="min-w-0 flex-1 leading-[1.45] [overflow-wrap:anywhere]">
-              @if (req.kind === 'permission') {
-                <span class="font-semibold">Needs permission:</span>
-                <span class="font-mono text-[11px]"> {{ req.command }}</span>
-              } @else {
-                <span class="font-semibold">Asked you:</span>
-                {{ req.questionPreview ?? req.command }}
-              }
-            </p>
+          @let detail = req.kind === 'permission' ? req.command : (req.questionPreview ?? req.command);
+          <li class="flex min-w-0 items-center gap-1.5 text-[11px] text-state-need" [attr.title]="detail">
+            <span
+              class="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--state-ink-need)_14%,transparent)] px-1.5 text-[10.5px] font-semibold"
+            >
+              <lucide-angular [img]="ShieldIcon" class="size-3 shrink-0" aria-hidden="true" />
+              {{ req.kind === 'permission' ? 'Permission' : 'Question' }}
+            </span>
+            <span class="min-w-0 flex-1 truncate text-base-content-muted" [class.font-mono]="req.kind === 'permission'">{{ detail }}</span>
             <button
               type="button"
               data-request-button
-              class="inline-flex h-7 min-w-[56px] shrink-0 items-center justify-center self-start rounded-md border border-[color-mix(in_srgb,var(--state-ink-need)_55%,transparent)] px-2.5 text-[11px] font-medium text-state-need focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+              class="inline-flex h-5 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--state-ink-need)_55%,transparent)] px-2 text-[10.5px] font-medium text-state-need hover:bg-[color-mix(in_srgb,var(--state-ink-need)_12%,transparent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               [attr.aria-expanded]="req.kind === 'permission' ? openRequest()?.requestId === req.requestId : null"
               [attr.aria-label]="buttonLabel(req)"
               (click)="activate(req)"

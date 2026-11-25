@@ -282,6 +282,13 @@ export class SessionInspectorComponent {
         : rows;
     }),
   };
+  /**
+   * The Orchestrator row carries the orchestrator's requests, so the top
+   * request lines render only while that row is missing: never twice.
+   */
+  protected readonly orchestratorRowShowsRequests = computed(() =>
+    this.inspectorAgentRows.rows()?.some((row) => row.key === 'orchestrator') ?? false,
+  );
   protected readonly agentsSelection = linkedSignal({
     source: () => ({ sessionId: this.sessionId(), key: this.selectedAgentKey() }),
     computation: ({ key }) => key,

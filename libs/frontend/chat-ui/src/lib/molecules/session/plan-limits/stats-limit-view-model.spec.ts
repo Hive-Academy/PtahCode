@@ -1210,12 +1210,27 @@ describe('inspector provider grouping', () => {
     expect(vm.providerLimits[0].label).toBe('Ptah CLI');
   });
 
-  it('does not present a model-specific window as the whole provider when scopes differ', () => {
+  it('keeps a model-specific window under its own label when scopes differ', () => {
     const vm = buildStatsLimitViewModel(input({
       owners: [snapshot(CLAUDE_A, { windows: [weeklyOpusExhausted()] })],
       laneRuns: [run({ modelScope: 'opus' }), run({ modelScope: 'sonnet' })],
     }));
-    expect(vm.providerLimits[0]).toMatchObject({ windows: [], message: 'Multiple scopes · Usage unknown' });
+    const provider = vm.providerLimits[0];
+    expect(provider.message).toBe('');
+    expect(provider.windows.map(tile => tile.window?.windowKey)).toEqual([weeklyOpusExhausted().key]);
+    expect(provider.windows.some(tile => tile.kind === 'status')).toBe(false);
+    expect(provider.indicator?.state).toBe('at-limit');
+  });
+
+  it('shows the account-wide windows once across lanes on different models', () => {
+    const vm = buildStatsLimitViewModel(input({
+      owners: [snapshot(CLAUDE_A)],
+      laneRuns: [run({ modelScope: 'opus' }), run({ modelScope: 'sonnet' }), run({ modelScope: null })],
+    }));
+    const provider = vm.providerLimits[0];
+    expect(provider.message).toBe('');
+    expect(provider.accountId).toBeTruthy();
+    expect(provider.windows.filter(tile => tile.kind === 'window')).toHaveLength(2);
   });
 });
 
