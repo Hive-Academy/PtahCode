@@ -21,6 +21,7 @@ class LaneComposerStubComponent {
   readonly laneState = input<LaneStateChip | null>(null);
   readonly stopRequested = output<Event>();
   readonly resumeRequested = output<Event>();
+  readonly accepted = output<void>();
 }
 
 function makeAgent(overrides: Partial<MonitoredAgent> = {}): MonitoredAgent {
@@ -144,6 +145,25 @@ describe('AgentContinueInputComponent', () => {
       potentialCapabilities: potential as unknown as MonitoredAgent['potentialCapabilities'] }));
     expect(composer()).not.toBeNull();
     expect(composer()?.stopped()).toBe(false);
+  });
+
+  it('mounts the composer for a running Grok lane shaped like the real spawn payload (F3, final check)', () => {
+    // agent:spawned for a new or resumed Grok lane: the effective snapshot is
+    // taken before the ACP session is set up (continuation unsupported), the
+    // handle does not continue yet and no session id is known.
+    const declared = capabilities('unsupported');
+    const potential = { ...declared, messaging: { ...declared.messaging,
+      interrupt: { state: 'supported' as const }, continuation: { state: 'supported' as const }, resume: { state: 'supported' as const } } };
+    setup(makeAgent({
+      cli: 'grok', status: 'running', supportsContinuation: false, cliSessionId: undefined,
+      potentialCapabilities: potential as unknown as MonitoredAgent['potentialCapabilities'],
+      effectiveCapabilities: { ...declared, source: 'live-handle' },
+    }));
+    expect(composer()).not.toBeNull();
+    expect(composer()?.stopped()).toBe(false);
+    expect(composer()?.showLaneControls()).toBe(true);
+    // No lone Stop next to it: Stop lives in the composer toolbar.
+    expect(fixture.nativeElement.querySelector('[aria-label="Stop generating"]')).toBeNull();
   });
 
   it('shows Stop alone for a running lane without steering or continuation', () => {

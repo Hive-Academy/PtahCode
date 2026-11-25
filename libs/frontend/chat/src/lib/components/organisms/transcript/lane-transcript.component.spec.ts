@@ -194,6 +194,20 @@ describe('LaneTranscriptComponent', () => {
     expect(images[0].alt).toBe('Image 1 of 1 you sent');
   });
 
+  it('renders a host notice as a neutral status row, not a bubble (round 7)', () => {
+    const fixture = TestBed.createComponent(LaneTranscriptComponent);
+    fixture.componentRef.setInput('laneId', 'cli-notice');
+    fixture.componentRef.setInput('nodes', [
+      createExecutionNode({ id: 'seg-notice-0', type: 'text', status: 'complete', content: 'Grok ran /context and returned no output.', startTime: 5_000 }),
+    ]);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const row = root.querySelector('[data-testid="lane-host-notice"]') as HTMLElement;
+    expect(row.textContent).toContain('Grok ran /context and returned no output.');
+    expect(row.querySelector('time')?.getAttribute('datetime')).toBe(new Date(5_000).toISOString());
+    expect(root.querySelectorAll('ptah-message-bubble')).toHaveLength(0);
+  });
+
   it('keeps the live elapsed label ticking through the shared clock', () => {
     const now = signal(100_000);
     const release = jest.fn();

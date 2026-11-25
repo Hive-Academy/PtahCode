@@ -54,6 +54,13 @@ function sameMembers(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
  */
 export const LANE_USER_ECHO_NODE_PREFIX = 'seg-user-';
 
+/**
+ * Id prefix of the node a host notice segment (`info` with `hostNotice: true`,
+ * e.g. "Grok ran /context and returned no output.") becomes. The lane
+ * transcript shows it as a neutral status row at its `sentAt`.
+ */
+export const LANE_HOST_NOTICE_NODE_PREFIX = 'seg-notice-';
+
 /** Maximum recursion depth for nested agent tree building */
 const MAX_DEPTH = 10;
 
@@ -517,6 +524,18 @@ export class AgentMonitorTreeBuilderService {
         case 'info': {
           if (textBuffer) flushText();
           if (thinkingBuffer) flushThinking();
+          if (segment.hostNotice === true) {
+            nodes.push(
+              createExecutionNode({
+                id: `${LANE_HOST_NOTICE_NODE_PREFIX}${i}`,
+                type: 'text',
+                status: 'complete',
+                content: segment.content,
+                ...(segment.sentAt !== undefined ? { startTime: segment.sentAt } : {}),
+              }),
+            );
+            break;
+          }
           nodes.push(
             createExecutionNode({
               id: `seg-info-${i}`,

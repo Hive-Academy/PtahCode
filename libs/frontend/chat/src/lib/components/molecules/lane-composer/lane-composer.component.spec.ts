@@ -38,7 +38,7 @@ import { VoiceInputService } from '../../../services/voice-input.service';
 import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
-import { findLaneModelOption, LaneComposerComponent } from './lane-composer.component';
+import { findLaneModelOption, LaneComposerComponent, laneLastRunModel } from './lane-composer.component';
 
 const agentId = '00000000-0000-4000-8000-000000000001';
 
@@ -260,6 +260,23 @@ describe('LaneComposerComponent', () => {
     key(fixture, { metaKey: true });
     await settle(fixture);
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Again', 'now', false, expect.any(String), undefined);
+  });
+
+  it('drops Send now when the lane changes while its previews refresh (PR 1512 review)', async () => {
+    sendMessage.mockResolvedValue({ mode: 'steer', receipt: { ...receipt, state: 'started', delivery: 'now' } });
+    const fixture = await mount();
+    type(fixture, 'For the first lane');
+    let release: () => void = () => undefined;
+    previewMessage.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
+    key(fixture, { ctrlKey: true });
+    // The user picks another lane before the refresh answers.
+    store.agentsById.set(new Map([[agentId, { status: 'running', cli: 'codex' }], ['other-lane', { status: 'running', cli: 'codex' }]]));
+    fixture.componentRef.setInput('agentId', 'other-lane');
+    fixture.detectChanges();
+    release();
+    await settle(fixture);
+    previewMessage.mockReset().mockResolvedValue(undefined);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('refuses Ctrl+Enter while an attachment is still being read (M1)', async () => {
@@ -732,6 +749,18 @@ describe('LaneComposerComponent', () => {
     expect(rpcCall.mock.calls.length).toBe(reads + 1);
   });
 
+  it('names the last-run model of a restored lane from its output usage (round 6)', async () => {
+    rpcCall.mockResolvedValue(rpcSuccess({ models: [{ id: 'claude-opus-5-5', name: 'Opus 5.5' }], efforts: [], commands: [] }));
+    store.agentsById.set(new Map([[agentId, {
+      status: 'stopped', cli: 'claude', usageTotals: null,
+      segments: [{ type: 'text', content: 'OK' }, { type: 'info', content: 'usage', usage: { model: 'claude-opus-5-5', inputTokens: 1 } }],
+    }]]));
+    const fixture = await mount({ stopped: true });
+    const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
+    expect(pill.textContent).toContain('Opus 5.5');
+    expect(pill.textContent).not.toContain('default');
+  });
+
   it('says the pick applies when the stopped lane resumes (M4)', async () => {
     const fixture = await mount({ stopped: true });
     const component = fixture.componentInstance as unknown as { settingFooter(): string };
@@ -1111,4 +1140,16 @@ describe('findLaneModelOption (PR 1509)', () => {
     expect(findLaneModelOption(options, 'haiku 5.5')?.id).toBe('claude-haiku-5-5-20261001');
   });
 
+});
+
+describe('laneLastRunModel', () => {
+  it('prefers the reported model, then the folded usage, then the newest usage segment, never mixed-model', () => {
+    expect(laneLastRunModel({ observedModel: 'a', usageTotals: { model: 'b' }, segments: [] })).toBe('a');
+    expect(laneLastRunModel({ observedModel: 'mixed-model', usageTotals: { model: 'b' }, segments: [] })).toBe('b');
+    expect(laneLastRunModel({ usageTotals: null, segments: [
+      { type: 'info', content: '', usage: { model: 'old' } }, { type: 'info', content: '', usage: { model: 'new' } },
+    ] })).toBe('new');
+    expect(laneLastRunModel({ segments: [] })).toBeUndefined();
+    expect(laneLastRunModel(undefined)).toBeUndefined();
+  });
 });

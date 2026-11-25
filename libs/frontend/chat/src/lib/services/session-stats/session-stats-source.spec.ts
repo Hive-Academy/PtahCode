@@ -3,7 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { buildStatsLimitViewModel, type LiveModelStats } from '@ptah-extension/chat-ui';
 import { AgentMonitorStore, type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import type { TabState } from '@ptah-extension/chat-types';
-import { AuthStateService, PlanLimitsStore } from '@ptah-extension/core';
+import { AuthStateService, ModelStateService, PlanLimitsStore } from '@ptah-extension/core';
+import { TabManagerService } from '@ptah-extension/chat-state';
 import type {
   PlanLimitOwnerSnapshot,
   PlanLimitsSnapshot,
@@ -37,6 +38,8 @@ describe('injectSessionStatsSource cache projection', () => {
       { provide: ChatStore, useValue: { sessionStats: mainSnapshot, liveModelStats: signal(null), compactionCount: signal(0) } },
       { provide: PlanLimitsStore, useValue: { snapshot: signal(null) } },
       { provide: AgentMonitorStore, useValue: { agentsOwnedBySession: () => [] } },
+      { provide: ModelStateService, useValue: { currentModel: signal('haiku') } },
+      { provide: TabManagerService, useValue: { activeTab: signal(null) } },
       { provide: AuthStateService, useValue: authState(signal<string | null>('anthropic')) },
     ] });
   });
@@ -173,6 +176,8 @@ describe('injectSessionStatsSource plan limits across a session switch', () => {
         },
       } },
       { provide: AgentMonitorStore, useValue: { agentsOwnedBySession: () => [] } },
+      { provide: ModelStateService, useValue: { currentModel: signal('haiku') } },
+      { provide: TabManagerService, useValue: { activeTab: signal(null) } },
       { provide: AuthStateService, useValue: authState(mainProvider) },
     ] });
   });
@@ -314,5 +319,24 @@ describe('lane usage mapping', () => {
       cliLabelSource: 'product',
     });
     expect(toStatsLimitLaneRun({ ...agent, cli: 'codex', ptahCliId: 'x' } as MonitoredAgent)).not.toHaveProperty('ptahCliId');
+  });
+});
+
+describe('injectSessionStatsSource current model (round 6)', () => {
+  it('passes the model pill model: the tab override wins over the global pick', () => {
+    const tab = signal({ id: 't', overrideModel: 'claude-haiku-4-5', sessionStats: null, liveModelStats: { model: 'claude-fable-5-2' } } as unknown as TabState);
+    TestBed.configureTestingModule({ providers: [
+      { provide: ChatStore, useValue: { sessionStats: signal(null), liveModelStats: signal(null), compactionCount: signal(0) } },
+      { provide: PlanLimitsStore, useValue: { snapshot: signal(null) } },
+      { provide: AgentMonitorStore, useValue: { agentsOwnedBySession: () => [] } },
+      { provide: AuthStateService, useValue: authState(signal<string | null>('anthropic')) },
+      { provide: ModelStateService, useValue: { currentModel: signal('opus') } },
+      { provide: TabManagerService, useValue: { activeTab: signal(null) } },
+    ] });
+    const { inputs } = TestBed.runInInjectionContext(() => injectSessionStatsSource({
+      tab: () => tab(), sessionId: () => 's', available: () => true, budget: () => null,
+    }));
+    expect(inputs()?.currentModel).toBe('claude-haiku-4-5');
+    expect(inputs()?.liveModelStats?.model).toBe('claude-fable-5-2');
   });
 });

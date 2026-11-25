@@ -5,7 +5,7 @@ import type { SessionBudgetState, SessionStatsEntry } from '@ptah-extension/shar
 import { PTAH_CLOCK, type PtahClock } from '@ptah-extension/ui';
 import type { SessionStatsInputs } from '../session-stats-view';
 import { cliContribution, sdkContribution, sessionTotal } from '../session-usage-totals';
-import { InspectorSessionStatsComponent } from './inspector-session-stats.component';
+import { InspectorSessionStatsComponent, sameModel } from './inspector-session-stats.component';
 
 const snapshot: SessionStatsEntry = {
   sessionId: 'first', model: 'opus', totalCost: 17.54, knownCost: 17.54,
@@ -227,6 +227,28 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(summary.getAttribute('title')).toBe('Current model: Opus 4.7. Earlier in this session: claude-fable-5-2.');
   });
 
+  it('takes the model pill as current, over a cost-ranked live pick of an older model (round 6)', () => {
+    const { fixture, models, root } = render({
+      snapshot: {
+        ...snapshot, model: 'claude-fable-5-2', modelUsageList: [
+          { model: 'claude-fable-5-2', inputTokens: 1, outputTokens: 2, cacheRead: 0, cacheCreation: 0, costUSD: 5 },
+          { model: 'opus-20261001', inputTokens: 3, outputTokens: 4, cacheRead: 0, cacheCreation: 0, costUSD: 1 },
+        ],
+      },
+      liveModelStats: { model: 'claude-fable-5-2', contextUsed: 0, contextWindow: 0, contextPercent: 0 },
+      currentModel: 'opus',
+    });
+    // The dated row is the pill's model: named once, by its display name.
+    expect(models.textContent).toMatch(/Models\s*2\s*/);
+    const title = root.querySelector('[data-testid="session-models-summary"]')?.getAttribute('title') ?? '';
+    expect(title).toMatch(/^Current model: (Opus 4\.7|opus(-20261001)?)\./);
+    expect(title).toContain('Earlier in this session: claude-fable-5-2.');
+    models.click();
+    fixture.detectChanges();
+    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    expect(when).toEqual(['earlier in this session', 'current']);
+  });
+
   it('labels each breakdown row current or earlier in this session', () => {
     const { fixture, models, root } = render({
       snapshot: {
@@ -297,5 +319,14 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(root.querySelector('ptah-disclosure')?.classList.contains('models-wide')).toBe(true);
     expect(root.querySelector('ptah-inspector-cache-tile')).toBeNull();
     expect(root.textContent).not.toContain('compactions');
+  });
+});
+
+describe('sameModel', () => {
+  it('matches equal, dated and tier-alias ids, never a vendor word', () => {
+    expect(sameModel('claude-haiku-4-5', 'claude-haiku-4-5-20251001')).toBe(true);
+    expect(sameModel('haiku', 'claude-haiku-4-5')).toBe(true);
+    expect(sameModel('claude', 'claude-haiku-4-5')).toBe(false);
+    expect(sameModel('gpt-5.5', 'gpt-5.5-mini')).toBe(false);
   });
 });

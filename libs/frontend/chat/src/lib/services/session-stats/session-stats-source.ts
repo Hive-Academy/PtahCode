@@ -18,7 +18,8 @@ import {
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import type { TabState } from '@ptah-extension/chat-types';
-import { PlanLimitsStore } from '@ptah-extension/core';
+import { TabManagerService, resolveTabModel } from '@ptah-extension/chat-state';
+import { ModelStateService, PlanLimitsStore } from '@ptah-extension/core';
 import type {
   CliType,
   LocalTimeOptions,
@@ -294,6 +295,13 @@ export function injectSessionStatsSource(
     equal: sameSessionStatsCache,
   });
 
+  /** The model pill's model: the same rule the send path uses (`resolveTabModel`). */
+  const modelState = inject(ModelStateService);
+  const tabManager = inject(TabManagerService);
+  const currentModel = computed(() =>
+    resolveTabModel(host.tab() ?? tabManager.activeTab(), modelState.currentModel()).model,
+  );
+
   const inputs = computed<SessionStatsInputs | null>(() => {
     if (!host.available()) return null;
     const live = liveModelStats();
@@ -303,6 +311,7 @@ export function injectSessionStatsSource(
       snapshot: snapshot(),
       cache: cache(),
       liveModelStats: live,
+      currentModel: currentModel(),
       compactionCount: compactionCount(),
       limits: limitView,
       budget: host.budget(),

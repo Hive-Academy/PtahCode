@@ -365,7 +365,9 @@ export class CanvasLaneTabsComponent {
     if (this.rail()) {
       const active = this.agents().filter(
         (agent) =>
-          isRunningAgentWord(agent.status) || agent.status === 'waiting',
+          // A lane that is stopping still runs until its process exits: it
+          // keeps its rail chip; a stopped lane does not (PR 1512 review).
+          isRunningAgentWord(agent.status) || agent.status === 'waiting' || agent.status === 'stopping',
       );
       const candidates = active.length ? active : this.agents().filter(agent => agent.kind === 'orchestrator');
       visible = candidates.slice(0, 5);

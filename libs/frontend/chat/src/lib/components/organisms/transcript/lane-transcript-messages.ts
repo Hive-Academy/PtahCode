@@ -5,10 +5,25 @@ import {
   type ExecutionNode,
   type FlatStreamEventUnion,
 } from '@ptah-extension/shared';
-import { LANE_USER_ECHO_NODE_PREFIX } from '../../../services/agent-monitor-tree-builder.service';
+import {
+  LANE_HOST_NOTICE_NODE_PREFIX,
+  LANE_USER_ECHO_NODE_PREFIX,
+} from '../../../services/agent-monitor-tree-builder.service';
 
 function isUserEcho(node: ExecutionNode): boolean {
   return node.type === 'text' && node.id.startsWith(LANE_USER_ECHO_NODE_PREFIX);
+}
+
+function isHostNotice(node: ExecutionNode): boolean {
+  return node.type === 'text' && node.id.startsWith(LANE_HOST_NOTICE_NODE_PREFIX);
+}
+
+/** Id marker of a host notice message: `LaneTranscriptComponent` draws it as a status row. */
+export const LANE_NOTICE_MESSAGE_MARKER = ':notice:';
+
+/** A host notice message (role `system`), not a bubble. */
+export function isLaneNoticeMessage(message: ExecutionChatMessage): boolean {
+  return message.role === 'system' && message.id.includes(LANE_NOTICE_MESSAGE_MARKER);
 }
 
 /**
@@ -92,7 +107,7 @@ export function laneTranscriptMessages(
   // never hides a later delivery.
   const streamedUsed = users.map(() => false);
   const outputTimes = nodes
-    .filter((node) => !isUserEcho(node) && !userTextIds.has(node.id))
+    .filter((node) => !isUserEcho(node) && !isHostNotice(node) && !userTextIds.has(node.id))
     .map((node) => node.startTime)
     .filter((time): time is number => time !== undefined);
   const consumeStreamed = (body: string, sentAt?: number): boolean => {
@@ -149,6 +164,20 @@ export function laneTranscriptMessages(
   for (const node of nodes) {
     if (userTextIds.has(node.id)) {
       flush();
+      continue;
+    }
+    if (isHostNotice(node)) {
+      // A Ptah status line at its send time, among the messages like an echo.
+      flush();
+      lastTime = node.startTime ?? lastTime;
+      messages.push(
+        createExecutionChatMessage({
+          id: `${laneId}${LANE_NOTICE_MESSAGE_MARKER}${node.id}`,
+          role: 'system',
+          timestamp: lastTime,
+          rawContent: node.content ?? '',
+        }),
+      );
       continue;
     }
     if (isUserEcho(node)) {

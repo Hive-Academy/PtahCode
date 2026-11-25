@@ -633,6 +633,19 @@ describe('AgentMonitorTreeBuilderService', () => {
     });
   });
 
+  describe('host notices (round 7)', () => {
+    it('builds a timed notice node for a hostNotice info segment and keeps other info as before', () => {
+      const nodes = service.buildTreeFromSegments('notice-agent', [
+        { type: 'info', content: 'Grok ran /context and returned no output.', hostNotice: true, sentAt: 42 },
+        { type: 'info', content: 'Plain info' },
+      ]);
+      expect(nodes[0]).toMatchObject({
+        id: 'seg-notice-0', type: 'text', content: 'Grok ran /context and returned no output.', startTime: 42,
+      });
+      expect(nodes[1].id).toBe('seg-info-1');
+    });
+  });
+
   describe('finalizeOrphanedTools', () => {
     it('returns the same reference when no streaming tools exist', () => {
       const nodes: ExecutionNode[] = [

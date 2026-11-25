@@ -61,18 +61,49 @@ describe('CanvasDetailService', () => {
     expect(detail.laneKeyFor('a')).toBe('orchestrator');
   });
 
-  it('follows a cold resume of a restored lane through the user receipt it resolved (F2)', () => {
+  it('never redirects an explicit pick of a lane whose card still exists (round 6)', () => {
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    successors.set(new Map([['agent-1', 'agent-9']]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    detail.open('a', 'cli:agent-1');
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+  });
+
+  it('follows a send from the lane view once, through the receipt of that send (F2, round 6)', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
     detail.open('a', 'cli:agent-1');
     const receipt = (actualAgentId: string, createdAt: number, sender = 'user') =>
       ({ id: `r${createdAt}`, agentId: 'agent-1', actualAgentId, sender, createdAt });
-    // The resolved lane is not on screen yet: stay.
-    receipts.set(new Map([['agent-1', [receipt('agent-9', 1)]]]));
+    // An old receipt from before this send never moves the view.
+    agentsById.set(new Map([['agent-1', {}], ['agent-old', {}]]));
+    receipts.set(new Map([['agent-1', [receipt('agent-old', 1)]]]));
+    detail.followAfterSend('a', 'agent-1');
+    TestBed.tick();
     expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
-    agentsById.set(new Map([['agent-9', {}], ['agent-8', {}]]));
+    // This send resolved to a new lane, not on screen yet: stay, then follow once it is.
+    const now = Date.now();
+    receipts.set(new Map([['agent-1', [receipt('agent-old', 1), receipt('agent-9', now), receipt('agent-7', now + 1, 'parent')]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+    agentsById.set(new Map([['agent-1', {}], ['agent-old', {}], ['agent-9', {}], ['agent-7', {}]]));
+    TestBed.tick();
     expect(detail.laneKeyFor('a')).toBe('cli:agent-9');
-    // The newest user receipt wins; a parent's receipt never moves the view.
-    receipts.set(new Map([['agent-1', [receipt('agent-9', 1), receipt('agent-8', 2), receipt('agent-7', 3, 'parent')]]]));
-    expect(detail.laneKeyFor('a')).toBe('cli:agent-8');
+    // Once: going back to the old lane by hand stays there.
+    detail.selectLaneFor('a', 'cli:agent-1');
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('cli:agent-1');
+  });
+
+  it('drops a follow when the user picked another lane before the resume appeared', () => {
+    agentsById.set(new Map([['agent-1', {}]]));
+    detail.open('a', 'cli:agent-1');
+    detail.followAfterSend('a', 'agent-1');
+    detail.selectLaneFor('a', 'orchestrator');
+    agentsById.set(new Map([['agent-1', {}], ['agent-9', {}]]));
+    receipts.set(new Map([['agent-1', [{ id: 'r', agentId: 'agent-1', actualAgentId: 'agent-9', sender: 'user', createdAt: Date.now() }]]]));
+    TestBed.tick();
+    expect(detail.laneKeyFor('a')).toBe('orchestrator');
   });
 
   it('focuses a known tab and accepts chat lane keys', () => {

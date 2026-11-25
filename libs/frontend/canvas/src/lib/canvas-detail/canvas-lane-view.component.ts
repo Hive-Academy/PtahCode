@@ -255,6 +255,7 @@ const LANE_CLI_PANEL_CLASS =
                         [resumePending]="laneCard.isResuming()"
                         (stopRequested)="laneCard.stopAgent($event)"
                         (resumeRequested)="laneCard.resumeAgent($event)"
+                        (messageAccepted)="followAfterSend(agent.agentId)"
                       />
                     </div>
                   </ptah-chat-session-layout>
@@ -447,6 +448,11 @@ export class CanvasLaneViewComponent {
       if (agent && !agent.expanded)
         this.monitor.toggleAgentExpanded(agent.agentId);
     });
+  }
+
+  /** A message sent from this lane view may resume the lane under a new id: follow it once (F2). */
+  followAfterSend(agentId: string): void {
+    this.detail.followAfterSend(this.tabId(), agentId);
   }
 
   back(): void {

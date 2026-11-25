@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { LucideAngularModule, Play, Square } from 'lucide-angular';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
-import { isAgentBudgetStopReason } from '@ptah-extension/shared';
+import { isAgentBudgetStopReason, type CliAdapterManifest } from '@ptah-extension/shared';
 import { COMPOSER_STOP_BUTTON_CLASS } from '@ptah-extension/chat-ui';
 import { laneGuardStopText } from '../agent-card/agent-card-header.component';
 import { LaneComposerComponent } from '../lane-composer/lane-composer.component';
@@ -45,6 +45,7 @@ import { PtahTooltipDirective } from '@ptah-extension/ui';
             [laneState]="laneState()"
             (stopRequested)="stopRequested.emit($event)"
             (resumeRequested)="resumeRequested.emit($event)"
+            (accepted)="messageAccepted.emit()"
           />
         } @else if (variant() === 'composer' || agent().status === 'starting') {
           <!-- No message field: Stop (or Resume session) stands alone. -->
@@ -80,6 +81,8 @@ export class AgentContinueInputComponent {
   readonly stopPending = input(false);
   readonly resumePending = input(false);
   readonly stopRequested = output<Event>();
+  /** The lane accepted a message the user sent from this composer. */
+  readonly messageAccepted = output<void>();
   readonly resumeRequested = output<Event>();
   protected readonly SquareIcon = Square;
   protected readonly PlayIcon = Play;
@@ -96,14 +99,15 @@ export class AgentContinueInputComponent {
   protected readonly visible = computed(() => {
     const agent = this.agent();
     if (agent.status === 'starting') return false;
-    // The resolved capabilities when the host sent them, else the adapter's
-    // declared ones: a running ACP lane (Grok) can take a message before its
-    // first turn ends (F3).
-    const messaging = (agent.effectiveCapabilities ?? agent.potentialCapabilities)?.messaging;
-    return agent.supportsContinuation === true || !!agent.cliSessionId ||
-      (agent.status === 'running' && (
-        messaging?.steer.state === 'supported' || messaging?.continuation.state === 'supported'
-      ));
+    if (agent.supportsContinuation === true || !!agent.cliSessionId) return true;
+    // A running lane takes a message when it steers or continues. The host's
+    // effective snapshot is taken at spawn, before an ACP (Grok) session is
+    // set up, so it says `continuation: unsupported` and `supportsContinuation`
+    // is false until the first turn ends. The adapter's declared manifest says
+    // what the lane can do once the session exists, so either set counts (F3).
+    // The composer's delivery previews still decide what a send does.
+    return agent.status === 'running' &&
+      (takesMessages(agent.effectiveCapabilities?.messaging) || takesMessages(agent.potentialCapabilities?.messaging));
   });
 }
 
@@ -134,4 +138,9 @@ export function laneStateChip(agent: MonitoredAgent): LaneStateChip | null {
       : agent.stopReason === 'host-restart' ? 'Interrupted'
         : 'Stopped';
   return { label, detail, tone: failed || agent.status === 'timeout' ? 'err' : budget ? 'need' : 'idle' };
+}
+
+/** A lane that steers or continues can take a message while it runs. */
+function takesMessages(messaging: CliAdapterManifest['messaging'] | undefined): boolean {
+  return messaging?.steer.state === 'supported' || messaging?.continuation.state === 'supported';
 }

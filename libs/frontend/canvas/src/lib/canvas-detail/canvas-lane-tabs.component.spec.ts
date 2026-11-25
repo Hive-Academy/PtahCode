@@ -262,6 +262,20 @@ describe('CanvasLaneTabsComponent', () => {
     fixture.destroy();
   });
 
+  it('keeps a stopping lane in the rail until its process exits, and drops a stopped one (PR 1512 review)', () => {
+    agents.set([
+      { ...cli({ agentId: 'stopping', parentSessionId: 'owner', cli: 'Stopping', status: 'stopped' }),
+        stopRequestedAt: 5, stopAcknowledged: true } as CliFixture,
+      cli({ agentId: 'stopped', parentSessionId: 'owner', cli: 'Stopped', status: 'stopped' }),
+    ]);
+    const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
+    fixture.componentRef.setInput('tabId', TAB_ID);
+    fixture.componentRef.setInput('rail', true);
+    fixture.detectChanges();
+    expect(tabLabels(fixture.nativeElement)).toEqual([expect.stringContaining('Stopping')]);
+    fixture.destroy();
+  });
+
   it('rail arrow keys move focus only, keep one tab stop, and leave selection to Enter or a click', async () => {
     agents.set(cliRoster(7));
     const fixture = TestBed.createComponent(CanvasLaneTabsComponent);

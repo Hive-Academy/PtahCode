@@ -375,10 +375,19 @@ export class InspectorSessionStatsComponent {
   });
 
   protected readonly modelsOpen = computed(() => this.expansion.isOpen(this.sessionKey(), 'models'));
-  /** The model the session runs now: the live stats' model, else the snapshot's. */
+  /**
+   * The model the session runs now: the model pill's model (the selection the
+   * next turn uses), else the latest turn's primary model, else the snapshot's.
+   * The latest turn's pick ranks by cost, so a session that switched to Haiku
+   * can still report an older model there; the pill does not (round 6).
+   * When a usage row is the same model (a dated id, a tier alias), the row's
+   * id is used, so it is matched and named once.
+   */
   protected readonly currentModelId = computed(() => {
-    const { snapshot, liveModelStats } = this.stats();
-    return liveModelStats?.model ?? snapshot?.model ?? null;
+    const { snapshot, liveModelStats, currentModel } = this.stats();
+    const id = currentModel || liveModelStats?.model || snapshot?.model || null;
+    if (!id) return null;
+    return snapshot?.modelUsageList?.find((row) => sameModel(row.model, id))?.model ?? id;
   });
   protected readonly modelNames = computed(() => {
     const { snapshot } = this.stats();
@@ -387,7 +396,7 @@ export class InspectorSessionStatsComponent {
     const used = rows?.length ? rows.map(({ model }) => model) : [];
     // The session's current model leads the summary ("Haiku 4.5 +2"); the
     // usage list is in first-use order, so its head is the session's first
-    // model, not the one it runs now.
+    // model, not the one it runs now. Display names, raw ids only when unknown.
     const ids = primary ? [primary, ...used.filter((id) => id !== primary)] : used;
     return ids.map((id) => resolveModelDisplayName(id, this.modelState.availableModels()));
   });
@@ -458,4 +467,22 @@ export class InspectorSessionStatsComponent {
       laneCount: laneAmounts.length,
     } as const;
   }
+}
+
+/** A provider date suffix: `-20251001` or `-2025-10-01`. */
+const MODEL_DATE_SUFFIX = /^-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+
+/**
+ * Whether two model ids name the same model: equal ignoring case, one is the
+ * other plus a date suffix, or one is a tier alias (`haiku`) of the other.
+ */
+export function sameModel(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  if (x === y) return true;
+  const dated = (longer: string, base: string) => longer.startsWith(base) && MODEL_DATE_SUFFIX.test(longer.slice(base.length));
+  if (dated(x, y) || dated(y, x)) return true;
+  // A tier word after the vendor prefix: `haiku` names `claude-haiku-4-5`, `claude` names nothing.
+  const alias = (word: string, id: string) => !word.includes('-') && id.split('-').slice(1).includes(word);
+  return alias(x, y) || alias(y, x);
 }

@@ -339,17 +339,27 @@ export class LaneDeliveryController {
       });
     });
     effect(() => {
-      // Messages recovered from undelivered receipts ("Recover text") land
-      // in this draft, oldest first, each with its own files, images, model
-      // and effort. With two composers on one lane, only the preferred one
-      // takes them.
-      if (!this.sources() || !this.preferred()) return;
+      // Messages recovered from undelivered receipts ("Recover text") come
+      // back one at a time, oldest first: the oldest lands in an empty draft
+      // with its own files, images, model and effort; the rest stay queued
+      // in the store until that one is sent or cleared. Merging them into one
+      // draft combined their text and kept only one turn's model or effort
+      // (PR 1512 review). With two composers on one lane, only the preferred
+      // one takes them.
+      const sources = this.sources();
+      if (!sources || !this.preferred()) return;
       const agentId = this.agentId();
       if (!this.store.recovered().has(agentId)) return;
+      const empty = sources.draft().trim() === '' &&
+        this.attachments.files().length === 0 && this.attachments.images().length === 0;
+      if (!empty) return;
       untracked(() => {
+        // A recovered message without text has nothing to restore; skip to the next.
         for (let message = this.store.takeRecoveredMessage(agentId); message;
           message = this.store.takeRecoveredMessage(agentId)) {
-          if (message.text) this.restore(message.text, this.snapshotFromTurn(message.turn));
+          if (!message.text) continue;
+          this.restore(message.text, this.snapshotFromTurn(message.turn));
+          return;
         }
       });
     });

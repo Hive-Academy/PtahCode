@@ -27,6 +27,7 @@ import {
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  type MonitoredAgent,
   LANE_OPTIONS_CHECKING_TEXT,
   LANE_OPTIONS_ERROR_TEXT,
   LANE_OPTIONS_STALE_TEXT,
@@ -151,6 +152,28 @@ export function findLaneModelOption(
   // A dated catalog id: only when exactly one row is the recorded id plus a date.
   const rows = options.filter((option) => dated(option.id.toLowerCase(), wanted));
   return rows.length === 1 ? rows[0] : undefined;
+}
+
+/**
+ * The model the lane's last run used, as the frontend saw it: the provider's
+ * reported model, else the model of its folded usage, else the newest usage
+ * segment's model. A lane restored after a host restart has no stored model,
+ * but its output can still name the model it ran (round 6: an orphan whose
+ * last turn ran Opus read "claude default"). The multi-model id names none.
+ */
+export function laneLastRunModel(
+  record: Pick<MonitoredAgent, 'observedModel' | 'usageTotals' | 'segments'> | undefined,
+): string | undefined {
+  if (!record) return undefined;
+  const usable = (model: string | undefined) => (model && model !== MULTI_MODEL_ID ? model : undefined);
+  const known = usable(record.observedModel) ?? usable(record.usageTotals?.model ?? undefined);
+  if (known) return known;
+  const segments = record.segments ?? [];
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const model = usable(segments[i].usage?.model);
+    if (model) return model;
+  }
+  return undefined;
 }
 
 function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion {
@@ -339,7 +362,7 @@ export class LaneComposerComponent {
    */
   protected readonly selectedModel = computed(() => {
     const record = this.record();
-    const id = [this.pending().model, record?.model, this.catalog().options?.currentModel, record?.observedModel]
+    const id = [this.pending().model, record?.model, this.catalog().options?.currentModel, laneLastRunModel(record)]
       .find((candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID);
     if (!id) return null;
     return findLaneModelOption(this.modelOptions(), id)?.id ?? id;
@@ -369,7 +392,7 @@ export class LaneComposerComponent {
   /** The model the provider confirmed (compact bar chip), never the pending pick. */
   protected readonly confirmedModelLabel = computed(() => {
     const record = this.record();
-    const id = [record?.model, record?.observedModel].find(
+    const id = [record?.model, laneLastRunModel(record)].find(
       (candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID,
     );
     if (!id) return '';
@@ -521,7 +544,16 @@ export class LaneComposerComponent {
     if (this.imagesBlocked()) return this.imagesBlockedText();
     const overLimit = this.attachmentLimitText();
     if (overLimit) return overLimit;
-    return this.composerInput.statusNote() ?? this.actionNote() ?? '';
+    return this.composerInput.statusNote() ?? this.actionNote() ?? this.recoveredNote();
+  });
+  /** Recovered messages still queued: they load into the draft one at a time. */
+  private readonly recoveredNote = computed(() => {
+    const waiting = this.deliveryStore.recovered().get(this.agentId());
+    const count = Array.isArray(waiting) ? waiting.length : waiting ? 1 : 0;
+    if (count === 0) return '';
+    return count === 1
+      ? '1 recovered message waits. It loads here when the draft is empty.'
+      : `${count} recovered messages wait. Each loads here, one at a time, when the draft is empty.`;
   });
   protected readonly noticeNeedsAction = computed(
     () => this.imagesBlocked() || this.attachmentLimitText() !== null,
@@ -620,7 +652,7 @@ export class LaneComposerComponent {
       const settled = previousStatus !== undefined && previousStatus !== status &&
         (previousStatus === 'running' || previousStatus === 'starting');
       previousStatus = status;
-      if (!settled || !record || record.model || record.observedModel) return;
+      if (!settled || !record || record.model || laneLastRunModel(record)) return;
       untracked(() => {
         const catalog = this.settings.catalog(this.agentId());
         if (catalog.status === 'ready' && !catalog.options?.currentModel) void this.loadCatalog();
@@ -728,8 +760,12 @@ export class LaneComposerComponent {
     if (this.confirmLoss() || this.preparingNow) return;
     if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked() || this.attachmentLimitText()) return;
     if (this.waitForReads()) return;
+    // The lane can change while the refresh runs (a dock click); the draft
+    // then belongs to another lane and must not be sent (PR 1512 review).
+    const lane = this.agentId();
     // Steer or interrupt is the running turn's state now, not at the last refresh.
     if (!(await this.prepareNow())) return;
+    if (this.agentId() !== lane) return;
     if (this.confirmLoss() || this.stopped() || this.delivery.nowDisabled()) return;
     // The tray can change during the refresh. A block shows its reason on
     // the status line (imagesBlockedText / attachmentLimitText); a read waits.
@@ -766,7 +802,10 @@ export class LaneComposerComponent {
   protected async requestQueuedNow(id: string): Promise<void> {
     // An open dialog keeps its target: confirming sends what it was opened for.
     if (this.confirmLoss() || this.preparingNow) return;
+    const lane = this.agentId();
     if (!(await this.prepareNow())) return;
+    // The queued card belongs to the lane it was shown for (PR 1512 review).
+    if (this.agentId() !== lane) return;
     if (this.confirmLoss() || this.stopped() || !this.delivery.state().now || this.delivery.state().nowDisabledReason) return;
     this.lossTarget = { kind: 'queued', id };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);

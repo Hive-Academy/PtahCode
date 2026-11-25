@@ -335,15 +335,22 @@ describe('LaneDeliveryController', () => {
     expect(attachments.files()).toEqual([FILE]);
   });
 
-  it('puts recovered text from a Recover text action into the draft', () => {
+  it('puts recovered text from a Recover text action into the draft once the draft is empty', () => {
     draft.set('Draft');
     recovered.set(new Map([[AGENT, { text: 'Recovered' }]]));
     TestBed.tick();
-    expect(draft()).toBe('Draft\nRecovered');
+    // Never merged into what the user is writing: it waits in the store.
+    expect(draft()).toBe('Draft');
+    draft.set('');
+    TestBed.tick();
+    expect(draft()).toBe('Recovered');
   });
 
-  it('takes every waiting recovered message, oldest first, each with its own turn (T2)', () => {
-    const waiting = [{ text: 'First' }, { text: 'Second', turn: { files: [FILE.path] } }];
+  it('restores recovered messages one at a time, oldest first, each with its own turn (PR 1512 review)', () => {
+    const waiting = [
+      { text: 'First', turn: { model: 'gpt-5.5' } },
+      { text: 'Second', turn: { files: [FILE.path], model: 'gpt-5.5-mini' } },
+    ];
     const take = jest.spyOn(store, 'takeRecoveredMessage').mockImplementation(() => {
       const message = waiting.shift() ?? null;
       if (waiting.length === 0) recovered.set(new Map());
@@ -352,7 +359,15 @@ describe('LaneDeliveryController', () => {
     try {
       recovered.set(new Map([[AGENT, { text: 'First' }]]));
       TestBed.tick();
-      expect(draft()).toBe('First\nSecond');
+      // Only the oldest: its text alone, the second still queued.
+      expect(draft()).toBe('First');
+      expect(attachments.files()).toEqual([]);
+      expect(waiting).toHaveLength(1);
+      // Sent (the draft empties): the next one loads with its own files.
+      draft.set('');
+      recovered.set(new Map([[AGENT, { text: 'Second' }]]));
+      TestBed.tick();
+      expect(draft()).toBe('Second');
       expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
     } finally {
       take.mockRestore();

@@ -23,7 +23,7 @@ import {
   streamingTurnIdsOf,
   turnLogOpenOf,
 } from './transcript-turn-contexts';
-import { laneTranscriptMessages } from './lane-transcript-messages';
+import { isLaneNoticeMessage, laneTranscriptMessages } from './lane-transcript-messages';
 import { LaneLogChoicesStore } from './lane-log-choices.store';
 import { laneThreadEntries } from './lane-thread';
 import { LaneThreadRowComponent } from './lane-thread-row.component';
@@ -50,6 +50,17 @@ import { echoImagesFor, laneEchoImages } from './lane-echo-images';
         </section>
       }
       @for (message of messages(); track message.id; let i = $index) {
+        @if (isNotice(message)) {
+          <!-- A Ptah host notice ("Grok ran /context and returned no output."): a neutral status row, no bubble. -->
+          <p
+            class="chat-msg-slot flex min-w-0 items-center gap-2 pb-3 text-xs text-base-content-muted"
+            data-testid="lane-host-notice"
+            [attr.data-ptah-transcript-message-id]="message.id"
+          >
+            <span class="min-w-0 break-words">{{ message.rawContent }}</span>
+            <time class="shrink-0" [attr.datetime]="isoTime(message.timestamp)">{{ shortTime(message.timestamp) }}</time>
+          </p>
+        } @else {
         @let turn = contexts().get(message.id) ?? null;
         @let live = turn !== null && liveTurns().has(turn.turnId);
         <div
@@ -88,6 +99,7 @@ import { echoImagesFor, laneEchoImages } from './lane-echo-images';
             }
           }
         </div>
+        }
       }
     </div>
   `,
@@ -109,6 +121,15 @@ export class LaneTranscriptComponent {
   protected readonly messages = computed(() =>
     laneTranscriptMessages(this.laneId(), this.nodes(), this.events()),
   );
+  /** The bubbles: turn contexts and live turns never see the host notice rows. */
+  private readonly bubbles = computed(() => this.messages().filter((message) => !isLaneNoticeMessage(message)));
+  protected readonly isNotice = isLaneNoticeMessage;
+  protected isoTime(timestamp: number): string | null {
+    return timestamp > 0 ? new Date(timestamp).toISOString() : null;
+  }
+  protected shortTime(timestamp: number): string {
+    return timestamp > 0 ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  }
   private readonly agent = computed(() => this.monitor?.agentsById?.().get(this.laneId()));
   /** Sent images per user echo, from the lane's live `user` segments. */
   private readonly echoImages = computed(() => laneEchoImages(this.agent()?.segments));
@@ -133,14 +154,14 @@ export class LaneTranscriptComponent {
     return sender ? (sender.displayName ?? sender.cli) : undefined;
   }
   protected readonly contexts = computed(() =>
-    this.turnContexts.compute(this.messages()),
+    this.turnContexts.compute(this.bubbles()),
   );
   protected readonly liveTurns = computed(() =>
     streamingTurnIdsOf(
-      this.messages(),
+      this.bubbles(),
       this.isStreaming()
-        ? Math.max(0, this.messages().length - 1)
-        : this.messages().length,
+        ? Math.max(0, this.bubbles().length - 1)
+        : this.bubbles().length,
       this.contexts(),
     ),
   );
