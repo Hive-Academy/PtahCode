@@ -15,11 +15,12 @@ import {
   type FakeAcpTransport,
 } from './__fixtures__/fake-acp-agent';
 import { readAcpFixture, recordedResult } from './__fixtures__/acp-fixture-reader';
+import { antigravityAcpProfile } from './profiles/antigravity-acp-profile';
 import { grokAcpProfile } from './profiles/grok-acp-profile';
 import type { AcpSpawnOptions } from './acp-process-transport';
 import * as loader from './acp-sdk-loader';
 import { createAcpSession, readAvailableCommands, type AcpSession } from './acp-session-runtime';
-import type { AcpVendorProfile } from './acp-vendor-profile';
+import type { AcpSessionOptions, AcpVendorProfile } from './acp-vendor-profile';
 
 const SESSION_ID = 'sess-1';
 
@@ -48,6 +49,7 @@ function start(
   agentOptions: FakeAcpAgentOptions = {},
   script?: (agent: FakeAcpAgent) => void,
   sessionProfile: AcpVendorProfile = profile,
+  sessionOptions: Partial<AcpSessionOptions> = {},
 ): Harness {
   const agent = createFakeAcpAgent({ sessionId: SESSION_ID, ...agentOptions });
   live.push(agent);
@@ -60,7 +62,12 @@ function start(
   const logger = createMockLogger();
   const session = createAcpSession({
     profile: sessionProfile,
-    options: { workingDirectory: process.cwd(), agentId: 'agent-1', mcp: [] },
+    options: {
+      workingDirectory: process.cwd(),
+      agentId: 'agent-1',
+      mcp: [],
+      ...sessionOptions,
+    },
     command: 'test-agent',
     baseEnv: { PATH: '/bin' },
     transportFactory: (options) => {
@@ -90,6 +97,97 @@ afterEach(async () => {
 });
 
 describe('createAcpSession', () => {
+  it.each([
+    { vendorProfile: grokAcpProfile, effortId: 'reasoning_effort' },
+    { vendorProfile: antigravityAcpProfile, effortId: 'thought_level' },
+  ])(
+    'reports the model and native effort choices from $vendorProfile.displayName',
+    async ({ vendorProfile, effortId }) => {
+      const h = start(
+        {},
+        (agent) => agent.handle('session/new', () => ({
+          result: {
+            sessionId: SESSION_ID,
+            models: { currentModelId: 'reply-model' },
+            configOptions: [
+              { id: 'model-option', category: 'model', currentValue: 'option-model' },
+              {
+                id: effortId,
+                currentValue: 'vendor-effort',
+                options: [
+                  { value: 'low' },
+                  { group: 'other', options: [{ value: 'vendor-effort' }] },
+                ],
+              },
+            ],
+          },
+        })),
+        vendorProfile,
+      );
+
+      await h.session.start();
+      expect(h.session.getReportedState()).toEqual({
+        model: 'reply-model',
+        effort: 'vendor-effort',
+        efforts: {
+          provenance: 'native',
+          supported: ['low', 'vendor-effort'],
+          default: null,
+        },
+      });
+      h.abort.abort();
+    },
+  );
+
+  it('reports the model option and current effort when there is no effort list', async () => {
+    const h = start(
+      {
+        configOptions: [
+          { id: 'model-option', category: 'model', currentValue: 'option-model' },
+          { id: 'reasoning_effort', currentValue: 'high', options: [] },
+        ],
+      },
+      (agent) => agent.handle('session/set_config_option', () => ({
+        result: {
+          configOptions: [
+            { id: 'reasoning_effort', options: [{ value: 'low' }] },
+          ],
+        },
+      })),
+      grokAcpProfile,
+    );
+
+    await h.session.start();
+    expect(h.session.getReportedState()).toEqual({
+      model: 'option-model',
+      effort: 'high',
+      efforts: { provenance: 'unknown' },
+    });
+    await expect(h.session.setEffort('low')).resolves.toBe(true);
+    expect(h.session.getReportedState()).toEqual({
+      model: null,
+      effort: null,
+      efforts: { provenance: 'native', supported: ['low'], default: null },
+    });
+    h.abort.abort();
+  });
+
+  it('keeps unreported values unknown after model and effort requests', async () => {
+    const h = start(
+      { configOptions: [{ id: 'reasoning_effort', options: [] }] },
+      undefined,
+      grokAcpProfile,
+      { model: 'requested-model', reasoningEffort: 'high' },
+    );
+
+    await h.session.start();
+    const unknown = { model: null, effort: null, efforts: { provenance: 'unknown' } };
+    expect(h.session.getReportedState()).toEqual(unknown);
+    await expect(h.session.setModel('acknowledged-model')).resolves.toBe(true);
+    expect(h.session.getReportedState()).toEqual(unknown);
+    h.abort.abort();
+  });
+
   it('hands the profile argv, the complete env and the console flag to the transport', () => {
     const h = start();
     expect(h.spawn()?.args).toEqual(['agent', 'stdio']);
