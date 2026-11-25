@@ -44,6 +44,7 @@ import {
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
+  AgentOutputDelta,
   CliAdapterManifest,
   EffectiveLanePolicy,
   AgentRoleChannel,
@@ -3132,8 +3133,11 @@ export class AgentProcessManager {
       );
     }
 
-    const warning = tracked.heldBudgetWarning;
-    const routedMessage = takeHeldBudgetWarning(tracked, message);
+    // A raw provider `/command` (`noSteer`, set only for one) must reach the
+    // CLI as typed: text before it would turn it into plain prose (D6). A held
+    // warning waits for the next ordinary message instead.
+    const warning = input.noSteer ? undefined : tracked.heldBudgetWarning;
+    const routedMessage = input.noSteer ? message : takeHeldBudgetWarning(tracked, message);
     try {
       const outcome = await this.messageRouter.route(
         agentId,
@@ -3819,7 +3823,23 @@ export class AgentProcessManager {
       };
     }
 
-    this.events.emit('agent:output', delta);
+    this.events.emit('agent:output', this.withSteerChange(tracked, delta));
+  }
+
+  /**
+   * Stamps `steerAvailable` on the delta when it changed since the last one
+   * (D1). A Claude lane's steer opens when a tool starts and closes when it
+   * ends; both produce output, so the throttled flush carries the change and
+   * the composer refetches its preview. Handles without steer never stamp.
+   */
+  private withSteerChange(tracked: TrackedAgent, delta: AgentOutputDelta): AgentOutputDelta {
+    const handle = tracked.sdkHandle;
+    if (typeof handle?.steer !== 'function') return delta;
+    const available =
+      tracked.info.status === 'running' && handle.supportsSteer?.() !== false;
+    if (available === tracked.publishedSteerAvailable) return delta;
+    tracked.publishedSteerAvailable = available;
+    return { ...delta, steerAvailable: available };
   }
 
   /**
@@ -4212,12 +4232,15 @@ export class AgentProcessManager {
         code === 0 && !structuredLimitTexts.length ? null : limit,
         observedAt,
       );
-    } else if (!tracked.info.completedAt) {
-      const completedAt = new Date().toISOString();
+    } else {
+      // Already terminal (a stop or a timeout stamped it): the process has now
+      // really exited. Its exit code rides the `agent:exited` below, so the
+      // card can end "Stopping…" here and not at the stop request.
+      const completedAt = tracked.info.completedAt ?? new Date().toISOString();
       tracked.info = {
         ...tracked.info,
-        completedAt,
-        lastActivityAt: completedAt,
+        ...(code !== null ? { exitCode: code } : {}),
+        ...(tracked.info.completedAt ? {} : { completedAt, lastActivityAt: completedAt }),
       };
     }
     this.events.emit('agent:turn-settled', {

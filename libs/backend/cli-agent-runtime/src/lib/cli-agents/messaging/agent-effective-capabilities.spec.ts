@@ -140,7 +140,7 @@ describe('resolveEffectiveLaneCapabilities', () => {
         images: { state: 'supported', onResume: true } } };
       const named = { ...grok, status: 'stopped' as const, accountBindingId: 'run-1' } as AgentProcessInfo;
       expect(resolveEffectiveLaneCapabilities(named, resumable).turnInput?.images)
-        .toEqual({ state: 'unsupported', reason: 'Images need a running lane.' });
+        .toEqual({ state: 'unsupported', onResume: true, reason: 'Images need a running lane on a named-account Claude lane.' });
     });
 
     it('hides steer when supportsSteer reports false', () => {

@@ -11,7 +11,7 @@ import {
   type MatrixCell,
   type ValueMatrixCell,
 } from './matrix.types';
-import { AUTOMATIC_MATRIX_MODEL, deriveLocalMatrix, isCapacityFailure } from './local-derivation';
+import { AUTOMATIC_MATRIX_MODEL, deriveLocalMatrix, isCapacityFailure, isExcludedFromRates } from './local-derivation';
 
 describe('capacity and open reviews', () => {
   const base = { family: 'test-family', model: 'test-model', taskKind: 'implement' as const, endedAt: Date.parse('2026-10-14T23:59:59.000Z') };
@@ -23,6 +23,15 @@ describe('capacity and open reviews', () => {
   it.each(['usage-limit', 'auth', 'timeout'] as const)('excludes a %s no-deliverable from capability', (failureClass) => {
     const missing = summary({ ...base, runId: `nd-${failureClass}`, verdict: 'no-deliverable', failureClass });
     expect(deriveLocalMatrix([missing], NOW).profiles).toEqual([]);
+  });
+  it('excludes a caller stop (user-stop) from capability, neither failure nor denominator', () => {
+    const stopped = summary({ ...base, runId: 'stopped', verdict: 'failed', failureClass: 'user-stop' });
+    expect(isExcludedFromRates('user-stop')).toBe(true);
+    expect(isCapacityFailure('user-stop')).toBe(false);
+    expect(deriveLocalMatrix([stopped], NOW).profiles).toEqual([]);
+    const delivered = summary({ ...base, runId: 'delivered', verdict: 'delivered' });
+    expect(valueAt(deriveLocalMatrix([delivered, stopped], NOW), base.family, base.model))
+      .toEqual(valueAt(deriveLocalMatrix([delivered], NOW), base.family, base.model));
   });
   it('counts one open revise and leaves later approval successful', () => {
     const open = summary({ ...base, runId: 'open', verdict: 'unverified', reviseRounds: 3 });

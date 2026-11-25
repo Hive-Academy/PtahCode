@@ -39,6 +39,8 @@ export interface TrackedAgent {
    */
   laneNoticeChanged?: (current: AgentActionNotice | undefined) => void;
   info: AgentProcessInfo;
+  /** Steer availability last published on an `agent:output` delta (D1). */
+  publishedSteerAvailable?: boolean;
   /** Admission has been returned to an MCP caller. */
   spawnReplied?: boolean;
   /** CLI label was filled only to satisfy the record shape. */

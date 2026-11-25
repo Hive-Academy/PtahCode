@@ -785,13 +785,15 @@ describe('LaneCompletionNotifier.signal', () => {
       expect(h.envelope()).toContain('did not finish');
     });
 
-    it('reports `failed` for a lane the caller stopped', async () => {
+    it('reports `stopped`, not `failed`, for a lane the caller stopped', async () => {
       const h = createHarness();
 
       const result = await h.notifier.signal(createInfo({ status: 'stopped' }));
 
       expect(result.signal?.status).toBe('stopped');
-      expect(result.signal?.verdict).toBe('failed');
+      expect(result.signal?.verdict).toBe('stopped');
+      expect(h.envelope()).toContain('verdict="stopped"');
+      expect(h.envelope()).toContain('stopped on request');
     });
 
     it('omits the host-stop fields for a caller stop', async () => {
@@ -1790,6 +1792,18 @@ describe('LaneCompletionNotifier review capture', () => {
     );
     const h = captureHarness();
     await h.notifier.signal(reviewInfo({ status: 'failed', exitCode: 1 }));
+    await flushCapture();
+    expect(h.captureReview).not.toHaveBeenCalled();
+  });
+
+  it('does not capture a review run the caller stopped (partial file)', async () => {
+    writeFileSync(
+      join(dir, 'review.md'),
+      'Reviewed-Run: agent-x\nVerdict: REVISE',
+    );
+    const h = captureHarness();
+    const delivery = await h.notifier.signal(reviewInfo({ status: 'stopped' }));
+    expect(delivery.signal?.verdict).toBe('stopped');
     await flushCapture();
     expect(h.captureReview).not.toHaveBeenCalled();
   });

@@ -758,6 +758,12 @@ export interface CliOutputSegment {
   readonly messageId?: string;
   /** Host send time in epoch ms (for `user` segments), to order the echo among stream events. */
   readonly sentAt?: number;
+  /**
+   * Images the user sent with the message (for `user` segments), for the
+   * echo thumbnail. Live deltas only: the persisted output drops them, so a
+   * reloaded transcript shows the echo text without its images.
+   */
+  readonly images?: readonly import('./rpc/rpc-chat.types').InlineImageAttachment[];
 }
 
 export interface AgentOutputDelta {
@@ -769,6 +775,13 @@ export interface AgentOutputDelta {
   readonly segments?: readonly CliOutputSegment[];
   /** Rich streaming events from Ptah CLI adapter (optional — only ptah-cli uses this) */
   readonly streamEvents?: readonly FlatStreamEventUnion[];
+  /**
+   * Whether a steer can join the running turn now. Present only on the delta
+   * where it changed for a lane whose handle exposes steer (a Claude lane
+   * offers steer only while one of its tools runs). The composer refetches
+   * `agent:previewMessage` when it sees this field.
+   */
+  readonly steerAvailable?: boolean;
 }
 
 /**
@@ -898,10 +911,13 @@ export interface LaneDeliverableCheck {
  * - `unverified` — terminal status `completed` (or a host stop) and nothing
  *   was declared, so there is nothing to check. Read the output before you
  *   trust it.
- * - `failed` — any other ending: a crash, a timeout or a caller stop.
+ * - `stopped` — the caller (the user's Stop or `ptah_agent_stop`) stopped the
+ *   lane: status `stopped` with no host `stopReason`. Not a failure; the work
+ *   is unfinished and can be resumed.
+ * - `failed` — any other ending: a crash or a timeout.
  */
 export type LaneCompletionVerdict =
-  'delivered' | 'no-deliverable' | 'unverified' | 'failed';
+  'delivered' | 'no-deliverable' | 'unverified' | 'failed' | 'stopped';
 
 /** The payload pushed to the session that spawned the lane. */
 export interface LaneCompletionSignal {

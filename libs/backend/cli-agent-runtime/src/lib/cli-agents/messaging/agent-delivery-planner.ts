@@ -7,6 +7,7 @@ import type {
   LaneTurnSettings,
 } from '@ptah-extension/shared';
 import { blockedLaneCommand, blockedLaneCommandReason } from '../cli-adapters/lane-command-filter';
+import { LANE_IMAGES_NEED_RUNNING_TEXT } from './agent-effective-capabilities';
 
 export interface AgentDeliveryPlanInput {
   readonly agentId: AgentMessagePreview['agentId'];
@@ -85,7 +86,10 @@ export function turnInputRefusal(
   const files = (turn.files?.length ?? 0) > 0;
   if (!input) return model || effort || images || files ? unsupported(TURN_INPUT_NOT_REPORTED) : undefined;
   if (images) {
-    if (plan.usesResume) return unsupported('Images need a running lane.');
+    // A cold resume carries images only where the manifest says its first
+    // turn does (`images.onResume`); the resolved item then also says
+    // whether this lane can (a named-account Claude lane cannot).
+    if (plan.usesResume && input.images.onResume !== true) return unsupported(LANE_IMAGES_NEED_RUNNING_TEXT);
     if (input.images.state !== 'supported') return unsupported(input.images.reason ?? 'This lane cannot take images.');
     if (plan.mode === 'steer' && input.images.onSteer !== true)
       return unsupported('Images cannot ride on a steer for this lane; queue the message instead.');

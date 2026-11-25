@@ -160,6 +160,7 @@ import {
 } from './tracked-agent';
 import type {
   AgentActionNotice,
+  AgentOutputDelta,
   AgentProcessInfo,
   CliAdapterManifest,
   AgentRoleDefinition,
@@ -3803,6 +3804,58 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       );
     });
 
+    it('stamps steerAvailable on the output delta only when it changes (D1)', async () => {
+      let steerOpen = false;
+      Object.assign(sdkControls.handle, {
+        steer: jest.fn(async () => undefined),
+        supportsSteer: () => steerOpen,
+      });
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const deltas: AgentOutputDelta[] = [];
+      manager.events.on('agent:output', (delta: AgentOutputDelta) => deltas.push(delta));
+      const flush = (data: string): void => {
+        sdkControls.emitOutput(data);
+        jest.advanceTimersByTime(250);
+      };
+      flush('turn starts');
+      flush('still thinking');
+      steerOpen = true;
+      flush('tool started');
+      flush('tool output');
+      steerOpen = false;
+      flush('tool ended');
+      expect(deltas.map((delta) => delta.steerAvailable))
+        .toEqual([false, undefined, true, undefined, false]);
+    });
+
+    it('never stamps steerAvailable for a handle without steer (D1)', async () => {
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const deltas: AgentOutputDelta[] = [];
+      manager.events.on('agent:output', (delta: AgentOutputDelta) => deltas.push(delta));
+      sdkControls.emitOutput('output');
+      jest.advanceTimersByTime(250);
+      expect(deltas).toHaveLength(1);
+      expect(deltas[0]).not.toHaveProperty('steerAvailable');
+    });
+
+    it('sends a second agent:exited with the exit code once a stopped process really exits', async () => {
+      const result = await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const exits: AgentProcessInfo[] = [];
+      manager.events.on('agent:exited', (info: AgentProcessInfo) => exits.push(info));
+      const stopped = manager.stop(result.agentId);
+      jest.advanceTimersByTime(600);
+      await stopped;
+      expect(exits).toHaveLength(1);
+      expect(exits[0]).toMatchObject({ status: 'stopped' });
+      expect(exits[0].exitCode).toBeUndefined();
+      sdkControls.resolve(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      jest.advanceTimersByTime(5_000);
+      expect(exits).toHaveLength(2);
+      expect(exits[1]).toMatchObject({ status: 'stopped', exitCode: 1 });
+    });
+
     it('flushes buffered output before signalling a stop', async () => {
       const result = await manager.spawn({
         task: 'Task',
@@ -4961,6 +5014,24 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       await settle();
       await manager.sendToAgent(agentId, 'second message');
       expect(controls.continueMessages[1]).toBe('second message');
+    });
+
+    it('keeps a held budget warning off a raw /command and sends it with the next message (D6)', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const agentId = await spawnWithHandle(controls.handle);
+      controls.resolve(0);
+      await settle();
+      const tracked = manager.getMessageRoutableAgent(agentId);
+      if (!tracked) throw new Error('Expected tracked lane');
+      Object.assign(tracked, { heldBudgetWarning: 'Budget warning: finish work.' });
+
+      await manager.sendToAgent(agentId, '/skill-design-principles', 'queue', undefined, false,
+        { rawBody: '/skill-design-principles', noSteer: true });
+      expect(controls.continueMessages).toEqual(['/skill-design-principles']);
+      controls.resolveContinue(0);
+      await settle();
+      await manager.sendToAgent(agentId, 'next message');
+      expect(controls.continueMessages[1]).toBe('Budget warning: finish work.\n\nnext message');
     });
 
     it('refuses with unsupported when the handle offers no mechanism at all', async () => {

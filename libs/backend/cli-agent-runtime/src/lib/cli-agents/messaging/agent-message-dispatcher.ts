@@ -10,6 +10,7 @@ import type {
   AgentMessageOutcome,
   AgentMessagePreview,
   AgentProcessInfo,
+  InlineImageAttachment,
   LaneTurnRequest,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -94,6 +95,11 @@ export class AgentMessageDispatcher {
       return this.refuseHeld(attempt, 'turn-input-unsupported', blockedLaneCommandReason(blocked));
     const form = await this.deliveryForm(attempt);
     if ('refusal' in form) return this.refuseHeld(attempt, form.refusal, form.lastError);
+    // The command name only (an advertised name), never its arguments.
+    if (form.raw)
+      this.deps.logger.info('[AgentMessageCoordinator] Delivering a raw lane command', {
+        agentId: attempt.laneId, command: leadingLaneCommand(attempt.body)?.slice(0, 64),
+      });
     let dispatching: AgentMessageEnvelope;
     try {
       // The raw decision is written with the journal record, once, so a retry
@@ -232,7 +238,7 @@ export class AgentMessageDispatcher {
     } catch (error: unknown) {
       return this.failed(attempt, dispatching, error);
     }
-    this.echoCold(attempt, spawnedId, sentAt);
+    this.echoCold(attempt, spawnedId, sentAt, turn?.images);
     try {
       await this.deps.aliases.record(attempt.laneId, spawnedId);
     } catch (error: unknown) {
@@ -338,10 +344,15 @@ export class AgentMessageDispatcher {
   }
 
   /** The user echo of a cold resume, on the resumed lane's own output. */
-  private echoCold(attempt: DispatchAttempt, agentId: AgentId, sentAt: number): void {
+  private echoCold(
+    attempt: DispatchAttempt,
+    agentId: AgentId,
+    sentAt: number,
+    images?: readonly InlineImageAttachment[],
+  ): void {
     if (attempt.envelope.sender.kind !== 'user' || attempt.body.trim() === '') return;
     try {
-      this.deps.manager.recordAgentNote?.(agentId, userEchoSegment(attempt.body, sentAt));
+      this.deps.manager.recordAgentNote?.(agentId, userEchoSegment(attempt.body, sentAt, images));
     } catch {
       // degradation-audit: reported - the message was delivered; only its
       // transcript echo is missing, and the delivery receipt still shows it.

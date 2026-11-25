@@ -64,7 +64,9 @@ export function enqueueLaneCompletionOutcome(
       taskKind: info.taskKind ?? null,
       phaseKind: phaseKindFromAgentInfo(info),
       taskId: info.taskFolder ? basename(info.taskFolder) : null,
-      verdict: signal.verdict,
+      // Outcome rows predate the `stopped` verdict: a caller stop stays a
+      // `failed` row whose status is `stopped`.
+      verdict: signal.verdict === 'stopped' ? 'failed' : signal.verdict,
       failureClass: classifyLaneFailureClass({
         verdict: signal.verdict,
         status: info.status,

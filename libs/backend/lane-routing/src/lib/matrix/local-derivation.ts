@@ -1,5 +1,6 @@
 import {
   LANE_DEFAULT_MODEL,
+  LANE_USER_STOP_CLASS,
   type LaneOutcomeSummary,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
@@ -49,6 +50,14 @@ export const AUTOMATIC_MATRIX_MODEL = 'auto';
 export const CAPACITY_FAILURE_CLASSES = new Set(['usage-limit', 'auth', 'timeout']);
 export function isCapacityFailure(failureClass: LaneOutcomeSummary['failureClass']): boolean {
   return failureClass !== null && CAPACITY_FAILURE_CLASSES.has(failureClass);
+}
+/**
+ * A run that says nothing about the lane's quality: a capacity failure, or a
+ * caller stop (`user-stop`). It counts in no delivery rate, neither as a
+ * failure nor in the denominator.
+ */
+export function isExcludedFromRates(failureClass: LaneOutcomeSummary['failureClass']): boolean {
+  return failureClass === LANE_USER_STOP_CLASS || isCapacityFailure(failureClass);
 }
 
 interface RateBucket {
@@ -183,13 +192,13 @@ function countSummary(bucket: RateBucket, summary: LaneOutcomeSummary): void {
       bucket.delivery.push(summary);
       break;
     case 'no-deliverable':
-      if (!isCapacityFailure(summary.failureClass)) {
+      if (!isExcludedFromRates(summary.failureClass)) {
         bucket.noDeliverable += 1;
         bucket.delivery.push(summary);
       }
       break;
     case 'failed':
-      if (!isCapacityFailure(summary.failureClass)) {
+      if (!isExcludedFromRates(summary.failureClass)) {
         bucket.failed += 1;
         bucket.delivery.push(summary);
       }

@@ -203,6 +203,39 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     expect(persisted()).toBe(0);
   });
 
+  it('accepts an image for a stopped lane whose cold resume carries images (D4)', async () => {
+    const resumable: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported', onSteer: false, onResume: true } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'claude', displayName: 'Claude', status: 'stopped', potentialCapabilities: resumable });
+    expect(coordinator.preview({ agentId: h.agentId }).usesResume).toBe(true);
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'what colour?', turn: { images: [image] } }, user);
+    expect(outcome.mode).not.toBe('unsupported');
+    const id = idOf(outcome);
+    expect(await h.store.get(id)).toMatchObject({ turn: { imageCount: 1 } });
+    expect(attachments?.take(id)).toEqual([image]);
+  });
+
+  it('refuses an image for a stopped named-account lane with the named reason (D4)', async () => {
+    const resumable: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported', onSteer: false, onResume: true } },
+    };
+    const { h, coordinator, persisted } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'claude', displayName: 'Claude', status: 'stopped', potentialCapabilities: resumable });
+    // The record carries the run's account fields (`laneAccountFields`).
+    Object.assign(h.tracked.info, { accountBindingId: 'run-1' });
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'what colour?', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported',
+      detail: 'Images need a running lane on a named-account Claude lane.',
+    });
+    expect(persisted()).toBe(0);
+    expect(h.resume.resume).not.toHaveBeenCalled();
+  });
+
   it('holds images beside the envelope and returns them with the body', async () => {
     const withImages: CliAdapterManifest = {
       ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },

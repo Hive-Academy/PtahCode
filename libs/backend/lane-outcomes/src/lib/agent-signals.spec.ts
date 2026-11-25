@@ -31,6 +31,18 @@ const base: LaneOutcomeRecord = {
 };
 
 describe('computeAgentSignals', () => {
+  it('leaves a caller stop out of the delivered rate and the failure tally', () => {
+    const result = computeAgentSignals(
+      [base, { ...base, runId: 'stopped', verdict: 'failed', failureClass: 'user-stop', finalReview: null }],
+      30,
+    ).review;
+    expect(result).toMatchObject({
+      runCount: 2,
+      delivered: { numerator: 1, denominator: 1 },
+      topFailureClass: null,
+    });
+  });
+
   it('counts verified runs and reviews, rounds the average, and breaks failure ties by recency', () => {
     const result = computeAgentSignals(
       [
