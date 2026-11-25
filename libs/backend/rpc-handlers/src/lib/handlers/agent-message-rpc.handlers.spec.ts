@@ -298,6 +298,30 @@ describe('AgentMessageRpcHandlers', () => {
       });
     });
 
+    it('serves unsendable efforts alongside the native effort list in catalog order', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [], efforts: ['low', 'future-effort', 'high'], unsendableEfforts: ['future-effort'], commands: [],
+      });
+
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+
+      expect(result.data).toEqual({
+        models: [], efforts: ['low', 'future-effort', 'high'], unsendableEfforts: ['future-effort'], commands: [],
+      });
+    });
+
+    it('omits an empty unsendable effort list', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [], efforts: ['low', 'high'], unsendableEfforts: [], commands: [],
+      });
+
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+
+      expect(result.data).toStrictEqual({ models: [], efforts: ['low', 'high'], commands: [] });
+    });
+
     it('passes the cached lists beside an error, and the stopped-lane reason (M5, S2)', async () => {
       const { coordinator, call } = setup();
       (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
