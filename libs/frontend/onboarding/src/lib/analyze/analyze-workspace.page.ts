@@ -275,6 +275,32 @@ function describeSetupIssue(
         </section>
       }
 
+      @if (
+        setupReadFailed() &&
+        !runner.isRunning() &&
+        !runner.isCanceling() &&
+        !stopRecovery()
+      ) {
+        <ptah-alert
+          tone="error"
+          live="assertive"
+          data-testid="setup-model-read-error"
+        >
+          Could not check the Setup model. Try again.
+          <button
+            alertAction
+            ptahButton
+            variant="secondary"
+            size="xs"
+            type="button"
+            [disabled]="setupRefreshing() || setupUpdating()"
+            (click)="refreshSetupModel()"
+          >
+            Retry
+          </button>
+        </ptah-alert>
+      }
+
       @if (stopRecovery()) {
         <ptah-run-panel
           state="cancelling"
@@ -382,7 +408,7 @@ function describeSetupIssue(
             <button
               type="button"
               [ptahSetupAction]="'primaryCompact'"
-              [disabled]="setupInvalid()"
+              [disabled]="!setupReady()"
               (click)="continuePrevious()"
             >
               Continue previous run
@@ -390,7 +416,7 @@ function describeSetupIssue(
             <button
               type="button"
               [ptahSetupAction]="'ghost'"
-              [disabled]="setupInvalid()"
+              [disabled]="!setupReady()"
               (click)="startFresh()"
             >
               Start fresh
@@ -417,7 +443,7 @@ function describeSetupIssue(
           <button
             type="button"
             [ptahSetupAction]="'primaryFull'"
-            [disabled]="setupInvalid()"
+            [disabled]="!setupReady()"
             data-testid="start-analysis-button"
             (click)="startFresh()"
           >
@@ -519,8 +545,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   private readonly destroyRef = inject(DestroyRef);
   private destroyed = false;
   private pendingAnalysis: string | null = null;
+  private pendingRerun = false;
   private setupAbort: AbortController | null = null;
   private setupRequestSeq = 0;
+  private setupRefreshQueued = false;
   private lastView: ViewType | null = null;
   protected readonly stopModal =
     viewChild.required<ConfirmationModalComponent>('stopModal');
@@ -534,11 +562,22 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   protected readonly savedError = signal(false);
   protected readonly setupState = signal<SetupPairState | null>(null);
   protected readonly setupUpdating = signal(false);
+  protected readonly setupRefreshing = signal(false);
+  protected readonly setupReadFailed = signal(false);
   protected readonly setupActionError = signal<string | null>(null);
   protected readonly setupIssue = computed(() =>
     describeSetupIssue(this.setupState()),
   );
   protected readonly setupInvalid = computed(() => this.setupIssue() !== null);
+  protected readonly setupReady = computed(() => {
+    const kind = this.setupState()?.kind;
+    return (
+      (kind === 'set' || kind === 'unset') &&
+      !this.setupRefreshing() &&
+      !this.setupUpdating() &&
+      !this.setupReadFailed()
+    );
+  });
   protected readonly setupBadgeLabel = computed(() => {
     const state = this.setupState();
     if (!state) return '';
@@ -657,15 +696,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
 
   public async ngOnInit(): Promise<void> {
-    void this.refreshSetupModel();
-    if (this.rerun() === '1') {
-      await this.router.navigate([], {
-        queryParams: { rerun: null },
-        queryParamsHandling: 'merge',
-        replaceUrl: true,
-      });
-      if (this.destroyed) return;
-      await this.startFresh();
+    this.pendingRerun = this.rerun() === '1';
+    const setup = this.refreshSetupModel();
+    if (this.pendingRerun) {
+      await setup;
       return;
     }
     this.pendingAnalysis = this.analysis() ?? null;
@@ -685,10 +719,15 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
 
   protected async refreshSetupModel(): Promise<void> {
+    if (this.setupUpdating()) {
+      this.setupRefreshQueued = true;
+      return;
+    }
     this.setupAbort?.abort();
     const controller = new AbortController();
     this.setupAbort = controller;
     const seq = ++this.setupRequestSeq;
+    this.setupRefreshing.set(true);
     try {
       const response = await this.ngZone.runOutsideAngular(() =>
         this.claudeRpc.call(
@@ -698,15 +737,24 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         ),
       );
       if (this.destroyed || seq !== this.setupRequestSeq) return;
-      if (response.isSuccess()) {
-        this.ngZone.run(() => {
-          this.setupActionError.set(null);
+      this.ngZone.run(() => {
+        if (response.isSuccess()) {
           this.setupState.set(response.data.state);
-        });
-      }
+          this.setupReadFailed.set(false);
+        } else {
+          this.setupReadFailed.set(true);
+        }
+      });
     } catch {
-      // Read-only preview refresh failure leaves prior state untouched.
+      if (this.destroyed || seq !== this.setupRequestSeq) return;
+      this.ngZone.run(() => this.setupReadFailed.set(true));
+    } finally {
+      if (!this.destroyed && seq === this.setupRequestSeq) {
+        this.setupAbort = null;
+        this.ngZone.run(() => this.setupRefreshing.set(false));
+      }
     }
+    await this.ngZone.run(() => this.startPendingRerun());
   }
 
   protected openSetupSettings(providerId?: string): void {
@@ -733,13 +781,16 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (this.setupUpdating()) return;
     this.setupUpdating.set(true);
     this.setupActionError.set(null);
-    const seq = ++this.setupRequestSeq;
+    this.setupRequestSeq++;
+    this.setupAbort?.abort();
+    this.setupAbort = null;
+    this.setupRefreshing.set(false);
     try {
       const response = await this.claudeRpc.call('wizard:set-setup-model', {
         provider: '',
         model: '',
       });
-      if (this.destroyed || seq !== this.setupRequestSeq) return;
+      if (this.destroyed) return;
       if (!response.isSuccess()) {
         this.setupActionError.set(
           'Could not switch to the workspace model. Try again.',
@@ -747,14 +798,23 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         return;
       }
       this.setupState.set(response.data.state);
+      this.setupReadFailed.set(false);
     } catch {
-      if (!this.destroyed && seq === this.setupRequestSeq) {
+      if (!this.destroyed) {
         this.setupActionError.set(
           'Could not switch to the workspace model. Try again.',
         );
       }
     } finally {
-      if (!this.destroyed) this.setupUpdating.set(false);
+      if (!this.destroyed) {
+        this.setupUpdating.set(false);
+        if (this.setupRefreshQueued) {
+          this.setupRefreshQueued = false;
+          await this.refreshSetupModel();
+        } else {
+          await this.startPendingRerun();
+        }
+      }
     }
   }
 
@@ -803,8 +863,20 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         this.selectError.set('The analysis could not be loaded. Try again.');
     }
   }
+  private async startPendingRerun(): Promise<void> {
+    if (!this.pendingRerun || !this.setupReady() || this.destroyed) return;
+    this.pendingRerun = false;
+    await Promise.all([
+      this.startFresh(),
+      this.router.navigate([], {
+        queryParams: { rerun: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      }),
+    ]);
+  }
   protected async startFresh(): Promise<void> {
-    if (this.setupInvalid()) return;
+    if (!this.setupReady()) return;
     this.pendingAnalysis = null;
     this.wizardState.reset();
     this.runner.reset();
@@ -817,7 +889,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     await this.loadSaved();
   }
   protected async continuePrevious(): Promise<void> {
-    if (this.setupInvalid()) return;
+    if (!this.setupReady()) return;
     this.pendingAnalysis = null;
     this.store.clearSelection();
     this.interrupted.set(false);

@@ -177,9 +177,150 @@ describe('AnalyzeWorkspacePage', () => {
       expect(rpc.getResumableRun).not.toHaveBeenCalled();
       fixture.destroy();
     });
+
+    it('preserves the selection and Re-run intent until a valid Setup read settles', async () => {
+      selected.set('saved');
+      let settleSetup!: (value: unknown) => void;
+      claudeRpcCall.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settleSetup = resolve;
+          }),
+      );
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      const page = fixture.componentInstance;
+      const init = page.ngOnInit();
+
+      await page['startFresh']();
+      await page['continuePrevious']();
+      expect(store.clearSelection).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+      settleSetup({
+        isSuccess: () => true,
+        data: {
+          state: {
+            kind: 'invalid',
+            source: 'setup',
+            provider: 'claude',
+            model: 'claude-retired',
+            cause: 'model-stale',
+          } satisfies SetupPairState,
+        },
+      });
+      await init;
+      expect(store.clearSelection).not.toHaveBeenCalled();
+      expect(wizard.reset).not.toHaveBeenCalled();
+      expect(runner.reset).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(runner.resumeAnalysis).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+
+      await page['refreshSetupModel']();
+      expect(runner.startFreshAnalysis).toHaveBeenCalledTimes(1);
+      expect(store.clearSelection).toHaveBeenCalledTimes(1);
+      expect(navigate).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({ queryParams: { rerun: null } }),
+      );
+      fixture.destroy();
+    });
   });
 
   describe('Setup model card', () => {
+    it('blocks Start after the initial Setup read rejects and shows a safe Retry', async () => {
+      claudeRpcCall.mockRejectedValueOnce(new Error('raw provider error'));
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      const start = element.querySelector<HTMLButtonElement>(
+        '[data-testid="start-analysis-button"]',
+      );
+      expect(start?.disabled).toBe(true);
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      const alert = element.querySelector(
+        '[data-testid="setup-model-read-error"]',
+      );
+      expect(alert?.textContent).toContain('Could not check the Setup model.');
+      expect(element.textContent).not.toContain('raw provider error');
+      const retry = alert?.querySelector('button');
+      expect(retry?.textContent?.trim()).toBe('Retry');
+      retry?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(
+        element.querySelector('[data-testid="setup-model-read-error"]'),
+      ).toBeNull();
+      expect(start?.disabled).toBe(false);
+      expect(store.clearSelection).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it.each([true, false])('queues focus behind a Setup clear with success=%s', async (success) => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      let settleClear!: (value: unknown) => void;
+      claudeRpcCall.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settleClear = resolve;
+          }),
+      );
+      const clear = element.querySelector<HTMLButtonElement>(
+        '[data-testid="setup-model-use-workspace"]',
+      );
+      if (!clear) throw new Error('Missing Use workspace model action');
+      clear.click();
+      window.dispatchEvent(new Event('focus'));
+      expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
+        'wizard:get-setup-model',
+        'wizard:set-setup-model',
+      ]);
+
+      if (success) {
+        setupStateResponse = {
+          kind: 'unset',
+          effective: { provider: 'claude', model: 'claude-sonnet-4' },
+        };
+      }
+      settleClear({
+        isSuccess: () => success,
+        data: { state: setupStateResponse },
+      });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
+        'wizard:get-setup-model',
+        'wizard:set-setup-model',
+        'wizard:get-setup-model',
+      ]);
+      expect(
+        element.querySelector('[data-testid="setup-model-badge"]')?.textContent,
+      ).toContain(success ? 'Default' : 'Needs attention');
+      expect(
+        element.querySelector<HTMLButtonElement>(
+          '[data-testid="start-analysis-button"]',
+        )?.disabled,
+      ).toBe(!success);
+      expect(
+        element.textContent?.includes('Could not switch to the workspace model.'),
+      ).toBe(!success);
+      fixture.destroy();
+    });
+
     it('renders the default effective workspace pair and opens Settings at the Setup row', async () => {
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       fixture.detectChanges();

@@ -451,6 +451,93 @@ describe('AnalyzeSkillsPage', () => {
     );
   });
 
+  it('blocks consent preview and duplicate re-runs during Setup preflight, then protects open consent', async () => {
+    recommendResponse = () =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data: makeJudgedResultWithInstallAndBuild(),
+      });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    const element = fixture.nativeElement as HTMLElement;
+    const rerun = element.querySelector<HTMLButtonElement>(
+      '[data-testid="rerun-skill-search"]',
+    );
+    if (!rerun) throw new Error('Missing Re-run action');
+    call.mockClear();
+    let settleSetup!: (value: unknown) => void;
+    const setup = new Promise((resolve) => {
+      settleSetup = resolve;
+    });
+    call.mockReturnValueOnce(setup);
+    const result = await recommendResponse();
+    let settleRecommendation!: (value: unknown) => void;
+    const recommendation = new Promise((resolve) => {
+      settleRecommendation = resolve;
+    });
+    recommendResponse = () => recommendation;
+
+    rerun.click();
+    fixture.detectChanges();
+    expect(rerun.disabled).toBe(true);
+    expect(primaryButton(element).disabled).toBe(true);
+    primaryButton(element).click();
+    await page.preview();
+    page.retry();
+    expect(call.mock.calls).toEqual([['wizard:get-setup-model', {}]]);
+    expect(page.state.consentOpen()).toBe(false);
+
+    settleSetup({ isSuccess: () => true, data: { state: setupStateResponse } });
+    await setup;
+    settleRecommendation(result);
+    await recommendation;
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(page.state.loading()).toBe(false);
+    const skills = [
+      {
+        skillName: 'owner/repo/angular',
+        contentHash: 'hash',
+        hasScripts: false,
+        files: [],
+        scriptFiles: [],
+      },
+    ];
+    call.mockResolvedValueOnce({ isSuccess: () => true, data: { skills } });
+    await page.preview();
+    fixture.detectChanges();
+    expect(page.state.stage()).toBe('consent');
+    expect(rerun.disabled).toBe(true);
+    page.retry();
+    expect(page.state.preview()).toEqual(skills);
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      'wizard:get-setup-model',
+      'wizard:recommend-analysis-skills',
+      'wizard:preview-skills-for-consent',
+    ]);
+
+    let settleInstallation!: (value: unknown) => void;
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          settleInstallation = resolve;
+        }),
+    );
+    const installation = page.install();
+    expect(page.state.stage()).toBe('installing');
+    page.retry();
+    expect(page.state.preview()).toEqual(skills);
+    expect(call).toHaveBeenCalledTimes(4);
+    settleInstallation({
+      isSuccess: () => true,
+      data: { success: true, installed: ['owner/repo/angular'] },
+    });
+    await installation;
+  });
+
   it('loads recommendations for the completed run and drops responses after workspace change', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
     fixture.detectChanges();
@@ -1597,7 +1684,7 @@ describe('AnalyzeSkillsPage', () => {
       isInstalled: false,
     };
     const rerunItem = {
-      kind: 'tool' as const,
+      kind: 'test-tool' as const,
       name: 'Vitest',
       evidence: 'vitest.config.ts',
       sourcePhase: 'project-profile',
@@ -1908,7 +1995,7 @@ describe('AnalyzeSkillsPage', () => {
       isInstalled: false,
     };
     const freshItem = {
-      kind: 'tool' as const,
+      kind: 'test-tool' as const,
       name: 'Playwright',
       evidence: 'playwright.config.ts',
       sourcePhase: 'project-profile',
@@ -2062,4 +2149,57 @@ describe('AnalyzeSkillsPage', () => {
     expect(runPill.badges()[1]?.pair).toBe('claude / claude-sonnet-4');
     expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
   });
+
+  it.each(['replacement', 'edit'] as const)(
+    'dismisses a post-result discard confirmation after a draft %s',
+    async (change) => {
+      const initialResult = makeJudgedResultWithInstallAndBuild();
+      recommendResponse = () =>
+        Promise.resolve({ isSuccess: () => true, data: initialResult });
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const page = fixture.componentInstance;
+      const element = fixture.nativeElement as HTMLElement;
+      let settleRecommendation!: (value: unknown) => void;
+      recommendResponse = () =>
+        new Promise((resolve) => {
+          settleRecommendation = resolve;
+        });
+      page.retry();
+      await Promise.resolve();
+      expect(page.state.openManualDraft('item-nx').status).toBe('ok');
+      page.state.updateDraftFields({ body: '## Original edits' });
+      settleRecommendation({
+        isSuccess: () => true,
+        data: makeRecommendResult(),
+      });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(
+        element.querySelector('[data-testid="dirty-draft-confirm"]')?.textContent,
+      ).toContain('Discard edits and apply');
+
+      if (change === 'replacement') {
+        page.state.closeDraft({ forceDiscardDirty: true });
+        expect(page.state.openManualDraft('item-nx').status).toBe('ok');
+        page.state.updateDraftFields({ body: '## Original edits' });
+        fixture.detectChanges();
+        expect(
+          element.querySelector('[data-testid="dirty-draft-confirm"]'),
+        ).toBeNull();
+      } else {
+        page.state.updateDraftFields({ body: '## Updated edits' });
+      }
+      const currentDraft = page.state.openDraft();
+      const apply = jest.spyOn(page.state, 'applyRecommendationResult');
+      page.confirmDirtyDraftAction();
+      fixture.detectChanges();
+
+      expect(apply).not.toHaveBeenCalled();
+      expect(page.state.openDraft()).toBe(currentDraft);
+      expect(page.summary()).toBe(initialResult);
+      expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    },
+  );
 });

@@ -65,18 +65,29 @@ interface ConfirmedDirtyDraft {
 }
 
 type PendingDirtyDraftAction =
-  | {
+  | (ConfirmedDirtyDraft & {
       readonly kind: 'rerun';
       readonly runId: string;
-      readonly draftRevision: number;
-      readonly draftSnapshot: DraftContentSnapshot;
-    }
-  | {
+    })
+  | (ConfirmedDirtyDraft & {
       readonly kind: 'apply';
       readonly data: WizardRecommendAnalysisSkillsResult;
       readonly rerun: boolean;
       readonly version: number;
-    };
+    });
+
+function snapshotDraft(
+  draft: DraftContentSnapshot & { readonly revision: number },
+): ConfirmedDirtyDraft {
+  return {
+    draftRevision: draft.revision,
+    draftSnapshot: {
+      name: draft.name,
+      description: draft.description,
+      body: draft.body,
+    },
+  };
+}
 
 function formatProviderDisplayName(id: string): string {
   const meta = getAnthropicProvider(id);
@@ -234,6 +245,7 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
                 size="sm"
                 type="button"
                 data-testid="setup-model-recovery-action"
+                [disabled]="block.action === 'retry' && selectionBusy()"
                 (click)="runSetupRecovery(block)"
               >
                 {{ block.actionLabel }}
@@ -268,7 +280,9 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
                 size="sm"
                 type="button"
                 data-testid="setup-model-recovery-action"
-                [disabled]="block.action === 'retry' && draftBusy()"
+                [disabled]="
+                  block.action === 'retry' && (draftBusy() || selectionBusy())
+                "
                 (click)="runSetupRecovery(block)"
               >
                 {{ block.actionLabel }}
@@ -308,7 +322,7 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
                 size="sm"
                 type="button"
                 data-testid="dirty-draft-discard"
-                [disabled]="draftBusy()"
+                [disabled]="draftBusy() || selectionBusy()"
                 (click)="confirmDirtyDraftAction()"
               >
                 {{
@@ -390,13 +404,7 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
               data-testid="rerun-skill-search"
               [busy]="state.loading()"
               [title]="rerunDisabledTitle()"
-              [disabled]="
-                state.loading() ||
-                !canRetry() ||
-                leaving() ||
-                state.previewing() ||
-                draftBusy()
-              "
+              [disabled]="selectionBusy() || !canRetry() || leaving() || draftBusy()"
               (click)="retry()"
             >
               Re-run skill search
@@ -466,6 +474,10 @@ export class AnalyzeSkillsPage implements OnInit {
     const draft = this.state.openDraft();
     return Boolean(draft?.busy || draft?.previewLoading);
   });
+  public readonly selectionBusy = computed(
+    () =>
+      this.state.loading() || this.state.previewing() || this.state.consentOpen(),
+  );
   public readonly rerunBlockedReason = computed<string | null>(() => {
     const draft = this.state.openDraft();
     if (draft?.busy) {
@@ -526,7 +538,10 @@ export class AnalyzeSkillsPage implements OnInit {
     effect(() => {
       const openDraft = this.state.openDraft();
       const pending = this.pendingDirtyActionState();
-      if (pending?.kind === 'rerun' && !openDraft?.dirty) {
+      if (
+        (pending?.kind === 'rerun' && !openDraft?.dirty) ||
+        (pending?.kind === 'apply' && !this.matchesDirtyDraft(pending))
+      ) {
         this.pendingDirtyActionState.set(null);
       }
     });
@@ -653,12 +668,26 @@ export class AnalyzeSkillsPage implements OnInit {
       return;
     }
     this.recommendationBlockedReasonState.set(null);
+    const draft = this.state.openDraft();
+    if (!draft?.dirty) return;
     this.pendingDirtyActionState.set({
       kind: 'apply',
       data,
       rerun,
       version,
+      ...snapshotDraft(draft),
     });
+  }
+
+  private matchesDirtyDraft(confirmed: ConfirmedDirtyDraft): boolean {
+    const draft = this.state.openDraft();
+    return Boolean(
+      draft?.dirty &&
+        draft.revision === confirmed.draftRevision &&
+        draft.name === confirmed.draftSnapshot.name &&
+        draft.description === confirmed.draftSnapshot.description &&
+        draft.body === confirmed.draftSnapshot.body,
+    );
   }
 
   private async load(
@@ -668,6 +697,7 @@ export class AnalyzeSkillsPage implements OnInit {
     confirmedDirtyDraft?: ConfirmedDirtyDraft,
   ): Promise<void> {
     const hasPriorResult = this.summary() !== null;
+    this.state.setLoading(true);
     try {
       const setupResp = await this.rpc.call('wizard:get-setup-model', {});
       if (version !== this.version || this.destroyRef.destroyed) return;
@@ -684,20 +714,14 @@ export class AnalyzeSkillsPage implements OnInit {
         this.applySetupBlock(block);
         return;
       }
-    } catch {
-      if (version !== this.version || this.destroyRef.destroyed) return;
-      this.applyLoadFailure('Could not load skill recommendations.');
-      return;
-    }
 
-    this.setupBlockState.set(null);
-    this.loadErrorState.set(!hasPriorResult);
-    this.backOnLoadErrorState.set(false);
-    this.state.setPreviewing(false);
-    this.state.setPreview([]);
-    this.state.setLoading(true);
-    this.state.setError(null);
-    try {
+      if (this.state.consentOpen()) return;
+      this.setupBlockState.set(null);
+      this.loadErrorState.set(!hasPriorResult);
+      this.backOnLoadErrorState.set(false);
+      this.state.setPreviewing(false);
+      this.state.setPreview([]);
+      this.state.setError(null);
       const response = await this.rpc.call(
         'wizard:recommend-analysis-skills',
         { runId },
@@ -716,15 +740,9 @@ export class AnalyzeSkillsPage implements OnInit {
         this.applyLoadFailure(message);
         return;
       }
-      const openDraft = this.state.openDraft();
+      if (this.state.consentOpen()) return;
       const discardDirtyDraft = Boolean(
-        confirmedDirtyDraft &&
-          openDraft &&
-          openDraft.revision === confirmedDirtyDraft.draftRevision &&
-          openDraft.name === confirmedDirtyDraft.draftSnapshot.name &&
-          openDraft.description ===
-            confirmedDirtyDraft.draftSnapshot.description &&
-          openDraft.body === confirmedDirtyDraft.draftSnapshot.body,
+        confirmedDirtyDraft && this.matchesDirtyDraft(confirmedDirtyDraft),
       );
       const applyResult = this.state.applyRecommendationResult(
         response.data,
@@ -773,7 +791,7 @@ export class AnalyzeSkillsPage implements OnInit {
   }
   public confirmDirtyDraftAction(): void {
     const pending = this.pendingDirtyActionState();
-    if (!pending) return;
+    if (!pending || this.selectionBusy() || this.leaving()) return;
     if (pending.kind === 'rerun') {
       if (this.draftBusy()) {
         this.pendingDirtyActionState.set(null);
@@ -795,7 +813,11 @@ export class AnalyzeSkillsPage implements OnInit {
       });
       return;
     }
-    if (pending.version !== this.version || this.destroyRef.destroyed) {
+    if (
+      pending.version !== this.version ||
+      this.destroyRef.destroyed ||
+      !this.matchesDirtyDraft(pending)
+    ) {
       this.pendingDirtyActionState.set(null);
       return;
     }
@@ -841,19 +863,14 @@ export class AnalyzeSkillsPage implements OnInit {
   public retry(): void {
     const runId = this.analysis.loaded()?.manifest.runId;
     if (!runId || !this.canRetry() || this.leaving()) return;
-    if (this.draftBusy()) return;
+    if (this.draftBusy() || this.selectionBusy()) return;
     const openDraft = this.state.openDraft();
     if (openDraft?.dirty) {
       this.recommendationBlockedReasonState.set(null);
       this.pendingDirtyActionState.set({
         kind: 'rerun',
         runId,
-        draftRevision: openDraft.revision,
-        draftSnapshot: {
-          name: openDraft.name,
-          description: openDraft.description,
-          body: openDraft.body,
-        },
+        ...snapshotDraft(openDraft),
       });
       return;
     }
@@ -970,13 +987,7 @@ export class AnalyzeSkillsPage implements OnInit {
       await this.continueToGuidance();
       return;
     }
-    if (
-      this.state.loading() ||
-      this.state.previewing() ||
-      this.leaving() ||
-      this.state.draftOpen()
-    )
-      return;
+    if (this.selectionBusy() || this.leaving() || this.state.draftOpen()) return;
     if (!this.state.selectedIds().size) {
       await this.continueToGuidance();
       return;
@@ -1013,7 +1024,8 @@ export class AnalyzeSkillsPage implements OnInit {
     if (this.skillsInstalled()) return;
     const previews = this.state.preview();
     if (
-      this.state.stage() === 'installing' ||
+      this.state.loading() ||
+      this.state.stage() !== 'consent' ||
       !previews.length ||
       previews.some(
         (item) =>
