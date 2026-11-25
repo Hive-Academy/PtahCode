@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { ClaudeRpcService, ModelStateService } from '@ptah-extension/core';
-import { TabManagerService } from '@ptah-extension/chat-state';
+import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
   AnalysisStatus,
   EnhancedPromptsRunWizardResponse,
@@ -21,7 +20,6 @@ import type {
   EnhancedPromptsCancelResponse,
 } from '@ptah-extension/shared';
 import { AgentSelection } from './setup-wizard-state.service';
-import { findBoundGenerationTab } from './bound-generation-tab';
 
 /**
  * Centralized RPC timeout budget for wizard backend calls. The values
@@ -104,8 +102,6 @@ export interface AgentSelectionResponse {
 })
 export class WizardRpcService {
   private readonly rpcService = inject(ClaudeRpcService);
-  private readonly modelState = inject(ModelStateService);
-  private readonly tabs = inject(TabManagerService);
 
   async getBoundRunState(
     binding: SetupGenerationTabBinding,
@@ -148,14 +144,11 @@ export class WizardRpcService {
     resume = false,
     decisions?: BoundAgentDecisions,
   ): Promise<WizardSubmitSelectionResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'wizard:submit-selection',
       {
         tabBinding: binding,
         selectedAgentIds,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
         ...(resume ? { resume: true } : {}),
         ...boundDecisionFields(decisions),
       },
@@ -177,14 +170,11 @@ export class WizardRpcService {
   async startBoundGuidance(
     binding: SetupGenerationTabBinding,
   ): Promise<EnhancedPromptsRunWizardResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'enhancedPrompts:runWizard',
       {
         workspacePath: binding.workspacePath,
         tabBinding: binding,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
@@ -196,15 +186,12 @@ export class WizardRpcService {
   async regenerateBoundGuidance(
     binding: SetupGenerationTabBinding,
   ): Promise<EnhancedPromptsRunWizardResponse> {
-    const tab = findBoundGenerationTab(this.tabs, binding);
     const result = await this.rpcService.call(
       'enhancedPrompts:regenerate',
       {
         workspacePath: binding.workspacePath,
         tabBinding: binding,
         force: true,
-        model:
-          tab?.overrideModel ?? this.modelState.currentModel() ?? undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
@@ -264,7 +251,6 @@ export class WizardRpcService {
       {
         selectedAgentIds: selectedIds,
         analysisDir,
-        model: this.modelState.currentModel() || undefined,
         ...boundDecisionFields(decisions),
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
@@ -347,7 +333,6 @@ export class WizardRpcService {
     const result = await this.rpcService.call(
       'wizard:deep-analyze',
       {
-        model: this.modelState.currentModel() || undefined,
         ...(options?.resume ? { resume: true } : {}),
       },
       { timeout: WIZARD_RPC_TIMEOUTS.DEEP_ANALYSIS_MS },
@@ -427,7 +412,6 @@ export class WizardRpcService {
       {
         workspacePath,
         ...(analysisDir ? { analysisDir } : {}),
-        model: this.modelState.currentModel() || undefined,
       },
       { timeout: WIZARD_RPC_TIMEOUTS.GENERATION_MS },
     );
