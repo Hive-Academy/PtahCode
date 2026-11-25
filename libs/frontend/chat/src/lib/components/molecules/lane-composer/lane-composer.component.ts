@@ -882,6 +882,13 @@ export class LaneComposerComponent {
   /** Paste on the folded bar: expand, then take the clipboard text and images. */
   protected onRootPaste(event: ClipboardEvent): void {
     if (!this.isCompact()) return;
+    // The textarea takes its own paste (its handler ran first). A paste that
+    // reaches it while the composer is folded (it is inert then, so only a
+    // scripted event or a fold racing the paste) must not be taken twice.
+    if (event.target === this.textareaRef()?.nativeElement) {
+      this.expandComposer();
+      return;
+    }
     const text = event.clipboardData?.getData('text/plain') ?? '';
     event.preventDefault();
     this.expandComposer();

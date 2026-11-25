@@ -582,3 +582,17 @@ The backend now emits host notices as `CliOutputSegment` `{ type: 'info', conten
   - `session-stats-source.spec.ts`: 19/19;
   - `tsc` on the chat lib: 0 errors; eslint: clean.
 - Housekeeping: the scratch worktree `.claude-worktrees/rb-bisect` (detached, with a `node_modules` junction) is left for the coordinator to remove.
+
+## Pre-merge check: one scripted paste gave two images on a running lane
+
+- Mechanism: the lane composer has two paste listeners. The textarea's `(paste)` calls `composerInput.handlePaste`. The composer root's `(paste)` is `onRootPaste`, which while the composer is folded (`isCompact()`) expands it and calls `handlePaste` again.
+- On a running lane the composer is folded, so the event dispatched on the textarea ran the textarea handler and then bubbled to the root handler, which took the images a second time (`imageCount: 2`). A stopped lane is never folded, so it gave one chip.
+- Would a real paste double? Very unlikely, though I did not test it with a real clipboard.
+  - While folded, the full card, the textarea included, is `inert`, so it cannot hold focus, and a real paste goes to the focused element (the folded bar or the body). Only the root handler runs then.
+  - While the textarea has focus, the compact store keeps the composer expanded, and the root handler returns at once.
+  - Only a scripted event on the inert textarea, or a fold racing the paste, reaches both handlers.
+- Fix anyway (defensive): `onRootPaste` now ignores a paste whose target is the textarea. Its own handler already took it, so the root handler only expands the composer.
+- Specs (`lane-composer.component.spec.ts`):
+  - one paste on the textarea while the lane runs calls `onPaste` exactly once and expands the composer. Without the guard this test fails with "Received number of calls: 2", which I confirmed by disabling the guard temporarily;
+  - one paste on the folded bar calls it once.
+- Verification: `lane-composer.component.spec.ts` 73/73; eslint clean; `tsc` on the chat lib: 0 errors.

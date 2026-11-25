@@ -858,6 +858,34 @@ describe('LaneComposerComponent', () => {
     expect(input.filteredSuggestions()).toEqual([]);
   });
 
+  it('takes one image from one paste while the lane runs, wherever the paste lands', async () => {
+    const fixture = await mount({ showLaneControls: true });
+    const stage = root(fixture).querySelector('.ptah-composer-stage') as HTMLElement;
+    expect(stage.hasAttribute('data-compact')).toBe(true);
+    const attachments = fixture.componentRef.injector.get(ComposerAttachmentsService);
+    const onPaste = jest.spyOn(attachments, 'onPaste').mockImplementation(() => undefined);
+    const paste = () => Object.defineProperty(new Event('paste', { bubbles: true, cancelable: true }), 'clipboardData', {
+      value: { items: [{ type: 'image/png', getAsFile: () => null }], getData: () => '' },
+    });
+    // On the textarea (a scripted paste while folded): its own handler only.
+    field(fixture).dispatchEvent(paste());
+    fixture.detectChanges();
+    expect(onPaste).toHaveBeenCalledTimes(1);
+    expect(stage.hasAttribute('data-compact')).toBe(false);
+  });
+
+  it('takes one image from one paste on the folded bar (the real paste target while folded)', async () => {
+    const fixture = await mount({ showLaneControls: true });
+    const attachments = fixture.componentRef.injector.get(ComposerAttachmentsService);
+    const onPaste = jest.spyOn(attachments, 'onPaste').mockImplementation(() => undefined);
+    const bar = root(fixture).querySelector('ptah-composer-compact-bar button') as HTMLElement;
+    bar.dispatchEvent(Object.defineProperty(new Event('paste', { bubbles: true, cancelable: true }), 'clipboardData', {
+      value: { items: [{ type: 'image/png', getAsFile: () => null }], getData: () => '' },
+    }));
+    fixture.detectChanges();
+    expect(onPaste).toHaveBeenCalledTimes(1);
+  });
+
   it('folds into the compact bar while the lane runs idle and expands on click', async () => {
     const fixture = await mount({ showLaneControls: true });
     const stage = root(fixture).querySelector('.ptah-composer-stage') as HTMLElement;
