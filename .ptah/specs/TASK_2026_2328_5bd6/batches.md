@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B19, B21 COMPLETE. B23 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
+| Status | B1-B19, B21, B23 COMPLETE. B20 IN_PROGRESS. All others PENDING. Known red until B27: rpc-handlers manifest specs (agent:getRoutingEvidence owner) |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -507,7 +507,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B20 - WU17 Copilot effort flag
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex 44afd3c7)
 - **Shape / weight**: logic / est. 10,300. **Actual tokens**: pending
 - **Projects**: cli-agent-runtime (1)
 - **Read set**: `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/copilot-sdk.adapter.ts:50-70,170-200,370-400,580-600`; `.../cli-adapters/copilot-sdk.adapter.spec.ts:1-120` + spawn-args describe; `cli-stdout-probe.ts` (find with `rg -ln probeCliStdout libs/backend/cli-agent-runtime/src`, whole); PLAN:732-746
@@ -560,8 +560,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B23 - WU8c gather on-mode catalog read + setting reader
 
-- **Status**: IN_PROGRESS (codex 0ae58424)
-- **Shape / weight**: logic / est. 10,900. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 0ae58424 + coordinator fix: on mode without a catalog keeps the listing path)
+- **Shape / weight**: logic / est. 10,900. **Actual tokens**: unavailable
 - **Projects**: lane-routing (1)
 - **Read set**: `W/libs/backend/lane-routing/src/lib/pipeline/gather.ts` (whole, 6,383 tokens counted); `.../pipeline/gather.spec.ts:1-100`; `.../catalog/lane-catalog.types.ts`; `.../scope/lane-rotation-setting.ts` (whole); PLAN:848-865, PLAN:886-892, PLAN:903-907, PLAN:533-534
 - **Write set**: `W/libs/backend/lane-routing/src/lib/pipeline/gather.ts`; `W/libs/backend/lane-routing/src/lib/scope/performance-routing-setting.ts` (new)
@@ -584,6 +584,7 @@ phase reviewer comes from a different model family than the executor of the batc
 - **Write set**: `W/libs/backend/lane-routing/src/lib/pipeline/phase-plan.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/assemble-gate.ts`; `W/libs/backend/lane-routing/src/lib/pipeline/route-choice.spec.ts` (new)
 - **Contract excerpt**: `planRoutePhases` builds `ChoiceInput` per lane candidate only in on mode (`policyEffort`, `effortFixed`, `exploreTurn` §4.4); `assembleGateResult` writes pair model/effort/provenance/score, `effortCheck` (both modes, lane entries with listed `efforts`), reason text, and the `routeId` it receives as input; off mode `ChosenEntry.effort = plan.policy.effort`. Spec drives gather + plan + assemble with an injected `routeId` (V7).
 - **Added by decision 32**: in `pipeline/assemble-gate.ts` pass `selected.parts` as `ChosenReasonFacts.parts` and the ChosenEntry `effortCheck` to `compile-reasons` (both optional, B19). Off path passes today's parts unchanged; the golden must stay green.
+- **Added by coordinator (B23 review)**: also test `PerformanceRoutingSetting.isEnabled()` (false only for an explicit false; a throw returns true with one warning) and that `gatherRouteCall({ choice: true })` without a `catalog` keeps the listing path.
 - **Depends on**: B23, B17, B19
 - **Required Skills**: nx-workspace-architect (host refused)
 - **Executor**: CLI lane, high-capability tier. **Fallback**: Task subagent `backend-developer`

@@ -4,6 +4,10 @@ import type {
   PhaseKind,
 } from '@ptah-extension/shared';
 import { SUBAGENT_LANE_ID } from '@ptah-extension/shared';
+import type {
+  LaneCatalogRefresher,
+  LaneCatalogSnapshotReader,
+} from '../catalog/lane-catalog.types';
 import {
   effectiveMachineCapabilities,
   PhaseDefinitionError,
@@ -111,6 +115,8 @@ export interface RouteRotation {
 export async function gatherRouteCall(input: {
   readonly source: RouteCandidateSource;
   readonly listing: LaneModelListing | undefined;
+  readonly choice?: boolean;
+  readonly catalog?: Pick<LaneCatalogSnapshotReader, 'get'> & LaneCatalogRefresher;
   readonly matrix: RouteMatrix;
   readonly rotation: RouteRotation;
   readonly logger: LaneRoutingLogger;
@@ -215,18 +221,29 @@ export async function gatherRouteCall(input: {
   ] = await Promise.all([
     readLimits(input.source, rowSnapshot, input.logger, gatherDeadline),
     rolesPromise,
-    listModels(
-      input.listing,
-      rowSnapshot,
-      input.listingBudgetMs,
-      input.logger,
-      gatherDeadline,
-    ),
+    input.choice === true && input.catalog !== undefined
+      ? readCatalogModels(
+          input.catalog,
+          rowSnapshot,
+          input.nowMs,
+          input.listingBudgetMs,
+          input.logger,
+          gatherDeadline,
+        )
+      : listModels(
+          // Without a catalog, on mode keeps today's listing path.
+          input.listing,
+          rowSnapshot,
+          input.listingBudgetMs,
+          input.logger,
+          gatherDeadline,
+        ),
     loadMatrix(
       input.matrix,
       rowSnapshot,
       input.nowMs,
       input.logger,
+      input.choice,
       gatherDeadline,
     ),
     phaseDefs === undefined
@@ -482,6 +499,78 @@ async function listModels(
   return { byLaneId, failed, reasons };
 }
 
+async function readCatalogModels(
+  catalog: Pick<LaneCatalogSnapshotReader, 'get'> & LaneCatalogRefresher,
+  rows: readonly CliDetectionResult[],
+  nowMs: number,
+  budgetMs: number,
+  logger: LaneRoutingLogger,
+  deadline?: RouteDeadline,
+): Promise<Awaited<ReturnType<typeof listModels>>> {
+  const pairs = await Promise.all(
+    rows.map(async (row) => {
+      const id = laneCandidateId(row);
+      let entry = catalog.get(id);
+      catalog.refreshIfDue(row, nowMs);
+      if (entry?.lastOkAt == null) {
+        const rowDeadline =
+          deadline === undefined
+            ? createRouteDeadline(performance.now() + budgetMs)
+            : capRouteDeadline(deadline, budgetMs);
+        // The catalog owns the refresh lifetime, so only the route's wait is bounded here.
+        const raced = await withinBudget(
+          rowDeadline,
+          () => catalog.refresh(row, nowMs),
+          (error) => logger.warn('[lane-routing] catalog refresh rejected after deadline', {
+            laneId: id,
+            ...logFacts(error),
+          }),
+        );
+        if (raced.kind === 'deadline') {
+          return { id, facts: { models: [], status: 'timeout' } as const };
+        }
+        if (raced.kind === 'error') {
+          logger.warn('[lane-routing] catalog refresh failed', {
+            laneId: id,
+            ...logFacts(raced.error),
+          });
+          return { id, facts: { models: [], status: 'error' } as const };
+        }
+        entry = raced.value;
+      }
+
+      if (entry.lastOkAt === null) {
+        const status = entry.status === 'timeout' || entry.status === 'error'
+          ? entry.status
+          : 'empty';
+        return { id, facts: { models: [], status } as const };
+      }
+
+      const ageMs = Math.max(0, nowMs - entry.lastOkAt);
+      return {
+        id,
+        facts: { ...factsFrom(entry.models), status: 'ok' } as const,
+        reason: entry.status === 'ok'
+          ? undefined
+          : `catalog for ${id} is ${ageMs}ms old (${entry.status})`,
+      };
+    }),
+  );
+  const byLaneId = new Map<string, LaneModelFacts>();
+  const reasons: string[] = [];
+  let failed = false;
+  for (const { id, facts, reason } of pairs) {
+    byLaneId.set(id, facts);
+    if (facts.status !== 'ok') {
+      failed = true;
+      reasons.push(modelUnknownReason(id, facts.status));
+    } else if (reason !== undefined) {
+      reasons.push(reason);
+    }
+  }
+  return { byLaneId, failed, reasons };
+}
+
 function modelUnknownReason(
   laneId: string,
   status: Exclude<ModelListStatus, 'ok'>,
@@ -544,6 +633,7 @@ function factsFrom(entries: readonly LaneModelEntry[]): LaneModelFacts {
       id: entry.id,
       provenance: entry.provenance,
       ...(entry.auto === true ? { auto: true } : {}),
+      ...(entry.efforts === undefined ? {} : { efforts: entry.efforts }),
     });
     if (configured === undefined && entry.provenance === 'configured') {
       configured = { id: entry.id, provenance: 'configured' };
@@ -559,6 +649,7 @@ async function loadMatrix(
   rows: readonly CliDetectionResult[],
   nowMs: number,
   logger: LaneRoutingLogger,
+  choice?: boolean,
   deadline?: RouteDeadline,
 ): Promise<CapabilityMatrixSnapshot> {
   const outcomeQueries: MatrixOutcomeQuery[] = rows.map((row) => ({
@@ -566,10 +657,15 @@ async function loadMatrix(
     subagent: false,
   }));
   outcomeQueries.push({ laneId: SUBAGENT_LANE_ID, subagent: true });
+  const loadInput: MatrixLoadInput = {
+    nowMs,
+    outcomeQueries,
+    ...(choice === true ? { choice: true } : {}),
+  };
   if (deadline !== undefined) {
     const raced = await withinBudget(
       deadline,
-      () => matrix.load({ nowMs, outcomeQueries }),
+      () => matrix.load(loadInput),
       (error) => {
         logger.warn(
           '[lane-routing] capability matrix rejected after deadline',
@@ -589,7 +685,7 @@ async function loadMatrix(
     return neutralSnapshot('unreadable');
   }
   try {
-    return await matrix.load({ nowMs, outcomeQueries });
+    return await matrix.load(loadInput);
   } catch (error: unknown) {
     logger.warn(
       '[lane-routing] capability matrix could not be loaded',
