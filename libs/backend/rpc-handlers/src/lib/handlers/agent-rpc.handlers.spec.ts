@@ -16,10 +16,8 @@ import 'reflect-metadata';
 jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   CLI_AGENT_RUNTIME_TOKENS: {
     SDK_PTAH_CLI_REGISTRY: Symbol.for('PtahCliRegistry'),
-    AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
     AGENT_LANE_RESUME: Symbol.for('AgentLaneResume'),
   },
-  AgentContinueError: class AgentContinueError extends Error {},
   // Same shape as the real class (`lane-resume-gate.ts`): a fixed message
   // and the refusal code. The handler matches it with `instanceof`.
   LaneAccountResumeError: class LaneAccountResumeError extends Error {
@@ -140,7 +138,6 @@ interface Harness {
     reserveAgentId: jest.Mock;
     laneToolGateFor: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
-    continueConversation: jest.Mock;
     findAgentInfo: jest.Mock;
   };
   /** Stored `ptah` settings, keyed by the full key (`agentOrchestration.x`). */
@@ -148,7 +145,6 @@ interface Harness {
   setConfiguration: jest.Mock;
   /** `ProviderAccountService.lookupBySdkSession`, when the service is registered. */
   accountLookup: jest.Mock | undefined;
-  messageCoordinator: { send: jest.Mock };
 }
 
 interface HarnessOptions {
@@ -232,7 +228,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
         resumeSessionId: input.resumeSessionId,
       }),
     ),
-    continueConversation: jest.fn().mockResolvedValue(undefined),
     findAgentInfo: jest.fn((agentId: string) => options.laneOwner?.agentId === agentId ? options.laneOwner : undefined),
   };
   const metadataStore = { createChild: jest.fn().mockResolvedValue(undefined) };
@@ -242,12 +237,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     // The real Ptah CLI resumer the runtime registers, over this harness's fakes.
     resumePtahCli: (...args: Parameters<PtahCliResumer['resumePtahCli']>) =>
       new PtahCliLaneResumer(processManager, registry, metadataStore, logger).resumePtahCli(...args),
-  };
-  const messageCoordinator = {
-    send: jest.fn(async (request: { agentId: string; message: string }) => {
-      await processManager.continueConversation(request.agentId, request.message);
-      return { mode: 'queued' as const };
-    }),
   };
 
   // Each write yields to the event loop before it lands, the way the file
@@ -294,7 +283,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     {
       isRegistered: jest.fn(
         (token: unknown) =>
-          token === Symbol.for('AgentMessageCoordinator') ||
           token === Symbol.for('AgentLaneResume') ||
           (accountLookup !== undefined && token === ProviderAccountService) ||
           (capabilityResolver !== undefined &&
@@ -304,9 +292,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV,
       ),
       resolve: jest.fn((token: unknown) =>
-        token === Symbol.for('AgentMessageCoordinator')
-          ? messageCoordinator
-          : token === Symbol.for('AgentLaneResume')
+        token === Symbol.for('AgentLaneResume')
           ? resumeService
           : token === ProviderAccountService
           ? { lookupBySdkSession: accountLookup }
@@ -351,7 +337,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     settings,
     setConfiguration,
     accountLookup,
-    messageCoordinator,
   };
 }
 
@@ -593,133 +578,6 @@ function expectNoLeak(result: unknown): void {
     expect(wire).not.toContain(leak);
   }
 }
-
-type ContinueResult = { success: boolean; error?: string; code?: string };
-const CONTINUE_AGENT_ID = '11111111-1111-4111-8111-111111111111';
-
-describe('AgentRpcHandlers — agent:continue account refusal (D28)', () => {
-  it('marks a renderer continue message as user sent', async () => {
-    const h = makeHarness();
-    await call<ContinueResult>(h, 'agent:continue', { agentId: CONTINUE_AGENT_ID, message: 'next step' });
-    expect(h.messageCoordinator.send).toHaveBeenCalledWith(
-      { agentId: CONTINUE_AGENT_ID, message: 'next step', delivery: 'queue' }, { kind: 'user' },
-    );
-  });
-  it('preserves message whitespace and caps continue input at the RPC boundary', async () => {
-    const h = makeHarness();
-    await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID, message: '  next step\n',
-    });
-    expect(h.messageCoordinator.send).toHaveBeenCalledWith(
-      { agentId: CONTINUE_AGENT_ID, message: '  next step\n', delivery: 'queue' }, { kind: 'user' },
-    );
-    await expect(call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID, message: 'x'.repeat(32769),
-    })).resolves.toEqual({ success: false, code: 'invalid_params', error: 'Invalid agent message parameters.' });
-    expect(h.messageCoordinator.send).toHaveBeenCalledTimes(1);
-  });
-  it('maps LaneAccountResumeError to account_refused with fixed text', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('unavailable-storage'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'account_refused',
-      error: LANE_ACCOUNT_REFUSED_ERROR,
-    });
-    expectNoLeak(result);
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'unavailable-storage' },
-    );
-    expect(h.logger.error).not.toHaveBeenCalled();
-  });
-
-  it('keeps the specific refusal code in the log, not the reply', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('identity-unproved'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'account_refused',
-      error: LANE_ACCOUNT_REFUSED_ERROR,
-    });
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'identity-unproved' },
-    );
-  });
-
-  it('logs a non-whitelisted code as unavailable-storage', async () => {
-    const h = makeHarness();
-    h.processManager.continueConversation.mockRejectedValueOnce(
-      laneAccountResumeError('C:/secret/path'),
-    );
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result.code).toBe('account_refused');
-    expect(
-      JSON.stringify((h.logger.warn as jest.Mock).mock.calls),
-    ).not.toContain('secret');
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      'RPC: agent:continue account refused',
-      { agentId: CONTINUE_AGENT_ID, code: 'unavailable-storage' },
-    );
-  });
-
-  it('treats an error only named LaneAccountResumeError as an ordinary failure', async () => {
-    const h = makeHarness();
-    const impostor = Object.assign(new Error('C:/secret/path'), {
-      code: 'identity-unproved',
-    });
-    impostor.name = 'LaneAccountResumeError';
-    h.processManager.continueConversation.mockRejectedValueOnce(impostor);
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({
-      success: false,
-      code: 'unknown',
-      error: 'Failed to continue agent conversation',
-    });
-  });
-
-  it('leaves an ambient (unbound) continue unchanged', async () => {
-    const h = makeHarness();
-
-    const result = await call<ContinueResult>(h, 'agent:continue', {
-      agentId: CONTINUE_AGENT_ID,
-      message: 'next step',
-    });
-
-    expect(result).toEqual({ success: true });
-    expect(h.processManager.continueConversation).toHaveBeenCalledWith(
-      CONTINUE_AGENT_ID,
-      'next step',
-    );
-  });
-});
 
 /**
  * TASK_2026_712 Batch 28a: Claude system-lane config keys. Before this batch

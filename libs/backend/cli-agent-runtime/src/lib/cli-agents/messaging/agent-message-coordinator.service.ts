@@ -124,6 +124,39 @@ const CANCELLABLE = new Set<AgentMessageEnvelope['state']>([
 const DELIVERABLE = new Set<AgentMessageEnvelope['state']>(['not-started', 'blocked-retryable']);
 
 /**
+ * A stopped lane with no cached catalog: the derived lists, and what appears
+ * only once the lane runs.
+ */
+function stoppedLaneView(
+  current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
+  models: LaneTurnOptionsView['models'],
+  efforts: readonly string[],
+  effortsFixedByModel = false,
+): LaneTurnOptionsView {
+  return {
+    ...current, models, efforts: [...efforts], commands: [],
+    unavailableReason: efforts.length > 0
+      ? 'Commands and skills appear when the lane is running.'
+      : effortsFixedByModel
+        ? 'This model sets its own effort level. Commands and skills appear when the lane is running.'
+        : 'Effort levels, commands and skills appear when the lane is running.',
+  };
+}
+
+/**
+ * M1: the record's model offers no effort levels although the CLI offers
+ * some for other models (an agy model id with an effort suffix). Such a lane
+ * serves none when it runs either, so the reason must not promise them.
+ */
+function effortsFixedByModel(
+  laneEfforts: ((model?: string) => readonly string[]) | undefined,
+  model: string | undefined,
+  efforts: readonly string[],
+): boolean {
+  return !!laneEfforts && !!model && efforts.length === 0 && laneEfforts(undefined).length > 0;
+}
+
+/**
  * One facade for preview, send, status, list, cancel and retry of lane
  * messages (Component 6). Every message is durable before any adapter call,
  * and all state lives in the envelope store: there is no memory-only id map.
@@ -494,8 +527,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * answers through `listTurnOptions()`; a stopped lane through the adapter's
    * `listModels()` plus the last list served for its lineage. Both lookups
    * are bounded (D17). A stopped lane with no cached list takes the
-   * adapter's static effort levels and says what appears once it runs
-   * (`unavailableReason`). A failure returns the cached lists with `error`
+   * adapter's effort levels for the record's model (`laneEfforts`), or the
+   * models and efforts of one live catalog read (`stoppedLaneCatalog`), and
+   * says what appears once it runs (`unavailableReason`). A failure returns the cached lists with `error`
    * set; it never throws. Hidden permission-policy commands are always dropped.
    */
   async turnOptions(agentId: AgentId): Promise<LaneTurnOptionsView> {
@@ -520,24 +554,26 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         this.remember(lineage, served);
         return served;
       }
+      if (!cached && adapter?.stoppedLaneCatalog) {
+        // One live catalog read serves the models and the efforts (D4).
+        const catalog = await bounded(adapter.stoppedLaneCatalog(), LANE_TURN_OPTIONS_TIMEOUT_MS);
+        return stoppedLaneView(current, catalog.models, catalog.efforts);
+      }
       const models = adapter?.listModels
         ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
         : cached?.models ?? [];
       if (cached) return { ...current, models, efforts: cached.efforts, commands: cached.commands };
-      const efforts = adapter?.laneEfforts?.() ?? [];
-      return {
-        ...current, models, efforts: [...efforts], commands: [],
-        unavailableReason: efforts.length > 0
-          ? 'Commands and skills appear when the lane is running.'
-          : 'Effort levels, commands and skills appear when the lane is running.',
-      };
+      const laneEfforts = adapter?.laneEfforts?.bind(adapter);
+      const efforts = laneEfforts?.(info.model) ?? [];
+      return stoppedLaneView(current, models, efforts, effortsFixedByModel(laneEfforts, info.model, efforts));
     } catch (error: unknown) {
       // degradation-audit: reported - logged here, and the result carries `error` for the composer.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane turn options unavailable', {
         agentId: laneId, error: error instanceof Error ? error.name : 'unknown',
       });
       return {
-        ...current, models: cached?.models ?? [], efforts: cached?.efforts ?? [...(adapter?.laneEfforts?.() ?? [])],
+        ...current, models: cached?.models ?? [], efforts: cached?.efforts
+          ?? (adapter?.stoppedLaneCatalog ? [] : [...(adapter?.laneEfforts?.(info.model) ?? [])]),
         commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
       };
     }

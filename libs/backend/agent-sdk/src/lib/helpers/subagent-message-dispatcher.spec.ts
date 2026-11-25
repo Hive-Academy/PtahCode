@@ -9,7 +9,6 @@
  *   - sendToSubagent bounds a never-settling streamInput with
  *     SUBAGENT_SEND_TIMEOUT_MS and reports RpcUserError('SEND_TIMEOUT')
  *     without wedging the per-session push chain
- *   - interruptSession wraps Query.interrupt failures in RpcUserError('SESSION_ENDED')
  *   - backgroundTask delegates to Query.backgroundTasks and surfaces
  *     SESSION_NOT_FOUND / SESSION_ENDED
  */
@@ -457,27 +456,6 @@ describe('SubagentMessageDispatcher.backgroundTask', () => {
 
     const err = await dispatcher
       .backgroundTask('sess-1', 'toolu_fg')
-      .catch((e: unknown) => e);
-
-    expect(err).toBeInstanceOf(RpcUserError);
-    expect((err as RpcUserError).errorCode).toBe('SESSION_ENDED');
-    expect((err as RpcUserError).message).toContain('session already done');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// interruptSession — SESSION_ENDED on interrupt failure
-// ---------------------------------------------------------------------------
-
-describe('SubagentMessageDispatcher.interruptSession — Fix 3', () => {
-  it('throws RpcUserError(SESSION_ENDED) when interrupt rejects', async () => {
-    const query = {
-      interrupt: jest.fn().mockRejectedValue(new Error('session already done')),
-    };
-    const dispatcher = buildDispatcher(makeLifecycleWithQuery(query));
-
-    const err = await dispatcher
-      .interruptSession('sess-3')
       .catch((e: unknown) => e);
 
     expect(err).toBeInstanceOf(RpcUserError);

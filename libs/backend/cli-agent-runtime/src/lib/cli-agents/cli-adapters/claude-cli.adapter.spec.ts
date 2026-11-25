@@ -24,6 +24,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   ClaudeCliAdapter,
+  CLAUDE_NAMED_RESUME_IMAGES_TEXT,
   type ClaudeCliAdapterDependencies,
 } from './claude-cli.adapter';
 import type { ClaudeCliCommandOptions } from './cli-adapter.interface';
@@ -240,6 +241,11 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       undefined,
     );
     const context = f.run.mock.calls[0][0];
+    // The manifest's steer reaches the runner; it stays unsupported (dormant).
+    expect(context.manifestSteer).toEqual({
+      state: 'unsupported',
+      reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.',
+    });
     expect(f.query).toHaveBeenCalledWith({
       prompt: context.mailbox.prompt,
       options: context.options,
@@ -301,6 +307,34 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     f.finish(0);
     await expect(handle.done).resolves.toBe(0);
     await expect(next?.done).resolves.toBe(0);
+  });
+
+  it('starts a cold resume with the held images in its first turn (L3)', async () => {
+    const f = fixture();
+    expect(f.adapter.capabilities().turnInput?.images).toEqual({ state: 'supported', onSteer: false, onResume: true });
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const handle = await f.adapter.runSdk({
+      ...f.input, resumeSessionId: 'resume-1', turnImages: [{ data: png, mediaType: 'image/png' }],
+    });
+    const context = f.run.mock.calls[0]?.[0];
+    expect((await context?.mailbox.prompt.next())?.value).toMatchObject({
+      message: { content: [
+        { type: 'text', text: 'do work' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+      ] },
+    });
+    f.finish(0);
+    await expect(handle.done).resolves.toBe(0);
+  });
+
+  it('refuses resume images on a named-account lane instead of dropping them', async () => {
+    const f = fixture();
+    await expect(f.adapter.runSdk({
+      ...f.input, resumeSessionId: 'resume-1',
+      accountAdmission: { kind: 'omitted' } as unknown as ClaudeCliCommandOptions['accountAdmission'],
+      turnImages: [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }],
+    })).rejects.toThrow(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
+    expect(f.run).not.toHaveBeenCalled();
   });
 
   it('reports adapter capabilities that match the handle it returns (D39)', async () => {

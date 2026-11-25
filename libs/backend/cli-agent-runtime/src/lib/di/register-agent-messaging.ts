@@ -178,7 +178,8 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         const codex = c.isRegistered(SDK_TOKENS.CODEX_CHAT_ADAPTER, true)
           ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined; resolveLiveSessionId?(callerId: string): string | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
           : undefined;
-        return parentLanePermission(parentSessionId, lifecycle, codex);
+        // Resume: a parent that is not live (app restart) is unknown, not plan (TASK_2026_2324_efc4).
+        return parentLanePermission(parentSessionId, lifecycle, codex, { unknownParent: 'uncapped' });
       };
       return new AgentLaneResumeService(manager, new PtahCliLaneResumer(
         manager,

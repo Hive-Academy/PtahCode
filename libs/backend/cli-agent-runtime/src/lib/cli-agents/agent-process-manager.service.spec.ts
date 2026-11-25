@@ -942,6 +942,22 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('spawn() with SDK adapter', () => {
+    it('forwards resume images only to an adapter that carries them on resume (L3)', async () => {
+      const images = [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }];
+      // The fixture adapter declares no images.onResume: it would drop them.
+      await expect(manager.spawn({ task: 'look', cli: 'codex', workingDirectory: '/workspace/root',
+        turnImages: images })).rejects.toThrow('Codex CLI cannot take images when it resumes.');
+      expect(sdkAdapter.runSdk).not.toHaveBeenCalled();
+      const base = sdkAdapter.capabilities() as CliAdapterManifest;
+      sdkAdapter.capabilities.mockReturnValue({ ...base, turnInput: {
+        model: { state: 'supported' }, effort: { state: 'supported' },
+        images: { state: 'supported', onResume: true }, files: { state: 'supported' },
+        commands: { state: 'supported' }, skills: { state: 'supported' },
+      } });
+      await manager.spawn({ task: 'look', cli: 'codex', workingDirectory: '/workspace/root', turnImages: images });
+      expect(sdkAdapter.runSdk).toHaveBeenCalledWith(expect.objectContaining({ turnImages: images }));
+    });
+
     it('queues a replied lane and releases it when memory becomes available', async () => {
       setupVscodeConfig({ maxConcurrentAgents: 3 });
       process.env['PTAH_VERIFY_FAKE_FREE_GB'] = '10';

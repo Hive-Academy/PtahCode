@@ -78,9 +78,6 @@ export function createMockRpcService(
   const stopSubagent = jest.fn(async () =>
     rpcSuccess({ ok: true } as const),
   ) as unknown as MockRpcService['stopSubagent'];
-  const interruptSubagentSession = jest.fn(async () =>
-    rpcSuccess({ ok: true } as const),
-  ) as unknown as MockRpcService['interruptSubagentSession'];
 
   const mock: MockRpcService = {
     call,
@@ -94,7 +91,6 @@ export function createMockRpcService(
     querySubagents,
     sendSubagentMessage,
     stopSubagent,
-    interruptSubagentSession,
   } as unknown as MockRpcService;
 
   if (overrides) {

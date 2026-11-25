@@ -70,12 +70,6 @@ export const SubagentStopSchema = z.object({
 
 export type SubagentStopInput = z.infer<typeof SubagentStopSchema>;
 
-export const SubagentInterruptSchema = z.object({
-  sessionId: z.string().min(1, 'sessionId is required'),
-});
-
-export type SubagentInterruptInput = z.infer<typeof SubagentInterruptSchema>;
-
 export const SubagentBackgroundSchema = z.object({
   sessionId: z.string().min(1, 'sessionId is required'),
   toolUseId: z.string().min(1).optional(),

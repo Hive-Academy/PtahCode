@@ -978,6 +978,38 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
+  // Regression (NG0103): the parent hands a new but equal cache object on each
+  // clock tick; the gate must not release and re-acquire the clock for it.
+  it('does not re-acquire the clock for a new but equal cache or on a tick', () => {
+    const release = jest.fn();
+    const acquire = jest.fn(() => release);
+    TestBed.overrideProvider(WallClockService, { useValue: { now: () => fixedNow, acquire } });
+    const fixture = mount([]);
+    const line = () => (fixture.componentInstance as unknown as {
+      cacheLine: () => { time: string } | null;
+    }).cacheLine()?.time ?? null;
+    const cache = { ttl: '5m' as const, lastRequestAt: 10_000, expiresAt: 310_000 };
+    fixture.componentRef.setInput('cache', cache);
+    fixture.detectChanges();
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenCalledWith('second');
+    expect(line()).toBe('5:00');
+
+    fixture.componentRef.setInput('cache', { ...cache });
+    fixture.detectChanges();
+    fixedNow.set(11_000);
+    fixture.componentRef.setInput('cache', { ...cache });
+    fixture.detectChanges();
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    expect(line()).toBe('4:59');
+
+    fixedNow.set(310_000);
+    fixture.detectChanges();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(line()).toBe('Expired');
+  });
+
   it('warns of cache expiry at 20% of the TTL left, like the cache tile', () => {
     const fixture = mount([]);
     const line = () => (fixture.componentInstance as unknown as {

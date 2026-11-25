@@ -6,7 +6,6 @@
 
 export const BASELINE_RPC_METHOD_NAMES: readonly string[] = [
   'agent:backgroundList',
-  'agent:continue',
   'agent:detectClis',
   'agent:e2eSeedPermission',
   'agent:getConfig',
@@ -327,7 +326,6 @@ export const BASELINE_RPC_METHOD_NAMES: readonly string[] = [
   'skillsSh:search',
   'skillsSh:uninstall',
   'subagent:background',
-  'subagent:interrupt',
   'subagent:send-message',
   'subagent:stop',
   'subagent:transcript',

@@ -43,6 +43,7 @@ export type {
   AcpRequestFailure,
   AcpRequestMethod,
   AcpSessionConfigEntry,
+  AcpSessionConfigInput,
   AcpSessionOptions,
   AcpSpawnSpec,
   AcpVendorProfile,

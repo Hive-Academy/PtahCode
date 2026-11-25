@@ -124,6 +124,25 @@ describe('resolveEffectiveLaneCapabilities', () => {
       });
     });
 
+    it('keeps images on a stopped lane whose cold resume carries them (L3)', () => {
+      const resumable: CliAdapterManifest = { ...turnPotential, turnInput: { ...(turnPotential.turnInput as NonNullable<CliAdapterManifest['turnInput']>),
+        images: { state: 'supported', onSteer: false, onResume: true } } };
+      const stopped = { ...grok, cli: 'claude' as const, displayName: 'Claude', status: 'stopped' as const };
+      expect(resolveEffectiveLaneCapabilities(stopped, resumable).turnInput?.images)
+        .toEqual({ state: 'supported', onSteer: false, onResume: true });
+      // Without the flag the stopped lane still refuses.
+      expect(resolveEffectiveLaneCapabilities(stopped, turnPotential).turnInput?.images)
+        .toEqual({ state: 'unsupported', reason: 'Images need a running lane.' });
+    });
+
+    it('refuses images on a stopped named-account lane even with onResume', () => {
+      const resumable: CliAdapterManifest = { ...turnPotential, turnInput: { ...(turnPotential.turnInput as NonNullable<CliAdapterManifest['turnInput']>),
+        images: { state: 'supported', onResume: true } } };
+      const named = { ...grok, status: 'stopped' as const, accountBindingId: 'run-1' } as AgentProcessInfo;
+      expect(resolveEffectiveLaneCapabilities(named, resumable).turnInput?.images)
+        .toEqual({ state: 'unsupported', reason: 'Images need a running lane.' });
+    });
+
     it('hides steer when supportsSteer reports false', () => {
       const handle: SdkHandle = { ...baseHandle(), steer: jest.fn(), supportsSteer: () => false };
       expect(resolveEffectiveLaneCapabilities(grok, turnPotential, handle).messaging.steer.state).toBe('unsupported');

@@ -7,6 +7,7 @@ import type {
   CliOutputSegment,
   FlatStreamEventUnion,
   LanePermissionMode,
+  LaneTurnInputCapabilities,
   PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import type {
@@ -30,6 +31,7 @@ import {
   claudeLaneRefusalCode,
   claudeLaneForeignErrorClass,
   claudeSdkLanePrompts,
+  claudeLaneTurnContent,
   CLAUDE_SDK_LANE_TURN_INPUT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunner,
@@ -49,6 +51,16 @@ import type {
   SdkHandle,
   LaneAccountBindingPort,
 } from './cli-adapter.interface';
+
+/** The native Claude lane's turn input: images also ride on a cold resume. */
+export const CLAUDE_NATIVE_LANE_TURN_INPUT: LaneTurnInputCapabilities = {
+  ...CLAUDE_SDK_LANE_TURN_INPUT,
+  images: { ...CLAUDE_SDK_LANE_TURN_INPUT.images, onResume: true },
+};
+
+/** Refusal when images would start a named-account lane's resumed turn. */
+export const CLAUDE_NAMED_RESUME_IMAGES_TEXT =
+  'Images need a running lane on a named-account Claude lane.';
 
 export interface ClaudeCliAdapterDependencies {
   readonly loader: Pick<SdkModuleLoader, 'getQueryFunction' | 'getCliJsPath'>;
@@ -120,7 +132,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       },
       limitReader: { state: 'available', source: 'anthropic' },
       mcp: { state: 'supported' },
-      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+      // A cold resume starts a new SDK turn whose first prompt carries the
+      // images (`runSdk` seeds the mailbox with image blocks).
+      turnInput: CLAUDE_NATIVE_LANE_TURN_INPUT,
       usage: { timing: 'live' },
       prompts: claudeSdkLanePrompts(permission),
     };
@@ -168,6 +182,12 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     input: ClaudeCliCommandOptions & { readonly phase?: PhaseDispatchV1 },
   ): Promise<SdkHandle> {
     const lanePolicy = translateLaneSpawnPolicy(this.name, this.capabilities(), input);
+    // Built before any process exists: an image of unknown type rejects the
+    // resume, it is never dropped. The named admission's first turn is text
+    // only, so a named lane refuses images instead of losing them.
+    const firstTurn = claudeLaneTurnContent(input.task, input.turnImages?.length ? { images: input.turnImages } : undefined);
+    if (input.turnImages?.length && input.accountAdmission)
+      throw new Error(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
     const abortController = new AbortController();
     const named = await this.prepareNamed(input, abortController);
     // Fixed word for the host step a named refusal happened in; the
@@ -303,7 +323,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       hostStep = 'runner';
       // The named query owns its empty gate. The legacy mailbox remains seeded
       // only for ambient runs, including the configured native registry.
-      const mailbox = createPromptMailbox(named ? '' : input.task);
+      const mailbox = createPromptMailbox(named ? '' : firstTurn);
       const outputCallbacks: Array<(data: string) => void> = [];
       const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
       const streamCallbacks: Array<(event: FlatStreamEventUnion) => void> = [];
@@ -356,6 +376,8 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
           },
           disposeCallbacks,
           stopProxy: async () => undefined,
+          // The runner exposes steer only when the manifest supports it.
+          manifestSteer: this.capabilities().messaging.steer,
         }).handle;
         return {
           ...handle,

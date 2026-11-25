@@ -58,8 +58,10 @@ export interface QueuedSendNowAction {
         <ul class="flex flex-col gap-2">
           @for (item of items(); track item.id) {
             <li class="flex justify-end" data-testid="queued-follow-up-item">
+              <!-- Opaque base-100 with a 5% primary tint: the card's text keeps
+                   its theme contrast over a glass scene (S3). -->
               <article
-                class="max-w-[85%] min-w-0 rounded-2xl border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-sm"
+                class="max-w-[85%] min-w-0 rounded-2xl border border-dashed border-primary/50 bg-[color-mix(in_oklch,oklch(var(--p))_5%,oklch(var(--b1)))] px-3 py-2 text-sm"
               >
                 <header
                   class="flex items-center gap-1.5 text-[11px] text-base-content-muted"

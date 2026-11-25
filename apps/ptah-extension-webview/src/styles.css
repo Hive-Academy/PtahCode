@@ -3770,7 +3770,10 @@ END OF ANUBIS DESIGN SYSTEM
 :root .suggestions-panel ptah-suggestion-option.suggestion-active .opacity-70 {
   opacity: 1;
 }
-:root .suggestions-panel ptah-suggestion-option.suggestion-active .badge.badge {
+/* The row's badges are ptahBadge spans ([data-ptah-badge]); a raw DaisyUI
+   .badge is kept for any other caller. Without the attribute selector the
+   Built-in badge kept its gold tint on the gold selection fill (S5). */
+:root .suggestions-panel ptah-suggestion-option.suggestion-active :is(.badge.badge, [data-ptah-badge]) {
   background: oklch(var(--pc));
   color: oklch(var(--p));
   border-color: transparent;

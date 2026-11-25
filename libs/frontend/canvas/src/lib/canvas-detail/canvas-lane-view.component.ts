@@ -74,11 +74,13 @@ export function effectiveCanvasLaneKind(
 }
 
 /**
- * A lane's panel: the main chat view's chrome surface, and the size container
- * that `LANE_COLUMN_CLASS` and the lane transcript measure their column from.
+ * A lane's panel (CLI and sub-agent): the main chat view's chrome surface and
+ * the size container that `LANE_COLUMN_CLASS` and the lane transcript measure
+ * their column from. It does not scroll: the transcript scrolls in its own
+ * region and the composer sits below it, as the main chat view does.
  */
-const LANE_PANEL_CLASS =
-  'relative flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pt-2 [container-type:inline-size]';
+const LANE_CLI_PANEL_CLASS =
+  'relative flex h-full min-h-0 min-w-0 flex-col pt-2 [container-type:inline-size]';
 
 @Component({
   selector: 'ptah-canvas-lane-view',
@@ -162,11 +164,19 @@ const LANE_PANEL_CLASS =
                 <!-- The main chat shell: the chrome panel, the session layout
                      (column width) and one centered column for every row. -->
                 <div
-                  [class]="lanePanelClass"
+                  [class]="cliPanelClass"
                   data-glass-surface="chrome"
                   data-testid="lane-panel"
                 >
-                  <ptah-chat-session-layout class="!flex-none min-h-full">
+                  <!-- Main chat's layout: the transcript scrolls in its own
+                       region and the composer sits below it, so no transcript
+                       row ever scrolls under the composer (B1). -->
+                  <ptah-chat-session-layout>
+                    <div
+                      sessionTranscript
+                      class="flex min-h-0 flex-1 flex-col overflow-y-auto"
+                      data-testid="lane-scroller"
+                    >
                     <!-- The lane's approvals and questions, as main chat's cards (Req 5). -->
                     @if (
                       prompts.waiting() ||
@@ -236,15 +246,18 @@ const LANE_PANEL_CLASS =
                         monitor.toggleAgentExpanded(agent.agentId)
                       "
                     />
-                    <ptah-agent-continue-input
-                      [class]="laneColumnClass + ' block flex-shrink-0 sticky bottom-0 z-10 bg-transparent pt-2'"
-                      variant="composer"
-                      [agent]="agent"
-                      [stopPending]="laneCard.isStopping()"
-                      [resumePending]="laneCard.isResuming()"
-                      (stopRequested)="laneCard.stopAgent($event)"
-                      (resumeRequested)="laneCard.resumeAgent($event)"
-                    />
+                    </div>
+                    <div sessionComposer class="flex-shrink-0 pt-2">
+                      <ptah-agent-continue-input
+                        [class]="laneColumnClass + ' block'"
+                        variant="composer"
+                        [agent]="agent"
+                        [stopPending]="laneCard.isStopping()"
+                        [resumePending]="laneCard.isResuming()"
+                        (stopRequested)="laneCard.stopAgent($event)"
+                        (resumeRequested)="laneCard.resumeAgent($event)"
+                      />
+                    </div>
                   </ptah-chat-session-layout>
                 </div>
               }
@@ -278,15 +291,17 @@ const LANE_PANEL_CLASS =
       }
       <ng-template #subagentLane>
         @if (selectedSubagent(); as sub) {
+          <!-- The CLI lane's shell: the lane scrolls its transcript and keeps
+               its composer below it (M4, as B1). -->
           <div
-            [class]="lanePanelClass"
+            [class]="cliPanelClass"
             data-glass-surface="chrome"
             data-testid="lane-panel"
           >
-            <ptah-chat-session-layout class="!flex-none min-h-full">
+            <ptah-chat-session-layout>
               <ptah-subagent-lane
                 [showStats]="false"
-                class="flex-1 min-h-fit"
+                class="min-h-0 flex-1"
                 presentation="flat"
                 [record]="sub"
                 [sessionId]="sessionId()"
@@ -303,7 +318,7 @@ const LANE_PANEL_CLASS =
   `,
 })
 export class CanvasLaneViewComponent {
-  protected readonly lanePanelClass = LANE_PANEL_CLASS;
+  protected readonly cliPanelClass = LANE_CLI_PANEL_CLASS;
   protected readonly laneColumnClass = LANE_COLUMN_CLASS;
   readonly monitor = inject(AgentMonitorStore);
   readonly chatStore = inject(ChatStore);

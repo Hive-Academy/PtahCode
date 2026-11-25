@@ -35,6 +35,17 @@ describe('CLI roster activity', () => {
     });
     expect(rows[1].activity).toBe('Reading files');
   });
+  it('never shows the user echo as lane activity', () => {
+    const rows = buildSessionAgentRoster({
+      sessionId: 'session-1', tabStatus: 'streaming', subagents: [],
+      cliAgents: [lane([
+        { type: 'info', content: 'Reading files' },
+        { type: 'user', content: 'please also check the tests', sentAt: 5 },
+      ])],
+      backgroundAgents: [], permissions: [], questions: [],
+    });
+    expect(rows[1].activity).toBe('Reading files');
+  });
 });
 
 describe('roster order', () => {

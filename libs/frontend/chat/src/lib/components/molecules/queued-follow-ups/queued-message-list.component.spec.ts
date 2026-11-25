@@ -57,6 +57,10 @@ describe('QueuedMessageListComponent', () => {
     expect(note.textContent).toContain('It stays queued.');
     expect(note.classList).toContain('text-state-need');
     expect(note.classList).not.toContain('text-warning');
+    // An opaque base-100 card: the inks keep their contrast over a glass scene (S3).
+    const card = root.querySelector('article') as HTMLElement;
+    expect(card.classList).toContain('bg-[color-mix(in_oklch,oklch(var(--p))_5%,oklch(var(--b1)))]');
+    expect(card.classList).not.toContain('bg-primary/5');
   });
 
   it('emits the item id for Withdraw and Send now', () => {

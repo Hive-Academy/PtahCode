@@ -200,6 +200,11 @@ export interface LaneTurnSettingSupport extends LaneCapabilitySupport {
 export interface LaneImageInputSupport extends LaneCapabilitySupport {
   /** True when images may also ride on a steer, not only on a full turn. */
   readonly onSteer?: boolean;
+  /**
+   * True when a stopped lane's cold resume carries the images into its first
+   * resumed turn. Absent: a stopped lane refuses images ("need a running lane").
+   */
+  readonly onResume?: boolean;
 }
 
 /** Support for attached workspace files on a turn. */
@@ -499,6 +504,12 @@ export interface SpawnAgentRequest {
   readonly timeout?: number;
   /** Files the agent should focus on */
   readonly files?: string[];
+  /**
+   * Host-internal: images that ride on the first turn of a cold lane resume
+   * (a stopped lane whose manifest sets `turnInput.images.onResume`). Never
+   * logged or persisted; spawn tools do not accept it.
+   */
+  readonly turnImages?: readonly import('./rpc/rpc-chat.types').InlineImageAttachment[];
   /** Task-tracking folder for shared workspace */
   readonly taskFolder?: string;
   /**
@@ -684,7 +695,12 @@ export type CliOutputSegmentType =
   | 'error'
   | 'info'
   | 'command'
-  | 'file-change';
+  | 'file-change'
+  /**
+   * Host echo of a message the user sent to the lane: the body only, never
+   * the Ptah header. Not provider output: it carries no usage.
+   */
+  | 'user';
 
 /**
  * What a usage figure covers: `message` is one provider message; `turn` is
@@ -735,6 +751,8 @@ export interface CliOutputSegment {
   readonly toolCallId?: string;
   /** Provider message the text belongs to; a change starts a new text block. */
   readonly messageId?: string;
+  /** Host send time in epoch ms (for `user` segments), to order the echo among stream events. */
+  readonly sentAt?: number;
 }
 
 export interface AgentOutputDelta {

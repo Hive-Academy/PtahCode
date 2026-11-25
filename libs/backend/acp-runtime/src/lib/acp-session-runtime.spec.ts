@@ -14,7 +14,8 @@ import {
   type FakeAcpAgentOptions,
   type FakeAcpTransport,
 } from './__fixtures__/fake-acp-agent';
-import { readAcpFixture } from './__fixtures__/acp-fixture-reader';
+import { readAcpFixture, recordedResult } from './__fixtures__/acp-fixture-reader';
+import { grokAcpProfile } from './profiles/grok-acp-profile';
 import type { AcpSpawnOptions } from './acp-process-transport';
 import * as loader from './acp-sdk-loader';
 import { createAcpSession, readAvailableCommands, type AcpSession } from './acp-session-runtime';
@@ -38,6 +39,7 @@ interface Harness {
   readonly resolved: string[];
   readonly abort: AbortController;
   readonly spawn: () => AcpSpawnOptions | undefined;
+  readonly logger: ReturnType<typeof createMockLogger>;
 }
 
 const live: FakeAcpAgent[] = [];
@@ -45,6 +47,7 @@ const live: FakeAcpAgent[] = [];
 function start(
   agentOptions: FakeAcpAgentOptions = {},
   script?: (agent: FakeAcpAgent) => void,
+  sessionProfile: AcpVendorProfile = profile,
 ): Harness {
   const agent = createFakeAcpAgent({ sessionId: SESSION_ID, ...agentOptions });
   live.push(agent);
@@ -54,8 +57,9 @@ function start(
   const resolved: string[] = [];
   const abort = new AbortController();
   let spawn: AcpSpawnOptions | undefined;
+  const logger = createMockLogger();
   const session = createAcpSession({
-    profile,
+    profile: sessionProfile,
     options: { workingDirectory: process.cwd(), agentId: 'agent-1', mcp: [] },
     command: 'test-agent',
     baseEnv: { PATH: '/bin' },
@@ -63,7 +67,7 @@ function start(
       spawn = options;
       return transport;
     },
-    logger: createMockLogger(),
+    logger,
     signal: abort.signal,
     onEvent: (event) => events.push(event),
     onSessionResolved: (id) => resolved.push(id),
@@ -76,6 +80,7 @@ function start(
     resolved,
     abort,
     spawn: () => spawn,
+    logger,
   };
 }
 
@@ -343,5 +348,107 @@ describe('available commands', () => {
       sessionUpdate: 'available_commands_update',
       availableCommands: [null, { name: '' }, { name: 'x', description: 3, _meta: { path: 7 } }],
     })).toEqual([{ name: 'x' }]);
+  });
+});
+
+describe('per-call usage (Grok `response_completed`)', () => {
+  const P1 = readAcpFixture('grok-p1-ptah-mcp-search-use-tool.ndjson');
+  /** The recorded `_x.ai/session_notification` params, in order. */
+  const vendorNotifications = P1.filter(
+    (envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === '_x.ai/session_notification',
+  ).map((envelope) => envelope.msg?.['params'] as Record<string, unknown>);
+  const grokHooks: AcpVendorProfile = { ...profile, extensions: grokAcpProfile.extensions };
+
+  /** Replays p1's vendor notifications and recorded prompt answer, readdressed to this session. */
+  const replayP1 = (extra?: (fake: FakeAcpAgent) => Promise<void>) => (agent: FakeAcpAgent) =>
+    agent.handle('session/prompt', async (params, fake) => {
+      const sessionId = String(params['sessionId']);
+      for (const notification of vendorNotifications) {
+        await fake.notify('_x.ai/session_notification', { ...notification, sessionId });
+      }
+      await extra?.(fake);
+      return { result: recordedResult(P1, 'session/prompt') };
+    });
+
+  it('emits one usageProgress per model call before the single turn usage', async () => {
+    const h = start({}, replayP1(), grokHooks);
+    await h.session.start();
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    const usageEvents = h.events.filter(
+      (event) => event.type === 'usageProgress' || event.type === 'usage',
+    );
+    expect(usageEvents.map((event) => event.type)).toEqual([
+      'usageProgress', 'usageProgress', 'usageProgress', 'usage',
+    ]);
+    const turnId = usageEvents[3]?.turnId;
+    const progress = usageEvents.flatMap((event) =>
+      event.type === 'usageProgress' ? [event] : []);
+    expect(progress.map((event) => [event.turnId, event.provider, event.usage])).toEqual([
+      [turnId, 'Test Agent', { inputTokens: 18267, outputTokens: 168 }],
+      [turnId, 'Test Agent', { inputTokens: 25092, outputTokens: 227 }],
+      [turnId, 'Test Agent', { inputTokens: 25665, outputTokens: 78 }],
+    ]);
+    const total = usageEvents[3];
+    expect(total?.type === 'usage' && total.usage).toMatchObject({ inputTokens: 69024, outputTokens: 473 });
+    h.abort.abort();
+  });
+
+  it("drops another session's frames and frames outside a prompt", async () => {
+    const h = start(
+      {},
+      replayP1(async (fake) => {
+        await fake.notify('_x.ai/session_notification', {
+          ...vendorNotifications[0],
+          sessionId: 'another-session',
+        });
+      }),
+      grokHooks,
+    );
+    await h.session.start();
+    await h.agent.notify('_x.ai/session_notification', { ...vendorNotifications[0], sessionId: SESSION_ID });
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    expect(h.events.filter((event) => event.type === 'usageProgress')).toHaveLength(3);
+    h.abort.abort();
+  });
+
+  it('warns once per session when usage frames stop parsing, and the turn total still lands (M2)', async () => {
+    const drifted = { sessionUpdate: 'response_completed', usage: { input: 5, output: 1 } };
+    const h = start(
+      {},
+      (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          const sessionId = String(params['sessionId']);
+          for (let i = 0; i < 3; i += 1) {
+            await fake.notify('_x.ai/session_notification', { sessionId, update: drifted });
+          }
+          await fake.notify('_x.ai/session_notification', { sessionId, update: { sessionUpdate: 'turn_completed' } });
+          return { result: recordedResult(P1, 'session/prompt') };
+        }),
+      grokHooks,
+    );
+    await h.session.start();
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    await expect(h.session.prompt('again')).resolves.toBe(0);
+    expect(h.events.some((event) => event.type === 'usageProgress')).toBe(false);
+    expect(h.events.filter((event) => event.type === 'usage')).toHaveLength(2);
+    const warnings = (h.logger.warn as jest.Mock).mock.calls.filter(
+      ([message]) => String(message).includes('usage notification did not parse'),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.[1]).toMatchObject({
+      method: '_x.ai/session_notification',
+      fieldPaths: expect.arrayContaining(['update.usage.input_tokens']),
+    });
+    expect(JSON.stringify(warnings[0]?.[1])).not.toContain('"input":5');
+    h.abort.abort();
+  });
+
+  it('emits none without a profile usage hook (agy, the default profile)', async () => {
+    const h = start({}, replayP1());
+    await h.session.start();
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    expect(h.events.some((event) => event.type === 'usageProgress')).toBe(false);
+    expect(h.events.filter((event) => event.type === 'usage')).toHaveLength(1);
+    h.abort.abort();
   });
 });

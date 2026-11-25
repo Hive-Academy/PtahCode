@@ -227,14 +227,6 @@ export interface SubagentStopParams {
 }
 
 /**
- * Parameters for subagent:interrupt RPC method
- */
-export interface SubagentInterruptParams {
-  /** Session to interrupt */
-  readonly sessionId: string;
-}
-
-/**
  * Parameters for subagent:background RPC method
  */
 export interface SubagentBackgroundParams {

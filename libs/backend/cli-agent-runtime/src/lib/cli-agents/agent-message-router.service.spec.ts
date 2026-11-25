@@ -877,4 +877,65 @@ describe('AgentMessageRouter turn input and raw body', () => {
     const outcome = await router.route(AGENT_ID, tracked, 'now please', createDispatcher(), 'steer');
     expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'steer-unavailable' });
   });
+
+  describe('user echo (L2/M5)', () => {
+    const echoDispatcher = (impl?: () => Promise<void>) => {
+      const dispatcher = createDispatcher(impl) as jest.Mocked<ContinuationDispatcher> & { recordAgentNote: jest.Mock };
+      dispatcher.recordAgentNote = jest.fn();
+      return dispatcher;
+    };
+    const idleRecord = (): MessageRoutableAgent => createRecord({
+      info: { ...createRecord().info, status: 'completed' },
+      sdkHandle: { supportsContinuation: () => true, continue: jest.fn() } as unknown as SdkHandle,
+    });
+
+    it('echoes the body of a delivered new turn as a user segment', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, idleRecord(), '[Ptah message m1 from the user] hello', dispatcher,
+        'queue', undefined, false, { rawBody: 'hello', echo: 'hello' });
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        { type: 'user', content: 'hello', sentAt: expect.any(Number) });
+    });
+
+    it('echoes nothing without an echo body, or when the turn was not delivered', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, idleRecord(), 'from parent', dispatcher);
+      const failing = echoDispatcher(() => Promise.reject(new Error('busy')));
+      await router.route(AGENT_ID, idleRecord(), 'x', failing, 'queue', undefined, false, { echo: 'x' });
+      expect(dispatcher.recordAgentNote).not.toHaveBeenCalled();
+      expect(failing.recordAgentNote).not.toHaveBeenCalled();
+    });
+
+    it('echoes a queued message when the flush delivers it, not when it is parked', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const tracked = createRecord({
+        sdkHandle: { supportsContinuation: () => true, continue: jest.fn() } as unknown as SdkHandle,
+      });
+      const dispatcher = echoDispatcher();
+      await router.route(AGENT_ID, tracked, 'queued text', dispatcher, 'queue', undefined, false, { echo: 'queued' });
+      expect(dispatcher.recordAgentNote).not.toHaveBeenCalled();
+      tracked.info = { ...tracked.info, status: 'completed' };
+      await router.flushPending(AGENT_ID, tracked, dispatcher);
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        expect.objectContaining({ type: 'user', content: 'queued' }));
+    });
+
+    it('echoes an interrupt-and-send once the message is re-submitted', async () => {
+      const router = new AgentMessageRouter(createLogger(), createDetection());
+      const tracked = createRecord();
+      tracked.sdkHandle = {
+        supportsInterrupt: () => true,
+        interrupt: jest.fn(async () => { tracked.info = { ...tracked.info, status: 'completed' }; }),
+        supportsContinuation: () => true,
+        continue: jest.fn(),
+      } as unknown as SdkHandle;
+      const dispatcher = echoDispatcher();
+      const outcome = await router.route(AGENT_ID, tracked, 'redirect', dispatcher, 'now', undefined, true, { echo: 'redirect' });
+      expect(outcome.mode).toBe('interrupt-resume');
+      expect(dispatcher.recordAgentNote).toHaveBeenCalledWith(AGENT_ID,
+        expect.objectContaining({ type: 'user', content: 'redirect' }));
+    });
+  });
 });

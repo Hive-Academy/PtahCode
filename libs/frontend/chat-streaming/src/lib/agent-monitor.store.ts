@@ -576,7 +576,7 @@ export interface MonitoredAgent {
   readonly supportsContinuation?: boolean;
   /**
    * The backend dropped this agent's process record after its completed-agent
-   * TTL, so `agent:continue` can only answer `not_found` from here on. The
+   * TTL, so an in-process follow-up finds no agent from here on. The
    * conversation itself is NOT gone — `cliSessionId` still resumes it — so this
    * marks WHICH path a follow-up has to take, never that follow-ups are over.
    * Cleared when a spawn event re-opens the same id.
@@ -840,7 +840,6 @@ export interface SubagentRpcError {
   readonly method:
     | 'subagent:send-message'
     | 'subagent:stop'
-    | 'subagent:interrupt'
     | 'subagent:background';
   readonly message: string;
   readonly code?: string;
@@ -3200,63 +3199,6 @@ export class AgentMonitorStore implements OnDestroy {
   }
 
   /**
-   * Send a follow-up message to an agent the backend still holds in memory.
-   *
-   * `ok` means the CONTINUATION was accepted, not that the round trip landed.
-   * The handler answers a refusal (`not_found` / `busy` / `unsupported`) as a
-   * transport SUCCESS carrying `{ success: false, code }`, so reading
-   * `isSuccess()` alone reports every refusal as a sent message — the caller
-   * clears the user's draft and shows nothing while the follow-up went nowhere.
-   */
-  async continueAgent(
-    agentId: string,
-    message: string,
-  ): Promise<{ ok: boolean; code?: string }> {
-    const result = await this.rpc.call('agent:continue', {
-      agentId,
-      message,
-    });
-    return {
-      ok: result.isSuccess() && result.data.success === true,
-      code: result.data?.code,
-    };
-  }
-
-  /**
-   * Deliver a follow-up by RESUMING the agent's CLI-native session instead of
-   * continuing its process — the recovery path for an agent the backend no
-   * longer tracks (TTL sweep, host restart).
-   *
-   * The message is passed as the resumed run's `task`, which is what the
-   * conversation continues WITH; history comes from `cliSessionId`. A caller
-   * without one has nothing to resume and must not reach here.
-   */
-  async resumeAgentWithMessage(
-    agent: MonitoredAgent,
-    message: string,
-  ): Promise<{ ok: boolean; error?: string }> {
-    if (!agent.cliSessionId) {
-      return { ok: false, error: 'This agent has no session to resume.' };
-    }
-
-    const result = await this.rpc.call('agent:resumeCliSession', {
-      cliSessionId: agent.cliSessionId,
-      cli: agent.cli,
-      task: message,
-      parentSessionId: agent.parentSessionId,
-      ptahCliId: agent.ptahCliId,
-      previousAgentId: agent.agentId,
-    });
-
-    if (!result.isSuccess()) {
-      return { ok: false, error: result.error };
-    }
-    return result.data.success
-      ? { ok: true }
-      : { ok: false, error: result.data.error };
-  }
-
-  /**
    * Terminalise a foreground subagent from its Task tool_use `tool_result`.
    *
    * This is the DEFINITIVE completion signal for a normally-finishing
@@ -3448,37 +3390,8 @@ export class AgentMonitorStore implements OnDestroy {
   }
 
   /**
-   * Interrupt the entire active session (all running subagents in scope).
-   */
-  async interruptSession(): Promise<void> {
-    const sessionId = this.tabManager.activeTabSessionId();
-    if (!sessionId) {
-      this.recordSubagentRpcError({
-        parentToolUseId: '',
-        method: 'subagent:interrupt',
-        message: 'No active session — cannot interrupt',
-        timestamp: Date.now(),
-      });
-      return;
-    }
-    const result = await this.rpc.call('subagent:interrupt', {
-      sessionId,
-    });
-    if (!result.isSuccess()) {
-      this.recordSubagentRpcError({
-        parentToolUseId: '',
-        method: 'subagent:interrupt',
-        message: result.error ?? 'Unknown error',
-        timestamp: Date.now(),
-      });
-    } else {
-      this._subagentRpcError.set(null);
-    }
-  }
-
-  /**
    * Move a running foreground subagent to the background. Follows the exact
-   * shape of {@link interruptSession}: fire-and-report the RPC, record any
+   * shape of {@link stopAgent}: fire-and-report the RPC, record any
    * error on the shared channel, and never mutate state optimistically — the
    * `background_agent_started` push event is the sole source of truth for the
    * resulting background record.

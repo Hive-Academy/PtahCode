@@ -101,7 +101,24 @@ function liveTurnInput(
   };
 }
 
-/** What a cold resume can carry: model, effort, files and the raw command prompt. */
+/** Reason a stopped lane refuses images when its cold resume cannot carry them. */
+export const LANE_IMAGES_NEED_RUNNING_TEXT = 'Images need a running lane.';
+
+/**
+ * Images on a cold resume: only when the manifest says the resumed first turn
+ * carries them (`images.onResume`). A lane bound to a named account resumes
+ * through an admission gate whose first turn is text only, so it refuses.
+ */
+function restoredImages(info: AgentProcessInfo, declared: LaneTurnInputCapabilities): LaneTurnInputCapabilities['images'] {
+  // The record carries the run's account fields (`laneAccountFields`), also a corrupt one.
+  const account = info as { readonly accountBinding?: unknown; readonly accountBindingId?: unknown };
+  const named = account.accountBinding !== undefined || account.accountBindingId !== undefined;
+  return declared.images.state === 'supported' && declared.images.onResume === true && !named
+    ? declared.images
+    : refuse(LANE_IMAGES_NEED_RUNNING_TEXT);
+}
+
+/** What a cold resume can carry: model, effort, files, the raw command prompt and, when declared, images. */
 function restoredTurnInput(info: AgentProcessInfo, potential: CliAdapterManifest): LaneTurnInputCapabilities {
   const declared = potential.turnInput;
   const blocked = declared?.commands.blocked ?? [];
@@ -109,7 +126,7 @@ function restoredTurnInput(info: AgentProcessInfo, potential: CliAdapterManifest
   return {
     model: declared.model,
     effort: declared.effort,
-    images: refuse('Images need a running lane.'),
+    images: restoredImages(info, declared),
     files: declared.files,
     commands: { ...declared.commands, blocked },
     skills: declared.skills,

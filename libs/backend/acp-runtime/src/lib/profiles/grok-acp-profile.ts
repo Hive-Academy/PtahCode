@@ -21,6 +21,12 @@
  * - `_x.ai/*` (and `x.ai/*`) notifications are vendor extensions, e.g. the
  *   `retry_state` notices before a rate-limit error; they are ignored, and
  *   `_x.ai/mcp/servers_updated` is logged (MCP attachment diagnostics).
+ * - Live usage: Grok sends `_x.ai/session_notification` with
+ *   `update.sessionUpdate: 'response_completed'` once per model call, its
+ *   `usage` the call's counters (`grok-p1-ptah-mcp-search-use-tool.ndjson`:
+ *   three calls). Σ(input + cache read) and Σ output equal the prompt
+ *   response's `_meta.usage` turn total, so each call is a usage increment
+ *   and the turn total stays the correction.
  * - Interrupt: `session/cancel` mid-shell answers the prompt `cancelled` and
  *   the process keeps running (`grok-p2-cancel-mid-shell.ndjson`), so the
  *   cancel behaviour is `await-reply`.
@@ -30,13 +36,18 @@
  *   Set the model explicitly to switch a resumed session.
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
+import { z } from 'zod';
 import { toAcpMcpServer } from '../acp-mcp-servers';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
-import type { ProviderSessionLogger } from '@ptah-extension/provider-session-contracts';
+import type {
+  ProviderSessionLogger,
+  ProviderUsage,
+} from '@ptah-extension/provider-session-contracts';
 import type {
   AcpModelSource,
   AcpRequestFailure,
   AcpSessionConfigEntry,
+  AcpSessionConfigInput,
   AcpSessionOptions,
   AcpSpawnSpec,
   AcpVendorProfile,
@@ -52,6 +63,62 @@ const GROK_ARGS: readonly string[] = ['agent', '--no-leader', 'stdio'];
 const EXTENSION_NOTIFICATION = /^_?x\.ai\//;
 const MCP_SERVERS_UPDATED = '_x.ai/mcp/servers_updated';
 const SIGN_IN_HINT = 'run `grok login`';
+const SESSION_NOTIFICATION = '_x.ai/session_notification';
+
+const tokenCount = z.number().int().nonnegative();
+
+/** One model call's counters on a `response_completed` notification. */
+const grokCallUsageSchema = z.object({
+  update: z.object({
+    sessionUpdate: z.literal('response_completed'),
+    usage: z.object({
+      input_tokens: tokenCount,
+      output_tokens: tokenCount,
+      cache_read_input_tokens: tokenCount.optional(),
+      cache_creation_input_tokens: tokenCount.optional(),
+    }),
+  }),
+});
+
+/**
+ * One model call's usage, in the shape of Grok's turn total: its
+ * `inputTokens` include the cached input (the fixtures' Σ matches the turn
+ * `_meta.usage.inputTokens`). No cache, context or cost field is set, since
+ * the turn total carries none under these names.
+ */
+function readGrokCallUsage(
+  method: string,
+  params: Record<string, unknown>,
+  malformed?: (fieldPaths: readonly string[]) => void,
+): ProviderUsage | undefined {
+  if (method !== SESSION_NOTIFICATION) return undefined;
+  const parsed = grokCallUsageSchema.safeParse(params);
+  if (!parsed.success) {
+    // A frame without valid counters adds no increment; the turn-end total
+    // still lands and corrects the card. Only a `response_completed` frame
+    // is a usage frame, so only its failure is reported as shape drift.
+    if (isResponseCompleted(params))
+      malformed?.(parsed.error.issues.map((issue) => issue.path.join('.')));
+    return undefined;
+  }
+  const usage = parsed.data.update.usage;
+  return {
+    inputTokens:
+      usage.input_tokens +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0),
+    outputTokens: usage.output_tokens,
+  };
+}
+
+function isResponseCompleted(params: Record<string, unknown>): boolean {
+  const update = params['update'];
+  return (
+    typeof update === 'object' &&
+    update !== null &&
+    (update as Record<string, unknown>)['sessionUpdate'] === 'response_completed'
+  );
+}
 
 /** Grok's -32000 auth failures say "Authentication required" / "no auth method id provided". */
 const AUTH_WORDING = /authenticat|auth method/i;
@@ -131,7 +198,7 @@ export const grokAcpProfile: AcpVendorProfile = {
     return (options.mcp ?? []).map((attachment) => toAcpMcpServer(attachment));
   },
 
-  sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {
+  sessionConfig(options: AcpSessionConfigInput): readonly AcpSessionConfigEntry[] {
     const entries: AcpSessionConfigEntry[] = [];
     if (options.model) {
       // Binding: a model Grok rejects fails the turn instead of silently
@@ -164,6 +231,7 @@ export const grokAcpProfile: AcpVendorProfile = {
       }
       return EXTENSION_NOTIFICATION.test(method);
     },
+    usage: readGrokCallUsage,
   },
 
   /**

@@ -24,7 +24,9 @@ describe('composer visual regressions', () => {
     expect(active).toContain('background: oklch(var(--p));');
     expect(active).toContain('color: oklch(var(--pc));');
     expect(block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active \.opacity-70/)).toContain('opacity: 1;');
-    const badge = block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active \.badge\.badge/);
+    // The row's badges are ptahBadge spans: the selector must reach them (S5).
+    expect(option).toContain('ptahBadge');
+    const badge = block(/:root \.suggestions-panel ptah-suggestion-option\.suggestion-active :is\(\.badge\.badge, \[data-ptah-badge\]\)/);
     expect(badge).toContain('background: oklch(var(--pc));');
     expect(badge).toContain('color: oklch(var(--p));');
   });

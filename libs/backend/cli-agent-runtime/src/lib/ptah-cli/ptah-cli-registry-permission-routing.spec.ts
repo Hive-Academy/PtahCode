@@ -385,7 +385,7 @@ describe('PtahCliRegistry.spawnAgent — lane turn input (B5)', () => {
     const pushes: Parameters<mailboxModule.PromptMailbox['push']>[] = [];
     const spy = jest
       .spyOn(mailboxModule, 'createPromptMailbox')
-      .mockImplementation((task: string) => {
+      .mockImplementation((task) => {
         const mailbox = original(task);
         const push = mailbox.push.bind(mailbox);
         return { ...mailbox, prompt: mailbox.prompt, push: (...args) => { pushes.push(args); push(...args); } };

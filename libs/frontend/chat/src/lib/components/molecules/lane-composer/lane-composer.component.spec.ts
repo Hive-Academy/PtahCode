@@ -38,7 +38,7 @@ import { VoiceInputService } from '../../../services/voice-input.service';
 import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
-import { LaneComposerComponent } from './lane-composer.component';
+import { findLaneModelOption, LaneComposerComponent } from './lane-composer.component';
 
 const agentId = '00000000-0000-4000-8000-000000000001';
 
@@ -655,7 +655,8 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     expect(root(fixture).querySelector('[data-testid="attachment-image-blocked"]')?.textContent).toBe("Can't send");
     expect(sendButton(fixture).disabled).toBe(true);
-    expect(statusText(fixture)).toBe('Copilot lanes cannot take images. Remove the image to send.');
+    // The lane's own reason, not a generic "{CLI} lanes cannot take images" (L3).
+    expect(statusText(fixture)).toBe('Image input is not confirmed for the Copilot lane. Remove the image to send.');
     key(fixture, {});
     await settle(fixture);
     expect(sendMessage).not.toHaveBeenCalled();
@@ -690,6 +691,61 @@ describe('LaneComposerComponent', () => {
     const retry = Array.from(alert.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Retry') as HTMLButtonElement;
     retry.click();
     expect(previewMessage.mock.calls.map((call) => call[1])).toEqual(['queue', 'now']);
+  });
+
+  it('uses the main chat card classes, so the textarea draws no ring and the card frames focus (S2)', async () => {
+    const fixture = await mount();
+    const card = field(fixture).closest('[data-glass-surface="tile"]') as HTMLElement;
+    expect(card.classList).toContain('chat-composer-card');
+    expect(card.classList).toContain('chat-composer-column');
+    expect(field(fixture).classList).toContain('focus:outline-none');
+    const line = root(fixture).querySelector('[data-testid="lane-status-line"]') as HTMLElement;
+    expect(line.getAttribute('data-glass-surface')).toBe('plate');
+  });
+
+  it('keeps one model label: the record model as a catalog row, never the dated or multi-model id (M1)', async () => {
+    store.agentsById.set(new Map([[agentId, {
+      status: 'running', cli: 'codex', model: 'gpt-5.5-mini-20261001', observedModel: 'mixed-model',
+    }]]));
+    const fixture = await mount();
+    const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
+    expect(pill.textContent).toContain('GPT-5.5 mini');
+    expect(pill.textContent).not.toContain('mixed-model');
+    const component = fixture.componentInstance as unknown as { selectedModel(): string | null };
+    expect(component.selectedModel()).toBe('gpt-5.5-mini');
+  });
+
+  it('prefers the record model over a lagging observed model (M1)', async () => {
+    store.agentsById.set(new Map([[agentId, {
+      status: 'running', cli: 'codex', model: 'gpt-5.5-mini', observedModel: 'gpt-5.5',
+    }]]));
+    const fixture = await mount();
+    const component = fixture.componentInstance as unknown as { selectedModel(): string | null };
+    expect(component.selectedModel()).toBe('gpt-5.5-mini');
+  });
+
+  it('names the pill while no model is known instead of leaving it blank (M2)', async () => {
+    rpcCall.mockResolvedValue(rpcSuccess({ models: [], efforts: [], commands: [] }));
+    const fixture = await mount();
+    const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
+    expect(pill.textContent).toContain('Codex default');
+  });
+
+  it('says the pick applies when the stopped lane resumes (M4)', async () => {
+    const fixture = await mount({ stopped: true });
+    const component = fixture.componentInstance as unknown as { settingFooter(): string };
+    expect(component.settingFooter()).toBe('Applies from your next message, which resumes the lane.');
+  });
+
+  it('drops the last send note when the lane starts or ends a run (M3)', async () => {
+    const fixture = await mount();
+    const component = fixture.componentInstance as unknown as { pickModel(id: string): void };
+    component.pickModel('gpt-5.5-mini');
+    fixture.detectChanges();
+    expect(statusText(fixture)).toContain('Model set to GPT-5.5 mini.');
+    fixture.componentRef.setInput('stopped', true);
+    await settle(fixture);
+    expect(statusText(fixture)).not.toContain('Model set to');
   });
 
   it('notes a model pick on the status line and sends it with the next message', async () => {
@@ -796,5 +852,28 @@ describe('LaneComposerComponent', () => {
     const resume = root(fixture).querySelector('[data-testid="lane-resume-btn"]') as HTMLButtonElement;
     expect(resume.getAttribute('aria-label')).toBe('Resume Codex session');
     expect(resume.title).toBe('Resume session');
+  });
+});
+
+describe('findLaneModelOption (PR 1509)', () => {
+  const options = [
+    { id: 'gpt-5.5', name: 'GPT-5.5' },
+    { id: 'claude-haiku-5-5-20261001', name: 'Haiku 5.5' },
+  ];
+
+  it('matches a recorded id that is a catalog id plus a date suffix', () => {
+    expect(findLaneModelOption(options, 'gpt-5.5-20261001')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'gpt-5.5-2026-10-01')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'claude-haiku-5-5')?.id).toBe('claude-haiku-5-5-20261001');
+  });
+
+  it('keeps an unmatched variant id instead of picking its base or its variant', () => {
+    expect(findLaneModelOption(options, 'gpt-5.5-mini')).toBeUndefined();
+    expect(findLaneModelOption([{ id: 'gpt-5.5-mini', name: 'GPT-5.5 mini' }], 'gpt-5.5')).toBeUndefined();
+  });
+
+  it('keeps exact and name matches', () => {
+    expect(findLaneModelOption(options, 'GPT-5.5')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'haiku 5.5')?.id).toBe('claude-haiku-5-5-20261001');
   });
 });

@@ -17,6 +17,7 @@ import type { AgentProcessManager } from '../agent-process-manager.service';
 import {
   AgentInterruptedDeliveryError,
   AgentMessageError,
+  userEchoSegment,
   type RouteTurnInput,
 } from '../agent-message-router.service';
 import {
@@ -35,11 +36,12 @@ import { ackStateAtStart } from './agent-message-reconciler';
 import type { AgentMessageEnvelope, EnvelopePatch } from './envelope/agent-message-envelope.schema';
 import type { AgentMessageEnvelopeStore } from './envelope/agent-message-envelope.store';
 import { LaneResumeError } from './lane-resumers/lane-resumer.port';
+import { redactLaneStderr } from '../cli-adapters/provider-session/lane-stderr-redaction';
 
 export type DispatchManager = Pick<
   AgentProcessManager,
   'findAgentInfo' | 'getMessageRoutableAgent' | 'sendToAgent'
->;
+> & Partial<Pick<AgentProcessManager, 'recordAgentNote'>>;
 export type DispatchEnvelopeStore = Pick<
   AgentMessageEnvelopeStore,
   'get' | 'transition' | 'markDispatching' | 'toReceipt'
@@ -216,15 +218,21 @@ export class AgentMessageDispatcher {
       ...(turn?.model !== undefined ? { model: turn.model } : {}),
       ...(turn?.reasoningEffort !== undefined ? { reasoningEffort: turn.reasoningEffort } : {}),
     };
+    const sentAt = Date.now();
     try {
       // The guard reads the body as written, before the Ptah header.
-      const result = await this.deps.resume.resume(info, text,
-        { rawBody: attempt.body, blocked: blockedCommandsOf(attempt) }, turn?.files);
+      // Held images ride on the resumed first turn (the plan admitted them only
+      // where the manifest declares `images.onResume`).
+      const guard = { rawBody: attempt.body, blocked: blockedCommandsOf(attempt) };
+      const result = turn?.images?.length
+        ? await this.deps.resume.resume(info, text, guard, turn.files, turn.images)
+        : await this.deps.resume.resume(info, text, guard, turn?.files);
       spawnedId = result.agentId;
       spawnedSession = result.cliSessionId;
     } catch (error: unknown) {
       return this.failed(attempt, dispatching, error);
     }
+    this.echoCold(attempt, spawnedId, sentAt);
     try {
       await this.deps.aliases.record(attempt.laneId, spawnedId);
     } catch (error: unknown) {
@@ -253,6 +261,8 @@ export class AgentMessageDispatcher {
       ...(form.turn ? { turn: form.turn } : {}),
       rawBody: attempt.body,
       ...(form.raw ? { noSteer: true } : {}),
+      // Only a user's message is echoed in the lane transcript, body only.
+      ...(envelope.sender.kind === 'user' ? { echo: attempt.body } : {}),
     };
     try {
       result = await this.deps.manager.sendToAgent(laneId, text, this.routerDeliveryFor(attempt, form.raw), envelope.id,
@@ -312,8 +322,30 @@ export class AgentMessageDispatcher {
       // Only the error's name: adapter messages can carry paths or tokens.
       this.deps.logger.error('[AgentMessageCoordinator] Delivery outcome unknown',
         new Error(`Delivery outcome unknown after ${error instanceof Error ? error.name : 'a non-Error throw'}`));
+    if (error instanceof LaneResumeError || error instanceof LaneAccountResumeError)
+      // L12: the cold resume's real reason, redacted and bounded. The
+      // composer only shows the reason code otherwise.
+      this.deps.logger.warn('[AgentMessageCoordinator] Lane resume failed', {
+        cli: attempt.info.cli,
+        code: error instanceof LaneResumeError ? error.code : 'account',
+        reason: resumeFailureText(error),
+      });
     const next = await this.deps.store.transition(dispatching.id, patch, ['dispatching']);
-    return this.unsupported(attempt, next ?? dispatching, reason);
+    const outcome = this.unsupported(attempt, next ?? dispatching, reason);
+    // Fixed host text (a policy refusal) reaches the composer as the detail.
+    return patch.lastError && error instanceof LaneResumeError && error.code === 'policy-refused'
+      ? { ...outcome, detail: patch.lastError } : outcome;
+  }
+
+  /** The user echo of a cold resume, on the resumed lane's own output. */
+  private echoCold(attempt: DispatchAttempt, agentId: AgentId, sentAt: number): void {
+    if (attempt.envelope.sender.kind !== 'user' || attempt.body.trim() === '') return;
+    try {
+      this.deps.manager.recordAgentNote?.(agentId, userEchoSegment(attempt.body, sentAt));
+    } catch {
+      // degradation-audit: reported - the message was delivered; only its
+      // transcript echo is missing, and the delivery receipt still shows it.
+    }
   }
 
   private async settleIfFinished(agentId: AgentId): Promise<void> {
@@ -358,12 +390,16 @@ export function classifyAttemptFailure(
   }
   if (error instanceof LaneAccountResumeError)
     return { reason: 'account_refused', patch: { state: 'failed', reason: 'account_refused', ...undo } };
-  if (error instanceof LaneResumeError && error.code === 'blocked-command')
+  if (error instanceof LaneResumeError && (error.code === 'blocked-command' || error.code === 'turn-input-refused'))
     return { reason: 'turn-input-unsupported',
       patch: { state: 'failed', reason: 'turn-input-unsupported', lastError: error.message.slice(0, 200), ...undo } };
   if (error instanceof LaneResumeError && error.code === 'turn-settings-refused')
     return { reason: 'turn-options-refused',
       patch: { state: 'failed', reason: 'turn-options-refused', lastError: error.message.slice(0, 200), ...undo } };
+  if (error instanceof LaneResumeError && error.code === 'policy-refused')
+    // Retrying resolves the same policy again, so the envelope fails with the reason.
+    return { reason: 'resume-failed',
+      patch: { state: 'failed', reason: 'resume-failed', lastError: resumeFailureText(error), ...undo } };
   if (error instanceof LaneResumeError) {
     return error.code === 'no-session'
       ? { reason: 'resume-failed', patch: { state: 'failed', reason: 'resume-failed', ...undo } }
@@ -386,6 +422,11 @@ function blockedCommandsOf(attempt: DispatchAttempt): readonly string[] {
  */
 function startAck(dispatching: AgentMessageEnvelope, attempt: DispatchAttempt, raw: boolean) {
   return ackStateAtStart(dispatching.ackState, raw ? undefined : attempt.plan.effectiveCapabilities.mcp);
+}
+
+/** A resume failure's message with secrets redacted, bounded for a log or `lastError`. */
+function resumeFailureText(error: Error): string {
+  return redactLaneStderr(error.message.replace(/\s+/g, ' ').trim()).slice(0, 200);
 }
 
 function asError(error: unknown): Error {

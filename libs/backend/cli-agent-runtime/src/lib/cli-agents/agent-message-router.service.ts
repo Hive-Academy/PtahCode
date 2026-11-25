@@ -26,6 +26,7 @@ import {
   type AgentMessageOutcome,
   type AgentProcessInfo,
   type CliAdapterManifest,
+  type CliOutputSegment,
   type LaneTurnContent,
   type LaneTurnRequest,
 } from '@ptah-extension/shared';
@@ -129,6 +130,8 @@ export interface PendingAgentMessage {
    * blocked-command pre-flight reads it, so a header never hides a `/command`.
    */
   readonly rawBody?: string;
+  /** The user's body to echo in the lane transcript once delivered ({@link RouteTurnInput.echo}). */
+  readonly echo?: string;
 }
 
 export type AgentMessageStatus =
@@ -164,6 +167,12 @@ export interface ContinuationDispatcher {
     turn: LaneTurnRequest | undefined,
     rawBody: string | undefined,
   ): Promise<void>;
+  /**
+   * Write a host segment onto the lane's own output stream (the user echo).
+   * It bypasses the provider segment path, so it never counts as provider
+   * output or usage. Absent: no echo.
+   */
+  recordAgentNote?(agentId: string, segment: CliOutputSegment): void;
 }
 
 /** What a route call carries beside the text: the turn request and the raw body. */
@@ -175,6 +184,33 @@ export interface RouteTurnInput {
    * `now` then interrupts and resumes when confirmed; `steer` is refused.
    */
   readonly noSteer?: boolean;
+  /**
+   * The body a user wrote, without the Ptah header (a raw `/command` as
+   * typed). Once delivered it is echoed in the lane transcript as a `user`
+   * segment. Absent for parent and lane senders: nothing is echoed.
+   */
+  readonly echo?: string;
+}
+
+/** The lane transcript's copy of what the user sent, stamped with the send time. */
+export function userEchoSegment(body: string, sentAt: number): CliOutputSegment {
+  return { type: 'user', content: body, sentAt };
+}
+
+/** Echo a delivered user message; a failing note never fails the delivery. */
+function echoDelivered(
+  dispatcher: ContinuationDispatcher,
+  agentId: string,
+  echo: string | undefined,
+  sentAt: number,
+): void {
+  if (echo === undefined || echo.trim() === '' || !dispatcher.recordAgentNote) return;
+  try {
+    dispatcher.recordAgentNote(agentId, userEchoSegment(echo, sentAt));
+  } catch {
+    // degradation-audit: reported - the message was delivered; only its
+    // transcript echo is missing, and the delivery receipt still shows it.
+  }
 }
 
 /**
@@ -295,11 +331,13 @@ export class AgentMessageRouter {
     if (delivery === 'steer') {
       if (input.noSteer || !turnInFlight || !caps.steer || !handle?.steer)
         return { mode: 'unsupported', reasonCode: 'steer-unavailable', detail: 'Explicit steer is unavailable for this active turn.' };
+      const sentAt = Date.now();
       try {
         await steer(handle);
       } catch {
         return { mode: 'unsupported', reasonCode: 'steer-rejected', detail: 'The live handle rejected the steer request.' };
       }
+      echoDelivered(dispatcher, agentId, input.echo, sentAt);
       return {
         mode: 'steer',
         detail:
@@ -311,7 +349,9 @@ export class AgentMessageRouter {
     if (delivery === 'now') {
       if (!input.noSteer && turnInFlight && caps.steer && handle?.steer) {
         try {
+          const sentAt = Date.now();
           await steer(handle);
+          echoDelivered(dispatcher, agentId, input.echo, sentAt);
           return { mode: 'steer', detail: 'Injected into the active turn.' };
         } catch (error: unknown) {
           return { mode: 'unsupported', reasonCode: 'steer-rejected', detail: `Steer rejected: ${describeError(error)}` };
@@ -393,8 +433,10 @@ export class AgentMessageRouter {
     let resubmitted = false;
     try {
       await this.awaitTurnSettled(tracked);
+      const sentAt = Date.now();
       await continueWith(dispatcher, agentId, message, undefined, input);
       resubmitted = true;
+      echoDelivered(dispatcher, agentId, input.echo, sentAt);
     } catch (error: unknown) {
       if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId, input);
       throw new AgentInterruptedDeliveryError(
@@ -442,6 +484,7 @@ export class AgentMessageRouter {
       ...(receiptId !== undefined ? { journaled: true } : {}),
       ...(input.turn !== undefined ? { turn: input.turn } : {}),
       ...(input.rawBody !== undefined ? { rawBody: input.rawBody } : {}),
+      ...(input.echo !== undefined ? { echo: input.echo } : {}),
     });
     return {
       mode: 'queue-next-turn',
@@ -483,6 +526,7 @@ export class AgentMessageRouter {
     messageId?: string,
     input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
+    const sentAt = Date.now();
     try {
       await continueWith(dispatcher, agentId, message, undefined, input);
     } catch (error: unknown) {
@@ -498,6 +542,7 @@ export class AgentMessageRouter {
       };
     }
 
+    echoDelivered(dispatcher, agentId, input.echo, sentAt);
     return {
       mode: 'start-turn',
       detail:
@@ -566,9 +611,12 @@ export class AgentMessageRouter {
           tracked.pendingMessages.unshift({ ...next, dispatchReserved: true });
           return;
         }
+        const sentAt = Date.now();
         await continueWith(dispatcher, agentId, next.text, next.messageId, next);
-        if (this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed')
+        if (this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed') {
           this.setTerminal(agentId, next.messageId, { status: 'delivered' });
+          echoDelivered(dispatcher, agentId, next.echo, sentAt);
+        }
         this.logger.info('[AgentMessageRouter] Delivered queued message', {
           agentId,
           cli: tracked.info.cli,

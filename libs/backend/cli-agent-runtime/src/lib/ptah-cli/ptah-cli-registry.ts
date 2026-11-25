@@ -1057,6 +1057,8 @@ export class PtahCliRegistry {
         disposeCallbacks,
         stopProxy,
         imageInput: potentialCapabilities.turnInput?.images,
+        // The runner exposes steer only when the manifest supports it.
+        manifestSteer: potentialCapabilities.messaging.steer,
       });
 
       this.logger.info(

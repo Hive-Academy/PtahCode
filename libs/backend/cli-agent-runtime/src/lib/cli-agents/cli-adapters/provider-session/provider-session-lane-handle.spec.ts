@@ -18,6 +18,8 @@ import {
   ACP_CANCEL_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUTS_MS,
   ACP_USAGE_DRAIN_MS,
+  antigravityAcpProfile,
+  grokAcpProfile,
   readAcpErrorDetail,
   type AcpRequestFailure,
   type AcpSpawnOptions,
@@ -31,12 +33,14 @@ import {
   type FakeAcpMessage,
   type FakeAcpTransport,
   readAcpFixture,
+  recordedResult,
 } from '@ptah-extension/acp-runtime/testing';
 import { LaneUsageNormalizer } from '../../lane-usage-normalizer';
 import type { McpAttachment } from '../../mcp-attachment-probe.port';
 import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
 import {
   acpLaneManifestSections,
+  acpProfileEfforts,
   createProviderSessionLaneHandle,
 } from './provider-session-lane-handle';
 import { laneTurnInputContractViolations } from '../../testing/lane-turn-input-contract';
@@ -2019,5 +2023,90 @@ describe('createProviderSessionLaneHandle — lane turn input (B8)', () => {
     const second = normalizer.accept('lane', failed.usageScope ?? 'turn', { inputTokens: 7, outputTokens: 2 });
     expect(second.increment).toEqual({ inputTokens: 7, outputTokens: 2 });
     expect(second.turnTotal).toEqual({ inputTokens: 7, outputTokens: 2 });
+  });
+});
+
+describe('createProviderSessionLaneHandle — Grok live usage', () => {
+  const P1 = readAcpFixture('grok-p1-ptah-mcp-search-use-tool.ndjson');
+  const vendorNotifications = P1.filter(
+    (envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === '_x.ai/session_notification',
+  ).map((envelope) => envelope.msg?.['params'] as Record<string, unknown>);
+
+  it('declares live usage for Grok and keeps agy at turn end', () => {
+    expect(acpLaneManifestSections(grokAcpProfile, 'x').usage).toEqual({ timing: 'live' });
+    expect(acpLaneManifestSections(antigravityAcpProfile, 'x').usage).toEqual({
+      timing: 'turn-end',
+      reason: 'Antigravity reports token usage when the turn ends.',
+    });
+  });
+
+  it('streams the p1 model calls as message increments whose sum is the turn total, with no double count', async () => {
+    const h = start({
+      profile: { extensions: grokAcpProfile.extensions },
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          for (const notification of vendorNotifications) {
+            await fake.notify('_x.ai/session_notification', {
+              ...notification,
+              sessionId: String(params['sessionId']),
+            });
+          }
+          return { result: recordedResult(P1, 'session/prompt') };
+        }),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const usageSegments = h.segments.filter((segment) => segment.usage);
+    expect(usageSegments.map((segment) => segment.usageScope)).toEqual([
+      'message', 'message', 'message', undefined,
+    ]);
+    expect(usageSegments.slice(0, 3).some((segment) => segment.turnTelemetry)).toBe(false);
+    expect(usageSegments[3]?.turnTelemetry).toBeDefined();
+
+    // The manager's fold: segment scope ?? handle scope ?? 'turn'.
+    const normalizer = new LaneUsageNormalizer();
+    const steps = usageSegments.map((segment) =>
+      normalizer.accept('lane', segment.usageScope ?? h.handle.usageScope ?? 'turn', segment.usage ?? {
+        inputTokens: 0, outputTokens: 0,
+      }));
+    const card = (key: 'inputTokens' | 'outputTokens') =>
+      steps.reduce((sum, step) => sum + (step.increment[key] ?? 0), 0);
+    expect(steps.slice(0, 3).map((step) => step.turnTotal)).toMatchObject([
+      { inputTokens: 18267, outputTokens: 168 },
+      { inputTokens: 43359, outputTokens: 395 },
+      { inputTokens: 69024, outputTokens: 473 },
+    ]);
+    // The turn-end total corrects nothing: the per-call sums already equal it.
+    expect(steps[3]?.increment).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+    expect(card('inputTokens')).toBe(69024);
+    expect(card('outputTokens')).toBe(473);
+    expect(steps[3]?.turnTotal).toMatchObject({ inputTokens: 69024, outputTokens: 473 });
+  });
+});
+
+describe('acpProfileEfforts (stopped-lane efforts)', () => {
+  it('gives Grok every level its mapping accepts, whatever the model', () => {
+    expect(acpProfileEfforts(grokAcpProfile)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(acpProfileEfforts(grokAcpProfile, 'grok-4.7')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('gives agy its thought levels, and none for a model id with an effort suffix', () => {
+    expect(acpProfileEfforts(antigravityAcpProfile, 'gemini-3-pro')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    expect(acpProfileEfforts(antigravityAcpProfile, 'gemini-3-pro-high')).toEqual([]);
+  });
+
+  it('gives none for a profile without sessionConfig', () => {
+    expect(acpProfileEfforts(createProfile(), 'model-a')).toEqual([]);
+  });
+
+  it('matches what the live handle serves for the same model', async () => {
+    const h = start({
+      agent: { configOptions: [MODEL_OPTION] },
+      profile: { sessionConfig: antigravityAcpProfile.sessionConfig },
+      options: { model: 'model-a-high' },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const live = await h.handle.listTurnOptions?.();
+    expect(live?.efforts).toEqual(acpProfileEfforts(antigravityAcpProfile, 'model-a-high'));
+    expect(live?.efforts).toEqual([]);
   });
 });

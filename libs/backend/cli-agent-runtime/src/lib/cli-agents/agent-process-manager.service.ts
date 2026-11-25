@@ -907,6 +907,11 @@ export class AgentProcessManager {
     if (!adapter) {
       throw new Error(`No adapter registered for CLI: ${cli}`);
     }
+    // Images reach a resumed first turn only where the adapter declares it;
+    // any other adapter would drop them silently.
+    if (request.turnImages?.length && adapter.capabilities().turnInput?.images.onResume !== true) {
+      throw new Error(`${adapter.displayName} cannot take images when it resumes.`);
+    }
     // Validate explicit policy before any adapter process or SDK run exists.
     const effectivePolicy = this.spawnEnvironment.resolveLanePolicy(
       adapter,
@@ -1517,6 +1522,10 @@ export class AgentProcessManager {
         // Claude adapter field (`ClaudeCliCommandOptions`); set for Claude only.
         ...(options.accountAdmission
           ? { accountAdmission: options.accountAdmission }
+          : {}),
+        // Claude adapter field: images of a cold resume's first turn.
+        ...(request.turnImages?.length
+          ? { turnImages: request.turnImages }
           : {}),
         onAccountBinding: async (reference, sdkSessionId) => {
           const snapshot = snapshotLaneAccountReference(reference);

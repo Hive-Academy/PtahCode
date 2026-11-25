@@ -237,7 +237,11 @@ export interface ClaudeSdkLaneRunContext {
 
 /** One turn sent to the CLI whose result frame has not arrived yet. */
 interface InFlightTurn {
-  /** The prompt's uuid; absent for the spawn's first turn and steer placeholders. */
+  /**
+   * The prompt's uuid; absent for the spawn's first turn. A missed steer's
+   * placeholder carries the steer's uuid, so a frame that lists it (two
+   * missed steers run as one turn) drops the placeholder as folded.
+   */
   readonly uuid?: string;
   readonly resolve: (exitCode: number) => void;
 }
@@ -321,9 +325,22 @@ export class ClaudeSdkLaneRunner {
     let settling: InFlightTurn[] | undefined;
     let interruptPending: { turn: InFlightTurn; timedOut: boolean } | undefined;
     // Steer fold-in (B6): main-thread tool calls without their result, and
-    // the uuids of steers pushed since the last result frame.
+    // the steers pushed since the last result frame, by uuid. Each keeps its
+    // anchor: the last turn in flight when it was pushed, which the CLI runs
+    // before the steer when it does not fold it in (M6 c). A steer that a
+    // frame without `user_message_uuids` passed is unproven: that frame may
+    // have folded it in, so a later frame cannot prove it missed.
     let toolInFlight = false;
-    const pendingSteers = new Set<string>();
+    const pendingSteers = new Map<string, { anchor?: InFlightTurn; unproven: boolean }>();
+    /** Every steer uuid sent to the CLI, until a result frame lists it. */
+    const sentSteers = new Set<string>();
+    /**
+     * M3: set by the first result frame that carries `user_message_uuids`.
+     * Until then the CLI has not shown that it reports them (an older CLI
+     * never does), so a steer's fate could not be checked and steer is not
+     * offered.
+     */
+    let reportsMessageUuids = false;
     let currentModel: string | undefined = options.model;
     let currentEffort: string | undefined =
       typeof options.effort === 'string' ? options.effort : undefined;
@@ -380,52 +397,103 @@ export class ClaudeSdkLaneRunner {
         toolInFlight = toolRunning;
       },
       onTurnResult: ({ subtype, userMessageUuids }) => {
+        if (userMessageUuids !== undefined) reportsMessageUuids = true;
         reconcileSteers(userMessageUuids);
-        const head = inFlight.shift();
-        if (!head) {
-          // Unsolicited (M4): no queued turn ends here.
-          settling = [];
-          return { interrupted: false };
-        }
-        // Queued prompts the CLI folded into this turn are proved by their
-        // uuids; they settle with it instead of waiting for a later frame.
-        const listed = new Set(userMessageUuids ?? []);
-        const folded = inFlight.filter((turn) => turn.uuid !== undefined && listed.has(turn.uuid));
-        for (const turn of folded) dropTurn(turn);
-        settling = [head, ...folded];
-        // The flag clears on this turn's result frame, whatever its outcome.
+        settling = settledByResult(userMessageUuids);
+        for (const turn of settling) dropTurn(turn);
+        // Unsolicited (M4) or a steer's own turn: no queued turn ends here.
+        if (settling.length === 0) return { interrupted: false };
+        // The flag clears on the result frame of the turn it targets,
+        // whatever its outcome.
         const flag = interruptPending;
-        interruptPending = undefined;
-        const interrupted =
-          flag !== undefined &&
-          flag.turn === head &&
-          subtype === 'error_during_execution' &&
-          !closed;
-        if (interrupted && flag.timedOut)
+        const flagSettles = flag !== undefined && settling.includes(flag.turn);
+        if (flagSettles) interruptPending = undefined;
+        const interrupted = flagSettles && subtype === 'error_during_execution' && !closed;
+        if (interrupted && flag?.timedOut)
           emitSegment({ type: 'info', content: CLAUDE_LATE_INTERRUPT_TEXT });
         return { interrupted };
       },
       onPlanLimitSignal: (signal) => lanePlanLimits.onSignal(signal),
       planBilledSuccess: isPlanBilledLaneProvider(providerId),
     });
+    /**
+     * The in-flight turns a result frame ends. The CLI lists the uuid of
+     * every prompt a turn consumed, so a frame that lists uuids ends the
+     * turns it lists, wherever they sit in `inFlight`: a turn the named gate
+     * committed out of push order, or a missed steer's placeholder, settles
+     * on its own frame and no other. The head ends as well when it has no
+     * uuid (the spawn's turn). A frame that lists no in-flight turn but lists
+     * a steer is that steer's own turn and ends none. Any other frame, and
+     * every frame without the field, ends the head, in push order (none when
+     * no turn is in flight, M4).
+     */
+    const settledByResult = (consumed?: readonly string[]): InFlightTurn[] => {
+      const head = inFlight[0];
+      if (consumed === undefined) return head ? [head] : [];
+      const listed = new Set(consumed);
+      const listsSteer = consumed.some((uuid) => sentSteers.has(uuid));
+      for (const uuid of consumed) sentSteers.delete(uuid);
+      if (!head) return [];
+      const matched = inFlight.filter((turn) => turn.uuid !== undefined && listed.has(turn.uuid));
+      if (head.uuid === undefined) return [head, ...matched];
+      if (matched.length > 0) return matched;
+      return listsSteer ? [] : [head];
+    };
     let finished = false;
     const turnRunning = (): boolean =>
       !closed && !finished && inFlight.length > 0;
-    const supportsSteer = (): boolean => toolInFlight && turnRunning();
+    /**
+     * Steer rule (M3, consistent with the parent task's M6): a steer is
+     * offered only after this lane's CLI has carried `user_message_uuids` on
+     * a result frame. An older CLI that never reports them gets no steer at
+     * all, so nothing is guessed: no steer is assumed folded (which would let
+     * a missed steer's own frame settle a real turn early) and none is
+     * counted missed. The lane's first turn has no proof yet, so steer starts
+     * from its second turn.
+     */
+    const supportsSteer = (): boolean =>
+      reportsMessageUuids && toolInFlight && turnRunning();
     /**
      * A steer the result frame does not list was not folded in: the CLI runs
-     * it as its own turn next. That turn gets a resolver of its own, so the
-     * next real turn's `done` is not settled by it (queued sends may
-     * coalesce, so one turn is assumed for all missed steers).
+     * it as its own turn, in push order, right after the turn that was last
+     * when it was pushed. Each missed steer gets a placeholder turn of its
+     * own, carrying its uuid, placed after its anchor and after the missed
+     * steers pushed before it, so no real turn's `done` is settled by a
+     * steer's frame. Each placeholder settles on the frame that lists its
+     * uuid (`settledByResult`), so its position keeps push order only. When
+     * the CLI runs several missed steers as one turn, that frame lists their
+     * uuids and settles every placeholder it lists. A frame without
+     * `user_message_uuids` (unexpected once the CLI has reported them) proves
+     * nothing: the steers stay pending, neither folded nor missed, and become
+     * unproven, because that frame may have folded them in. The next frame
+     * that lists uuids ends their wait. A listed steer was folded in. An
+     * unproven steer it does not list gets no placeholder and no missed-steer
+     * notice; should it still run as its own turn, that frame lists only the
+     * steer and `settledByResult` ends no real turn for it. This runs before
+     * the frame settles turns, so an anchor still in flight puts the
+     * placeholder after it; an anchor already gone puts it right after the
+     * head.
      */
     const reconcileSteers = (consumed?: readonly string[]): void => {
       if (pendingSteers.size === 0) return;
-      const listed = new Set(consumed ?? []);
-      const missed = [...pendingSteers].some((uuid) => !listed.has(uuid));
+      if (consumed === undefined) {
+        for (const steer of pendingSteers.values()) steer.unproven = true;
+        return;
+      }
+      const steers = [...pendingSteers];
       pendingSteers.clear();
-      if (!missed) return;
+      const listed = new Set(consumed);
+      const missed = steers.filter(([uuid, steer]) => !listed.has(uuid) && !steer.unproven);
+      if (missed.length === 0) return;
       emitSegment({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
-      inFlight.splice(1, 0, { resolve: () => undefined });
+      let previous: InFlightTurn | undefined;
+      for (const [uuid, { anchor: anchorTurn }] of missed) {
+        const anchor = anchorTurn ? inFlight.indexOf(anchorTurn) : -1;
+        const afterPrevious = previous ? inFlight.indexOf(previous) + 1 : 0;
+        const index = Math.max(anchor >= 0 ? anchor + 1 : 1, afterPrevious);
+        previous = { uuid, resolve: () => undefined };
+        inFlight.splice(index, 0, previous);
+      }
     };
     /** Refuses a turn carrying images when the lane's provider cannot take them (S1). */
     const assertImagesAccepted = (content?: LaneTurnContent): void => {
@@ -441,15 +509,25 @@ export class ClaudeSdkLaneRunner {
         content: claudeLaneTurnContent(message, content),
         uuid: randomUUID(),
       };
-      pendingSteers.add(turn.uuid as string);
+      const uuid = turn.uuid as string;
+      pendingSteers.set(uuid, { anchor: inFlight[inFlight.length - 1], unproven: false });
+      sentSteers.add(uuid);
       this.logger.info(`[ClaudeLane] steer pushed into the running turn for "${agentName}"`, {
         messageLength: message.length,
         imageCount: content?.images?.length ?? 0,
         fileCount: content?.files?.length ?? 0,
       });
-      if (context.named)
-        await context.named.enqueue(turn, resolvedSessionId ?? undefined);
-      else mailbox.push(turn, resolvedSessionId ?? undefined);
+      try {
+        if (context.named)
+          await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+        else mailbox.push(turn, resolvedSessionId ?? undefined);
+      } catch (error: unknown) {
+        // A steer that never reached the CLI cannot be missed (M6 b); the
+        // caller gets the failure.
+        pendingSteers.delete(uuid);
+        sentSteers.delete(uuid);
+        throw error;
+      }
     };
     const applyTurnSettings = async (
       settings: LaneTurnSettings,
@@ -548,6 +626,7 @@ export class ClaudeSdkLaneRunner {
       finished = true;
       interruptPending = undefined;
       pendingSteers.clear();
+      sentSteers.clear();
       toolInFlight = false;
       abortController.signal.removeEventListener('abort', closeMailbox);
       closeMailbox();

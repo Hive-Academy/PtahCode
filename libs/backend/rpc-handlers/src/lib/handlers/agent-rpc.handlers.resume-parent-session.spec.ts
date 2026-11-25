@@ -35,10 +35,8 @@ jest.mock('fs/promises', () => ({
 jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   CLI_AGENT_RUNTIME_TOKENS: {
     SDK_PTAH_CLI_REGISTRY: Symbol.for('PtahCliRegistry'),
-    AGENT_MESSAGE_COORDINATOR: Symbol.for('AgentMessageCoordinator'),
     AGENT_LANE_RESUME: Symbol.for('AgentLaneResume'),
   },
-  AgentContinueError: class AgentContinueError extends Error {},
   LaneAccountResumeError: class LaneAccountResumeError extends Error {
     constructor(readonly code: string) {
       super(code);

@@ -51,7 +51,10 @@ import {
 } from './permission/ask-user-question.service';
 import { ExitPlanModeService } from './permission/exit-plan-mode.service';
 import { evaluateUnattendedBash } from './permission/unattended-bash-policy';
-import { isPlanLaneAllowedPtahTool } from './permission/plan-lane-tool-policy';
+import {
+  isLaneOwnPtahTool,
+  isPlanLaneAllowedPtahTool,
+} from './permission/plan-lane-tool-policy';
 import {
   CRON_UNATTENDED_DENY_MESSAGE,
   isCronMutatingTool,
@@ -832,6 +835,20 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       ) {
         const planDecision = this.decidePlanLaneToolCall(toolName, input);
         if (planDecision) return planDecision;
+      }
+
+      // A CLI lane's own Ptah tools (report, message status, message ack) run
+      // without a prompt in every mode. Only lanes (a cliAgentResolver), only
+      // the host's own tools: a gateway tool with the same prefix never.
+      if (
+        cliAgentResolver &&
+        isLaneOwnPtahTool(toolName) &&
+        !this.isGatewayTool(toolName)
+      ) {
+        this.logger.debug(
+          `[SdkPermissionHandler] Auto-approved lane-own Ptah tool: ${toolName}`,
+        );
+        return { behavior: 'allow' as const, updatedInput: input };
       }
 
       // Unattended (child) sessions: read live so a release takes effect on

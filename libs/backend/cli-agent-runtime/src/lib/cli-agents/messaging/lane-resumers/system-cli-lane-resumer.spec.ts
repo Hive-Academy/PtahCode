@@ -1,6 +1,7 @@
 import { AgentId, type AgentProcessInfo } from '@ptah-extension/shared';
 import { LaneResumeError } from './lane-resumer.port';
 import { SystemCliLaneResumer } from './system-cli-lane-resumer';
+import { LaneSpawnPolicyError } from '../../lane-spawn-policy';
 
 const AGENT_ID = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000101');
 const NEW_AGENT_ID = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000102');
@@ -17,6 +18,27 @@ const info: AgentProcessInfo = {
 };
 
 describe('SystemCliLaneResumer', () => {
+  it('passes the turn images to the spawn as turnImages', async () => {
+    const spawn = jest.fn(async () => ({ agentId: NEW_AGENT_ID, cli: 'claude' as const, status: 'running' as const, startedAt: 'now' }));
+    const resumer = new SystemCliLaneResumer({ spawn, releaseIdleForResume: jest.fn(async () => undefined) });
+    const images = [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }];
+    await resumer.resume({ ...info, cli: 'claude' }, 'look', undefined, images);
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ turnImages: images }));
+  });
+
+  it('turns a lane policy refusal into a non-retryable policy-refused error (L12)', async () => {
+    const spawn = jest.fn(async () => {
+      throw new LaneSpawnPolicyError({ code: 'UNSUPPORTED_LANE_POLICY', field: 'permission', cli: 'grok',
+        requested: { permission: 'plan' },
+        reason: 'Parent plan cap permission: Grok exposes no native read-only plan flag.' });
+    });
+    const resumer = new SystemCliLaneResumer({ spawn, releaseIdleForResume: jest.fn(async () => undefined) });
+    await expect(resumer.resume({ ...info, cli: 'grok' }, 'continue')).rejects.toMatchObject({
+      code: 'policy-refused',
+      message: 'Parent plan cap permission: Grok exposes no native read-only plan flag.',
+    });
+  });
+
   it('uses the current parent level on cold resume', async () => {
     const spawn = jest.fn(async () => ({ agentId: NEW_AGENT_ID, cli: 'codex' as const, status: 'running' as const, startedAt: 'now' }));
     const resumer = new SystemCliLaneResumer({ spawn, releaseIdleForResume: jest.fn(async () => undefined) },

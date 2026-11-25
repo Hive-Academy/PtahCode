@@ -174,6 +174,11 @@ describe('GrokCliAdapter', () => {
     it('strips ANSI codes from raw output', () => {
       expect(adapter.parseOutput('\u001b[32mok\u001b[0m')).toBe('ok');
     });
+
+    it('serves a stopped lane the effort levels a live lane would, for any model', () => {
+      expect(adapter.laneEfforts()).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(adapter.laneEfforts('grok-4.7')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+    });
   });
 
   describe('lane turn input (B8, D18)', () => {
@@ -187,7 +192,7 @@ describe('GrokCliAdapter', () => {
       turnInputSupport: () => ({}),
     } as SdkHandle;
 
-    it('declares the ACP turn input, turn-end usage and no lane prompts', () => {
+    it('declares the ACP turn input, live usage and no lane prompts', () => {
       const manifest = adapter.capabilities();
       expect(manifest.turnInput).toEqual({
         model: { state: 'supported', appliesAt: 'next-turn' },
@@ -198,7 +203,8 @@ describe('GrokCliAdapter', () => {
         skills: { state: 'supported' },
       });
       expect(manifest.turnInput?.commands.blocked).toEqual(grokAcpProfile.hiddenLaneCommands);
-      expect(manifest.usage).toEqual({ timing: 'turn-end', reason: 'Grok reports token usage when the turn ends.' });
+      // Per-call `response_completed` usage streams during the turn.
+      expect(manifest.usage).toEqual({ timing: 'live' });
       expect(manifest.prompts?.approvals).toEqual({
         state: 'unsupported',
         reason: 'Grok exposes no native per-lane ask flag.',

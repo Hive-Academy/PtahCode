@@ -260,6 +260,8 @@ export function createFlatStreamProjector(
       case 'configChanged':
       case 'info':
       case 'diagnostic':
+      case 'usageProgress':
+        // Mid-turn usage never completes the message; the turn's `usage` does.
         return [];
       default: {
         const unknownEvent: never = event;

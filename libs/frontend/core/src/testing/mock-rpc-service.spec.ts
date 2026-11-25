@@ -41,7 +41,6 @@ describe('createMockRpcService', () => {
     expect(typeof instance.querySubagents).toBe('function');
     expect(typeof instance.sendSubagentMessage).toBe('function');
     expect(typeof instance.stopSubagent).toBe('function');
-    expect(typeof instance.interruptSubagentSession).toBe('function');
   });
 });
 

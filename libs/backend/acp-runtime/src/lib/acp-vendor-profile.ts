@@ -21,6 +21,7 @@ import type {
 import type {
   ProviderMcpAttachment,
   ProviderSessionLogger,
+  ProviderUsage,
 } from '@ptah-extension/provider-session-contracts';
 import type { AcpSpawnEnv } from './acp-spawn-env';
 import type { CliType, LanePermissionMode } from '@ptah-extension/shared';
@@ -158,6 +159,13 @@ export interface AcpSpawnSpec {
  */
 export type AcpCancelBehavior = 'await-reply' | 'kill';
 
+/**
+ * What {@link AcpVendorProfile.sessionConfig} reads: the model and effort
+ * only, so the mapping needs no spawn options and a stopped lane can derive
+ * its effort levels from the lane record's model.
+ */
+export type AcpSessionConfigInput = Pick<AcpSessionOptions, 'model' | 'reasoningEffort'>;
+
 /** Vendor extension hooks. Unknown methods fall through to the runner. */
 export interface AcpExtensionHooks {
   /**
@@ -169,6 +177,21 @@ export interface AcpExtensionHooks {
     params: Record<string, unknown>,
     logger: ProviderSessionLogger | undefined,
   ): boolean;
+  /**
+   * One model call's token counters, read from a vendor notification sent
+   * while a prompt runs, or `undefined` when the notification carries none.
+   * A pure parse of untrusted input that never throws. The runtime emits each
+   * result as `usageProgress`; the prompt response's usage stays the turn
+   * total. Its presence makes a lane report usage live. When a frame is the
+   * usage notification but its counters do not parse (a vendor shape change),
+   * the hook calls `malformed` with the failing field paths (never values);
+   * the runtime logs that once per session.
+   */
+  usage?(
+    method: string,
+    params: Record<string, unknown>,
+    malformed?: (fieldPaths: readonly string[]) => void,
+  ): ProviderUsage | undefined;
   /**
    * A vendor request from the agent. Resolve the result, or `undefined` to
    * answer method-not-found. Without this hook every agent request is
@@ -264,7 +287,7 @@ export interface AcpVendorProfile {
    * Config to apply after session setup and before the first prompt. Entries
    * whose `configId` the session did not advertise are skipped with an `info`.
    */
-  sessionConfig?(options: AcpSessionOptions): readonly AcpSessionConfigEntry[];
+  sessionConfig?(options: AcpSessionConfigInput): readonly AcpSessionConfigEntry[];
   /** Vendor extension hooks. Omit to report every unknown notification once. */
   readonly extensions?: AcpExtensionHooks;
   /**

@@ -237,7 +237,6 @@ import type {
   SubagentQueryResult,
   SubagentSendMessageParams,
   SubagentStopParams,
-  SubagentInterruptParams,
   SubagentBackgroundParams,
   SubagentBackgroundResult,
   SubagentCommandResult,
@@ -497,7 +496,6 @@ import type {
   AgentSetClaudeBuiltinParams,
   AgentSetClaudeBuiltinResult,
   AgentListCliModelsResult,
-  AgentContinueErrorCode,
   LanePermissionResponse,
   SkillShEntry,
   InstalledSkill,
@@ -1758,10 +1756,6 @@ export interface RpcMethodRegistry
     params: SubagentStopParams;
     result: SubagentCommandResult;
   };
-  'subagent:interrupt': {
-    params: SubagentInterruptParams;
-    result: SubagentCommandResult;
-  };
   'subagent:background': {
     params: SubagentBackgroundParams;
     result: SubagentBackgroundResult;
@@ -2012,10 +2006,6 @@ export interface RpcMethodRegistry
   'agent:stop': {
     params: { agentId: string };
     result: { success: boolean; error?: string };
-  };
-  'agent:continue': {
-    params: { agentId: string; message: string };
-    result: { success: boolean; error?: string; code?: AgentContinueErrorCode };
   };
   /** Resume a CLI agent session by spawning a new process with resumeSessionId */
   'agent:resumeCliSession': {
@@ -3927,7 +3917,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'chat:dismiss-resumable-subagents': true,
   'subagent:send-message': true,
   'subagent:stop': true,
-  'subagent:interrupt': true,
   'subagent:background': true,
   'subagent:history-page': true,
   'enhancedPrompts:getStatus': true,
@@ -3974,7 +3963,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:pendingPermissions': true,
   'agent:e2eSeedPermission': true, // TEST-ONLY seam, PTAH_E2E-gated (TASK_2026_264)
   'agent:stop': true,
-  'agent:continue': true,
   'agent:resumeCliSession': true, // CLI agent session resume
   'agent:backgroundList': true, // Background agent listing
   // TASK_2026_623 R10.1. `agent:` is ALREADY in `ALLOWED_METHOD_PREFIXES`, so

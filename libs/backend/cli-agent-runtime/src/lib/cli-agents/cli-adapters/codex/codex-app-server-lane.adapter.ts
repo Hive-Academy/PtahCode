@@ -32,6 +32,7 @@ import {
   type LaneTurnOptionsCatalog,
   type LaneTurnSettingsResult,
   type SdkHandle,
+  type StoppedLaneCatalog,
 } from '../cli-adapter.interface';
 import { bestMessagingCapability } from '../cli-adapter.interface';
 import { translateLaneSpawnPolicy } from '../../lane-spawn-policy';
@@ -71,7 +72,7 @@ import {
   FileCodexLaneCredentialProbe,
   type CodexLaneCredentialProbe,
 } from './codex-app-server-lane-auth';
-import { codexLaneModels } from './codex-app-server-lane-models';
+import { codexAdvertisedEfforts, codexLaneModels } from './codex-app-server-lane-models';
 import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
 /** Safety bound for app-server builds that omit a trailing usage notification. */
@@ -269,18 +270,33 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
 
   async listModels(): Promise<CliModelInfo[]> {
     try {
+      return (await this.stoppedLaneCatalog()).models;
+    } catch {
+      // degradation-audit: optional-capability - stoppedLaneCatalog already
+      // logged the failure, and an empty list lets the caller use its default model.
+      return [];
+    }
+  }
+
+  /**
+   * Models and effort levels from one live catalog read (no lane needed),
+   * for the composer of a stopped lane. Efforts are only what the catalog
+   * advertises; nothing static is added. A failed read is logged and
+   * rethrown, so the coordinator reports an error instead of a false
+   * empty list.
+   */
+  async stoppedLaneCatalog(): Promise<StoppedLaneCatalog> {
+    try {
       const binary = await this.binary.resolve();
       if (!binary) throw new Error('Codex executable is unavailable');
       const home = await this.home();
-      return codexLaneModels(
-        await readCodexLaneCatalog(
-          () => this.runtime.openCatalog(binary.path, home, binary.selection),
-          this.logger,
-        ),
+      const catalog = await readCodexLaneCatalog(
+        () => this.runtime.openCatalog(binary.path, home, binary.selection),
+        this.logger,
       );
+      return { models: codexLaneModels(catalog), efforts: codexAdvertisedEfforts(catalog) };
     } catch (error: unknown) {
-      // degradation-audit: optional-capability - the warning reports catalog
-      // failure, and an empty list lets the caller use its default model.
+      // degradation-audit: reported - logged here and rethrown to the caller.
       this.logger.warn(
         '[CodexAppServerLaneAdapter] Codex model catalog failed',
         {
@@ -288,7 +304,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
             error instanceof Error ? error.constructor.name : typeof error,
         },
       );
-      return [];
+      throw error;
     }
   }
 
@@ -897,8 +913,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
       if (closed || !context) throw new Error('Codex lane is closed');
       const catalog = await context.listModels();
-      const advertised = [...new Set(catalog.flatMap((model) => model.supportedEfforts ?? []))]
-        .filter((effort) => validatedEffort(effort) !== undefined);
+      const advertised = codexAdvertisedEfforts(catalog);
       return {
         models: codexLaneModels(catalog),
         efforts: advertised.length > 0

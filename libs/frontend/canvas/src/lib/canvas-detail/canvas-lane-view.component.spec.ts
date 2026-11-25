@@ -304,21 +304,26 @@ describe('CanvasLaneViewComponent', () => {
     );
     expect(input).not.toBeNull();
     expect(fixture.nativeElement.querySelectorAll('ptah-agent-continue-input')).toHaveLength(1);
-    expect(card?.nextElementSibling).toBe(input);
     // The main chat shell (TASK_2026_717 D3): the chrome panel, the session
     // layout, and the composer in the centered column.
     const cliPanel = card?.closest('[data-testid="lane-panel"]');
     expect(cliPanel?.getAttribute('data-glass-surface')).toBe('chrome');
-    expect(card?.parentElement?.tagName).toBe('PTAH-CHAT-SESSION-LAYOUT');
-    expect(card?.parentElement?.classList.contains('!flex-none')).toBe(true);
-    expect(card?.parentElement?.classList.contains('min-h-full')).toBe(true);
+    // The panel does not scroll; the transcript region does, and the composer
+    // sits below it, so transcript rows never pass under the composer (B1).
+    expect(cliPanel?.classList.contains('overflow-y-auto')).toBe(false);
+    const layout = cliPanel?.firstElementChild;
+    expect(layout?.tagName).toBe('PTAH-CHAT-SESSION-LAYOUT');
+    const scroller = card?.parentElement;
+    expect(scroller?.hasAttribute('sessionTranscript')).toBe(true);
+    expect(scroller?.classList.contains('overflow-y-auto')).toBe(true);
+    expect(scroller?.parentElement).toBe(layout);
+    const composerSlot = input?.parentElement;
+    expect(composerSlot?.hasAttribute('sessionComposer')).toBe(true);
+    expect(composerSlot?.parentElement).toBe(layout);
+    expect(scroller?.contains(input)).toBe(false);
     expect(input?.classList.contains('mx-auto')).toBe(true);
     expect(input?.classList.contains('w-[calc(100cqw-1.5rem)]')).toBe(true);
-    expect(input?.classList.contains('sticky')).toBe(true);
-    expect(input?.classList.contains('bottom-0')).toBe(true);
-    // No opaque strip behind the composer card: it would show as a hard box.
-    expect(input?.classList.contains('bg-transparent')).toBe(true);
-    expect(input?.classList.contains('bg-base-100')).toBe(false);
+    expect(input?.classList.contains('sticky')).toBe(false);
     fixture.componentRef.setInput('laneKey', 'sub:task-tool');
     fixture.detectChanges();
     expect(
@@ -326,8 +331,15 @@ describe('CanvasLaneViewComponent', () => {
     ).toBeNull();
     const subLane = fixture.nativeElement.querySelector('ptah-subagent-lane');
     expect(subLane?.parentElement?.tagName).toBe('PTAH-CHAT-SESSION-LAYOUT');
-    expect(subLane?.parentElement?.classList.contains('!flex-none')).toBe(true);
-    expect(subLane?.parentElement?.classList.contains('min-h-full')).toBe(true);
+    // M4: the sub-agent lane panel does not scroll either; the lane scrolls
+    // its own transcript and keeps its composer below it.
+    expect(subLane?.parentElement?.classList.contains('!flex-none')).toBe(false);
+    expect(subLane?.parentElement?.classList.contains('min-h-full')).toBe(false);
+    expect(subLane?.classList.contains('min-h-0')).toBe(true);
+    expect(subLane?.classList.contains('flex-1')).toBe(true);
+    expect(
+      subLane?.closest('[data-testid="lane-panel"]')?.classList.contains('overflow-y-auto'),
+    ).toBe(false);
     expect(
       subLane
         ?.closest('[data-testid="lane-panel"]')

@@ -6,7 +6,7 @@
  *   Decision-model fields delegate to DECISION_MODEL_CONFIG (lane-routing).
  * - agent:detectClis / agent:listCliModels — rival-CLI detection and models
  * - agent:permissionResponse — routes decisions to the SDK + Copilot bridges
- * - agent:stop / agent:continue / agent:resumeCliSession — process control
+ * - agent:stop / agent:resumeCliSession — process control
  *
  * Unified from three byte-for-byte-equivalent copies (VS Code, Electron,
  * cli-engine). Electron's implementation is the base; the only host-specific
@@ -37,9 +37,7 @@ import {
   CopilotPermissionBridge,
   COPILOT_EDIT_REFUSED,
   AgentProcessManager,
-  AgentMessageCoordinator,
   AgentLaneResumeService,
-  AgentContinueError,
   LaneAccountResumeError,
   CLI_AGENT_RUNTIME_TOKENS,
   PtahCliRegistry,
@@ -85,7 +83,6 @@ import type {
   AgentListCliModelsResult,
   AgentPermissionRequest,
   LanePermissionResponse,
-  AgentContinueErrorCode,
   AgentResumeOutcome,
   CliDetectionResult,
   CliType,
@@ -100,7 +97,6 @@ import type {
   ProviderAccountSelection,
 } from '@ptah-extension/shared';
 import {
-  AgentId,
   PROVIDER_ACCOUNT_RESULT_CODES,
   CLI_REASONING_EFFORT_VALUES,
   CLAUDE_REASONING_EFFORT_VALUES,
@@ -279,7 +275,7 @@ function decisionModelRefusal(
 
 /**
  * The reply text when the runtime refuses a `claude` lane's named account on
- * continue or resume. Fixed: the thrown text and the refusal code stay in the
+ * resume. Fixed: the thrown text and the refusal code stay in the
  * host log, so no path, email, secret or CLI output reaches the caller.
  */
 const LANE_ACCOUNT_REFUSED_ERROR =
@@ -352,7 +348,6 @@ export class AgentRpcHandlers {
     'agent:pendingPermissions',
     'agent:e2eSeedPermission',
     'agent:stop',
-    'agent:continue',
     'agent:resumeCliSession',
   ] as const;
 
@@ -416,7 +411,6 @@ export class AgentRpcHandlers {
     this.registerPendingPermissions();
     this.registerE2eSeedPermission();
     this.registerAgentStop();
-    this.registerAgentContinue();
     this.registerResumeCliSession();
     const copilotAutoApprove = this.getAgentCfg<boolean>(
       'copilotAutoApprove',
@@ -442,7 +436,6 @@ export class AgentRpcHandlers {
         'agent:pendingPermissions',
         'agent:e2eSeedPermission',
         'agent:stop',
-        'agent:continue',
         'agent:resumeCliSession',
       ],
     });
@@ -1601,85 +1594,6 @@ export class AgentRpcHandlers {
           error instanceof Error ? error : new Error(errorMessage),
         );
         return { success: false, error: errorMessage };
-      }
-    });
-  }
-
-  private registerAgentContinue(): void {
-    this.rpcHandler.registerMethod<
-      { agentId: string; message: string },
-      { success: boolean; error?: string; code?: AgentContinueErrorCode }
-    >('agent:continue', async (params) => {
-      try {
-        this.logger.debug('RPC: agent:continue called', {
-          agentId: params.agentId,
-        });
-
-        const input = z.object({
-          agentId: z.string().refine(AgentId.validate).transform(AgentId.from),
-          message: z.string().min(1).max(32768).refine((value) => value.trim().length > 0),
-        }).strict().parse(params);
-        const outcome = await this.runtimeContainer.resolve<AgentMessageCoordinator>(
-          CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR,
-        ).send({ ...input, delivery: 'queue' }, { kind: 'user' });
-        if (outcome.mode === 'unsupported') {
-          if (outcome.receipt?.reason === 'account_refused')
-            return { success: false, code: 'account_refused', error: LANE_ACCOUNT_REFUSED_ERROR };
-          if (outcome.receipt?.reason === 'not_found')
-            return { success: false, code: 'not_found', error: 'Agent was not found.' };
-          if (outcome.receipt?.reason === 'busy')
-            return { success: false, code: 'busy', error: 'Agent is busy.' };
-          if (outcome.receipt?.reason === 'released')
-            return { success: false, code: 'released', error: 'Agent handle was released.' };
-          return { success: false, code: 'unknown', error: 'Message delivery unavailable' };
-        }
-
-        this.logger.info('RPC: agent:continue success', {
-          agentId: params.agentId,
-        });
-
-        return { success: true };
-      } catch (error) {
-        if (error instanceof z.ZodError)
-          return { success: false, code: 'invalid_params', error: 'Invalid agent message parameters.' };
-        if (error instanceof AgentContinueError) {
-          this.logger.warn('RPC: agent:continue rejected', {
-            agentId: params.agentId,
-            code: error.code,
-          });
-          const safeError = error.code === 'account_refused' ? LANE_ACCOUNT_REFUSED_ERROR
-            : error.code === 'not_found' ? 'Agent was not found.'
-            : error.code === 'busy' ? 'Agent is busy.'
-            : error.code === 'released' ? 'Agent handle was released.'
-            : 'Message delivery unavailable.';
-          return { success: false, code: error.code, error: safeError };
-        }
-        const accountRefusal = laneAccountRefusalCode(error);
-        if (accountRefusal) {
-          // A `claude` lane's account was refused on continue (D28). The
-          // dedicated code is not a resume-fallback code: a resume would hit
-          // the same account gate. The refusal code goes to the log only.
-          this.logger.warn('RPC: agent:continue account refused', {
-            agentId: params.agentId,
-            code: accountRefusal,
-          });
-          return {
-            success: false,
-            code: 'account_refused',
-            error: LANE_ACCOUNT_REFUSED_ERROR,
-          };
-        }
-        const errorMessage =
-          error instanceof Error ? error.message : String(error);
-        this.logger.error(
-          'RPC: agent:continue failed',
-          error instanceof Error ? error : new Error(errorMessage),
-        );
-        return {
-          success: false,
-          code: 'unknown',
-          error: 'Failed to continue agent conversation',
-        };
       }
     });
   }

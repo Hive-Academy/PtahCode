@@ -416,10 +416,12 @@ export class InspectorAgentsSectionComponent implements OnInit {
   });
 
   private readonly clockNow = inject(WallClockService).now('second');
-  private readonly cacheNow = injectWallClock('second', () => {
+  /** Boolean gate: a tick or an equal but new cache object never re-acquires the clock. */
+  private readonly cacheClockActive = computed(() => {
     const cache = this.cache();
     return cache !== null && this.detailKey() !== 'orchestrator' && cache.expiresAt > this.clockNow();
   });
+  private readonly cacheNow = injectWallClock('second', this.cacheClockActive);
   protected readonly cacheLine = computed(() => {
     const cache = this.cache();
     if (cache === null) return null;

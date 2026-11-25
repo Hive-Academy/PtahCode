@@ -466,6 +466,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   /** Approvals waiting on the sink, so an interrupt can let them answer before `session/cancel`. */
   const pendingApprovals = new Set<Promise<unknown>>();
   const reportedExtensionMethods = new Set<string>();
+  let reportedMalformedUsage = false;
 
   /** The current process generation; replaced only by a respawn. */
   let gen!: Generation;
@@ -641,6 +642,35 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     },
     extNotification: async (method, params) => {
       if (dropStale(target, method)) return;
+      // Per-call usage counts only for the running prompt of this session:
+      // replay (`session/load`) and another session's frames are ignored.
+      if (
+        promptInFlight &&
+        currentTurnId &&
+        sessionId !== undefined &&
+        params['sessionId'] === sessionId
+      ) {
+        const callUsage = profile.extensions?.usage?.(method, params, (fieldPaths) => {
+          // M2: one warning per session, so a vendor shape change is visible
+          // without a line per frame. Field paths only, never frame values.
+          if (reportedMalformedUsage) return;
+          reportedMalformedUsage = true;
+          logger?.warn('[AcpSessionHandle] usage notification did not parse; live usage is off', {
+            ...logContext,
+            method,
+            fieldPaths: fieldPaths.slice(0, 8),
+          });
+        });
+        if (callUsage) {
+          const model = callUsage.model ?? sessionModel();
+          emit({
+            type: 'usageProgress',
+            provider: name,
+            turnId: currentTurnId,
+            usage: model ? { ...callUsage, model } : callUsage,
+          });
+        }
+      }
       if (profile.extensions?.notification?.(method, params, logger)) return;
       logger?.debug('[AcpSessionHandle] unsupported extension notification', {
         ...logContext,

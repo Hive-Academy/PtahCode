@@ -367,6 +367,20 @@ describe('AgentMonitorTreeBuilderService', () => {
   });
 
   describe('buildTreeFromSegments', () => {
+    it('turns a user echo into its own node that never merges into prose (L2)', () => {
+      const tree = service.buildTreeFromSegments('agent-echo', [
+        { type: 'text', content: 'before ' },
+        { type: 'user', content: 'what I sent', sentAt: 42 },
+        { type: 'text', content: 'after' },
+      ] as CliOutputSegment[]);
+      expect(tree.map((node) => [node.id, node.content])).toEqual([
+        ['seg-text-0', 'before '],
+        ['seg-user-1', 'what I sent'],
+        ['seg-text-2', 'after'],
+      ]);
+      expect(tree[1].startTime).toBe(42);
+    });
+
     it('returns [] for empty segments', () => {
       expect(service.buildTreeFromSegments('agent-1', [])).toEqual([]);
     });
