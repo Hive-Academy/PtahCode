@@ -7,6 +7,7 @@ import {
 } from '@ptah-extension/core';
 import {
   ComposerInputController,
+  rankCommandMatches,
   type ComposerCommandSource,
   type ComposerFileMode,
   type ComposerSuggestionsPanel,
@@ -376,5 +377,28 @@ describe('ComposerInputController', () => {
         'Microphone access denied',
       );
     });
+  });
+});
+
+describe('rankCommandMatches (F4)', () => {
+  const list = [
+    command('compact', 'Compact the context to free space'),
+    command('cost'),
+    command('context', 'Show context usage'),
+    command('clear-context'),
+  ];
+
+  it('puts the exact name first, so /context + Enter picks context, not compact', () => {
+    expect(rankCommandMatches(list, 'context').map((item) => item.name)).toEqual(['context', 'clear-context', 'compact']);
+    expect(rankCommandMatches(list, '/context')[0].name).toBe('context');
+  });
+
+  it('ranks prefix matches before contains, description and fuzzy matches', () => {
+    expect(rankCommandMatches(list, 'co').map((item) => item.name)).toEqual(['compact', 'cost', 'context', 'clear-context']);
+    expect(rankCommandMatches(list, 'cntx').map((item) => item.name)).toEqual(['context', 'clear-context']);
+  });
+
+  it('keeps every command for an empty query', () => {
+    expect(rankCommandMatches(list, '')).toHaveLength(4);
   });
 });

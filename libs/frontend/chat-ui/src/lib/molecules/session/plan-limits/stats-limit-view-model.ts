@@ -124,12 +124,11 @@ export function buildStatsLimitViewModel(
     const ownerKey = ownerKeys[0];
     const ownerSnapshot = input.owners.find(snapshot => snapshot.owner.key === ownerKey);
     const scopes = [...new Set(runs.filter(run => run.quotaOwner?.key === ownerKey).map(run => run.modelScope ?? null))];
-    if (scopes.length > 1) return {
-      id: `provider:${providerKey}`, label: laneGroupLabel(runs),
-      ownerState: 'single' as const, windows: [], message: 'Multiple scopes · Usage unknown',
-      ownerDetails,
-    };
-    const ownerPlan = sessionPlan({ ...input, sessionOwnerKey: ownerKey, sessionModelScope: scopes.length === 1 ? scopes[0] : null }, ctx);
+    // Lanes of one owner on different models: each scope keeps its own
+    // windows (a model-scoped window carries its model in its label), and the
+    // account-wide windows render once.
+    const ownerPlan = mergePlans(scopes.map(scope =>
+      sessionPlan({ ...input, sessionOwnerKey: ownerKey, sessionModelScope: scope }, ctx)));
     const windows = inspectorPlanTiles(ownerPlan, input.now).filter(tile =>
       tile.kind === 'window' || tile.kind === 'cooldown' || tile.kind === 'evidence'
       || tile.id === `plan-status:${ownerKey}` && ownerSnapshot?.status !== 'no-usage-source');
@@ -164,6 +163,40 @@ export function buildStatsLimitViewModel(
       subtotal: subtotalTile(input.laneRuns, laneTiles.length),
     }),
     lanesCount: input.laneRuns.length,
+  };
+}
+
+/**
+ * One plan from the per-scope plans of a single owner: tiles deduplicated by
+ * id in first-seen order, and the most severe indicator (at-limit over near).
+ */
+function mergePlans(plans: readonly SessionPlan[]): SessionPlan {
+  const [first, ...rest] = plans;
+  if (rest.length === 0) return first;
+  const tiles = new Map<string, PlanLimitTileModel>();
+  const renderedWindows = new Map(first.renderedWindows);
+  const renderedEvidence = new Set(first.renderedEvidence);
+  const hasWindows = (plan: SessionPlan) => plan.tiles.some(tile => tile.kind === 'window');
+  const anyWindows = plans.some(hasWindows);
+  for (const plan of plans) {
+    // A scope with no windows of its own reports "usage unavailable"; that
+    // status is wrong for the owner when another scope rendered windows.
+    const skipStatus = anyWindows && !hasWindows(plan);
+    for (const tile of plan.tiles) {
+      if (skipStatus && tile.kind === 'status') continue;
+      if (!tiles.has(tile.id)) tiles.set(tile.id, tile);
+    }
+    for (const [key, entry] of plan.renderedWindows) renderedWindows.set(key, entry);
+    for (const evidence of plan.renderedEvidence) renderedEvidence.add(evidence);
+  }
+  const indicator = plans.find(plan => plan.indicator?.state === 'at-limit')?.indicator
+    ?? plans.find(plan => plan.indicator)?.indicator;
+  return {
+    ...first,
+    tiles: [...tiles.values()],
+    renderedWindows,
+    renderedEvidence,
+    ...(indicator && { indicator }),
   };
 }
 

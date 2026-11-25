@@ -172,6 +172,46 @@ describe('LaneTranscriptComponent', () => {
     expect(root.querySelector('[data-ptah-transcript-message-id]')?.textContent).toContain('Inspect files');
   });
 
+  it('shows the images the user sent under the echo bubble (D5)', () => {
+    const agentId = 'cli-images';
+    const png = 'iVBORw0KGgo=';
+    TestBed.overrideProvider(AgentMonitorStore, { useValue: {
+      agentsById: signal(new Map([[agentId, { cli: 'claude', status: 'running', segments: [
+        { type: 'user', content: 'What colour is the image?', sentAt: 5_000,
+          images: [{ data: png, mediaType: 'image/png' }, { data: '<svg/>', mediaType: 'image/svg+xml' }] },
+      ] }]])),
+    } });
+    const fixture = TestBed.createComponent(LaneTranscriptComponent);
+    fixture.componentRef.setInput('laneId', agentId);
+    fixture.componentRef.setInput('nodes', [
+      createExecutionNode({ id: 'seg-user-0', type: 'text', status: 'complete', content: 'What colour is the image?', startTime: 5_000 }),
+    ]);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const images = root.querySelectorAll<HTMLImageElement>('[data-testid="lane-echo-images"] img');
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute('src')).toBe(`data:image/png;base64,${png}`);
+    expect(images[0].alt).toBe('Image 1 of 1 you sent');
+  });
+
+  it('renders a host notice as a neutral status row, not a bubble (round 7)', () => {
+    const fixture = TestBed.createComponent(LaneTranscriptComponent);
+    fixture.componentRef.setInput('laneId', 'cli-notice');
+    fixture.componentRef.setInput('nodes', [
+      createExecutionNode({ id: 'seg-notice-0', type: 'text', status: 'complete', content: 'Grok ran /context and returned no output.', startTime: 5_000 }),
+    ]);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const row = root.querySelector('[data-testid="lane-host-notice"]') as HTMLElement;
+    expect(row.textContent).toContain('Grok ran /context and returned no output.');
+    expect(row.querySelector('time')?.getAttribute('datetime')).toBe(new Date(5_000).toISOString());
+    // Text and time never run together: a separator sits between them (round 8).
+    const parts = [...row.querySelectorAll('p > *')].map((node) => node.textContent?.trim());
+    expect(parts[0]).toBe('Grok ran /context and returned no output.');
+    expect(parts[1]).toBe('·');
+    expect(root.querySelectorAll('ptah-message-bubble')).toHaveLength(0);
+  });
+
   it('keeps the live elapsed label ticking through the shared clock', () => {
     const now = signal(100_000);
     const release = jest.fn();

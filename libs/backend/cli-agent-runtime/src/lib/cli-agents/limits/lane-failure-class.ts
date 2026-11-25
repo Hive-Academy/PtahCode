@@ -1,7 +1,8 @@
-import type {
-  AgentStatus,
-  LaneCompletionVerdict,
-  LaneFailureClass,
+import {
+  LANE_USER_STOP_CLASS,
+  type AgentStatus,
+  type LaneCompletionVerdict,
+  type LaneFailureClass,
 } from '@ptah-extension/shared';
 
 export interface LaneFailureClassInput {
@@ -13,12 +14,17 @@ export interface LaneFailureClassInput {
   readonly rateLimited?: boolean;
 }
 
-/** Fixed precedence: successful evidence, quota, rate limit, timeout, auth, crash, output. */
+/**
+ * Fixed precedence: successful evidence, a caller stop, quota, rate limit,
+ * timeout, auth, crash, output. A caller stop (`stopped` verdict) is
+ * `user-stop`, which routing statistics leave out.
+ */
 export function classifyLaneFailureClass(
   input: LaneFailureClassInput,
 ): LaneFailureClass | null {
   if (input.verdict === 'delivered' || input.verdict === 'unverified')
     return null;
+  if (input.verdict === 'stopped') return LANE_USER_STOP_CLASS;
   if (input.failureKind === 'quota') return 'usage-limit';
   if (input.rateLimited) return 'usage-limit';
   if (input.status === 'timeout') return 'timeout';

@@ -160,6 +160,7 @@ import {
 } from './tracked-agent';
 import type {
   AgentActionNotice,
+  AgentOutputDelta,
   AgentProcessInfo,
   CliAdapterManifest,
   AgentRoleDefinition,
@@ -1801,6 +1802,18 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(runSdkCall.role).toBe(roleDefinition);
     });
 
+    it('carries the potential and effective capabilities on the first spawned event (F3)', async () => {
+      const spawnedInfos: AgentProcessInfo[] = [];
+      manager.events.on('agent:spawned', (info: AgentProcessInfo) => spawnedInfos.push(info));
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      expect(spawnedInfos).toHaveLength(1);
+      expect(spawnedInfos[0].potentialCapabilities).toEqual(sdkAdapter.capabilities());
+      expect(spawnedInfos[0].effectiveCapabilities).toMatchObject({
+        source: 'live-handle',
+        messaging: { continuation: { state: 'unsupported' } },
+      });
+    });
+
     it('stamps role, delivery and channel on the record, the spawned event and the result', async () => {
       const spawnedInfos: AgentProcessInfo[] = [];
       manager.events.on('agent:spawned', (info: AgentProcessInfo) =>
@@ -2652,6 +2665,40 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(
         (sdkAdapter.runSdk as jest.Mock).mock.calls[0][0].resumeSessionId,
       ).toBeUndefined();
+    });
+
+    it('links a fresh handoff of a restored lane to the record it resumes (F2)', async () => {
+      manager.restoreAgents(
+        [
+          {
+            cliSessionId: SESSION,
+            cli: 'codex',
+            agentId: 'orphan-previous' as CliSessionReference['agentId'],
+            task: 'Implement the parser',
+            startedAt: '2026-10-04T08:00:00.000Z',
+            completedAt: '2026-10-04T08:01:00.000Z',
+            status: 'stopped',
+          },
+        ],
+        '/workspace/root',
+      );
+      resumeGate.evaluate.mockResolvedValueOnce({
+        decision: 'fresh', reason: 'lifetime budget expired', contextTokens: null, source: 'estimate', idleMs: 0,
+      });
+      const result = await manager.spawn({
+        task: 'Continue', cli: 'codex', workingDirectory: '/workspace/root',
+        resumeSessionId: SESSION, resumedFromAgentId: 'orphan-previous',
+      });
+      expect(result.resumeDecision?.decision).toBe('fresh');
+      const info = manager.getStatus(result.agentId) as AgentProcessInfo;
+      expect(info.resumedFromAgentId).toBe('orphan-previous');
+    });
+
+    it('ignores a resumed-from id that names no record of the same CLI (F2)', async () => {
+      const result = await manager.spawn({
+        task: 'Fresh', cli: 'codex', workingDirectory: '/workspace/root', resumedFromAgentId: 'no-such-lane',
+      });
+      expect(manager.getStatus(result.agentId)).not.toHaveProperty('resumedFromAgentId');
     });
 
     it('does not inherit an owner from a restored lane when resume omits the owner', async () => {
@@ -3802,6 +3849,58 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.readOutput(result.agentId).stdout).toContain(
         'final delta',
       );
+    });
+
+    it('stamps steerAvailable on the output delta only when it changes (D1)', async () => {
+      let steerOpen = false;
+      Object.assign(sdkControls.handle, {
+        steer: jest.fn(async () => undefined),
+        supportsSteer: () => steerOpen,
+      });
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const deltas: AgentOutputDelta[] = [];
+      manager.events.on('agent:output', (delta: AgentOutputDelta) => deltas.push(delta));
+      const flush = (data: string): void => {
+        sdkControls.emitOutput(data);
+        jest.advanceTimersByTime(250);
+      };
+      flush('turn starts');
+      flush('still thinking');
+      steerOpen = true;
+      flush('tool started');
+      flush('tool output');
+      steerOpen = false;
+      flush('tool ended');
+      expect(deltas.map((delta) => delta.steerAvailable))
+        .toEqual([false, undefined, true, undefined, false]);
+    });
+
+    it('never stamps steerAvailable for a handle without steer (D1)', async () => {
+      await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const deltas: AgentOutputDelta[] = [];
+      manager.events.on('agent:output', (delta: AgentOutputDelta) => deltas.push(delta));
+      sdkControls.emitOutput('output');
+      jest.advanceTimersByTime(250);
+      expect(deltas).toHaveLength(1);
+      expect(deltas[0]).not.toHaveProperty('steerAvailable');
+    });
+
+    it('sends a second agent:exited with the exit code once a stopped process really exits', async () => {
+      const result = await manager.spawn({ task: 'Task', cli: 'codex', workingDirectory: '/workspace/root' });
+      const exits: AgentProcessInfo[] = [];
+      manager.events.on('agent:exited', (info: AgentProcessInfo) => exits.push(info));
+      const stopped = manager.stop(result.agentId);
+      jest.advanceTimersByTime(600);
+      await stopped;
+      expect(exits).toHaveLength(1);
+      expect(exits[0]).toMatchObject({ status: 'stopped' });
+      expect(exits[0].exitCode).toBeUndefined();
+      sdkControls.resolve(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      jest.advanceTimersByTime(5_000);
+      expect(exits).toHaveLength(2);
+      expect(exits[1]).toMatchObject({ status: 'stopped', exitCode: 1 });
     });
 
     it('flushes buffered output before signalling a stop', async () => {
@@ -4962,6 +5061,44 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       await settle();
       await manager.sendToAgent(agentId, 'second message');
       expect(controls.continueMessages[1]).toBe('second message');
+    });
+
+    it('sends the parent no completion for a completed raw /command turn, and one for the next real turn', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const agentId = await spawnWithHandle(controls.handle);
+      controls.resolve(0);
+      await settle();
+      const afterSpawnTurn = laneCompletion.signal.mock.calls.length;
+
+      await manager.sendToAgent(agentId, '/context', 'queue', undefined, false,
+        { rawBody: '/context', noSteer: true });
+      controls.resolveContinue(0);
+      await settle();
+      expect(laneCompletion.signal.mock.calls.length).toBe(afterSpawnTurn);
+
+      await manager.sendToAgent(agentId, '[Ptah message m2 from the user]\n\nnow do the work', 'queue', undefined, false,
+        { rawBody: 'now do the work' });
+      controls.resolveContinue(0);
+      await settle();
+      expect(laneCompletion.signal.mock.calls.length).toBe(afterSpawnTurn + 1);
+    });
+
+    it('keeps a held budget warning off a raw /command and sends it with the next message (D6)', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const agentId = await spawnWithHandle(controls.handle);
+      controls.resolve(0);
+      await settle();
+      const tracked = manager.getMessageRoutableAgent(agentId);
+      if (!tracked) throw new Error('Expected tracked lane');
+      Object.assign(tracked, { heldBudgetWarning: 'Budget warning: finish work.' });
+
+      await manager.sendToAgent(agentId, '/skill-design-principles', 'queue', undefined, false,
+        { rawBody: '/skill-design-principles', noSteer: true });
+      expect(controls.continueMessages).toEqual(['/skill-design-principles']);
+      controls.resolveContinue(0);
+      await settle();
+      await manager.sendToAgent(agentId, 'next message');
+      expect(controls.continueMessages[1]).toBe('Budget warning: finish work.\n\nnext message');
     });
 
     it('refuses with unsupported when the handle offers no mechanism at all', async () => {

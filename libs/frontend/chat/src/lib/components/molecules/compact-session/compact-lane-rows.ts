@@ -61,6 +61,8 @@ function toCompactLaneStatus(
       return 'error';
     case 'queued':
       return 'waiting';
+    case 'stopping':
+      return 'running';
     case 'stopped':
       if (status === 'stopped' || status === 'killed') return 'stopped';
       if (status === 'timeout') return 'error';

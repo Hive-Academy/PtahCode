@@ -33,4 +33,31 @@ describe('NotificationAnnouncerComponent', () => {
       jest.useRealTimers();
     }
   });
+
+  it('removes the announcement of a permission once it is answered (no stale node)', () => {
+    jest.useFakeTimers();
+    try {
+      TestBed.configureTestingModule({ imports: [NotificationAnnouncerComponent] });
+      const notices = TestBed.inject(NotificationService);
+      const fixture = TestBed.createComponent(NotificationAnnouncerComponent);
+      fixture.detectChanges();
+      const item: AttentionItem = {
+        key: 'chat:permission:p1', generation: 1, source: 'chat', kind: 'permission', severity: 'warning',
+        workspacePath: '/workspace', workspaceName: 'Workspace', title: 'Permission: mcp__ptah__ptah_agent_spawn',
+        actions: [], actionable: true, soundEligible: false,
+      };
+      notices.upsert(item);
+      fixture.detectChanges();
+      jest.runOnlyPendingTimers();
+      fixture.detectChanges();
+      const status = () => (fixture.nativeElement.querySelector('[role="status"]') as HTMLElement).textContent ?? '';
+      expect(status()).toContain('Needs your attention');
+      notices.resolve(item.key, item.generation);
+      fixture.detectChanges();
+      expect(status()).toBe('');
+      expect(fixture.nativeElement.textContent).not.toContain('ptah_agent_spawn');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

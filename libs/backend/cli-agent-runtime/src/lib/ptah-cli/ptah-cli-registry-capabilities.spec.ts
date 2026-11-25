@@ -111,10 +111,10 @@ describe('Ptah CLI provider manifest', () => {
     expect(registry.capabilities('z-ai').limitReader.state).toBe('no-reliable-source');
   });
 
-  it('declares interrupt, next-turn settings, images, path-text files, commands and live usage', () => {
+  it('declares steer, interrupt, next-turn settings, images, path-text files, commands and live usage', () => {
     const manifest = registry.capabilities('claude-cli');
     expect(manifest.messaging.interrupt.state).toBe('supported');
-    expect(manifest.messaging.steer.state).toBe('unsupported');
+    expect(manifest.messaging.steer.state).toBe('supported');
     expect(manifest.turnInput).toEqual({
       model: { state: 'supported', appliesAt: 'next-turn' },
       effort: { state: 'supported', appliesAt: 'next-turn' },

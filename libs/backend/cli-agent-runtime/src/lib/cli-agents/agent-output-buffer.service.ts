@@ -102,7 +102,9 @@ export class AgentOutputBuffer {
       tracked &&
       tracked.accumulatedSegments.length < MAX_ACCUMULATED_SEGMENTS
     ) {
-      tracked.accumulatedSegments.push(segment);
+      // Echo images ride the live delta only; persisted output keeps no image bytes.
+      const { images: _images, ...persisted } = segment;
+      tracked.accumulatedSegments.push(segment.images ? persisted : segment);
     }
     this.scheduleFlush(agentId, onFlushDue);
   }

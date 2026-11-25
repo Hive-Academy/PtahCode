@@ -1,5 +1,5 @@
 import type {
-  LaneCompletionVerdict,
+  LaneOutcomeVerdict,
   LaneOutcomeRecord,
   OutcomeRoutingSource,
   OutcomeTaskKind,
@@ -43,7 +43,7 @@ export function heldReportJoinsRow(
 export type OutcomeReportEffect =
   | {
       readonly kind: 'deliverables';
-      readonly verdict: LaneCompletionVerdict;
+      readonly verdict: LaneOutcomeVerdict;
       readonly declaredAt: number;
       readonly taskKind?: OutcomeTaskKind;
       readonly taskId?: string;

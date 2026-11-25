@@ -632,7 +632,7 @@ describe('AgentMessageCoordinator', () => {
       return { agentId: spawnedId, cli: 'pi' as const, status: 'running' as const, startedAt: new Date().toISOString() };
     });
     const resume = new AgentLaneResumeService(
-      { spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn(async () => undefined) },
+      { spawn, prepareSdkHandleSpawn: jest.fn(), findAgentInfo: jest.fn(), releaseIdleForResume: jest.fn(async () => undefined) },
       { resume: jest.fn(), resumePtahCli: jest.fn() },
     );
     const coordinator = new AgentMessageCoordinator({

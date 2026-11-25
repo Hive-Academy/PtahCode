@@ -5,7 +5,7 @@ import {
 } from '@ptah-extension/shared';
 import type { DecisionOutcomeFigures } from '../decision-model/decision-payload';
 import { ANY_EFFORT, choiceModelOf, sentEffortBucket, type EffortBucket } from './choice-evidence';
-import { dedupeByRun, isCapacityFailure } from './local-derivation';
+import { dedupeByRun, isExcludedFromRates } from './local-derivation';
 
 export type OutcomeFigureLookup = (
   laneId: string,
@@ -33,7 +33,7 @@ export function outcomeFiguresFrom(
     }
     if (
       verdict === 'unverified' ||
-      ((byModelEffort || verdict === 'failed') && isCapacityFailure(summary.failureClass))
+      ((byModelEffort || verdict === 'failed') && isExcludedFromRates(summary.failureClass))
     ) {
       continue;
     }

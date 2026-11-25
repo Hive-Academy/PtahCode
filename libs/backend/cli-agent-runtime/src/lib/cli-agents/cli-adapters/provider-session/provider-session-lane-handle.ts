@@ -79,7 +79,7 @@ import {
   type LaneTurnSettingsResult,
   type SdkHandle,
 } from '../cli-adapter.interface';
-import { filterLaneCommands } from '../lane-command-filter';
+import { filterLaneCommands, leadingLaneCommand, matchesLaneCommand } from '../lane-command-filter';
 import { buildTaskPrompt, createBufferedEmitter } from '../cli-adapter.utils';
 import {
   LANE_ACP_PROMPT_TIMEOUT_MS,
@@ -213,6 +213,24 @@ export function createProviderSessionLaneHandle(
   let errorShownForTurn: string | undefined;
   /** Turns that already have stream rows (an open message to complete). */
   let streamedTurn: string | undefined;
+  /**
+   * The advertised `/command` the current turn runs (F9), or undefined for a
+   * model turn. Grok runs some commands (`/context`, `/compact`) without a
+   * model call: the turn ends with no output and no usage.
+   */
+  let commandTurn: { readonly name: string; output: boolean } | undefined;
+
+  /**
+   * A command turn's segments: any provider output marks the turn as
+   * answered; a "telemetry unavailable" turn total is dropped, because a
+   * command that called no model has no usage to miss (no budget handoff).
+   */
+  const commandTurnSegment = (item: CliOutputSegment): CliOutputSegment | undefined => {
+    if (!commandTurn) return item;
+    if (item.turnTelemetry?.status === 'unavailable') return undefined;
+    if (item.type !== 'info' || item.usage === undefined) commandTurn.output = true;
+    return item;
+  };
 
   const project = (event: ProviderSessionEvent): void => {
     const turnKey = event.turnId ?? `${event.contextId}:setup`;
@@ -230,7 +248,10 @@ export function createProviderSessionLaneHandle(
         `\n[${name}] ${event.type === 'error' ? event.error.message : event.message}\n`,
       );
     }
-    for (const item of projectToCliSegments(event)) segment.emit(item);
+    for (const item of projectToCliSegments(event)) {
+      const shown = commandTurnSegment(item);
+      if (shown) segment.emit(shown);
+    }
     // A failure already reaches the execution tree as its `error` segment
     // (the card renders error segments beside the event tree); projecting it
     // too would show the message twice. The same holds for the failed
@@ -507,6 +528,11 @@ export function createProviderSessionLaneHandle(
     } catch (error: unknown) {
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
+    // A raw command arrives as typed (no Ptah header), led by an advertised name.
+    const command = typeof prompt === 'string' ? leadingLaneCommand(prompt) : undefined;
+    commandTurn = command !== undefined && matchesLaneCommand(message, laneCommands().map((entry) => entry.name))
+      ? { name: command, output: false }
+      : undefined;
     // Counts only: no image data or file path reaches the log.
     if (typeof prompt !== 'string')
       logger?.info('[AcpSessionHandle] turn with content blocks', {
@@ -515,8 +541,28 @@ export function createProviderSessionLaneHandle(
         fileCount: content?.files?.length ?? 0,
       });
     return Promise.resolve({
-      done: runTurn(prompt).catch(onUnexpectedTurnError),
+      done: runTurn(prompt).then(endCommandTurn).catch(onUnexpectedTurnError),
     });
+  };
+
+  /**
+   * Ends a command turn: one that completed and returned nothing tells the
+   * lane so, instead of a silent empty turn (F9). An interrupted or stopped
+   * turn also resolves 0, but it did not run to its end: no notice.
+   */
+  const endCommandTurn = (code: number): number => {
+    const ended = commandTurn;
+    commandTurn = undefined;
+    const ranToEnd = lastTerminalStatus === 'completed' && !interruptRequested &&
+      !abort.signal.aborted && !session.isClosed();
+    if (ended && !ended.output && code === 0 && ranToEnd)
+      segment.emit({
+        type: 'info',
+        content: `${name} ran /${ended.name} and returned no output.`,
+        hostNotice: true,
+        sentAt: Date.now(),
+      });
+    return code;
   };
 
   /**

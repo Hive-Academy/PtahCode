@@ -117,7 +117,7 @@ describe('PtahCliStreamLoop.effectiveSessionId', () => {
     expect(SessionId.validate(getEffectiveSessionId(loop) as string)).toBe(
       true,
     );
-    expect(onSessionResolved).toHaveBeenCalledWith(VALID_UUID);
+    expect(onSessionResolved).toHaveBeenCalledWith(VALID_UUID, 'claude-3-5-sonnet');
   });
 
   it('stays null when system-init has no session_id', async () => {
@@ -1117,7 +1117,7 @@ describe('PtahCliStreamLoop usage tracking', () => {
 
     await loop.run(singleMessage(initMsg));
 
-    expect(sessionResolvedCallback).toHaveBeenCalledWith(VALID_UUID);
+    expect(sessionResolvedCallback).toHaveBeenCalledWith(VALID_UUID, 'claude-3-5-sonnet');
   });
 
   it('emits segment with usage when result includes usage', async () => {

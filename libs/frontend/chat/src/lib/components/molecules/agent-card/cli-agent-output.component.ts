@@ -26,6 +26,7 @@ import { LaneTranscriptComponent } from '../../organisms/transcript/lane-transcr
 import { LANE_COLUMN_CLASS } from '../execution-header/lane-column';
 import {
   AgentMonitorTreeBuilderService,
+  LANE_HOST_NOTICE_NODE_PREFIX,
   LANE_USER_ECHO_NODE_PREFIX,
 } from '../../../services/agent-monitor-tree-builder.service';
 import type { CliLaneUsage } from '../../../utils/lane-stats.adapters';
@@ -37,6 +38,16 @@ import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
 
 function isLaneUserEcho(node: ExecutionNode): boolean {
   return node.type === 'text' && node.id.startsWith(LANE_USER_ECHO_NODE_PREFIX);
+}
+
+/** A host notice node: a Ptah status line, not provider output. */
+function isLaneHostNotice(node: ExecutionNode): boolean {
+  return node.type === 'text' && node.id.startsWith(LANE_HOST_NOTICE_NODE_PREFIX);
+}
+
+/** A host-written node placed by its send time: a user echo or a host notice. */
+function isTimedHostNode(node: ExecutionNode): boolean {
+  return isLaneUserEcho(node) || isLaneHostNotice(node);
 }
 
 /**
@@ -58,12 +69,12 @@ function withUserEchoes(
   let from = 0;
   for (const node of segmentNodes) {
     const sentAt = node.startTime;
-    if (!isLaneUserEcho(node) || sentAt === undefined) {
+    if (!isTimedHostNode(node) || sentAt === undefined) {
       rest.push(node);
       continue;
     }
     let index = merged.findIndex(
-      (other, i) => i >= from && !isLaneUserEcho(other) && (other.startTime ?? -Infinity) > sentAt,
+      (other, i) => i >= from && !isTimedHostNode(other) && (other.startTime ?? -Infinity) > sentAt,
     );
     if (index < 0) index = merged.length;
     merged.splice(index, 0, node);
@@ -199,6 +210,8 @@ export class CliAgentOutputComponent {
 
   /** Whether the agent is still running (passed through to ExecutionNodeComponent) */
   readonly isStreaming = input<boolean>(false);
+  /** When the lane's run ended (epoch ms): an unfinished tool's final elapsed time ends here. */
+  readonly endedAt = input<number | undefined>(undefined);
 
   /** Triggers auto-scroll when value changes (incremented externally) */
   readonly scrollTrigger = input<number>(0);
@@ -230,6 +243,8 @@ export class CliAgentOutputComponent {
                 segment.type === 'error' ||
                 // The user echo exists only as a segment (the SDK does not echo it).
                 segment.type === 'user' ||
+                // A host notice too ("Grok ran /context and returned no output.").
+                (segment.type === 'info' && segment.hostNotice === true) ||
                 (!hasTextDeltas && segment.type === 'text') ||
                 (segment.type === 'info' &&
                   segment.content.startsWith('Message from unverified peer')),
@@ -242,7 +257,7 @@ export class CliAgentOutputComponent {
           this.treeSegments(),
         );
     if (!this.isStreaming()) {
-      return this.treeBuilder.finalizeOrphanedTools(tree);
+      return this.treeBuilder.finalizeOrphanedTools(tree, this.endedAt());
     }
     return tree;
   });
@@ -255,7 +270,7 @@ export class CliAgentOutputComponent {
   protected readonly showStdoutFallback = computed(
     () =>
       this.stdoutSegments().length > 0 &&
-      !this.executionNodes().some((node) => !isLaneUserEcho(node)),
+      !this.executionNodes().some((node) => !isTimedHostNode(node)),
   );
 
   /** Auto-scroll container reference */

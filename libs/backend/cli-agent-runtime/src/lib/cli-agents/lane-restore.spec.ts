@@ -49,6 +49,12 @@ describe('restoreLaneIdentity', () => {
     ).not.toHaveProperty('ptahCliName');
   });
 
+  it('restores the stored lane model so a cold resume starts on it (D8)', () => {
+    expect(restoreLaneIdentity(ref({ model: 'claude-haiku-4-5' }))).toMatchObject({ model: 'claude-haiku-4-5' });
+    expect(restoreLaneIdentity(ref({ model: '  ' }))).not.toHaveProperty('model');
+    expect(restoreLaneIdentity(ref({ model: 'x'.repeat(257) }))).not.toHaveProperty('model');
+  });
+
   it('restores parent, manifest, Ptah CLI identity and workspace beside lifecycle', () => {
     const reference = ref({
       ptahCliId: 'ptah-config',

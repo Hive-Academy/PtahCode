@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { ChevronDown, ChevronRight, CircleCheckBig, CircleX, Eye, MessageSquareText, TriangleAlert, UserRound, Bot, Waypoints, LucideAngularModule } from 'lucide-angular';
+import { ChevronDown, ChevronRight, CircleCheckBig, CirclePause, CircleX, Eye, MessageSquareText, TriangleAlert, UserRound, Bot, Waypoints, LucideAngularModule } from 'lucide-angular';
 import { DeliveryStatusComponent } from '../../molecules/delivery-status/delivery-status.component';
 import type { LaneThreadEntry } from './lane-thread';
 import { PtahBadgeDirective } from '@ptah-extension/ui';
@@ -80,6 +80,8 @@ export class LaneThreadRowComponent {
   protected readonly DoneIcon = CircleCheckBig;
   protected readonly FailIcon = CircleX;
   protected readonly WarningIcon = TriangleAlert;
+  /** A stopped run: the same pause glyph the dock uses for `stopped`. */
+  protected readonly StoppedIcon = CirclePause;
   /** Neutral icon for a `read` ack, so it never looks like the lane acted. */
   protected readonly ReadIcon = Eye;
   protected readonly subject = computed(() => `${this.entry().kind} from ${this.laneLabel()} to the parent`);
@@ -87,6 +89,7 @@ export class LaneThreadRowComponent {
     return this.entry().kind === 'ack' && this.entry().ackState === 'rejected';
   }
   protected isError(): boolean {
+    if (this.entry().stopped) return false;
     return (this.entry().kind === 'completion' && this.entry().verdict === 'Failed') || this.isRejectedAck();
   }
   /**
@@ -95,6 +98,9 @@ export class LaneThreadRowComponent {
    */
   protected deliveryNeedsAttention(): boolean {
     const state = this.entry().parentDelivery?.state;
+    // A stopped run's report to the parent is routine, not a prompt for the user:
+    // only a delivery that needs an action (retry) stays on the collapsed row.
+    if (this.entry().stopped && (state === 'pending' || state === 'sending')) return false;
     return state !== undefined && state !== 'delivered' && state !== 'cancelled';
   }
   /** `laneThreadEntries` writes this verdict when every declared deliverable exists. */
@@ -103,6 +109,7 @@ export class LaneThreadRowComponent {
   }
   protected badgeTone(): 'info' | 'ok' | 'warn' | 'err' {
     if (this.isError()) return 'err';
+    if (this.entry().stopped) return 'info';
     if (this.entry().kind === 'report') return 'info';
     if (this.entry().kind === 'ack') return this.entry().ackState === 'acted' || this.entry().ackState === 'read' ? 'ok' : 'warn';
     return this.isDelivered() ? 'ok' : 'warn';
@@ -135,7 +142,10 @@ export class LaneThreadRowComponent {
       if (this.isRejectedAck()) return this.FailIcon;
       return this.entry().ackState === 'read' ? this.ReadIcon : this.DoneIcon;
     }
-    if (this.entry().kind === 'completion') return this.entry().verdict === 'Failed' ? this.FailIcon : this.isDelivered() ? this.DoneIcon : this.WarningIcon;
+    if (this.entry().kind === 'completion') {
+      if (this.entry().stopped) return this.StoppedIcon;
+      return this.entry().verdict === 'Failed' ? this.FailIcon : this.isDelivered() ? this.DoneIcon : this.WarningIcon;
+    }
     switch (this.entry().senderKind) {
       case 'user': return this.YouIcon;
       case 'peer-lane': return this.PeerLaneIcon;

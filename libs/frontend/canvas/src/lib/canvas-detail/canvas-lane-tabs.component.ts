@@ -20,6 +20,7 @@ import { SessionAgentRosterService } from '@ptah-extension/chat';
 import {
   AgentAvatarComponent,
   agentAccessibleLabel,
+  agentStatusText,
   isRunningAgentWord,
   type AgentKind,
 } from '@ptah-extension/chat-ui';
@@ -61,6 +62,8 @@ interface DockChipModel {
   readonly selected: boolean;
   readonly label: string;
   readonly durationText: string | null;
+  /** The status as shown: `stopping` reads "stopping…". */
+  readonly statusText: string;
   readonly statusInk: string;
   readonly tabDomId: string;
   /** Set where the group changes from the previous chip: draw its marker. */
@@ -97,6 +100,10 @@ interface DockLayout {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     '(document:keydown.escape)': 'onDocumentEscape($event)',
+    // A click anywhere, or the window losing focus, ends a hover card: a
+    // re-render under the pointer can skip the pointerleave that closes it.
+    '(document:pointerdown)': 'dismissCard()',
+    '(window:blur)': 'dismissCard()',
     '[class.flex]': 'rail()',
     '[class.flex-col]': 'rail()',
     '[class.items-center]': 'rail()',
@@ -200,8 +207,8 @@ interface DockLayout {
               />
               <span class="min-w-0 truncate" data-testid="dock-chip-name">{{ chip.agent.name }}</span>
               @if (chip.agent.status) {
-                <span class="shrink-0 {{ chip.statusInk }}">{{
-                  chip.agent.status
+                <span class="shrink-0 {{ chip.statusInk }}" data-testid="dock-chip-status">{{
+                  chip.statusText
                 }}</span>
               }
               @if (chip.durationText; as duration) {
@@ -358,7 +365,9 @@ export class CanvasLaneTabsComponent {
     if (this.rail()) {
       const active = this.agents().filter(
         (agent) =>
-          isRunningAgentWord(agent.status) || agent.status === 'waiting',
+          // A lane that is stopping still runs until its process exits: it
+          // keeps its rail chip; a stopped lane does not (PR 1512 review).
+          isRunningAgentWord(agent.status) || agent.status === 'waiting' || agent.status === 'stopping',
       );
       const candidates = active.length ? active : this.agents().filter(agent => agent.kind === 'orchestrator');
       visible = candidates.slice(0, 5);
@@ -393,6 +402,7 @@ export class CanvasLaneTabsComponent {
           ? accessible
           : `${accessible}, ${group === 'active' ? 'active agents' : 'finished agents'}`,
         durationText: agentDurationText(agent, now),
+        statusText: agentStatusText(agent.status),
         statusInk: agentStatusInk(agent.status),
         tabDomId: `${idPrefix}-tab-${agent.key}`,
         groupStart,
@@ -483,7 +493,18 @@ export class CanvasLaneTabsComponent {
   }
 
   protected onTabClick(key: string): void {
+    this.dismissCard();
     this.pick(key);
+  }
+
+  /** Closes any open hover / focus card and forgets the hovered chip. */
+  protected dismissCard(): void {
+    this.tabHoveredKey = null;
+    if (this.cardKey() === null) {
+      this.clearCardTimer();
+      return;
+    }
+    this.closeCard();
   }
 
   protected onMenuSelect(key: string): void {

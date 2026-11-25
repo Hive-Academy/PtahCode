@@ -262,6 +262,20 @@ describe('CanvasLaneTabsComponent', () => {
     fixture.destroy();
   });
 
+  it('keeps a stopping lane in the rail until its process exits, and drops a stopped one (PR 1512 review)', () => {
+    agents.set([
+      { ...cli({ agentId: 'stopping', parentSessionId: 'owner', cli: 'Stopping', status: 'stopped' }),
+        stopRequestedAt: 5, stopAcknowledged: true } as CliFixture,
+      cli({ agentId: 'stopped', parentSessionId: 'owner', cli: 'Stopped', status: 'stopped' }),
+    ]);
+    const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
+    fixture.componentRef.setInput('tabId', TAB_ID);
+    fixture.componentRef.setInput('rail', true);
+    fixture.detectChanges();
+    expect(tabLabels(fixture.nativeElement)).toEqual([expect.stringContaining('Stopping')]);
+    fixture.destroy();
+  });
+
   it('rail arrow keys move focus only, keep one tab stop, and leave selection to Enter or a click', async () => {
     agents.set(cliRoster(7));
     const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
@@ -1267,6 +1281,52 @@ describe('CanvasLaneTabsComponent', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('closes a hover card on a click anywhere and when the window loses focus, with no pointerleave', () => {
+    agents.set(cliRoster(5));
+    jest.useFakeTimers();
+    try {
+      const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
+      fixture.componentRef.setInput('tabId', TAB_ID);
+      fixture.detectChanges();
+      TestBed.tick();
+      const tab: HTMLElement | null = fixture.nativeElement.querySelector('[role="tab"][aria-selected="false"]');
+      expect(tab).not.toBeNull();
+      if (!tab) return;
+      const open = () => {
+        tab.dispatchEvent(Object.defineProperty(new MouseEvent('pointerenter', { bubbles: true }), 'pointerType', { value: 'mouse' }));
+        jest.advanceTimersByTime(220);
+        fixture.detectChanges();
+        expect(fixture.nativeElement.querySelector('[role="tooltip"]')).not.toBeNull();
+      };
+      open();
+      // The pointer is still over the tab (no pointerleave): a click still ends the card.
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('[role="tooltip"]')).toBeNull();
+
+      open();
+      window.dispatchEvent(new Event('blur'));
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('[role="tooltip"]')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('shows "stopping…" in the selected pill while a user stop waits for the process exit', () => {
+    // The host already reports `stopped`; the process has not exited yet.
+    agents.set([{ ...cli({ agentId: 'c0', parentSessionId: 'owner', cli: 'claude', status: 'stopped' }),
+      stopRequestedAt: 5, stopAcknowledged: true } as CliFixture]);
+    const fixture = TestBed.createComponent(CanvasLaneTabsComponent);
+    fixture.componentRef.setInput('tabId', TAB_ID);
+    fixture.componentRef.setInput('laneKey', 'cli:c0');
+    fixture.detectChanges();
+    TestBed.tick();
+    fixture.detectChanges();
+    const status: HTMLElement | null = fixture.nativeElement.querySelector('[data-testid="dock-chip-status"]');
+    expect(status?.textContent?.trim()).toBe('stopping…');
   });
 
   it('closes the open card after a quick pointer sweep across two tabs', () => {

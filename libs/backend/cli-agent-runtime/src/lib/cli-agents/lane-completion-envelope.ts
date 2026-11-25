@@ -90,6 +90,8 @@ function nextAction(signal: LaneCompletionSignal): string {
       return 'Next: this lane exited without writing every deliverable it was given, so treat the task as NOT done. Read its output with ptah_agent_read to see how far it got, then resume it with the missing paths named, or do the work another way. Do not report this lane as complete.';
     case 'failed':
       return 'Next: the lane did not finish. Read its output with ptah_agent_read, then resume it when a CLI Session ID is present or respawn with a smaller task.';
+    case 'stopped':
+      return 'Next: the lane was stopped on request before it finished, so treat its work as unfinished. Read its output with ptah_agent_read; resume it only if the user still wants the task done.';
     case 'unverified':
       return 'Next: read the lane output and check its claims against the files and the project tests before you use them.';
   }

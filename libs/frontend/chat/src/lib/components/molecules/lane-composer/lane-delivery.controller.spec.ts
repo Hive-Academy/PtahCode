@@ -10,7 +10,7 @@ import {
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
 import { ComposerAttachmentsService, type ComposerImage } from '../../../services/composer-attachments.service';
 import { FilePickerService, type ChatFile } from '../../../services/file-picker.service';
-import { LaneDeliveryController } from './lane-delivery.controller';
+import { ACTIVITY_REFRESH_MS, LaneDeliveryController } from './lane-delivery.controller';
 
 const AGENT = '00000000-0000-4000-8000-000000000001';
 const OTHER_AGENT = '00000000-0000-4000-8000-000000000002';
@@ -34,6 +34,7 @@ describe('LaneDeliveryController', () => {
   const receipts = signal<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(new Map());
   const recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
   const agentsById = signal<ReadonlyMap<string, object>>(new Map());
+  const steerChanges = signal<ReadonlyMap<string, number>>(new Map());
   let keys = 0;
   const store = {
     receipts,
@@ -53,6 +54,7 @@ describe('LaneDeliveryController', () => {
     receipt: () => undefined,
     markRestored: jest.fn(),
     newIdempotencyKey: () => `key-${++keys}`,
+    steerChange: (id: string) => steerChanges().get(id) ?? 0,
     takeRecoveredMessage: (id: string) => {
       const message = recovered().get(id) ?? null;
       const next = new Map(recovered());
@@ -116,9 +118,24 @@ describe('LaneDeliveryController', () => {
     draft = signal('');
     accepted = jest.fn();
     controller.connect({
-      agentId, draft, stopped: signal(false), cli: signal('Codex'), resumePath: signal(null), accepted,
+      agentId, draft, stopped: signal(false), cli: signal('Codex'), accepted,
     });
     TestBed.tick();
+  });
+
+  it('sends an image-only message: staged images with no text enable Send (round 8)', async () => {
+    expect(controller.queueDisabled()).toBe(true);
+    attachments.images.set([IMAGE]);
+    expect(controller.queueDisabled()).toBe(false);
+    expect(controller.nowDisabled()).toBe(false);
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: receipt() });
+    await controller.send('queue');
+    expect(store.sendMessage).toHaveBeenCalledWith(AGENT, '', 'queue', false, expect.any(String),
+      expect.objectContaining({ images: [{ data: IMAGE.data, mediaType: 'image/png' }] }));
+    expect(attachments.images()).toEqual([]);
+    // A staged file alone is not a message (main chat's rule is text or images).
+    attachments.addFile(FILE);
+    expect(controller.queueDisabled()).toBe(true);
   });
 
   it('sends the draft with its attachments and pick, then clears the draft and the tray', async () => {
@@ -168,26 +185,6 @@ describe('LaneDeliveryController', () => {
     );
   });
 
-  it('does not fold into the queued message when the fold would pass the image limit (M2)', async () => {
-    const image = (index: number): ComposerImage => ({ ...IMAGE, id: `img-${index}` });
-    const earlier = receipt();
-    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: earlier });
-    draft.set('First');
-    attachments.images.set([1, 2, 3, 4, 5].map(image));
-    await controller.send('queue');
-    push(earlier);
-
-    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: receipt() });
-    draft.set('Second');
-    attachments.images.set([6, 7, 8, 9].map(image));
-    await controller.send('queue');
-
-    const [, text, , , , turn] = store.sendMessage.mock.calls[1];
-    expect(text).toBe('Second');
-    expect(turn.images).toHaveLength(4);
-    expect(store.cancelMessage).not.toHaveBeenCalled();
-  });
-
   it('sends a text-only message without a turn', async () => {
     store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: receipt() });
     draft.set('Plain');
@@ -207,9 +204,15 @@ describe('LaneDeliveryController', () => {
 
       push({ ...sent, state: 'failed', reason, lastError: 'Model opus is not offered by this lane', updatedAt: sent.updatedAt + 1 });
 
-      expect(draft()).toBe('Typed meanwhile\nUse the new model');
-      expect(attachments.files()).toEqual([FILE]);
-      expect(attachments.images()).toEqual([IMAGE]);
+      // Never merged into the message being typed (PR 1512 review): it waits,
+      // then comes back alone with its own attachments and pick.
+      expect(draft()).toBe('Typed meanwhile');
+      expect(attachments.files()).toEqual([]);
+      draft.set('');
+      TestBed.tick();
+      expect(draft()).toBe('Use the new model');
+      expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+      expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
       expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
       expect(controller.error()).toContain('Not delivered:');
       expect(controller.error()).toContain('Model opus is not offered by this lane');
@@ -232,99 +235,25 @@ describe('LaneDeliveryController', () => {
     expect(accepted).not.toHaveBeenCalled();
   });
 
-  it('coalesces a new draft with the queued message and carries both snapshots', async () => {
-    const earlier = receipt();
-    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: earlier });
+  it('sends a second queued message on its own, leaving the first queued (T2: one echo per message)', async () => {
+    const first = receipt();
+    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: first });
     draft.set('First');
     attachments.addFile(FILE);
     await controller.send('queue');
-    push(earlier);
+    push(first);
 
-    const combined = receipt();
-    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: combined });
-    store.cancelMessage.mockResolvedValue({ ...earlier, state: 'cancelled', reason: 'cancelled-by-user' });
+    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: receipt() });
     draft.set('Second');
     attachments.images.set([IMAGE]);
-    settings.pickEffort(AGENT, 'low');
     await controller.send('queue');
 
-    expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'First\nSecond', 'queue', false, 'key-2', {
-      reasoningEffort: 'low', images: [{ data: IMAGE.data, mediaType: 'image/png' }], files: [FILE.path],
-    });
-    expect(store.cancelMessage).toHaveBeenCalledWith(AGENT, earlier.id);
-
-    // The earlier receipt never restores: the combined one carries its content.
-    push({ ...earlier, state: 'failed', reason: 'cancelled-by-user', updatedAt: 99 });
+    expect(store.cancelMessage).not.toHaveBeenCalled();
+    expect(store.sendMessage.mock.calls.map((call) => [call[1], call[5]])).toEqual([
+      ['First', { files: [FILE.path] }],
+      ['Second', { images: [{ data: IMAGE.data, mediaType: 'image/png' }] }],
+    ]);
     expect(draft()).toBe('');
-    push({ ...combined, state: 'failed', reason: 'turn-input-unsupported', updatedAt: 100 });
-    expect(draft()).toBe('First\nSecond');
-    expect(attachments.files()).toEqual([FILE]);
-    expect(attachments.images()).toEqual([IMAGE]);
-  });
-
-  describe('folding into the queued message', () => {
-    async function queueEarlier(): Promise<AgentDeliveryReceipt> {
-      const earlier = receipt();
-      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: earlier });
-      draft.set('First');
-      attachments.addFile(FILE);
-      await controller.send('queue');
-      push(earlier);
-      return earlier;
-    }
-
-    it('takes the earlier message out of the queue before the combined send', async () => {
-      const earlier = await queueEarlier();
-      const order: string[] = [];
-      store.cancelMessage.mockImplementationOnce(async () => {
-        order.push('cancel');
-        return { ...earlier, state: 'cancelled', reason: 'cancelled-by-user' };
-      });
-      store.sendMessage.mockImplementationOnce(async () => {
-        order.push('send');
-        return { mode: 'queue-next-turn', receipt: receipt() };
-      });
-      draft.set('Second');
-      await controller.send('queue');
-      expect(order).toEqual(['cancel', 'send']);
-      expect(store.sendMessage).toHaveBeenLastCalledWith(
-        AGENT, 'First\nSecond', 'queue', false, expect.any(String), { files: [FILE.path] },
-      );
-    });
-
-    it('sends the draft alone when the earlier message already started', async () => {
-      const earlier = await queueEarlier();
-      store.cancelMessage.mockResolvedValueOnce({ ...earlier, state: 'started', reason: undefined });
-      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: receipt() });
-      draft.set('Second');
-      await controller.send('queue');
-      expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Second', 'queue', false, expect.any(String), undefined);
-      expect(controller.error()).toBeNull();
-    });
-
-    it('sends nothing and keeps the draft when the cancel fails', async () => {
-      await queueEarlier();
-      store.cancelMessage.mockRejectedValueOnce(new Error('transport'));
-      draft.set('Second');
-      await controller.send('queue');
-      expect(store.sendMessage).toHaveBeenCalledTimes(1);
-      expect(draft()).toBe('Second');
-      expect(controller.error()).toBe('Could not update the queued message. Try again.');
-      expect(controller.sending()).toBe(false);
-    });
-
-    it('puts the earlier message back in front of the draft when the combined send is refused', async () => {
-      const earlier = await queueEarlier();
-      store.cancelMessage.mockResolvedValueOnce({ ...earlier, state: 'cancelled', reason: 'cancelled-by-user' });
-      store.sendMessage.mockResolvedValueOnce({ mode: 'unsupported', detail: 'Lane cannot take images' });
-      draft.set('Second');
-      attachments.images.set([IMAGE]);
-      await controller.send('queue');
-      expect(draft()).toBe('First\nSecond');
-      expect(attachments.files()).toEqual([FILE]);
-      expect(attachments.images()).toEqual([IMAGE]);
-      expect(controller.error()).toBe('Lane cannot take images');
-    });
   });
 
   it('keeps an unresolved message when the lane cap evicts entries', async () => {
@@ -427,11 +356,77 @@ describe('LaneDeliveryController', () => {
     expect(attachments.files()).toEqual([FILE]);
   });
 
-  it('puts recovered text from a Recover text action into the draft', () => {
+  it('recovers an image-only message whose delivery failed (PR 1512 review)', async () => {
+    const sent = receipt();
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+    attachments.images.set([IMAGE]);
+    await controller.send('queue');
+    expect(attachments.images()).toEqual([]);
+    push({ ...sent, state: 'failed', updatedAt: 50 });
+    expect(draft()).toBe('');
+    expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
+  });
+
+  it('keeps a failed message separate when the user is writing another one: it waits, then loads alone (PR 1512 review)', async () => {
+    const sent = receipt();
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+    draft.set('First message');
+    await controller.send('queue');
+    draft.set('Second, being written');
+    push({ ...sent, state: 'failed', updatedAt: 50 });
+    // Not merged into the draft: held for the lane's composer.
+    expect(draft()).toBe('Second, being written');
+    expect(store.holdForComposer).toHaveBeenCalledWith(AGENT, { text: 'First message' });
+    draft.set('');
+    TestBed.tick();
+    expect(draft()).toBe('First message');
+  });
+
+  it('puts recovered text from a Recover text action into the draft once the draft is empty', () => {
     draft.set('Draft');
     recovered.set(new Map([[AGENT, { text: 'Recovered' }]]));
     TestBed.tick();
-    expect(draft()).toBe('Draft\nRecovered');
+    // Never merged into what the user is writing: it waits in the store.
+    expect(draft()).toBe('Draft');
+    draft.set('');
+    TestBed.tick();
+    expect(draft()).toBe('Recovered');
+  });
+
+  it('restores recovered messages one at a time, oldest first, each with its own turn (PR 1512 review)', () => {
+    const waiting = [
+      { text: 'First', turn: { model: 'gpt-5.5' } },
+      { text: 'Second', turn: { files: [FILE.path], model: 'gpt-5.5-mini' } },
+    ];
+    const take = jest.spyOn(store, 'takeRecoveredMessage').mockImplementation(() => {
+      const message = waiting.shift() ?? null;
+      if (waiting.length === 0) recovered.set(new Map());
+      return message;
+    });
+    try {
+      recovered.set(new Map([[AGENT, { text: 'First' }]]));
+      TestBed.tick();
+      // Only the oldest: its text alone, the second still queued.
+      expect(draft()).toBe('First');
+      expect(attachments.files()).toEqual([]);
+      expect(waiting).toHaveLength(1);
+      // Sent (the draft empties): the next one loads with its own files.
+      draft.set('');
+      recovered.set(new Map([[AGENT, { text: 'Second' }]]));
+      TestBed.tick();
+      expect(draft()).toBe('Second');
+      expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+    } finally {
+      take.mockRestore();
+    }
+  });
+
+  it('restores a recovered message that has only attachments (PR 1512 review)', () => {
+    recovered.set(new Map([[AGENT, { text: '', turn: { files: [FILE.path] } }]]));
+    TestBed.tick();
+    expect(draft()).toBe('');
+    expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+    expect(recovered().has(AGENT)).toBe(false);
   });
 
   it('restores the recovered turn (files, images, model, effort) with the text', () => {
@@ -707,7 +702,7 @@ describe('LaneDeliveryController', () => {
       secondDraft = signal('');
       second.connect({
         agentId: signal(AGENT), draft: secondDraft, stopped: signal(false), cli: signal('Codex'),
-        resumePath: signal(null), accepted: jest.fn(),
+        accepted: jest.fn(),
       });
       TestBed.tick();
     });
@@ -751,7 +746,7 @@ describe('LaneDeliveryController', () => {
         const ownerDraft = signal('');
         owner.connect({
           agentId: ownerLane, draft: ownerDraft, stopped: signal(false), cli: signal('Codex'),
-          resumePath: signal(null), accepted: jest.fn(),
+          accepted: jest.fn(),
         });
         TestBed.tick();
         const sent = receipt();
@@ -787,6 +782,234 @@ describe('LaneDeliveryController', () => {
       TestBed.tick();
       expect(secondDraft()).toBe('Recovered');
       expect(draft()).toBe('');
+    });
+  });
+
+  /** A second controller on AGENT with its own `stopped` signal. */
+  function mountLane(stopped: boolean): { readonly lane: LaneDeliveryController; readonly injector: DestroyableInjector } {
+    const injector = Injector.create({
+      providers: [LaneDeliveryController, ComposerAttachmentsService],
+      parent: TestBed.inject(Injector),
+    });
+    const lane = injector.get(LaneDeliveryController);
+    lane.connect({ agentId: signal(AGENT), draft: signal(''), stopped: signal(stopped), cli: signal('Claude'), accepted: jest.fn() });
+    TestBed.tick();
+    return { lane, injector };
+  }
+
+  describe('restart path of a lane with no running turn (D9)', () => {
+    function hintFor(record: object, usesResume: boolean): { readonly hint: string; readonly restart: string } {
+      agentsById.set(new Map([[AGENT, record]]));
+      store.composerState.mockReturnValue({
+        queue: { supported: true, mode: 'start-turn', usesResume }, now: { supported: false, mode: 'unsupported' },
+      });
+      const { lane, injector } = mountLane(true);
+      try {
+        return { hint: lane.hint(), restart: lane.restart() };
+      } finally {
+        injector.destroy();
+      }
+    }
+
+    it('continues the warm session of a lane that finished its turn normally', () => {
+      expect(hintFor({ status: 'completed', supportsContinuation: true }, false))
+        .toEqual({ hint: 'Send: continues the warm session', restart: 'warm' });
+    });
+
+    it('resumes a user-stopped lane cold, never as a warm session, and names its CLI session', () => {
+      expect(hintFor({ status: 'stopped', supportsContinuation: true, cliSessionId: '43089909-aaaa' }, true))
+        .toEqual({ hint: 'Resume with message: Resume CLI session 43089909', restart: 'resume' });
+    });
+
+    it('says "Resume saved conversation" for a resume without a known CLI session id', () => {
+      expect(hintFor({ status: 'failed' }, true).hint).toBe('Resume with message: Resume saved conversation');
+    });
+
+    it('starts a fresh handoff when nothing can be continued or resumed', () => {
+      expect(hintFor({ status: 'stopped', supportsContinuation: true }, false))
+        .toEqual({ hint: 'Send: starts a fresh handoff', restart: 'fresh' });
+      expect(hintFor({ status: 'completed', supportsContinuation: true, continuationExpired: true }, false).restart).toBe('fresh');
+    });
+  });
+
+  describe('preview refresh on a host steer-availability change (D1)', () => {
+    function steerChanged(): void {
+      steerChanges.set(new Map([[AGENT, (steerChanges().get(AGENT) ?? 0) + 1]]));
+      TestBed.tick();
+    }
+
+    afterEach(() => steerChanges.set(new Map()));
+
+    it('refetches both previews at once, without waiting for the throttle', () => {
+      store.previewMessage.mockClear();
+      steerChanged();
+      expect(store.previewMessage.mock.calls.map((call) => call[1])).toEqual(['queue', 'now']);
+      store.previewMessage.mockClear();
+      steerChanged();
+      expect(store.previewMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops the throttled activity refresh once the lane reported steer availability (M3)', () => {
+      jest.useFakeTimers();
+      try {
+        // Running before the report, so the status-change refresh is not counted.
+        agentsById.set(new Map([[AGENT, { status: 'running', streamRevision: 0, segments: [], stdout: '' }]]));
+        TestBed.tick();
+        jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+        steerChanged();
+        store.previewMessage.mockClear();
+        for (let revision = 1; revision <= 5; revision++) {
+          agentsById.set(new Map([[AGENT, { status: 'running', streamRevision: revision, segments: [], stdout: '' }]]));
+          TestBed.tick();
+        }
+        jest.advanceTimersByTime(ACTIVITY_REFRESH_MS * 3);
+        expect(store.previewMessage).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('skips an activity refresh already pending when the first steer report arrives (M3)', () => {
+      jest.useFakeTimers();
+      try {
+        agentsById.set(new Map([[AGENT, { status: 'running', streamRevision: 1, segments: [], stdout: '' }]]));
+        TestBed.tick();
+        steerChanged();
+        store.previewMessage.mockClear();
+        jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+        expect(store.previewMessage).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not refetch for a lane with no running turn', () => {
+      const { lane, injector } = mountLane(true);
+      try {
+        store.previewMessage.mockClear();
+        steerChanged();
+        // Only the running composer (`controller`) refetched.
+        expect(store.previewMessage).toHaveBeenCalledTimes(2);
+        expect(lane.error()).toBeNull();
+      } finally {
+        injector.destroy();
+      }
+    });
+  });
+
+  describe('preview refresh on lane activity (D1)', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    function stream(revision: number): void {
+      agentsById.set(new Map([[AGENT, { status: 'running', streamRevision: revision, segments: [], stdout: '' }]]));
+      TestBed.tick();
+    }
+
+    it('refreshes the previews after streamed events, at most once per second', () => {
+      stream(1);
+      store.previewMessage.mockClear();
+      stream(2);
+      jest.advanceTimersByTime(0);
+      expect(store.previewMessage.mock.calls.map((call) => call[1])).toEqual(['queue', 'now']);
+      store.previewMessage.mockClear();
+      // A burst inside the second: one trailing refresh at its end.
+      stream(3);
+      stream(4);
+      stream(5);
+      jest.advanceTimersByTime(ACTIVITY_REFRESH_MS - 1);
+      expect(store.previewMessage).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(store.previewMessage).toHaveBeenCalledTimes(2);
+    });
+
+    it('ignores a record update that carries no new activity', () => {
+      stream(1);
+      jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+      store.previewMessage.mockClear();
+      stream(1);
+      jest.advanceTimersByTime(ACTIVITY_REFRESH_MS * 2);
+      expect(store.previewMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not refresh on activity of a lane with no running turn, and keeps a failed background refresh silent', async () => {
+      const { lane, injector } = mountLane(true);
+      try {
+        stream(1);
+        store.previewMessage.mockClear();
+        stream(2);
+        jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+        // Only the running composer (`controller`) refreshed.
+        expect(store.previewMessage).toHaveBeenCalledTimes(2);
+        expect(lane.error()).toBeNull();
+      } finally {
+        injector.destroy();
+      }
+      store.previewMessage.mockClear().mockRejectedValue(new Error('offline'));
+      stream(3);
+      jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+      expect(store.previewMessage).toHaveBeenCalled();
+      for (let index = 0; index < 5; index++) await Promise.resolve();
+      expect(controller.error()).toBeNull();
+    });
+
+    it('drops a pending refresh when the composer is destroyed', () => {
+      const { injector } = mountLane(false);
+      stream(1);
+      stream(2);
+      injector.destroy();
+      store.previewMessage.mockClear();
+      jest.advanceTimersByTime(ACTIVITY_REFRESH_MS);
+      // The remaining composer (`controller`) refreshes once; the destroyed one never.
+      expect(store.previewMessage).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('refreshBeforeSend', () => {
+    it('reads both previews while a turn runs and reports a failure', async () => {
+      store.previewMessage.mockClear();
+      await controller.refreshBeforeSend();
+      expect(store.previewMessage.mock.calls.map((call) => call[1])).toEqual(['queue', 'now']);
+      store.previewMessage.mockRejectedValue(new Error('offline'));
+      await controller.refreshBeforeSend();
+      expect(controller.error()).toBe('Message options unavailable. Try again.');
+    });
+
+    it('clears an earlier error when the refresh works, and says whether it worked (M4)', async () => {
+      store.previewMessage.mockRejectedValueOnce(new Error('offline'));
+      await expect(controller.refreshBeforeSend()).resolves.toBe(false);
+      expect(controller.error()).toBe('Message options unavailable. Try again.');
+      store.previewMessage.mockResolvedValue(undefined);
+      await expect(controller.refreshBeforeSend()).resolves.toBe(true);
+      expect(controller.error()).toBeNull();
+    });
+
+    it('reports success only when its own previews are current: a later read makes it read again (PR 1512 review)', async () => {
+      const current = { queue: { supported: true, mode: 'queue-next-turn' }, now: { supported: true, mode: 'steer' } };
+      store.composerState.mockImplementation(() => current);
+      let calls = 0;
+      store.previewMessage.mockImplementation(async (_id: string, delivery: 'queue' | 'now') => {
+        calls++;
+        // The store holds a newer answer than the first read returned.
+        return calls <= 2 ? { ...current[delivery] } : current[delivery];
+      });
+      await expect(controller.refreshBeforeSend()).resolves.toBe(true);
+      expect(calls).toBe(4);
+      // Never current: it gives up with a reason instead of a stale success.
+      store.previewMessage.mockImplementation(async (_id: string, delivery: 'queue' | 'now') => ({ ...current[delivery] }));
+      await expect(controller.refreshBeforeSend()).resolves.toBe(false);
+      expect(controller.error()).toBe('Message options are still changing. Try again.');
+    });
+
+    it('does nothing for a lane with no running turn', async () => {
+      const { lane, injector } = mountLane(true);
+      try {
+        store.previewMessage.mockClear();
+        await lane.refreshBeforeSend();
+        expect(store.previewMessage).not.toHaveBeenCalled();
+      } finally {
+        injector.destroy();
+      }
     });
   });
 });

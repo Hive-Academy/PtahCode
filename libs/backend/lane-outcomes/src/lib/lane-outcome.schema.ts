@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import {
   EFFORT_DISPOSITIONS,
-  LANE_FAILURE_CLASSES,
   MAX_OUTCOME_EFFORT_LENGTH,
   OUTCOME_EFFORT_SOURCES,
   OUTCOME_MODEL_SOURCES,
+  STORED_LANE_FAILURE_CLASSES,
   OUTCOME_ROUTING_SOURCES,
   OUTCOME_TASK_KIND_SOURCES,
   OUTCOME_TASK_KINDS,
@@ -70,7 +70,7 @@ export const LaneOutcomeRowSchema = z.object({
   phaseKind: z.enum(PHASE_KINDS).nullable().default(null),
   taskId: z.string().nullable(),
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']),
-  failureClass: z.enum(LANE_FAILURE_CLASSES).nullable(),
+  failureClass: z.enum(STORED_LANE_FAILURE_CLASSES).nullable(),
   startedAt: nonnegative.nullable(),
   endedAt: nonnegative,
   durationMs: nonnegative.nullable(),

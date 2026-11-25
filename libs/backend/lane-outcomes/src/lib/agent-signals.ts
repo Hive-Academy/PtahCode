@@ -1,7 +1,8 @@
-import type {
-  AgentOutcomeSignals,
-  LaneFailureClass,
-  LaneOutcomeRecord,
+import {
+  LANE_USER_STOP_CLASS,
+  type AgentOutcomeSignals,
+  type LaneFailureClass,
+  type LaneOutcomeRecord,
 } from '@ptah-extension/shared';
 
 export function computeAgentSignals(
@@ -17,13 +18,15 @@ export function computeAgentSignals(
   }
   const result: Record<string, AgentOutcomeSignals> = {};
   for (const [slug, rows] of grouped) {
-    const verified = rows.filter((row) => row.verdict !== 'unverified');
-    const reviewed = rows.filter((row) => row.finalReview !== null);
+    // A caller stop says nothing about the agent: no rate, no failure tally.
+    const judged = rows.filter((row) => row.failureClass !== LANE_USER_STOP_CLASS);
+    const verified = judged.filter((row) => row.verdict !== 'unverified');
+    const reviewed = judged.filter((row) => row.finalReview !== null);
     const failures = new Map<
       LaneFailureClass,
       { count: number; latest: number }
     >();
-    for (const row of rows) {
+    for (const row of judged) {
       if (row.failureClass === null) continue;
       const previous = failures.get(row.failureClass);
       failures.set(row.failureClass, {

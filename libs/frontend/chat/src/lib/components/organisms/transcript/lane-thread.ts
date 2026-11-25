@@ -1,4 +1,4 @@
-import type { AgentDeliveryReceipt, AgentMessageAckState, ExecutionChatMessage } from '@ptah-extension/shared';
+import { isAgentBudgetStopReason, type AgentDeliveryReceipt, type AgentMessageAckState, type ExecutionChatMessage, type LaneStopReason } from '@ptah-extension/shared';
 import { AgentDeliveryStore, type ParentDeliveryItem } from '@ptah-extension/chat-streaming';
 
 /** Who wrote an entry: the user, the parent agent, another lane, or the lane this thread belongs to. */
@@ -19,6 +19,25 @@ export interface LaneThreadEntry {
   readonly verdict?: string;
   /** Delivery of this report or completion to the parent; its label comes from AgentDeliveryStore. */
   readonly parentDelivery?: ParentDeliveryItem;
+  /** A completion of a stopped run: neutral, never an error, and no "Waiting for parent" prompt. */
+  readonly stopped?: boolean;
+}
+
+/** How a lane run ended, as the thread's completion row reads it. */
+export interface LaneThreadCompletion {
+  readonly status: string;
+  readonly timestamp: number;
+  readonly stopReason?: LaneStopReason;
+  /** The user pressed Stop: a stopped or failed run reads "Stopped by you". */
+  readonly stoppedByUser?: boolean;
+}
+
+/** Verdict of a stopped run, or `undefined` when the run did not stop. */
+function stoppedVerdict(completion: LaneThreadCompletion): string | undefined {
+  // A user stop that an older host reports as `failed` is still a stop.
+  if (completion.stoppedByUser && (completion.status === 'stopped' || completion.status === 'failed')) return 'Stopped by you';
+  if (completion.status !== 'stopped') return undefined;
+  return isAgentBudgetStopReason(completion.stopReason) ? 'Stopped by Ptah budget monitor' : 'Stopped';
 }
 
 /** Resolves a lane's display name from the monitor's agent list; `undefined` when unknown. */
@@ -97,7 +116,7 @@ export function laneThreadEntries(
   laneLabel: string,
   cli: string,
   parentDelivery: readonly ParentDeliveryItem[] = [],
-  completion?: { readonly status: string; readonly timestamp: number },
+  completion?: LaneThreadCompletion,
   laneNameOf: LaneNameResolver = () => undefined,
 ): LaneThreadEntry[] {
   // "kimi · kimi" reads as a stutter: name the CLI once when the label is the CLI.
@@ -145,7 +164,12 @@ export function laneThreadEntries(
   }
   if (completion) {
     const delivery = [...parentDelivery].reverse().find(event => event.kind === 'completion');
-    const verdict = delivery?.verdict === 'delivered' ? 'Deliverables written'
+    // A stop is not a failure: a stopped run reads stopped even when the
+    // host's completion verdict (or an older host's status) says failed.
+    // The host's own `stopped` verdict (a caller stop) reads the same way.
+    const stopped = stoppedVerdict(completion) ?? (delivery?.verdict === 'stopped' ? 'Stopped' : undefined);
+    const verdict = stopped ? stopped
+      : delivery?.verdict === 'delivered' ? 'Deliverables written'
       : delivery?.verdict === 'no-deliverable' ? 'No deliverable'
       : delivery?.verdict === 'failed' ? 'Failed'
       : delivery?.verdict === 'unverified' ? 'Unverified'
@@ -153,7 +177,7 @@ export function laneThreadEntries(
     // No parent-delivery push means the state is unknown (for example a lane from an earlier
     // app run), so no parent signal is shown instead of a false "Waiting for parent".
     entries.push({ id: 'completion', ...self, kind: 'completion', timestamp: completion.timestamp,
-      body: '', verdict, parentDelivery: delivery });
+      body: '', verdict, parentDelivery: delivery, ...(stopped ? { stopped: true } : {}) });
   }
   return entries.sort((a, b) => a.timestamp - b.timestamp);
 }

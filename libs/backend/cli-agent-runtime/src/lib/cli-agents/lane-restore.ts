@@ -78,6 +78,7 @@ export function restoreLaneIdentity(
   parentSessionId?: string,
 ): Pick<
   AgentProcessInfo,
+  | 'model'
   | 'parentSessionId'
   | 'potentialCapabilities'
   | 'ptahCliId'
@@ -95,6 +96,12 @@ export function restoreLaneIdentity(
       ? { ptahCliName: ref.ptahCliName }
       : {}),
     ...(ref.workspaceKey ? { workspaceKey: ref.workspaceKey } : {}),
+    // The lane's model, so a cold resume starts on it and the composer names
+    // it instead of "<CLI> default" (D8). Persisted data: a bounded,
+    // non-blank string only.
+    ...(typeof ref.model === 'string' && ref.model.trim() && ref.model.length <= 256
+      ? { model: ref.model }
+      : {}),
   };
 }
 

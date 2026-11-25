@@ -151,6 +151,19 @@ describe('AgentOutputBuffer', () => {
     });
   });
 
+  describe('appendSegment() echo images (D5)', () => {
+    it('keeps echo images on the live delta and out of the persisted segments', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const images = [{ data: 'aGk=', mediaType: 'image/png' }];
+      buffer.appendSegment(AGENT_ID, tracked, { type: 'user', content: 'look', sentAt: 1, images }, jest.fn());
+      expect(tracked.accumulatedSegments).toEqual([{ type: 'user', content: 'look', sentAt: 1 }]);
+      expect(buffer.takeDelta(AGENT_ID, tracked)?.segments).toEqual([
+        { type: 'user', content: 'look', sentAt: 1, images },
+      ]);
+    });
+  });
+
   describe('appendStreamEvent()', () => {
     it('re-caps only past the slack and logs the cap once', () => {
       const { buffer, logger } = makeBuffer();

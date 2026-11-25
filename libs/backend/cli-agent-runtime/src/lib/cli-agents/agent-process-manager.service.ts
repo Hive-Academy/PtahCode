@@ -45,6 +45,7 @@ import {
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
+  AgentOutputDelta,
   CliAdapterManifest,
   EffectiveLanePolicy,
   AgentRoleChannel,
@@ -96,6 +97,7 @@ import { TURN_INPUT_NOT_REPORTED } from './messaging/agent-delivery-planner';
 import {
   blockedLaneCommand,
   blockedLaneCommandReason,
+  isRawCommandDelivery,
 } from './cli-adapters/lane-command-filter';
 import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
@@ -1442,7 +1444,7 @@ export class AgentProcessManager {
         cli,
         agentId,
       ),
-      ...(previous ? { resumedFromAgentId: previous.agentId } : {}),
+      ...this.resumedFromField(request.resumedFromAgentId, cli, previous),
       displayName,
       ...spawnSettings,
       ...(request.resumeSessionId
@@ -3167,8 +3169,11 @@ export class AgentProcessManager {
       );
     }
 
-    const warning = tracked.heldBudgetWarning;
-    const routedMessage = takeHeldBudgetWarning(tracked, message);
+    // A raw provider `/command` (`noSteer`, set only for one) must reach the
+    // CLI as typed: text before it would turn it into plain prose (D6). A held
+    // warning waits for the next ordinary message instead.
+    const warning = input.noSteer ? undefined : tracked.heldBudgetWarning;
+    const routedMessage = input.noSteer ? message : takeHeldBudgetWarning(tracked, message);
     try {
       const outcome = await this.messageRouter.route(
         agentId,
@@ -3479,6 +3484,7 @@ export class AgentProcessManager {
 
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
+    tracked.rawCommandTurn = isRawCommandDelivery(message, rawBody);
 
     // The continuation is the reason the subprocess was kept alive — stand the
     // idle countdown down before doing anything that can await.
@@ -3832,6 +3838,23 @@ export class AgentProcessManager {
    * Guarded shape because `unref` exists on Node's `Timeout` but not on the
    * DOM's numeric handle, and not on every fake-timer implementation.
    */
+  /**
+   * The card link of a resumed lane (F2). The resumer names the record it
+   * resumes; that link holds even when the resume gate started a fresh
+   * handoff (no session id, so no `previous` by session). Only a tracked
+   * record of the same CLI is linked, so a caller cannot point a new lane at
+   * an unrelated card. Without one, the record that held the session links.
+   */
+  private resumedFromField(
+    requested: string | undefined,
+    cli: CliType,
+    previous: AgentProcessInfo | undefined,
+  ): Pick<AgentProcessInfo, 'resumedFromAgentId'> {
+    const named = requested ? this.agents.get(requested)?.info : undefined;
+    const source = named && named.cli === cli ? named : previous;
+    return source ? { resumedFromAgentId: source.agentId } : {};
+  }
+
   private unrefTimer(timer: NodeJS.Timeout): NodeJS.Timeout {
     if (typeof (timer as { unref?: () => void }).unref === 'function') {
       (timer as { unref: () => void }).unref();
@@ -3855,7 +3878,23 @@ export class AgentProcessManager {
       };
     }
 
-    this.events.emit('agent:output', delta);
+    this.events.emit('agent:output', this.withSteerChange(tracked, delta));
+  }
+
+  /**
+   * Stamps `steerAvailable` on the delta when it changed since the last one
+   * (D1). A Claude lane's steer opens when a tool starts and closes when it
+   * ends; both produce output, so the throttled flush carries the change and
+   * the composer refetches its preview. Handles without steer never stamp.
+   */
+  private withSteerChange(tracked: TrackedAgent, delta: AgentOutputDelta): AgentOutputDelta {
+    const handle = tracked.sdkHandle;
+    if (typeof handle?.steer !== 'function') return delta;
+    const available =
+      tracked.info.status === 'running' && handle.supportsSteer?.() !== false;
+    if (available === tracked.publishedSteerAvailable) return delta;
+    tracked.publishedSteerAvailable = available;
+    return { ...delta, steerAvailable: available };
   }
 
   /**
@@ -4249,12 +4288,15 @@ export class AgentProcessManager {
         observedAt,
       );
       this.captureReportedSession(tracked);
-    } else if (!tracked.info.completedAt) {
-      const completedAt = new Date().toISOString();
+    } else {
+      // Already terminal (a stop or a timeout stamped it): the process has now
+      // really exited. Its exit code rides the `agent:exited` below, so the
+      // card can end "Stopping…" here and not at the stop request.
+      const completedAt = tracked.info.completedAt ?? new Date().toISOString();
       tracked.info = {
         ...tracked.info,
-        completedAt,
-        lastActivityAt: completedAt,
+        ...(code !== null ? { exitCode: code } : {}),
+        ...(tracked.info.completedAt ? {} : { completedAt, lastActivityAt: completedAt }),
       };
     }
     this.events.emit('agent:turn-settled', {
@@ -4627,6 +4669,15 @@ export class AgentProcessManager {
         : {}),
       ...(tracked.repeatedCalls ? { repeatedCalls: tracked.repeatedCalls } : {}),
     };
+    // A completed raw user `/command` turn (`/context`, `/compact`) is not
+    // work the parent assigned: no completion envelope, no outcome row. Its
+    // usage was recorded above. A failed or stopped one still reports.
+    if (tracked.rawCommandTurn && info.status === 'completed') {
+      this.logger.debug('[AgentProcessManager] Command turn settled without a parent completion', {
+        agentId: info.agentId,
+      });
+      return;
+    }
     const externalOwner = tracked.externalOwner;
     const deliver = (parentSessionId?: string) => {
       const completion = { ...info, parentSessionId };

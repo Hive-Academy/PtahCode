@@ -9,6 +9,11 @@ const MESSAGE_ID = '11111111-2222-4333-8444-555555555555';
 const LANE = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
 
 describe('formatAgentMessageDeliveryText', () => {
+  it('sends the header alone for an image-only message', () => {
+    expect(formatAgentMessageDeliveryText(MESSAGE_ID, { kind: 'user' }, '', false))
+      .toBe(`[Ptah message ${MESSAGE_ID} from the user]`);
+  });
+
   it('prefixes the body with the message id and the sender label', () => {
     expect(formatAgentMessageDeliveryText(MESSAGE_ID, { kind: 'user' }, 'Please rebase.', false))
       .toBe(`[Ptah message ${MESSAGE_ID} from the user]\n\nPlease rebase.`);

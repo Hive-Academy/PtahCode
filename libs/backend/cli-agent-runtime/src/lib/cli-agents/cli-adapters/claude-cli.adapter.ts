@@ -44,6 +44,7 @@ import {
   isReviewerOrTester,
   translateLaneSpawnPolicy,
 } from '../lane-spawn-policy';
+import { LANE_IMAGES_NAMED_RESUME_TEXT } from '../messaging/agent-effective-capabilities';
 import { stripAnsiCodes } from './cli-adapter.utils';
 import type {
   ClaudeCliAdapterContract,
@@ -59,9 +60,6 @@ export const CLAUDE_NATIVE_LANE_TURN_INPUT: LaneTurnInputCapabilities = {
   images: { ...CLAUDE_SDK_LANE_TURN_INPUT.images, onResume: true },
 };
 
-/** Refusal when images would start a named-account lane's resumed turn. */
-export const CLAUDE_NAMED_RESUME_IMAGES_TEXT =
-  'Images need a running lane on a named-account Claude lane.';
 
 export interface ClaudeCliAdapterDependencies {
   readonly loader: Pick<SdkModuleLoader, 'getQueryFunction' | 'getCliJsPath'>;
@@ -115,7 +113,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
   capabilities(permission?: LanePermissionMode): CliAdapterManifest {
     return {
       messaging: {
-        steer: { state: 'unsupported', reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' },
+        steer: { state: 'supported' },
         interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
@@ -197,7 +195,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     // only, so a named lane refuses images instead of losing them.
     const firstTurn = claudeLaneTurnContent(input.task, input.turnImages?.length ? { images: input.turnImages } : undefined);
     if (input.turnImages?.length && input.accountAdmission)
-      throw new Error(CLAUDE_NAMED_RESUME_IMAGES_TEXT);
+      throw new Error(LANE_IMAGES_NAMED_RESUME_TEXT);
     const abortController = new AbortController();
     const named = await this.prepareNamed(input, abortController);
     // Fixed word for the host step a named refusal happened in; the
