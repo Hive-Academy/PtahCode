@@ -265,6 +265,15 @@ function settingsGetResolver(params: unknown): {
   if (key === 'skills.enhancement.timeoutMs') {
     return { success: true, value: 120000 };
   }
+  // The Setup pair keys (TASK_2026_2325_899d, registered with the default `''`
+  // in `file-settings-keys.ts`): an empty value is the Unset state, which the
+  // Background models Setup row renders as "workspace model applies".
+  if (key === 'setup.provider') {
+    return { success: true, value: '' };
+  }
+  if (key === 'setup.model') {
+    return { success: true, value: '' };
+  }
   if (
     typeof key === 'string' &&
     Object.hasOwn(SESSION_BUDGET_SETTINGS_FIXTURE, key)
