@@ -51,3 +51,39 @@ export interface ISettingsStore {
    */
   flushSync(): void;
 }
+
+/**
+ * Narrow extension of {@link ISettingsStore} for stores that support atomic
+ * multi-key global writes and coherent multi-key global reads.
+ *
+ * Kept separate from {@link ISettingsStore} so unrelated adapters and mocks do
+ * not need to implement batch methods.
+ */
+export interface IGlobalBatchSettingsStore extends ISettingsStore {
+  /**
+   * Read multiple global (non-secret) settings in a single synchronous turn.
+   */
+  readGlobalMany(keys: readonly string[]): Record<string, unknown>;
+
+  /**
+   * Atomically persist multiple global settings in one disk transaction and
+   * return the frozen slice of entries committed by this transaction.
+   */
+  writeGlobalBatch(
+    entries: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>>;
+}
+
+/**
+ * Runtime type guard for {@link IGlobalBatchSettingsStore}.
+ */
+export function isGlobalBatchSettingsStore(
+  store: ISettingsStore | null | undefined,
+): store is IGlobalBatchSettingsStore {
+  if (!store || typeof store !== 'object') return false;
+  const candidate = store as Partial<IGlobalBatchSettingsStore>;
+  return (
+    typeof candidate.writeGlobalBatch === 'function' &&
+    typeof candidate.readGlobalMany === 'function'
+  );
+}

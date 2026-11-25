@@ -46,6 +46,24 @@ const prevUserProfile = process.env['USERPROFILE'];
 process.env['HOME'] = mockTestHome;
 process.env['USERPROFILE'] = mockTestHome;
 
+type RenameFn = typeof import('fs/promises').rename;
+let renameOverride: RenameFn | null = null;
+
+jest.mock('fs/promises', () => {
+  const actual =
+    jest.requireActual<typeof import('fs/promises')>('fs/promises');
+  return {
+    ...actual,
+    rename: (
+      oldPath: Parameters<RenameFn>[0],
+      newPath: Parameters<RenameFn>[1],
+    ) =>
+      renameOverride
+        ? renameOverride(oldPath, newPath)
+        : actual.rename(oldPath, newPath),
+  };
+});
+
 jest.mock('os', () => {
   const actual = jest.requireActual<typeof import('os')>('os');
   return {
@@ -67,6 +85,7 @@ afterAll(() => {
 });
 
 import { expectNormalizedPath } from '@ptah-extension/shared/testing';
+import { SettingsPersistError } from './file-settings-errors';
 import { PtahFileSettingsManager } from './file-settings-manager';
 import {
   FILE_BASED_SETTINGS_KEYS,
@@ -102,6 +121,7 @@ describe('PtahFileSettingsManager', () => {
   });
 
   afterEach(() => {
+    renameOverride = null;
     warnSpy.mockRestore();
   });
 
@@ -1057,6 +1077,344 @@ describe('PtahFileSettingsManager', () => {
         handle!.dispose();
         handle!.dispose();
       }).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Atomic batch writes (setMany / getMany) & Setup keys (Amendment 3.2 + C1)
+  // -------------------------------------------------------------------------
+
+  describe('setMany() / getMany() and setup.* keys', () => {
+    it('registers setup.provider and setup.model with empty-string defaults and round-trips across restart and Undo', async () => {
+      expect(FILE_BASED_SETTINGS_KEYS.has('setup.provider')).toBe(true);
+      expect(FILE_BASED_SETTINGS_KEYS.has('setup.model')).toBe(true);
+      expect(isFileBasedSettingKey('setup.provider')).toBe(true);
+      expect(isFileBasedSettingKey('setup.model')).toBe(true);
+      expect(FILE_BASED_SETTINGS_DEFAULTS['setup.provider']).toBe('');
+      expect(FILE_BASED_SETTINGS_DEFAULTS['setup.model']).toBe('');
+
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      expect(mgr.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': '',
+        'setup.model': '',
+      });
+
+      const first = await mgr.setMany({
+        'setup.provider': 'openrouter',
+        'setup.model': 'anthropic/claude-sonnet-4-5',
+      });
+      expect(Object.isFrozen(first)).toBe(true);
+      expect(first).toEqual({
+        'setup.provider': 'openrouter',
+        'setup.model': 'anthropic/claude-sonnet-4-5',
+      });
+
+      // Restart read-back from a fresh manager instance.
+      const restarted = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      expect(restarted.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': 'openrouter',
+        'setup.model': 'anthropic/claude-sonnet-4-5',
+      });
+
+      // Undo back to unset ('', '') persists and survives restart.
+      const cleared = await restarted.setMany({
+        'setup.provider': '',
+        'setup.model': '',
+      });
+      expect(cleared).toEqual({ 'setup.provider': '', 'setup.model': '' });
+
+      const afterClear = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      expect(afterClear.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': '',
+        'setup.model': '',
+      });
+    });
+
+    it('set() behavior is unchanged (optimistic read-after-set, rollback on failure)', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      await mgr.set('authMethod', 'claudeCli');
+
+      let releaseRename!: () => void;
+      const renameGate = new Promise<void>((resolve) => {
+        releaseRename = resolve;
+      });
+      const realRename =
+        jest.requireActual<typeof import('fs/promises')>('fs/promises').rename;
+      renameOverride = async (from, to) => {
+        renameOverride = null;
+        await renameGate;
+        return realRename(from, to);
+      };
+
+      try {
+        const pending = mgr.set('authMethod', 'apiKey');
+        // Optimistic read-after-set: new value is immediately visible before rename completes.
+        expect(mgr.get<string>('authMethod')).toBe('apiKey');
+        releaseRename();
+        await pending;
+        expect(mgr.get<string>('authMethod')).toBe('apiKey');
+      } finally {
+        renameOverride = null;
+      }
+
+      // On persist failure, set() rolls back in-memory value and fires no watcher.
+      const watched: unknown[] = [];
+      mgr.watch('authMethod', (v) => watched.push(v));
+      renameOverride = async () => {
+        renameOverride = null;
+        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      };
+
+      try {
+        const failed = mgr.set('authMethod', 'thirdParty');
+        expect(mgr.get<string>('authMethod')).toBe('thirdParty');
+        await expect(failed).rejects.toThrow(SettingsPersistError);
+        expect(mgr.get<string>('authMethod')).toBe('apiKey');
+        expect(watched).toEqual([]);
+      } finally {
+        renameOverride = null;
+      }
+    });
+
+    it("overlapping setMany() returns each call's own committedSlice in FIFO order", async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      const notifications: Array<{
+        key: string;
+        value: unknown;
+        pair: Record<string, unknown>;
+      }> = [];
+      mgr.watch('setup.provider', (value) => {
+        notifications.push({
+          key: 'setup.provider',
+          value,
+          pair: mgr.getMany(['setup.provider', 'setup.model']),
+        });
+      });
+      mgr.watch('setup.model', (value) => {
+        notifications.push({
+          key: 'setup.model',
+          value,
+          pair: mgr.getMany(['setup.provider', 'setup.model']),
+        });
+      });
+
+      const resolvedOrder: string[] = [];
+      const inputA = {
+        'setup.provider': 'openrouter',
+        'setup.model': 'model-a',
+      };
+      const inputB = {
+        'setup.provider': 'apiKey',
+        'setup.model': 'model-b',
+      };
+
+      const pA = mgr.setMany(inputA).then((slice) => {
+        resolvedOrder.push('A');
+        return slice;
+      });
+      // Mutating caller object after invoking setMany must not affect the queued transaction.
+      inputA['setup.model'] = 'mutated-after-call';
+
+      const pB = mgr.setMany(inputB).then((slice) => {
+        resolvedOrder.push('B');
+        return slice;
+      });
+
+      const [sliceA, sliceB] = await Promise.all([pA, pB]);
+
+      expect(resolvedOrder).toEqual(['A', 'B']);
+      expect(Object.isFrozen(sliceA)).toBe(true);
+      expect(Object.isFrozen(sliceB)).toBe(true);
+      expect(sliceA).toEqual({
+        'setup.provider': 'openrouter',
+        'setup.model': 'model-a',
+      });
+      expect(sliceB).toEqual({
+        'setup.provider': 'apiKey',
+        'setup.model': 'model-b',
+      });
+
+      // Each watcher saw the coherent committed pair of its own transaction in FIFO order.
+      expect(notifications).toEqual([
+        {
+          key: 'setup.provider',
+          value: 'openrouter',
+          pair: { 'setup.provider': 'openrouter', 'setup.model': 'model-a' },
+        },
+        {
+          key: 'setup.model',
+          value: 'model-a',
+          pair: { 'setup.provider': 'openrouter', 'setup.model': 'model-a' },
+        },
+        {
+          key: 'setup.provider',
+          value: 'apiKey',
+          pair: { 'setup.provider': 'apiKey', 'setup.model': 'model-b' },
+        },
+        {
+          key: 'setup.model',
+          value: 'model-b',
+          pair: { 'setup.provider': 'apiKey', 'setup.model': 'model-b' },
+        },
+      ]);
+
+      // Disk matches the final committed pair on fresh restart.
+      const restarted = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      expect(restarted.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': 'apiKey',
+        'setup.model': 'model-b',
+      });
+    });
+
+    it('failed setMany() leaves disk and memory unchanged', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      await mgr.setMany({
+        'setup.provider': 'claudeCli',
+        'setup.model': 'claude-sonnet-4-5',
+      });
+      const diskBefore = fs.readFileSync(SETTINGS_PATH, 'utf-8');
+
+      const providerWatched = jest.fn();
+      const modelWatched = jest.fn();
+      mgr.watch('setup.provider', providerWatched);
+      mgr.watch('setup.model', modelWatched);
+
+      renameOverride = async () => {
+        renameOverride = null;
+        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      };
+
+      try {
+        const failed = mgr.setMany({
+          'setup.provider': 'openrouter',
+          'setup.model': 'model-failed',
+        });
+
+        // Uncommitted setMany values must never appear in memory while in flight.
+        expect(mgr.getMany(['setup.provider', 'setup.model'])).toEqual({
+          'setup.provider': 'claudeCli',
+          'setup.model': 'claude-sonnet-4-5',
+        });
+
+        await expect(failed).rejects.toThrow(SettingsPersistError);
+      } finally {
+        renameOverride = null;
+      }
+
+      // Memory, disk, watchers, and temp-file cleanup are all intact.
+      expect(mgr.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': 'claudeCli',
+        'setup.model': 'claude-sonnet-4-5',
+      });
+      expect(fs.readFileSync(SETTINGS_PATH, 'utf-8')).toBe(diskBefore);
+      expect(providerWatched).not.toHaveBeenCalled();
+      expect(modelWatched).not.toHaveBeenCalled();
+      const leftovers = fs
+        .readdirSync(PTAH_DIR)
+        .filter((name) => name.endsWith('.tmp'));
+      expect(leftovers).toEqual([]);
+
+      // Queue keeps accepting subsequent writes after failure.
+      const recovered = await mgr.setMany({
+        'setup.provider': 'apiKey',
+        'setup.model': 'claude-opus-4-1',
+      });
+      expect(recovered).toEqual({
+        'setup.provider': 'apiKey',
+        'setup.model': 'claude-opus-4-1',
+      });
+    });
+
+    it('interleaved set() and setMany() preserve both writes and hide setMany values until rename succeeds', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      await mgr.setMany({
+        'setup.provider': 'claudeCli',
+        'setup.model': 'claude-sonnet-4-5',
+      });
+
+      let releaseRename!: () => void;
+      const renameGate = new Promise<void>((resolve) => {
+        releaseRename = resolve;
+      });
+      let renameEntered!: () => void;
+      const renameEnteredPromise = new Promise<void>((resolve) => {
+        renameEntered = resolve;
+      });
+      const realRename =
+        jest.requireActual<typeof import('fs/promises')>('fs/promises').rename;
+      renameOverride = async (from, to) => {
+        renameOverride = null;
+        renameEntered();
+        await renameGate;
+        return realRename(from, to);
+      };
+
+      try {
+        const batchWrite = mgr.setMany({
+          'setup.provider': 'openrouter',
+          'setup.model': 'openai/gpt-5',
+        });
+        await renameEnteredPromise;
+
+        // While setMany is awaiting rename, readers still see the previous committed pair.
+        expect(mgr.getMany(['setup.provider', 'setup.model'])).toEqual({
+          'setup.provider': 'claudeCli',
+          'setup.model': 'claude-sonnet-4-5',
+        });
+
+        // An interleaved unrelated set() writes optimistically and chains behind setMany.
+        const singleWrite = mgr.set('display.autoOpenArtifacts', false);
+        expect(mgr.get<boolean>('display.autoOpenArtifacts')).toBe(false);
+
+        releaseRename();
+        const [slice] = await Promise.all([batchWrite, singleWrite]);
+        expect(slice).toEqual({
+          'setup.provider': 'openrouter',
+          'setup.model': 'openai/gpt-5',
+        });
+      } finally {
+        renameOverride = null;
+      }
+
+      // Both writes survived in memory and on disk.
+      const restarted = new PtahFileSettingsManager(
+        FILE_BASED_SETTINGS_DEFAULTS,
+      );
+      expect(restarted.getMany(['setup.provider', 'setup.model'])).toEqual({
+        'setup.provider': 'openrouter',
+        'setup.model': 'openai/gpt-5',
+      });
+      expect(restarted.get<boolean>('display.autoOpenArtifacts')).toBe(false);
+    });
+
+    it('setMany() advances routingConfigurationGeneration only after rename succeeds', async () => {
+      const mgr = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS);
+      expect(mgr.getRoutingConfigurationGeneration()).toBe(0);
+
+      renameOverride = async () => {
+        renameOverride = null;
+        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      };
+      try {
+        await expect(
+          mgr.setMany({ 'agentOrchestration.hostRouting': false }),
+        ).rejects.toThrow(SettingsPersistError);
+        expect(mgr.getRoutingConfigurationGeneration()).toBe(0);
+      } finally {
+        renameOverride = null;
+      }
+
+      await mgr.setMany({
+        'agentOrchestration.hostRouting': false,
+        'agentOrchestration.laneRotation': false,
+      });
+      expect(mgr.getRoutingConfigurationGeneration()).toBe(1);
     });
   });
 });

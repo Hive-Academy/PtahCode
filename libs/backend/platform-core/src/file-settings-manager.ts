@@ -191,6 +191,18 @@ export class PtahFileSettingsManager {
   }
 
   /**
+   * Read multiple settings synchronously in a single turn using the same
+   * lookup order as {@link get} (in-memory cache, then registered default).
+   */
+  getMany(keys: readonly string[]): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const key of keys) {
+      result[key] = this.get(key);
+    }
+    return result;
+  }
+
+  /**
    * Whether `key` has a stored (user-set) value. Unlike {@link get}, the
    * registered default does not count, so a caller can tell an explicit
    * choice from the fallback.
@@ -249,6 +261,65 @@ export class PtahFileSettingsManager {
     this.listeners.get(key)?.forEach((cb) => {
       cb(value);
     });
+  }
+
+  /**
+   * Atomically persist multiple settings in a single serialized disk write.
+   *
+   * Unlike {@link set}, in-memory state is never mutated before the atomic
+   * temp-file rename succeeds: the queued step builds an immutable `nextImage`
+   * from `this.settings` merged with `entries`, persists only `nextImage`, and
+   * only after rename succeeds applies each entry to `this.settings`, advances
+   * `writeGenerations` (and `routingConfigurationGeneration` when a routing
+   * key is present), fires watchers synchronously in one turn, and returns the
+   * frozen `committedSlice` captured inside this transaction.
+   *
+   * On failure, removes the temp file, leaves `this.settings` and disk
+   * unchanged for those keys, fires no watchers, and throws
+   * {@link SettingsPersistError}. The write queue keeps accepting writes.
+   */
+  async setMany(
+    entries: Readonly<Record<string, unknown>>,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const pendingEntries: ReadonlyArray<readonly [string, unknown]> =
+      Object.entries(entries);
+    let committedSlice: Readonly<Record<string, unknown>> = Object.freeze({});
+
+    const runBatch = async (): Promise<void> => {
+      const nextImage: Record<string, unknown> = { ...this.settings };
+      for (const [key, value] of pendingEntries) {
+        nextImage[key] = value;
+      }
+      const frozenSlice = Object.freeze(
+        Object.fromEntries(pendingEntries.map(([key]) => [key, nextImage[key]])),
+      );
+
+      await this.persistImage(nextImage);
+
+      let touchedRoutingKey = false;
+      for (const [key, value] of pendingEntries) {
+        this.settings[key] = value;
+        const generation = (this.writeGenerations.get(key) ?? 0) + 1;
+        this.writeGenerations.set(key, generation);
+        if (ROUTING_KEYS.has(key)) {
+          touchedRoutingKey = true;
+        }
+      }
+      if (touchedRoutingKey) {
+        this.routingConfigurationGeneration += 1;
+      }
+      committedSlice = frozenSlice;
+      for (const [key, value] of pendingEntries) {
+        this.listeners.get(key)?.forEach((cb) => {
+          cb(value);
+        });
+      }
+    };
+
+    const write = this.writePromise.then(runBatch, runBatch);
+    this.writePromise = write;
+    await write;
+    return committedSlice;
   }
 
   /**
@@ -717,10 +788,16 @@ export class PtahFileSettingsManager {
    *   carries only the filesystem code, never a settings value.
    */
   private async persist(): Promise<void> {
+    return this.persistImage(this.settings);
+  }
+
+  private async persistImage(
+    image: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
     const tmpPath = `${this.filePath}.${process.pid}.${++persistTempSequence}.tmp`;
     try {
       await fsPromises.mkdir(this.dirPath, { recursive: true });
-      const nested = unflattenObject(this.settings);
+      const nested = unflattenObject(image);
       const output = {
         $schema: 'https://ptah.live/schemas/settings.json',
         version: 1,
@@ -835,7 +912,7 @@ function flattenObject(
  *   => { provider: { "github-copilot": { clientId: "abc" } } }
  */
 function unflattenObject(
-  flat: Record<string, unknown>,
+  flat: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 

@@ -2,7 +2,11 @@ export { SETTINGS_TOKENS } from './di/tokens';
 export type { SecretEnvelope } from './encryption/secret-envelope';
 export { encryptValue, decryptValue } from './encryption/secret-envelope';
 export { SecretsFileStore } from './encryption/secrets-file-store';
-export type { ISettingsStore } from './ports/settings-store.interface';
+export type {
+  ISettingsStore,
+  IGlobalBatchSettingsStore,
+} from './ports/settings-store.interface';
+export { isGlobalBatchSettingsStore } from './ports/settings-store.interface';
 export type { ISettingsMigrator } from './ports/settings-migrator.interface';
 export { defineSetting } from './schema/definition';
 export type {

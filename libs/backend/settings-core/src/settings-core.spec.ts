@@ -51,8 +51,14 @@ import { runV2Migration } from './migrations/v2-migration';
 import {
   resolveAuthProviderKey,
   FILE_BASED_SETTINGS_KEYS,
+  FILE_BASED_SETTINGS_DEFAULTS,
+  PtahFileSettingsManager,
 } from '@ptah-extension/platform-core';
-import type { ISettingsStore } from './ports/settings-store.interface';
+import {
+  isGlobalBatchSettingsStore,
+  type IGlobalBatchSettingsStore,
+  type ISettingsStore,
+} from './ports/settings-store.interface';
 import type { IDisposable } from '@ptah-extension/platform-core';
 import { providerSelectedModelDef } from './schema/provider-schema';
 import { ModelSettings } from './repositories/model-settings';
@@ -1159,4 +1165,351 @@ describe('ModelSettings.selectedModel — scope and provider key', () => {
       );
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// IGlobalBatchSettingsStore + ReactiveSettingsStore.writeGlobalBatch (3.2)
+// ---------------------------------------------------------------------------
+
+describe('IGlobalBatchSettingsStore and ReactiveSettingsStore batch operations', () => {
+  interface BatchMockStore extends IGlobalBatchSettingsStore {
+    _batchCalls: Array<Readonly<Record<string, unknown>>>;
+    _readManyCalls: Array<readonly string[]>;
+  }
+
+  function makeBatchMockStore(
+    initial: Record<string, unknown> = {},
+    writeImpl?: (
+      entries: Readonly<Record<string, unknown>>,
+    ) => Promise<Readonly<Record<string, unknown>>>,
+  ): BatchMockStore {
+    const base = makeMockStore(initial);
+    const data: Record<string, unknown> = { ...initial };
+    const batchCalls: Array<Readonly<Record<string, unknown>>> = [];
+    const readManyCalls: Array<readonly string[]> = [];
+
+    return {
+      ...base,
+      _batchCalls: batchCalls,
+      _readManyCalls: readManyCalls,
+      readGlobal<T>(key: string): T | undefined {
+        return data[key] as T | undefined;
+      },
+      async writeGlobal<T>(key: string, value: T): Promise<void> {
+        data[key] = value;
+        await base.writeGlobal(key, value);
+      },
+      readGlobalMany(keys: readonly string[]): Record<string, unknown> {
+        readManyCalls.push(keys);
+        const result: Record<string, unknown> = {};
+        for (const key of keys) {
+          result[key] = data[key];
+        }
+        return result;
+      },
+      async writeGlobalBatch(
+        entries: Readonly<Record<string, unknown>>,
+      ): Promise<Readonly<Record<string, unknown>>> {
+        batchCalls.push(entries);
+        if (writeImpl) {
+          const committed = await writeImpl(entries);
+          for (const [key, value] of Object.entries(committed)) {
+            data[key] = value;
+          }
+          return committed;
+        }
+        const slice: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(entries)) {
+          data[key] = value;
+          slice[key] = value;
+        }
+        return Object.freeze(slice);
+      },
+    };
+  }
+
+  it('isGlobalBatchSettingsStore distinguishes batch-capable stores from plain ISettingsStore mocks', () => {
+    const plain = makeMockStore();
+    const batch = makeBatchMockStore();
+    const reactive = new ReactiveSettingsStore(batch);
+
+    expect(isGlobalBatchSettingsStore(plain)).toBe(false);
+    expect(isGlobalBatchSettingsStore(null)).toBe(false);
+    expect(isGlobalBatchSettingsStore(undefined)).toBe(false);
+    expect(isGlobalBatchSettingsStore(batch)).toBe(true);
+    expect(isGlobalBatchSettingsStore(reactive)).toBe(true);
+  });
+
+  it('ReactiveSettingsStore.writeGlobalBatch returns committedSlice and publishes all keys before emitting', async () => {
+    const backend = makeBatchMockStore({
+      'setup.provider': 'claudeCli',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+    const store = new ReactiveSettingsStore(backend);
+
+    // Pre-warm cache with old pair.
+    expect(store.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'claudeCli',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+
+    const observedDuringEmit: Array<{
+      eventKey: string;
+      eventValue: unknown;
+      cachedProvider: unknown;
+      cachedModel: unknown;
+      cachedPair: Record<string, unknown>;
+    }> = [];
+
+    store.watchGlobal('setup.provider', (value) => {
+      observedDuringEmit.push({
+        eventKey: 'setup.provider',
+        eventValue: value,
+        cachedProvider: store.readGlobal('setup.provider'),
+        cachedModel: store.readGlobal('setup.model'),
+        cachedPair: store.readGlobalMany(['setup.provider', 'setup.model']),
+      });
+    });
+    store.watchGlobal('setup.model', (value) => {
+      observedDuringEmit.push({
+        eventKey: 'setup.model',
+        eventValue: value,
+        cachedProvider: store.readGlobal('setup.provider'),
+        cachedModel: store.readGlobal('setup.model'),
+        cachedPair: store.readGlobalMany(['setup.provider', 'setup.model']),
+      });
+    });
+
+    const committed = await store.writeGlobalBatch({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-opus-4-1',
+    });
+
+    expect(Object.isFrozen(committed)).toBe(true);
+    expect(committed).toEqual({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-opus-4-1',
+    });
+
+    // When the VERY FIRST watcher fired (setup.provider), setup.model was already updated in cache.
+    expect(observedDuringEmit).toEqual([
+      {
+        eventKey: 'setup.provider',
+        eventValue: 'openrouter',
+        cachedProvider: 'openrouter',
+        cachedModel: 'anthropic/claude-opus-4-1',
+        cachedPair: {
+          'setup.provider': 'openrouter',
+          'setup.model': 'anthropic/claude-opus-4-1',
+        },
+      },
+      {
+        eventKey: 'setup.model',
+        eventValue: 'anthropic/claude-opus-4-1',
+        cachedProvider: 'openrouter',
+        cachedModel: 'anthropic/claude-opus-4-1',
+        cachedPair: {
+          'setup.provider': 'openrouter',
+          'setup.model': 'anthropic/claude-opus-4-1',
+        },
+      },
+    ]);
+  });
+
+  it('publishes overlapping writeGlobalBatch calls in FIFO order even if backend resolves out of order', async () => {
+    const resolvers: Array<(slice: Readonly<Record<string, unknown>>) => void> =
+      [];
+    const backend = makeBatchMockStore({}, () => {
+      return new Promise<Readonly<Record<string, unknown>>>((resolve) => {
+        resolvers.push(resolve);
+      });
+    });
+    const store = new ReactiveSettingsStore(backend);
+
+    const emittedPairs: Array<Record<string, unknown>> = [];
+    store.watchGlobal('setup.provider', () => {
+      emittedPairs.push(store.readGlobalMany(['setup.provider', 'setup.model']));
+    });
+
+    const p1 = store.writeGlobalBatch({
+      'setup.provider': 'openrouter',
+      'setup.model': 'first-model',
+    });
+    const p2 = store.writeGlobalBatch({
+      'setup.provider': 'apiKey',
+      'setup.model': 'second-model',
+    });
+
+    expect(resolvers).toHaveLength(2);
+    // Resolve second backend write BEFORE the first.
+    resolvers[1](
+      Object.freeze({ 'setup.provider': 'apiKey', 'setup.model': 'second-model' }),
+    );
+    await Promise.resolve();
+    // Neither should have published out of order yet.
+    expect(emittedPairs).toEqual([]);
+
+    resolvers[0](
+      Object.freeze({
+        'setup.provider': 'openrouter',
+        'setup.model': 'first-model',
+      }),
+    );
+
+    const [slice1, slice2] = await Promise.all([p1, p2]);
+    expect(slice1).toEqual({
+      'setup.provider': 'openrouter',
+      'setup.model': 'first-model',
+    });
+    expect(slice2).toEqual({
+      'setup.provider': 'apiKey',
+      'setup.model': 'second-model',
+    });
+    expect(emittedPairs).toEqual([
+      { 'setup.provider': 'openrouter', 'setup.model': 'first-model' },
+      { 'setup.provider': 'apiKey', 'setup.model': 'second-model' },
+    ]);
+    expect(store.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'apiKey',
+      'setup.model': 'second-model',
+    });
+  });
+
+  it('leaves globalCache untouched and emits nothing when backend writeGlobalBatch rejects', async () => {
+    let shouldFail = true;
+    const backend = makeBatchMockStore(
+      { 'setup.provider': 'claudeCli', 'setup.model': 'claude-sonnet-4-5' },
+      async (entries) => {
+        if (shouldFail) {
+          throw new Error('persist failed');
+        }
+        return Object.freeze({ ...entries });
+      },
+    );
+    const store = new ReactiveSettingsStore(backend);
+    expect(store.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'claudeCli',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+
+    const watcher = jest.fn();
+    store.watchGlobal('setup.provider', watcher);
+    store.watchGlobal('setup.model', watcher);
+
+    await expect(
+      store.writeGlobalBatch({
+        'setup.provider': 'openrouter',
+        'setup.model': 'bad-model',
+      }),
+    ).rejects.toThrow('persist failed');
+
+    expect(store.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'claudeCli',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+    expect(watcher).not.toHaveBeenCalled();
+
+    // Queue keeps working after a rejected batch.
+    shouldFail = false;
+    const recovered = await store.writeGlobalBatch({
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-opus-4-1',
+    });
+    expect(recovered).toEqual({
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-opus-4-1',
+    });
+    expect(watcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects explicitly when writeGlobalBatch is called on a non-batch backend', async () => {
+    const plain = makeMockStore();
+    const store = new ReactiveSettingsStore(plain);
+
+    await expect(
+      store.writeGlobalBatch({ 'setup.provider': 'apiKey', 'setup.model': 'm1' }),
+    ).rejects.toThrow(/does not support atomic batch writes/);
+  });
+
+  it('readGlobalMany serves cached entries and falls back cleanly on non-batch backends', () => {
+    const plain = makeMockStore({
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+    const store = new ReactiveSettingsStore(plain);
+    expect(store.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'apiKey',
+      'setup.model': 'claude-sonnet-4-5',
+    });
+
+    const batch = makeBatchMockStore({
+      'setup.provider': 'openrouter',
+      'setup.model': 'model-x',
+    });
+    const batchReactive = new ReactiveSettingsStore(batch);
+    expect(batchReactive.readGlobal('setup.provider')).toBe('openrouter');
+    expect(
+      batchReactive.readGlobalMany(['setup.provider', 'setup.model']),
+    ).toEqual({
+      'setup.provider': 'openrouter',
+      'setup.model': 'model-x',
+    });
+    // Only the uncached key was fetched via readGlobalMany.
+    expect(batch._readManyCalls).toEqual([['setup.model']]);
+  });
+
+  it('round-trips setup pair atomically with a file-backed PtahFileSettingsManager adapter across Undo and restart', async () => {
+    const dir = path.join(mockTestHome, 'reactive-batch-file-backed');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+
+    const makeFileStore = (
+      mgr: PtahFileSettingsManager,
+    ): IGlobalBatchSettingsStore => ({
+      readGlobal: <T>(key: string) => mgr.get<T>(key),
+      readGlobalMany: (keys) => mgr.getMany(keys),
+      hasGlobal: (key) => mgr.has(key),
+      writeGlobal: (key, value) => mgr.set(key, value),
+      writeGlobalBatch: (entries) => mgr.setMany(entries),
+      readSecret: async () => undefined,
+      writeSecret: async () => undefined,
+      deleteSecret: async () => undefined,
+      watchGlobal: (key, cb) => mgr.watch(key, cb),
+      watchSecret: () => ({ dispose: () => undefined }),
+      flushSync: () => mgr.flushSync(),
+    });
+
+    const mgr1 = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS, dir);
+    const store1 = new ReactiveSettingsStore(makeFileStore(mgr1));
+
+    const committed = await store1.writeGlobalBatch({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-sonnet-4-5',
+    });
+    expect(committed).toEqual({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-sonnet-4-5',
+    });
+
+    // Fresh instance simulates restart read-back.
+    const mgr2 = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS, dir);
+    const store2 = new ReactiveSettingsStore(makeFileStore(mgr2));
+    expect(store2.readGlobalMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': 'openrouter',
+      'setup.model': 'anthropic/claude-sonnet-4-5',
+    });
+
+    // Undo back to unset ('', '').
+    const cleared = await store2.writeGlobalBatch({
+      'setup.provider': '',
+      'setup.model': '',
+    });
+    expect(cleared).toEqual({ 'setup.provider': '', 'setup.model': '' });
+
+    const mgr3 = new PtahFileSettingsManager(FILE_BASED_SETTINGS_DEFAULTS, dir);
+    expect(mgr3.getMany(['setup.provider', 'setup.model'])).toEqual({
+      'setup.provider': '',
+      'setup.model': '',
+    });
+  });
 });
