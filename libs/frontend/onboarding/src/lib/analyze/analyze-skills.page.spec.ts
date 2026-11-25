@@ -1585,4 +1585,481 @@ describe('AnalyzeSkillsPage', () => {
     expect(element.textContent).toContain('Write a skill by hand');
     expect(element.textContent).toContain('Back');
   });
+
+  it('asks for dirty-draft confirmation before advancing version or clearing state on Re-run and discards only after confirm', async () => {
+    const initialResult = makeJudgedResultWithInstallAndBuild();
+    const rerunSkill: SkillShEntry = {
+      source: 'owner/repo',
+      skillId: 'vitest',
+      name: 'Vitest Patterns',
+      description: 'Modern Vitest testing guidance',
+      installs: 88,
+      isInstalled: false,
+    };
+    const rerunItem = {
+      kind: 'tool' as const,
+      name: 'Vitest',
+      evidence: 'vitest.config.ts',
+      sourcePhase: 'project-profile',
+    };
+    const rerunResult: WizardRecommendAnalysisSkillsResult = {
+      skills: [{ skill: rerunSkill, evidence: 'Vitest', score: 95 }],
+      analysisPair: DEFAULT_PAIR,
+      judge: {
+        method: 'decision',
+        counts: { decision: 1, normal: 0, notJudged: 0 },
+        items: [
+          {
+            itemId: 'item-vitest',
+            item: rerunItem,
+            registry: 'matched',
+            candidateIds: ['owner/repo/vitest'],
+            candidateAssessments: [
+              { candidateId: 'owner/repo/vitest', eligible: true },
+            ],
+            outcomes: [
+              {
+                verdict: 'install',
+                candidateId: 'owner/repo/vitest',
+                reason: 'Matches Vitest config.',
+                stage: 'decision',
+              },
+            ],
+            judgedBy: 'decision',
+          },
+        ],
+        candidates: [
+          {
+            candidateId: 'owner/repo/vitest',
+            selectionKey: 'owner/repo/vitest',
+            skill: rerunSkill,
+            deprecated: false,
+          },
+        ],
+        proposals: [],
+        stages: [
+          {
+            stage: 'decision',
+            status: 'used',
+            pairUsed: { provider: 'claude', model: 'claude-sonnet-4' },
+            itemsJudged: 1,
+            invalidItemIds: [],
+          },
+        ],
+      },
+      detectedItems: [rerunItem],
+      unmatchedItems: [],
+      searchFailures: [],
+      summarySource: 'structured',
+    };
+
+    recommendResponse = () =>
+      Promise.resolve({ isSuccess: () => true, data: initialResult });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    const element = fixture.nativeElement as HTMLElement;
+
+    // Open a manual draft and edit it so it becomes dirty
+    const opened = page.state.openManualDraft('item-nx');
+    expect(opened.status).toBe('ok');
+    page.state.updateDraftFields({
+      body: '## Custom rules\n\nPreserve this unsaved draft.',
+    });
+    expect(page.state.openDraft()?.dirty).toBe(true);
+    fixture.detectChanges();
+
+    // Start a pending search to confirm retry() does not advance version or clear search before confirm
+    let resolveSearch!: (value: unknown) => void;
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSearch = resolve;
+        }),
+    );
+    const pendingSearch = page.search('vitest');
+    const callsBeforeRerun = call.mock.calls.length;
+
+    // Click Re-run skill search -> must show confirmation without starting RPC or clearing state
+    const rerunBtn = element.querySelector<HTMLButtonElement>(
+      '[data-testid="rerun-skill-search"]',
+    );
+    expect(rerunBtn).not.toBeNull();
+    expect(rerunBtn?.disabled).toBe(false);
+    rerunBtn?.click();
+    fixture.detectChanges();
+
+    expect(call).toHaveBeenCalledTimes(callsBeforeRerun);
+    expect(page.state.searching()).toBe(true);
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
+    expect(page.state.openDraft()?.body).toContain('Preserve this unsaved draft.');
+    const confirmAlert = element.querySelector('[data-testid="dirty-draft-confirm"]');
+    expect(confirmAlert).not.toBeNull();
+    expect(confirmAlert?.textContent).toContain('unsaved edits');
+
+    // Keep editing cancels confirmation and lets the pending search complete cleanly (version did not advance)
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-keep"]')
+      ?.click();
+    fixture.detectChanges();
+    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    resolveSearch({
+      isSuccess: () => true,
+      data: { skills: [rerunSkill] },
+    });
+    await pendingSearch;
+    expect(page.state.searchResults()).toEqual([rerunSkill]);
+    expect(call).toHaveBeenCalledTimes(callsBeforeRerun);
+
+    // Trigger via retry() (same path as Try again), then confirm discard -> rerun executes and applies
+    const applySpy = jest.spyOn(page.state, 'applyRecommendationResult');
+    recommendResponse = () =>
+      Promise.resolve({ isSuccess: () => true, data: rerunResult });
+    page.retry();
+    fixture.detectChanges();
+    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).not.toBeNull();
+
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-discard"]')
+      ?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(applySpy).toHaveBeenCalledWith(rerunResult, {
+      discardDirtyDraft: true,
+    });
+    expect(page.state.openDraft()).toBeNull();
+    expect(page.summary()?.detectedItems[0].name).toBe('Vitest');
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/vitest']);
+    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+  });
+
+  it('blocks Re-run and Try again with a visible reason while a draft Create or preview is in flight', async () => {
+    recommendResponse = () =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data: makeJudgedResultWithInstallAndBuild(),
+      });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    const element = fixture.nativeElement as HTMLElement;
+
+    // 1. Draft Create in flight (busy === true)
+    const opened = page.state.openManualDraft('item-nx');
+    if (opened.status !== 'ok') throw new Error('Manual draft failed');
+    page.state.updateDraftFields({
+      name: 'nx-rules',
+      description: 'Nx rules',
+      body: '## Rules\n\nFollow tags.',
+    });
+    const createAction = page.state.beginCreateDraft();
+    if (!createAction) throw new Error('beginCreateDraft failed');
+    fixture.detectChanges();
+
+    const rerunBtn = element.querySelector<HTMLButtonElement>(
+      '[data-testid="rerun-skill-search"]',
+    );
+    expect(rerunBtn?.disabled).toBe(true);
+    const reasonEl = element.querySelector('[data-testid="rerun-blocked-reason"]');
+    expect(reasonEl?.textContent).toContain('skill creation');
+
+    const callsBeforeRetry = call.mock.calls.length;
+    page.retry();
+    await fixture.whenStable();
+    expect(call).toHaveBeenCalledTimes(callsBeforeRetry);
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
+    expect(page.state.openDraft()?.busy).toBe(true);
+
+    // Settle Create so we can also verify previewLoading blocking
+    page.state.failCreateDraft(createAction.revision, 'retry later');
+    page.state.closeDraft({ forceDiscardDirty: true });
+
+    // 2. Draft preview generation in flight (previewLoading === true)
+    const propOpened = page.state.openProposalDraft('prop-nx');
+    expect(propOpened.status).toBe('ok');
+    expect(page.state.openDraft()?.previewLoading).toBe(true);
+    fixture.detectChanges();
+
+    expect(rerunBtn?.disabled).toBe(true);
+    expect(
+      element.querySelector('[data-testid="rerun-blocked-reason"]')?.textContent,
+    ).toContain('draft generation');
+    page.retry();
+    await fixture.whenStable();
+    expect(call).toHaveBeenCalledTimes(callsBeforeRetry);
+  });
+
+  it('settles an in-flight Create response by draft revision even after page version advances', async () => {
+    recommendResponse = () =>
+      Promise.resolve({
+        isSuccess: () => true,
+        data: makeJudgedResultWithInstallAndBuild(),
+      });
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.componentInstance;
+
+    // 1. Success settles after page version advances
+    const opened = page.state.openManualDraft('item-nx');
+    if (opened.status !== 'ok') throw new Error('Manual draft failed');
+    page.state.updateDraftFields({
+      name: 'nx-rules',
+      description: 'Nx rules',
+      body: '## Rules\n\nFollow tags.',
+    });
+    const createAction = page.state.beginCreateDraft();
+    if (!createAction) throw new Error('beginCreateDraft failed');
+
+    let resolveCreate!: (value: unknown) => void;
+    call.mockImplementationOnce(
+      (method: string) =>
+        new Promise((resolve) => {
+          expect(method).toBe('harness:create-skill');
+          resolveCreate = resolve;
+        }),
+    );
+    const pendingCreate = page.createDraft(createAction);
+
+    // Advance the page version while Create is in flight
+    (page as unknown as { version: number }).version += 1;
+
+    resolveCreate({
+      isSuccess: () => true,
+      data: {
+        skillPath:
+          '~/.ptah/plugins/ptah-harness-nx-rules/skills/nx-rules/SKILL.md',
+      },
+    });
+    await pendingCreate;
+
+    expect(page.state.openDraft()).toBeNull();
+    expect(page.state.createdPathFor('manual:item-nx')).toBe(
+      '~/.ptah/plugins/ptah-harness-nx-rules/skills/nx-rules/SKILL.md',
+    );
+    expect(page.state.createdSkillSlugs()).toContain('nx-rules');
+
+    // 2. Failure also settles by draft revision after page version advances
+    const blank = page.state.openBlankManualDraft();
+    if (blank.status !== 'ok') throw new Error('Blank draft failed');
+    page.state.updateDraftFields({
+      name: 'custom-skill',
+      description: 'Custom',
+      body: '## Body\n\nDetails.',
+    });
+    const failingCreate = page.state.beginCreateDraft();
+    if (!failingCreate) throw new Error('second beginCreateDraft failed');
+
+    let rejectCreate!: (error: Error) => void;
+    call.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectCreate = reject;
+        }),
+    );
+    const pendingFail = page.createDraft(failingCreate);
+    (page as unknown as { version: number }).version += 1;
+
+    rejectCreate(new Error('disk full'));
+    await pendingFail;
+
+    expect(page.state.openDraft()?.busy).toBe(false);
+    expect(page.state.openDraft()?.createError).toBe(
+      'Could not create this skill. Your draft is still here.',
+    );
+    expect(page.state.openDraft()?.body).toContain('Details.');
+
+    // 3. After workspace/run reset (new draftRevision), a stale Create response is safely ignored
+    const staleCreate = page.state.beginCreateDraft();
+    if (!staleCreate) throw new Error('third beginCreateDraft failed');
+    let resolveStale!: (value: unknown) => void;
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    const pendingStale = page.createDraft(staleCreate);
+    loaded.set({ manifest: { runId: 'run-2' } });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    resolveStale({
+      isSuccess: () => true,
+      data: { skillPath: '~/.ptah/plugins/stale/SKILL.md' },
+    });
+    await pendingStale;
+    expect(page.state.createdSkillSlugs()).toEqual([]);
+  });
+
+  it('keeps the old result and shows the reason on non-ok applyRecommendationResult statuses, then applies after dirty confirm', async () => {
+    const initialResult = makeJudgedResultWithInstallAndBuild();
+    const freshSkill: SkillShEntry = {
+      source: 'owner/repo',
+      skillId: 'playwright',
+      name: 'Playwright Testing',
+      description: 'E2E guidance',
+      installs: 55,
+      isInstalled: false,
+    };
+    const freshItem = {
+      kind: 'tool' as const,
+      name: 'Playwright',
+      evidence: 'playwright.config.ts',
+      sourcePhase: 'project-profile',
+    };
+    const nextResult: WizardRecommendAnalysisSkillsResult = {
+      skills: [{ skill: freshSkill, evidence: 'Playwright', score: 90 }],
+      analysisPair: DEFAULT_PAIR,
+      judge: {
+        method: 'decision',
+        counts: { decision: 1, normal: 0, notJudged: 0 },
+        items: [
+          {
+            itemId: 'item-pw',
+            item: freshItem,
+            registry: 'matched',
+            candidateIds: ['owner/repo/playwright'],
+            candidateAssessments: [
+              { candidateId: 'owner/repo/playwright', eligible: true },
+            ],
+            outcomes: [
+              {
+                verdict: 'install',
+                candidateId: 'owner/repo/playwright',
+                reason: 'Covers Playwright tests.',
+                stage: 'decision',
+              },
+            ],
+            judgedBy: 'decision',
+          },
+        ],
+        candidates: [
+          {
+            candidateId: 'owner/repo/playwright',
+            selectionKey: 'owner/repo/playwright',
+            skill: freshSkill,
+            deprecated: false,
+          },
+        ],
+        proposals: [],
+        stages: [
+          {
+            stage: 'decision',
+            status: 'used',
+            pairUsed: { provider: 'claude', model: 'claude-sonnet-4' },
+            itemsJudged: 1,
+            invalidItemIds: [],
+          },
+        ],
+      },
+      detectedItems: [freshItem],
+      unmatchedItems: [],
+      searchFailures: [],
+      summarySource: 'structured',
+    };
+
+    recommendResponse = () =>
+      Promise.resolve({ isSuccess: () => true, data: initialResult });
+    const runPill = TestBed.inject(OnboardingRunPillService);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const page = fixture.componentInstance;
+    const element = fixture.nativeElement as HTMLElement;
+
+    // 1. 'busy' from applyRecommendationResult keeps old result and displays visible reason
+    let resolveBusyRerun!: (value: unknown) => void;
+    recommendResponse = () =>
+      new Promise((resolve) => {
+        resolveBusyRerun = resolve;
+      });
+    page.retry();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Draft becomes busy while rerun is already in flight
+    const manual = page.state.openManualDraft('item-nx');
+    if (manual.status !== 'ok') throw new Error('Manual draft failed');
+    page.state.updateDraftFields({
+      name: 'nx-rules',
+      description: 'Nx rules',
+      body: '## Rules\n\nUse boundaries.',
+    });
+    const busyCreate = page.state.beginCreateDraft();
+    if (!busyCreate) throw new Error('beginCreateDraft failed');
+
+    resolveBusyRerun({ isSuccess: () => true, data: nextResult });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(page.summary()?.detectedItems[0].name).toBe('Angular');
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
+    expect(page.selectionReset()).toBe(false);
+    expect(page.state.loading()).toBe(false);
+    expect(page.state.openDraft()?.busy).toBe(true);
+    expect(runPill.badges()[1]?.pair).toBe('claude / claude-haiku-4');
+    const busyAlert = element.querySelector(
+      '[data-testid="recommendation-apply-blocked"]',
+    );
+    expect(busyAlert?.textContent).toContain('skill creation is in progress');
+
+    // Finish Create (fail so draft stays open & dirty), then close to start next race
+    page.state.failCreateDraft(busyCreate.revision, 'Create failed');
+    page.state.closeDraft({ forceDiscardDirty: true });
+
+    // 2. 'confirm-dirty' from applyRecommendationResult keeps old result until user confirms
+    let resolveDirtyRerun!: (value: unknown) => void;
+    recommendResponse = () =>
+      new Promise((resolve) => {
+        resolveDirtyRerun = resolve;
+      });
+    page.retry();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // User opens and edits a draft while rerun is already in flight
+    const dirtyOpened = page.state.openManualDraft('item-nx');
+    if (dirtyOpened.status !== 'ok') throw new Error('Second manual draft failed');
+    page.state.updateDraftFields({
+      body: '## Unsaved\n\nDo not discard silently.',
+    });
+
+    resolveDirtyRerun({ isSuccess: () => true, data: nextResult });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(page.summary()?.detectedItems[0].name).toBe('Angular');
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
+    expect(page.selectionReset()).toBe(false);
+    expect(page.state.openDraft()?.body).toContain('Do not discard silently.');
+    expect(runPill.badges()[1]?.pair).toBe('claude / claude-haiku-4');
+    const confirmAlert = element.querySelector(
+      '[data-testid="dirty-draft-confirm"]',
+    );
+    expect(confirmAlert?.textContent).toContain('New skill recommendations are ready');
+
+    // Confirming calls applyRecommendationResult again with { discardDirtyDraft: true }
+    const applySpy = jest.spyOn(page.state, 'applyRecommendationResult');
+    element
+      .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-discard"]')
+      ?.click();
+    fixture.detectChanges();
+
+    expect(applySpy).toHaveBeenCalledWith(nextResult, {
+      discardDirtyDraft: true,
+    });
+    expect(page.summary()?.detectedItems[0].name).toBe('Playwright');
+    expect([...page.state.selectedIds()]).toEqual(['owner/repo/playwright']);
+    expect(page.state.openDraft()).toBeNull();
+    expect(page.selectionReset()).toBe(true);
+    expect(runPill.badges()[1]?.pair).toBe('claude / claude-sonnet-4');
+    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+  });
 });

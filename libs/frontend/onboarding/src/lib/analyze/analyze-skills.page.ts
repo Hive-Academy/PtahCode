@@ -28,6 +28,7 @@ import {
 import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import { WizardRpcService } from '@ptah-extension/setup-wizard';
 import { StackSkillStore } from '../proposal/stack-skill.store';
+import type { RecommendationApplyResult } from '../proposal/stack-coverage';
 import { StackSkillConsentComponent } from '../proposal/stack-skill-consent.component';
 import {
   StackSkillReviewComponent,
@@ -51,6 +52,31 @@ export interface SetupBlockView {
   readonly source: 'setup' | 'workspace';
   readonly hasPriorResult: boolean;
 }
+
+interface DraftContentSnapshot {
+  readonly name: string;
+  readonly description: string;
+  readonly body: string;
+}
+
+interface ConfirmedDirtyDraft {
+  readonly draftRevision: number;
+  readonly draftSnapshot: DraftContentSnapshot;
+}
+
+type PendingDirtyDraftAction =
+  | {
+      readonly kind: 'rerun';
+      readonly runId: string;
+      readonly draftRevision: number;
+      readonly draftSnapshot: DraftContentSnapshot;
+    }
+  | {
+      readonly kind: 'apply';
+      readonly data: WizardRecommendAnalysisSkillsResult;
+      readonly rerun: boolean;
+      readonly version: number;
+    };
 
 function formatProviderDisplayName(id: string): string {
   const meta = getAnthropicProvider(id);
@@ -242,9 +268,76 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
                 size="sm"
                 type="button"
                 data-testid="setup-model-recovery-action"
+                [disabled]="block.action === 'retry' && draftBusy()"
                 (click)="runSetupRecovery(block)"
               >
                 {{ block.actionLabel }}
+              </button>
+            </ptah-alert>
+          </div>
+        }
+        @if (pendingDirtyAction(); as pending) {
+          <div class="px-4 pt-4">
+            <ptah-alert
+              tone="warning"
+              live="assertive"
+              data-testid="dirty-draft-confirm"
+            >
+              @if (pending.kind === 'rerun') {
+                You have unsaved edits in your open skill draft. Re-running
+                skill search will discard them.
+              } @else {
+                New skill recommendations are ready, but applying them will
+                discard your unsaved skill draft edits.
+              }
+              <button
+                alertAction
+                ptahButton
+                variant="ghost"
+                size="sm"
+                type="button"
+                data-testid="dirty-draft-keep"
+                (click)="cancelDirtyDraftConfirm()"
+              >
+                Keep editing
+              </button>
+              <button
+                alertAction
+                ptahButton
+                variant="danger"
+                size="sm"
+                type="button"
+                data-testid="dirty-draft-discard"
+                [disabled]="draftBusy()"
+                (click)="confirmDirtyDraftAction()"
+              >
+                {{
+                  pending.kind === 'rerun'
+                    ? 'Discard edits and re-run'
+                    : 'Discard edits and apply'
+                }}
+              </button>
+            </ptah-alert>
+          </div>
+        }
+        @if (recommendationBlockedReason(); as reason) {
+          <div class="px-4 pt-4">
+            <ptah-alert
+              tone="warning"
+              live="polite"
+              data-testid="recommendation-apply-blocked"
+            >
+              {{ reason }}
+              <button
+                alertAction
+                ptahButton
+                variant="ghost"
+                size="sm"
+                type="button"
+                data-testid="recommendation-apply-blocked-dismiss"
+                (click)="dismissRecommendationBlockedReason()"
+              >
+                Dismiss
               </button>
             </ptah-alert>
           </div>
@@ -289,20 +382,35 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
           (skip)="continueToGuidance()"
           (back)="back()"
         >
-          <button
-            reviewActions
-            ptahButton
-            variant="secondary"
-            type="button"
-            [busy]="state.loading()"
-            [title]="!canRetry() ? 'Choose a completed analysis first.' : ''"
-            [disabled]="
-              state.loading() || !canRetry() || leaving() || state.previewing()
-            "
-            (click)="retry()"
-          >
-            Re-run skill search
-          </button>
+          <div reviewActions class="flex flex-col items-end gap-1">
+            <button
+              ptahButton
+              variant="secondary"
+              type="button"
+              data-testid="rerun-skill-search"
+              [busy]="state.loading()"
+              [title]="rerunDisabledTitle()"
+              [disabled]="
+                state.loading() ||
+                !canRetry() ||
+                leaving() ||
+                state.previewing() ||
+                draftBusy()
+              "
+              (click)="retry()"
+            >
+              Re-run skill search
+            </button>
+            @if (rerunBlockedReason(); as reason) {
+              <p
+                role="status"
+                data-testid="rerun-blocked-reason"
+                class="text-xs text-base-content-muted"
+              >
+                {{ reason }}
+              </p>
+            }
+          </div>
         </ptah-stack-skill-review>
       }
       <ptah-stack-skill-consent
@@ -354,11 +462,39 @@ export class AnalyzeSkillsPage implements OnInit {
       this.workspace.config().workspaceRoot,
     ),
   );
+  public readonly draftBusy = computed(() => {
+    const draft = this.state.openDraft();
+    return Boolean(draft?.busy || draft?.previewLoading);
+  });
+  public readonly rerunBlockedReason = computed<string | null>(() => {
+    const draft = this.state.openDraft();
+    if (draft?.busy) {
+      return 'Wait for skill creation to finish before re-running.';
+    }
+    if (draft?.previewLoading) {
+      return 'Wait for skill draft generation to finish before re-running.';
+    }
+    return null;
+  });
+  public readonly rerunDisabledTitle = computed<string>(() => {
+    const blocked = this.rerunBlockedReason();
+    if (blocked) return blocked;
+    return !this.canRetry() ? 'Choose a completed analysis first.' : '';
+  });
   public readonly backOnLoadError = computed(
     () => !this.canRetry() || this.backOnLoadErrorState(),
   );
   private readonly selectionResetState = signal(false);
   public readonly selectionReset = this.selectionResetState.asReadonly();
+  private readonly pendingDirtyActionState =
+    signal<PendingDirtyDraftAction | null>(null);
+  public readonly pendingDirtyAction =
+    this.pendingDirtyActionState.asReadonly();
+  private readonly recommendationBlockedReasonState = signal<string | null>(
+    null,
+  );
+  public readonly recommendationBlockedReason =
+    this.recommendationBlockedReasonState.asReadonly();
   private version = 0;
   private searchVersion = 0;
   private identity = '\u0000';
@@ -376,6 +512,8 @@ export class AnalyzeSkillsPage implements OnInit {
       this.summary.set(null);
       this.setupBlockState.set(null);
       this.selectionResetState.set(false);
+      this.pendingDirtyActionState.set(null);
+      this.recommendationBlockedReasonState.set(null);
       this.state.reset();
       this.runPill.clear();
       this.loadErrorState.set(true);
@@ -384,6 +522,13 @@ export class AnalyzeSkillsPage implements OnInit {
       if (!runId) this.state.setError('Choose a completed analysis first.');
       else if (root) void this.load(runId, this.version);
       else this.state.setError('Open a workspace to find skills.');
+    });
+    effect(() => {
+      const openDraft = this.state.openDraft();
+      const pending = this.pendingDirtyActionState();
+      if (pending?.kind === 'rerun' && !openDraft?.dirty) {
+        this.pendingDirtyActionState.set(null);
+      }
     });
     this.destroyRef.onDestroy(() => {
       this.version++;
@@ -476,10 +621,51 @@ export class AnalyzeSkillsPage implements OnInit {
     this.applySetupBlock(fallbackSetupBlock(hasPriorResult));
   }
 
+  private buildBusyApplyReason(): string {
+    return this.state.openDraft()?.busy
+      ? 'New skill recommendations could not be applied while skill creation is in progress. Re-run after it finishes.'
+      : 'New skill recommendations could not be applied while a skill draft preview is generating. Re-run after it finishes.';
+  }
+
+  private handleApplyRecommendationResult(
+    applyResult: RecommendationApplyResult,
+    data: WizardRecommendAnalysisSkillsResult,
+    rerun: boolean,
+    version: number,
+  ): void {
+    if (applyResult.status === 'ok') {
+      this.pendingDirtyActionState.set(null);
+      this.recommendationBlockedReasonState.set(null);
+      this.selectionResetState.set(rerun);
+      this.summary.set(data);
+      this.runPill.recordRun({
+        analysisPair: this.state.analysisPair(),
+        stages: data.judge.stages,
+      });
+      this.loadErrorState.set(false);
+      this.backOnLoadErrorState.set(false);
+      this.state.setStage('review');
+      return;
+    }
+    if (applyResult.status === 'busy') {
+      this.pendingDirtyActionState.set(null);
+      this.recommendationBlockedReasonState.set(this.buildBusyApplyReason());
+      return;
+    }
+    this.recommendationBlockedReasonState.set(null);
+    this.pendingDirtyActionState.set({
+      kind: 'apply',
+      data,
+      rerun,
+      version,
+    });
+  }
+
   private async load(
     runId: string,
     version: number,
     rerun = false,
+    confirmedDirtyDraft?: ConfirmedDirtyDraft,
   ): Promise<void> {
     const hasPriorResult = this.summary() !== null;
     try {
@@ -530,16 +716,26 @@ export class AnalyzeSkillsPage implements OnInit {
         this.applyLoadFailure(message);
         return;
       }
-      this.selectionResetState.set(rerun);
-      this.summary.set(response.data);
-      this.state.applyRecommendationResult(response.data);
-      this.runPill.recordRun({
-        analysisPair: this.state.analysisPair(),
-        stages: response.data.judge.stages,
-      });
-      this.loadErrorState.set(false);
-      this.backOnLoadErrorState.set(false);
-      this.state.setStage('review');
+      const openDraft = this.state.openDraft();
+      const discardDirtyDraft = Boolean(
+        confirmedDirtyDraft &&
+          openDraft &&
+          openDraft.revision === confirmedDirtyDraft.draftRevision &&
+          openDraft.name === confirmedDirtyDraft.draftSnapshot.name &&
+          openDraft.description ===
+            confirmedDirtyDraft.draftSnapshot.description &&
+          openDraft.body === confirmedDirtyDraft.draftSnapshot.body,
+      );
+      const applyResult = this.state.applyRecommendationResult(
+        response.data,
+        discardDirtyDraft ? { discardDirtyDraft: true } : undefined,
+      );
+      this.handleApplyRecommendationResult(
+        applyResult,
+        response.data,
+        rerun,
+        version,
+      );
     } catch {
       if (version === this.version && !this.destroyRef.destroyed) {
         this.applyLoadFailure('Could not load skill recommendations.');
@@ -569,20 +765,99 @@ export class AnalyzeSkillsPage implements OnInit {
   public dismissSelectionReset(): void {
     this.selectionResetState.set(false);
   }
+  public dismissRecommendationBlockedReason(): void {
+    this.recommendationBlockedReasonState.set(null);
+  }
+  public cancelDirtyDraftConfirm(): void {
+    this.pendingDirtyActionState.set(null);
+  }
+  public confirmDirtyDraftAction(): void {
+    const pending = this.pendingDirtyActionState();
+    if (!pending) return;
+    if (pending.kind === 'rerun') {
+      if (this.draftBusy()) {
+        this.pendingDirtyActionState.set(null);
+        return;
+      }
+      const runId = this.analysis.loaded()?.manifest.runId;
+      if (
+        !runId ||
+        runId !== pending.runId ||
+        !this.canRetry() ||
+        this.leaving()
+      ) {
+        this.pendingDirtyActionState.set(null);
+        return;
+      }
+      this.startRerun(runId, {
+        draftRevision: pending.draftRevision,
+        draftSnapshot: pending.draftSnapshot,
+      });
+      return;
+    }
+    if (pending.version !== this.version || this.destroyRef.destroyed) {
+      this.pendingDirtyActionState.set(null);
+      return;
+    }
+    if (this.draftBusy()) {
+      this.pendingDirtyActionState.set(null);
+      this.recommendationBlockedReasonState.set(this.buildBusyApplyReason());
+      return;
+    }
+    const applyResult = this.state.applyRecommendationResult(pending.data, {
+      discardDirtyDraft: true,
+    });
+    this.handleApplyRecommendationResult(
+      applyResult,
+      pending.data,
+      pending.rerun,
+      pending.version,
+    );
+  }
   public toggleSelection(key: string): void {
     this.state.toggle(key);
     this.dismissSelectionReset();
   }
 
-  public retry(): void {
-    const runId = this.analysis.loaded()?.manifest.runId;
-    if (!runId || !this.canRetry() || this.leaving()) return;
+  private startRerun(
+    runId: string,
+    confirmedDirtyDraft?: ConfirmedDirtyDraft,
+  ): void {
+    this.pendingDirtyActionState.set(null);
+    this.recommendationBlockedReasonState.set(null);
     this.searchVersion++;
     this.state.setSearching(false);
     this.state.setSearchError(null);
     this.ngZone.run(() => {
-      void this.load(runId, ++this.version, this.summary() !== null);
+      void this.load(
+        runId,
+        ++this.version,
+        this.summary() !== null,
+        confirmedDirtyDraft,
+      );
     });
+  }
+
+  public retry(): void {
+    const runId = this.analysis.loaded()?.manifest.runId;
+    if (!runId || !this.canRetry() || this.leaving()) return;
+    if (this.draftBusy()) return;
+    const openDraft = this.state.openDraft();
+    if (openDraft?.dirty) {
+      this.recommendationBlockedReasonState.set(null);
+      this.pendingDirtyActionState.set({
+        kind: 'rerun',
+        runId,
+        draftRevision: openDraft.revision,
+        draftSnapshot: {
+          name: openDraft.name,
+          description: openDraft.description,
+          body: openDraft.body,
+        },
+      });
+      return;
+    }
+    this.startRerun(runId);
   }
 
   public clearSearch(): void {
@@ -670,7 +945,6 @@ export class AnalyzeSkillsPage implements OnInit {
 
   public async createDraft(action: SkillDraftCreateAction): Promise<void> {
     if (this.state.consentOpen()) return;
-    const version = this.version;
     const fallback = 'Could not create this skill. Your draft is still here.';
     try {
       const response = await this.rpc.call('harness:create-skill', {
@@ -678,14 +952,14 @@ export class AnalyzeSkillsPage implements OnInit {
         description: action.submitted.description,
         content: action.submitted.body,
       });
-      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (this.destroyRef.destroyed) return;
       if (!response.isSuccess()) {
         this.state.failCreateDraft(action.revision, fallback);
         return;
       }
       this.state.completeCreateDraft(action.revision, response.data.skillPath);
     } catch {
-      if (version === this.version && !this.destroyRef.destroyed) {
+      if (!this.destroyRef.destroyed) {
         this.state.failCreateDraft(action.revision, fallback);
       }
     }
