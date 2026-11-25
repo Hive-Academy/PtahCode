@@ -52,13 +52,20 @@ import type {
 } from '@ptah-extension/vscode-core';
 import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 
-import { WorkspaceProviderProfileResolver } from './workspace-provider-profile-resolver';
+import {
+  isConcreteModelId,
+  resolveDirectApiKey,
+  WorkspaceProviderProfileResolver,
+} from './workspace-provider-profile-resolver';
 import { ProviderModelsService } from '../provider-models.service';
 import { ModelResolver } from './model-resolver';
 import { ActiveProviderResolver } from './active-provider-resolver';
 import type { ProviderProxyPool } from './provider-proxy-pool';
 import type { AuthManager } from './auth-manager';
 import type { ActiveAuth } from './active-provider-resolver';
+import type { ICopilotAuthService } from '../providers/copilot';
+import type { IKimiCodeAuthService } from '../providers/kimi-code';
+import type { IOpenRouterAuthService } from '../providers/openrouter';
 import { AuthRequiredError } from '@ptah-extension/agent-sdk';
 
 const WORKSPACE =
@@ -124,6 +131,10 @@ function createHarness(opts: {
   apiKey?: string;
   /** What the ambient Claude CLI login reader answers. */
   ambientState?: ProviderAmbientClaudeStatus['state'];
+  /** Optional proxy auth service stubs for Setup pre-acquire checks. */
+  copilotAuth?: Partial<ICopilotAuthService>;
+  openRouterAuth?: Partial<IOpenRouterAuthService>;
+  kimiCodeAuth?: Partial<IKimiCodeAuthService>;
 }): Harness {
   const mockLogger = createMockLogger();
   const logger = mockLogger as unknown as Logger;
@@ -186,6 +197,9 @@ function createHarness(opts: {
     proxyPool,
     new CodexHomeResolver('synthetic-codex-home'),
     { read: ambientRead },
+    opts.copilotAuth as ICopilotAuthService | undefined,
+    opts.openRouterAuth as IOpenRouterAuthService | undefined,
+    opts.kimiCodeAuth as IKimiCodeAuthService | undefined,
   );
 
   return {
@@ -1599,5 +1613,378 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
     expect(resolver.resolveStoredModel('D:/projects/other', 'gpt-6-luna')).toBe(
       'gpt-6-luna',
     );
+  });
+});
+
+describe('WorkspaceProviderProfileResolver — Setup profile builder', () => {
+  const savedEnvKey = process.env['ANTHROPIC_API_KEY'];
+
+  beforeEach(() => {
+    delete process.env['ANTHROPIC_API_KEY'];
+  });
+
+  afterEach(() => {
+    if (savedEnvKey === undefined) {
+      delete process.env['ANTHROPIC_API_KEY'];
+    } else {
+      process.env['ANTHROPIC_API_KEY'] = savedEnvKey;
+    }
+  });
+
+  describe('resolveDirectApiKey & isConcreteModelId', () => {
+    it('prefers stored apiKey over env, accepts env-only ANTHROPIC_API_KEY, and returns null when neither exists', async () => {
+      const emptySecrets = createMockAuthSecretsService({
+        credentials: {},
+      }) as unknown as IAuthSecretsService;
+      expect(await resolveDirectApiKey(emptySecrets)).toBeNull();
+
+      process.env['ANTHROPIC_API_KEY'] = '  sk-ant-env  ';
+      expect(await resolveDirectApiKey(emptySecrets)).toBe('sk-ant-env');
+
+      const storedSecrets = createMockAuthSecretsService({
+        credentials: { apiKey: '  sk-ant-stored  ' },
+      }) as unknown as IAuthSecretsService;
+      expect(await resolveDirectApiKey(storedSecrets)).toBe('sk-ant-stored');
+    });
+
+    it('rejects empty strings and tier aliases as non-concrete model IDs', () => {
+      for (const bad of [
+        null,
+        undefined,
+        '',
+        '   ',
+        'default',
+        'DEFAULT',
+        'opus',
+        'Sonnet',
+        'HAIKU',
+      ]) {
+        expect(isConcreteModelId(bad)).toBe(false);
+      }
+      expect(isConcreteModelId('claude-sonnet-4-6')).toBe(true);
+      expect(isConcreteModelId('glm-5.2')).toBe(true);
+    });
+  });
+
+  describe('direct Anthropic (apiKey and claudeCli)', () => {
+    it('builds isolated apiKey profile from env-only ANTHROPIC_API_KEY and aligns probe with builder', async () => {
+      process.env['ANTHROPIC_API_KEY'] = 'sk-ant-env-only';
+      const { resolver } = createHarness({ ambientState: 'signed-out' });
+
+      expect(
+        await resolver.getSetupCredentialProbe().hasAnthropicApiKey(),
+      ).toBe(true);
+
+      const res = await resolver.buildSetupProfile(
+        { authMethod: 'apiKey', providerId: 'anthropic' },
+        WORKSPACE,
+        'claude-sonnet-4-6',
+      );
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.profile.providerId).toBe('anthropic');
+        expect(res.profile.model).toBe('claude-sonnet-4-6');
+        expect(res.profile.authEnv.ANTHROPIC_API_KEY).toBe('sk-ant-env-only');
+        expect(res.profile.authEnv.ANTHROPIC_AUTH_TOKEN).toBe('');
+        expect(res.profile.authEnv.ANTHROPIC_BASE_URL).toBe('');
+      }
+    });
+
+    it('returns invalid/not-signed-in when direct apiKey is missing from both secrets and env', async () => {
+      const { resolver } = createHarness({ ambientState: 'connected' });
+
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'apiKey', providerId: 'anthropic' },
+          WORKSPACE,
+          'claude-sonnet-4-6',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+    });
+
+    it('requires connected Claude CLI for claudeCli and rejects signed-out/unknown', async () => {
+      const connectedH = createHarness({ ambientState: 'connected' });
+      const ok = await connectedH.resolver.buildSetupProfile(
+        { authMethod: 'claudeCli', providerId: 'anthropic' },
+        WORKSPACE,
+        'claude-sonnet-4-6',
+      );
+      expect(ok.ok).toBe(true);
+      if (ok.ok) {
+        expect(ok.profile.providerId).toBe('anthropic');
+        expect(ok.profile.model).toBe('claude-sonnet-4-6');
+        expect(ok.profile.authEnv.ANTHROPIC_API_KEY).toBe('');
+        expect(ok.profile.authEnv.ANTHROPIC_AUTH_TOKEN).toBe('');
+        expect(ok.profile.authEnv.ANTHROPIC_BASE_URL).toBe('');
+      }
+
+      const signedOutH = createHarness({
+        ambientState: 'signed-out',
+        apiKey: 'sk-ant-stored',
+      });
+      await expect(
+        signedOutH.resolver.buildSetupProfile(
+          { authMethod: 'claudeCli', providerId: 'anthropic' },
+          WORKSPACE,
+          'claude-sonnet-4-6',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+    });
+  });
+
+  describe('proxy providers — pre-acquire credential check vs startup failure', () => {
+    it('classifies missing OpenRouter key as invalid/not-signed-in without calling proxyPool.acquire', async () => {
+      const { resolver, acquire } = createHarness({
+        openRouterAuth: { isAuthenticated: jest.fn(async () => false) },
+      });
+
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'openrouter' },
+          WORKSPACE,
+          'anthropic/claude-sonnet-4.5',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+      expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it('classifies missing/expired Copilot OAuth as invalid/not-signed-in without calling proxyPool.acquire', async () => {
+      const { resolver, acquire } = createHarness({
+        copilotAuth: {
+          isAuthenticated: jest.fn(async () => false),
+          tryRestoreAuth: jest.fn(async () => false),
+        },
+      });
+
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'github-copilot' },
+          WORKSPACE,
+          'gpt-5.4',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+      expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it('classifies signed-out Kimi Code (no CLI login and no fallback key) as invalid/not-signed-in without acquiring proxy', async () => {
+      const { resolver, acquire } = createHarness({
+        kimiCodeAuth: {
+          ensureFresh: jest.fn(async () => false),
+          isAuthenticated: jest.fn(async () => false),
+        },
+      });
+
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'kimi-code' },
+          WORKSPACE,
+          'k3',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+      expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it('classifies missing Sakana key as invalid/not-signed-in without calling proxyPool.acquire', async () => {
+      const { resolver, acquire } = createHarness({});
+
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'sakana' },
+          WORKSPACE,
+          'fugu',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+      expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it('classifies proxyPool.acquire returning undefined or throwing as unavailable/provider-unavailable when credentials exist', async () => {
+      const undefinedH = createHarness({
+        copilotAuth: {
+          isAuthenticated: jest.fn(async () => true),
+          tryRestoreAuth: jest.fn(async () => true),
+        },
+      });
+      undefinedH.acquire.mockResolvedValueOnce(undefined);
+
+      await expect(
+        undefinedH.resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'github-copilot' },
+          WORKSPACE,
+          'gpt-5.4',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'unavailable',
+        cause: 'provider-unavailable',
+      });
+      expect(undefinedH.acquire).toHaveBeenCalledTimes(1);
+
+      const throwH = createHarness({
+        openRouterAuth: { isAuthenticated: jest.fn(async () => true) },
+      });
+      throwH.acquire.mockRejectedValueOnce(new Error('EADDRINUSE'));
+
+      await expect(
+        throwH.resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'openrouter' },
+          WORKSPACE,
+          'anthropic/claude-sonnet-4.5',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'unavailable',
+        cause: 'provider-unavailable',
+      });
+      expect(throwH.acquire).toHaveBeenCalledTimes(1);
+    });
+
+    it('allows keyless local proxy (lm-studio) through to proxyPool.acquire', async () => {
+      const { resolver, acquire } = createHarness({});
+      const res = await resolver.buildSetupProfile(
+        { authMethod: 'thirdParty', providerId: 'lm-studio' },
+        WORKSPACE,
+        'local-qwen-32b',
+      );
+      expect(acquire).toHaveBeenCalledTimes(1);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.profile.model).toBe('local-qwen-32b');
+      }
+    });
+  });
+
+  describe('third-party direct, unsupported/unknown providers, and concrete model invariant', () => {
+    it('requires stored key for third-party direct providers and allows keyless ollama', async () => {
+      const missingKey = createHarness({});
+      await expect(
+        missingKey.resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'z-ai' },
+          WORKSPACE,
+          'glm-5.2',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'not-signed-in',
+      });
+
+      const ollama = createHarness({});
+      const ollamaRes = await ollama.resolver.buildSetupProfile(
+        { authMethod: 'thirdParty', providerId: 'ollama' },
+        WORKSPACE,
+        'devstral',
+      );
+      expect(ollamaRes.ok).toBe(true);
+      if (ollamaRes.ok) {
+        expect(ollamaRes.profile.model).toBe('devstral');
+        expect(ollamaRes.profile.providerId).toBe('ollama');
+      }
+    });
+
+    it('rejects unsupported and unknown providers with typed causes', async () => {
+      const { resolver, acquire } = createHarness({});
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'openai-codex' },
+          WORKSPACE,
+          'gpt-5.4',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'provider-unsupported',
+      });
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'antigravity-cli' },
+          WORKSPACE,
+          'gemini-3',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'provider-unsupported',
+      });
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'no-such-provider' },
+          WORKSPACE,
+          'some-model',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'provider-unknown',
+      });
+      expect(acquire).not.toHaveBeenCalled();
+    });
+
+    it('rejects tier aliases and models that ModelResolver would silently rewrite at dispatch boundary', async () => {
+      const { resolver } = createHarness({
+        providerKeys: { 'z-ai': 'zai-key' },
+      });
+
+      for (const alias of ['default', 'opus', 'sonnet', 'haiku']) {
+        await expect(
+          resolver.buildSetupProfile(
+            { authMethod: 'thirdParty', providerId: 'z-ai' },
+            WORKSPACE,
+            alias,
+          ),
+        ).resolves.toEqual({
+          ok: false,
+          kind: 'invalid',
+          cause: 'model-stale',
+        });
+      }
+
+      // `claude-sonnet-4-5` on Z.AI would be rewritten to `glm-5.2` by ModelResolver.resolve.
+      await expect(
+        resolver.buildSetupProfile(
+          { authMethod: 'thirdParty', providerId: 'z-ai' },
+          WORKSPACE,
+          'claude-sonnet-4-5',
+        ),
+      ).resolves.toEqual({
+        ok: false,
+        kind: 'invalid',
+        cause: 'model-stale',
+      });
+
+      // Concrete Z.AI model is preserved verbatim without rewriting.
+      const ok = await resolver.buildSetupProfile(
+        { authMethod: 'thirdParty', providerId: 'z-ai' },
+        WORKSPACE,
+        'glm-5.2',
+      );
+      expect(ok.ok).toBe(true);
+      if (ok.ok) {
+        expect(ok.profile.model).toBe('glm-5.2');
+      }
+    });
   });
 });

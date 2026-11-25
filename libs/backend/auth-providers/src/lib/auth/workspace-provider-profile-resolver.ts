@@ -69,7 +69,6 @@ import type { CodexHomeResolver } from '../providers/codex/codex-home-resolver';
 import type { ProviderModelsService } from '../provider-models.service';
 import {
   ActiveProviderResolver,
-  createAuthCredentialProbe,
   type ActiveAuth,
   type AuthCredentialProbe,
 } from './active-provider-resolver';
@@ -84,8 +83,62 @@ import {
 import { API_KEY_RECOVERY_HINT } from './auth-method.utils';
 import { ClaudeAmbientLoginStatusReader } from '../accounts/claude-ambient-login-status';
 import { OLLAMA_AUTH_TOKEN_PLACEHOLDER } from '../providers/local';
+import type { ICopilotAuthService } from '../providers/copilot';
+import {
+  KIMI_CODE_PROVIDER_ID,
+  type IKimiCodeAuthService,
+} from '../providers/kimi-code';
+import type { IOpenRouterAuthService } from '../providers/openrouter';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
 import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
+
+/**
+ * Single direct Anthropic API key lookup shared by both the credential probe
+ * and the isolated Setup profile builder, so env-only `ANTHROPIC_API_KEY`
+ * behaves identically across probe and dispatch.
+ */
+export async function resolveDirectApiKey(
+  authSecrets: Pick<IAuthSecretsService, 'getCredential'>,
+): Promise<string | null> {
+  const stored = (await authSecrets.getCredential('apiKey'))?.trim();
+  if (stored) return stored;
+  const envKey = process.env['ANTHROPIC_API_KEY']?.trim();
+  return envKey || null;
+}
+
+/**
+ * True when `id` is a concrete model identifier rather than empty/whitespace
+ * or an SDK tier alias (`default`, `opus`, `sonnet`, `haiku`).
+ */
+export function isConcreteModelId(id: string | null | undefined): boolean {
+  if (typeof id !== 'string') return false;
+  const trimmed = id.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  return (
+    lower !== 'default' &&
+    lower !== 'opus' &&
+    lower !== 'sonnet' &&
+    lower !== 'haiku'
+  );
+}
+
+export type SetupProfileBuildResult =
+  | { readonly ok: true; readonly profile: ProviderProfile }
+  | {
+      readonly ok: false;
+      readonly kind: 'invalid';
+      readonly cause:
+        | 'provider-unknown'
+        | 'provider-unsupported'
+        | 'model-stale'
+        | 'not-signed-in';
+    }
+  | {
+      readonly ok: false;
+      readonly kind: 'unavailable';
+      readonly cause: 'provider-unavailable';
+    };
 
 /**
  * Start a workspace snapshot with every tier-scoped key PRESENT and
@@ -171,8 +224,35 @@ export class WorkspaceProviderProfileResolver {
     private readonly codexHome: CodexHomeResolver,
     @inject(ClaudeAmbientLoginStatusReader)
     ambientLogin: Pick<ClaudeAmbientLoginStatusReader, 'read'>,
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_COPILOT_AUTH, { isOptional: true })
+    private readonly copilotAuth?: ICopilotAuthService,
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_OPENROUTER_AUTH, { isOptional: true })
+    private readonly openRouterAuth?: IOpenRouterAuthService,
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
+    private readonly kimiCodeAuth?: IKimiCodeAuthService,
   ) {
-    this.credentialProbe = createAuthCredentialProbe(authSecrets, ambientLogin);
+    this.credentialProbe = {
+      hasAnthropicApiKey: async () =>
+        (await resolveDirectApiKey(authSecrets)) !== null,
+      isClaudeCliConnected: async () =>
+        (await ambientLogin.read()).state === 'connected',
+    };
+  }
+
+  /**
+   * Unified credential probe used by Setup resolution so direct API key
+   * (stored or env) and Claude CLI readiness agree between probe and builder.
+   */
+  getSetupCredentialProbe(): AuthCredentialProbe {
+    return this.credentialProbe;
+  }
+
+  /**
+   * Resolve the workspace's active auth for Unset Setup resolution using the
+   * unified credential probe.
+   */
+  resolveSetupWorkspaceAuth(workspacePath: string): Promise<ActiveAuth> {
+    return this.resolveAuthForPath(workspacePath);
   }
 
   /**
@@ -466,6 +546,269 @@ export class WorkspaceProviderProfileResolver {
       workspacePath,
       requestedModel,
     );
+  }
+
+  /**
+   * Build an isolated {@link ProviderProfile} for Setup execution with a
+   * discriminated error classification (`undefined` never classifies auth).
+   *
+   * Guarantees:
+   * - `concreteModel` must be a concrete model ID (never `'default'` or a tier
+   *   alias) and is assigned directly without `resolveModel` rewriting.
+   * - Direct `apiKey` uses {@link resolveDirectApiKey} (stored or env
+   *   `ANTHROPIC_API_KEY`).
+   * - `claudeCli` requires `credentialProbe.isClaudeCliConnected()`.
+   * - Proxy providers verify credentials/OAuth BEFORE calling
+   *   `proxyPool.acquire`, separating `not-signed-in` from
+   *   `provider-unavailable`.
+   * - Asserts `modelResolver.resolve(concreteModel, profile.authEnv) === concreteModel`
+   *   (the exact rewrite check `SdkQueryRunnerService` runs via
+   *   `SdkModelService.resolveModelId`) so no silent dispatch-time rewrite can
+   *   occur.
+   */
+  async buildSetupProfile(
+    { authMethod, providerId }: ActiveAuth,
+    workspacePath: string,
+    concreteModel: string,
+  ): Promise<SetupProfileBuildResult> {
+    if (
+      providerId === 'openai-codex' ||
+      isProviderSessionProviderId(providerId)
+    ) {
+      return { ok: false, kind: 'invalid', cause: 'provider-unsupported' };
+    }
+
+    const model = typeof concreteModel === 'string' ? concreteModel.trim() : '';
+    if (!isConcreteModelId(model)) {
+      return { ok: false, kind: 'invalid', cause: 'model-stale' };
+    }
+
+    let profile: ProviderProfile;
+    if (authMethod === 'claudeCli') {
+      const connected = await this.credentialProbe.isClaudeCliConnected();
+      if (!connected) {
+        return { ok: false, kind: 'invalid', cause: 'not-signed-in' };
+      }
+      const snapshot = createIsolatedSnapshot();
+      snapshot.ANTHROPIC_API_KEY = '';
+      snapshot.ANTHROPIC_AUTH_TOKEN = '';
+      snapshot.ANTHROPIC_BASE_URL = '';
+      profile = {
+        providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+        authEnv: snapshot,
+        model,
+      };
+    } else if (authMethod === 'apiKey') {
+      const apiKey = await resolveDirectApiKey(this.authSecrets);
+      if (!apiKey) {
+        return { ok: false, kind: 'invalid', cause: 'not-signed-in' };
+      }
+      const snapshot = createIsolatedSnapshot();
+      snapshot.ANTHROPIC_API_KEY = apiKey;
+      snapshot.ANTHROPIC_AUTH_TOKEN = '';
+      snapshot.ANTHROPIC_BASE_URL = '';
+      profile = {
+        providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+        authEnv: snapshot,
+        model,
+      };
+    } else {
+      const provider = getAnthropicProvider(providerId);
+      if (!provider) {
+        return { ok: false, kind: 'invalid', cause: 'provider-unknown' };
+      }
+
+      if (provider.nativeAuth === true) {
+        const connected = await this.credentialProbe.isClaudeCliConnected();
+        if (!connected) {
+          return { ok: false, kind: 'invalid', cause: 'not-signed-in' };
+        }
+        const snapshot = createIsolatedSnapshot();
+        snapshot.ANTHROPIC_API_KEY = '';
+        snapshot.ANTHROPIC_AUTH_TOKEN = '';
+        snapshot.ANTHROPIC_BASE_URL = '';
+        profile = {
+          providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+          authEnv: snapshot,
+          model,
+        };
+      } else if (provider.requiresProxy === true) {
+        const hasCreds = await this.hasProxyCredentials(providerId, provider);
+        if (!hasCreds) {
+          return { ok: false, kind: 'invalid', cause: 'not-signed-in' };
+        }
+        let acquired: { baseUrl: string; authToken: string } | undefined;
+        try {
+          acquired = await this.proxyPool.acquire(
+            workspacePath,
+            providerId,
+            provider,
+          );
+        } catch (error: unknown) {
+          this.logger.warn(
+            '[WorkspaceProviderProfileResolver] Failed to acquire isolated proxy for Setup',
+            {
+              providerId,
+              workspacePath,
+              error: error instanceof Error ? error.name : 'unknown',
+            },
+          );
+          return {
+            ok: false,
+            kind: 'unavailable',
+            cause: 'provider-unavailable',
+          };
+        }
+        if (!acquired) {
+          this.logger.warn(
+            '[WorkspaceProviderProfileResolver] No isolated proxy acquired for Setup',
+            { providerId, workspacePath },
+          );
+          return {
+            ok: false,
+            kind: 'unavailable',
+            cause: 'provider-unavailable',
+          };
+        }
+        const snapshot = createIsolatedSnapshot();
+        snapshot.ANTHROPIC_BASE_URL = acquired.baseUrl;
+        snapshot.ANTHROPIC_AUTH_TOKEN = acquired.authToken;
+        snapshot.ANTHROPIC_API_KEY = '';
+        this.applyProviderTiers(snapshot, providerId);
+        profile = {
+          providerId,
+          authEnv: snapshot,
+          model,
+          baseUrl: acquired.baseUrl,
+        };
+      } else {
+        const snapshot = createIsolatedSnapshot();
+        const customUrl = this.config
+          .get<string>(`provider.${providerId}.baseUrl`)
+          ?.trim();
+        if (provider.authType === 'none') {
+          if (providerId === 'ollama-cloud' && !customUrl) {
+            const cloudKey = (
+              await this.authSecrets.getProviderKey('ollama-cloud')
+            )?.trim();
+            if (cloudKey) {
+              snapshot.ANTHROPIC_BASE_URL = OLLAMA_CLOUD_DIRECT_BASE_URL;
+              snapshot.ANTHROPIC_AUTH_TOKEN = cloudKey;
+            } else {
+              snapshot.ANTHROPIC_BASE_URL = provider.baseUrl;
+              snapshot.ANTHROPIC_AUTH_TOKEN = OLLAMA_AUTH_TOKEN_PLACEHOLDER;
+            }
+          } else {
+            snapshot.ANTHROPIC_BASE_URL = customUrl || provider.baseUrl;
+            snapshot.ANTHROPIC_AUTH_TOKEN = OLLAMA_AUTH_TOKEN_PLACEHOLDER;
+          }
+          snapshot.ANTHROPIC_API_KEY = '';
+          this.applyProviderTiers(snapshot, providerId);
+          profile = {
+            providerId,
+            authEnv: snapshot,
+            model,
+            baseUrl: snapshot.ANTHROPIC_BASE_URL,
+          };
+        } else {
+          const providerKey = (
+            await this.authSecrets.getProviderKey(providerId)
+          )?.trim();
+          if (!providerKey) {
+            return { ok: false, kind: 'invalid', cause: 'not-signed-in' };
+          }
+          const baseUrl = customUrl || provider.baseUrl;
+          const authEnvVar = getProviderAuthEnvVar(providerId);
+          snapshot.ANTHROPIC_API_KEY = '';
+          snapshot.ANTHROPIC_AUTH_TOKEN = '';
+          snapshot.ANTHROPIC_BASE_URL = baseUrl;
+          snapshot[authEnvVar as keyof AuthEnv] = providerKey;
+          this.applyProviderTiers(snapshot, providerId);
+          profile = {
+            providerId,
+            authEnv: snapshot,
+            model,
+            baseUrl,
+          };
+        }
+      }
+    }
+
+    // Assert no silent dispatch-time rewrite (`SdkQueryRunnerService` resolves
+    // via `SdkModelService.resolveModelId`, which delegates to `modelResolver`).
+    const resolvedAtDispatch = this.modelResolver.resolve(
+      model,
+      profile.authEnv,
+    );
+    if (resolvedAtDispatch !== model) {
+      this.logger.warn(
+        '[WorkspaceProviderProfileResolver] Setup model would be rewritten at dispatch — rejecting as model-stale',
+        { providerId: profile.providerId, model, resolvedAtDispatch },
+      );
+      return { ok: false, kind: 'invalid', cause: 'model-stale' };
+    }
+
+    return { ok: true, profile };
+  }
+
+  /**
+   * Verify credential/OAuth presence for a proxy-requiring provider BEFORE
+   * acquiring a proxy instance, so missing/expired credentials surface as
+   * `not-signed-in` rather than `provider-unavailable`.
+   */
+  private async hasProxyCredentials(
+    providerId: string,
+    provider: AnthropicProvider,
+  ): Promise<boolean> {
+    if (provider.authType === 'none') {
+      return true;
+    }
+    if (providerId === 'github-copilot') {
+      if (!this.copilotAuth) return false;
+      try {
+        return (
+          (await this.copilotAuth.isAuthenticated()) ||
+          (await this.copilotAuth.tryRestoreAuth())
+        );
+      } catch {
+        return false;
+      }
+    }
+    if (providerId === KIMI_CODE_PROVIDER_ID) {
+      if (this.kimiCodeAuth) {
+        try {
+          await this.kimiCodeAuth.ensureFresh();
+        } catch {
+          // A refresh failure is not fatal when a stored API key fallback exists.
+        }
+        try {
+          return await this.kimiCodeAuth.isAuthenticated();
+        } catch {
+          return false;
+        }
+      }
+      return Boolean(
+        (await this.authSecrets.getProviderKey(providerId))?.trim(),
+      );
+    }
+    if (providerId === 'openrouter') {
+      if (this.openRouterAuth) {
+        try {
+          return await this.openRouterAuth.isAuthenticated();
+        } catch {
+          return false;
+        }
+      }
+      return Boolean(
+        (await this.authSecrets.getProviderKey(providerId))?.trim(),
+      );
+    }
+    if (provider.authType === 'apiKey' || provider.authType === undefined) {
+      return Boolean(
+        (await this.authSecrets.getProviderKey(providerId))?.trim(),
+      );
+    }
+    return false;
   }
 
   /**

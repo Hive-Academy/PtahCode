@@ -26,17 +26,27 @@ import {
   AuthRequiredError,
   type IWorkspaceLlmResolver,
   type OneShotAuthOverride,
+  type ResolvedSetupSnapshot,
+  type SetupResolution,
   type WorkspaceLlmResolveOptions,
   type WorkspaceLlmSnapshot,
 } from '@ptah-extension/agent-sdk';
 import {
+  ANTHROPIC_DIRECT_PROVIDER_ID,
+  getAnthropicProvider,
   isProviderSessionProviderId,
   type ProviderProfile,
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { ProviderModelsService } from '../provider-models.service';
-import type { ActiveProviderResolver } from './active-provider-resolver';
-import type { WorkspaceProviderProfileResolver } from './workspace-provider-profile-resolver';
+import type {
+  ActiveAuth,
+  ActiveProviderResolver,
+} from './active-provider-resolver';
+import {
+  isConcreteModelId,
+  type WorkspaceProviderProfileResolver,
+} from './workspace-provider-profile-resolver';
 import type { ProviderQuotaStore } from './provider-quota.store';
 
 const TIER_ALIASES: ReadonlySet<string> = new Set([
@@ -136,6 +146,367 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
       model: this.ensureAvailable(profile, catalog),
       auth,
       // The cooldown belongs to the provider the snapshot targets.
+      ...this.cooldownFor(profile.providerId),
+    };
+  }
+
+  async resolveSetup(
+    workspaceRoot: string | undefined,
+  ): Promise<SetupResolution> {
+    const path = workspaceRoot?.trim() ?? '';
+    const stored = this.scope.readSetupPair();
+    if (stored.provider === null && stored.model === null) {
+      return this.resolveUnsetSetup(path);
+    }
+    return this.resolveSetSetup(path, stored.provider, stored.model);
+  }
+
+  /**
+   * Validate a candidate Setup pair using the same strict admission rules as
+   * {@link resolveSetup} without mutating stored settings. Used before
+   * committing a user-selected pair so invalid inputs never touch disk.
+   */
+  async validateSetupPair(
+    workspaceRoot: string | undefined,
+    pair: { provider: string; model: string },
+  ): Promise<SetupResolution> {
+    const path = workspaceRoot?.trim() ?? '';
+    const provider =
+      typeof pair.provider === 'string' && pair.provider.trim().length > 0
+        ? pair.provider.trim()
+        : null;
+    const model =
+      typeof pair.model === 'string' && pair.model.trim().length > 0
+        ? pair.model.trim()
+        : null;
+    if (provider === null && model === null) {
+      return this.resolveUnsetSetup(path);
+    }
+    return this.resolveSetSetup(path, provider, model);
+  }
+
+  private async resolveUnsetSetup(
+    workspacePath: string,
+  ): Promise<SetupResolution> {
+    const activeAuth =
+      await this.profileResolver.resolveSetupWorkspaceAuth(workspacePath);
+    const authKey = resolveAuthProviderKey(
+      activeAuth.authMethod,
+      activeAuth.providerId,
+    );
+    const rawSaved = this.scope
+      .readForPath<string>(
+        `provider.${authKey}.selectedModel`,
+        workspacePath,
+        true,
+      )
+      ?.trim();
+    const savedModel = rawSaved && rawSaved.length > 0 ? rawSaved : null;
+
+    if (
+      activeAuth.providerId === 'openai-codex' ||
+      isProviderSessionProviderId(activeAuth.providerId)
+    ) {
+      return {
+        kind: 'invalid',
+        source: 'workspace',
+        provider: activeAuth.providerId,
+        model: savedModel,
+        cause: 'provider-unsupported',
+      };
+    }
+
+    if (
+      activeAuth.authMethod === 'thirdParty' &&
+      !getAnthropicProvider(activeAuth.providerId)
+    ) {
+      return {
+        kind: 'invalid',
+        source: 'workspace',
+        provider: activeAuth.providerId,
+        model: savedModel,
+        cause: 'provider-unknown',
+      };
+    }
+
+    const catalogueProviderId =
+      activeAuth.authMethod === 'thirdParty'
+        ? activeAuth.providerId
+        : ANTHROPIC_DIRECT_PROVIDER_ID;
+
+    let concreteModel: string | undefined;
+    if (savedModel && isConcreteModelId(savedModel)) {
+      concreteModel = savedModel;
+    } else {
+      const persistedTiers = this.providerModels.getModelTiers(
+        catalogueProviderId,
+        'mainAgent',
+      );
+      const tiers = this.providerModels.resolveEffectiveTiers(
+        catalogueProviderId,
+        persistedTiers,
+      );
+      const lowerAlias = savedModel?.toLowerCase();
+      const candidates: Array<string | undefined> =
+        lowerAlias === 'opus' ||
+        lowerAlias === 'sonnet' ||
+        lowerAlias === 'haiku'
+          ? [tiers[lowerAlias], tiers.sonnet, tiers.opus, tiers.haiku]
+          : [tiers.sonnet, tiers.opus, tiers.haiku];
+      concreteModel = candidates.find(
+        (candidate): candidate is string =>
+          typeof candidate === 'string' && isConcreteModelId(candidate),
+      );
+    }
+
+    if (!concreteModel) {
+      return {
+        kind: 'invalid',
+        source: 'workspace',
+        provider: activeAuth.providerId,
+        model: savedModel,
+        cause: 'model-missing',
+      };
+    }
+
+    const catalog = this.providerModels.getCachedModelIds(catalogueProviderId);
+    if (catalog !== null && !catalog.includes(concreteModel)) {
+      return {
+        kind: 'invalid',
+        source: 'workspace',
+        provider: activeAuth.providerId,
+        model: concreteModel,
+        cause: 'model-stale',
+      };
+    }
+
+    const built = await this.profileResolver.buildSetupProfile(
+      activeAuth,
+      workspacePath,
+      concreteModel,
+    );
+    if (!built.ok) {
+      return built.kind === 'unavailable'
+        ? {
+            kind: 'unavailable',
+            source: 'workspace',
+            provider: activeAuth.providerId,
+            model: concreteModel,
+            cause: 'provider-unavailable',
+          }
+        : {
+            kind: 'invalid',
+            source: 'workspace',
+            provider: activeAuth.providerId,
+            model: concreteModel,
+            cause: built.cause,
+          };
+    }
+
+    return {
+      kind: 'unset',
+      snapshot: this.toSetupSnapshot(built.profile),
+    };
+  }
+
+  private async resolveSetSetup(
+    workspacePath: string,
+    provider: string | null,
+    model: string | null,
+  ): Promise<SetupResolution> {
+    if (provider === null) {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider: null,
+        model,
+        cause: 'provider-missing',
+      };
+    }
+    if (model === null) {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider,
+        model: null,
+        cause: 'model-missing',
+      };
+    }
+
+    if (provider === 'openai-codex' || isProviderSessionProviderId(provider)) {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider,
+        model,
+        cause: 'provider-unsupported',
+      };
+    }
+
+    let mapped:
+      | {
+          readonly kind: 'fixed';
+          readonly activeAuth: ActiveAuth;
+          readonly catalogueProviderId: string;
+        }
+      | {
+          readonly kind: 'direct-disambiguate';
+          readonly catalogueProviderId: string;
+        };
+
+    if (provider === 'claudeCli') {
+      mapped = {
+        kind: 'fixed',
+        activeAuth: {
+          authMethod: 'claudeCli',
+          providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+        },
+        catalogueProviderId: ANTHROPIC_DIRECT_PROVIDER_ID,
+      };
+    } else if (provider === 'apiKey') {
+      mapped = {
+        kind: 'fixed',
+        activeAuth: {
+          authMethod: 'apiKey',
+          providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+        },
+        catalogueProviderId: ANTHROPIC_DIRECT_PROVIDER_ID,
+      };
+    } else if (provider === ANTHROPIC_DIRECT_PROVIDER_ID) {
+      mapped = {
+        kind: 'direct-disambiguate',
+        catalogueProviderId: ANTHROPIC_DIRECT_PROVIDER_ID,
+      };
+    } else if (getAnthropicProvider(provider)) {
+      mapped = {
+        kind: 'fixed',
+        activeAuth: {
+          authMethod: 'thirdParty',
+          providerId: provider,
+        },
+        catalogueProviderId: provider,
+      };
+    } else {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider,
+        model,
+        cause: 'provider-unknown',
+      };
+    }
+
+    if (!isConcreteModelId(model)) {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider,
+        model,
+        cause: 'model-stale',
+      };
+    }
+
+    const catalog = this.providerModels.getCachedModelIds(
+      mapped.catalogueProviderId,
+    );
+    if (catalog !== null && !catalog.includes(model)) {
+      return {
+        kind: 'invalid',
+        source: 'setup',
+        provider,
+        model,
+        cause: 'model-stale',
+      };
+    }
+
+    let activeAuth: ActiveAuth;
+    if (mapped.kind === 'fixed') {
+      activeAuth = mapped.activeAuth;
+    } else {
+      const resolvedDirect = await this.disambiguateDirectAnthropic(
+        workspacePath,
+      );
+      if (!resolvedDirect) {
+        return {
+          kind: 'invalid',
+          source: 'setup',
+          provider,
+          model,
+          cause: 'not-signed-in',
+        };
+      }
+      activeAuth = resolvedDirect;
+    }
+
+    const built = await this.profileResolver.buildSetupProfile(
+      activeAuth,
+      workspacePath,
+      model,
+    );
+    if (!built.ok) {
+      return built.kind === 'unavailable'
+        ? {
+            kind: 'unavailable',
+            source: 'setup',
+            provider,
+            model,
+            cause: 'provider-unavailable',
+          }
+        : {
+            kind: 'invalid',
+            source: 'setup',
+            provider,
+            model,
+            cause: built.cause,
+          };
+    }
+
+    return {
+      kind: 'set',
+      snapshot: this.toSetupSnapshot(built.profile),
+    };
+  }
+
+  /**
+   * Disambiguate stored `ANTHROPIC_DIRECT_PROVIDER_ID` (`'anthropic'`):
+   * prefer the workspace's active direct method (`'apiKey'` or `'claudeCli'`)
+   * when its credential is valid; otherwise accept whichever of `'apiKey'` or
+   * `'claudeCli'` has valid credentials; if neither, return `null`.
+   */
+  private async disambiguateDirectAnthropic(
+    workspacePath: string,
+  ): Promise<ActiveAuth | null> {
+    const workspaceActive =
+      this.activeProviderResolver.resolveActiveAuthForPath(workspacePath);
+    const preferredOrder: readonly ('apiKey' | 'claudeCli')[] =
+      workspaceActive.authMethod === 'apiKey'
+        ? ['apiKey', 'claudeCli']
+        : ['claudeCli', 'apiKey'];
+    const probe = this.profileResolver.getSetupCredentialProbe();
+    for (const method of preferredOrder) {
+      const ready =
+        method === 'apiKey'
+          ? await probe.hasAnthropicApiKey()
+          : await probe.isClaudeCliConnected();
+      if (ready) {
+        return {
+          authMethod: method,
+          providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
+        };
+      }
+    }
+    return null;
+  }
+
+  private toSetupSnapshot(profile: ProviderProfile): ResolvedSetupSnapshot {
+    const auth: OneShotAuthOverride = {
+      env: { ...profile.authEnv },
+      ...(profile.baseUrl ? { baseUrl: profile.baseUrl } : {}),
+    };
+    return {
+      providerId: profile.providerId,
+      model: profile.model,
+      auth,
       ...this.cooldownFor(profile.providerId),
     };
   }
