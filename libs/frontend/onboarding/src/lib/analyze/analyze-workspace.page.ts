@@ -407,7 +407,7 @@ function describeSetupIssue(
           <div class="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
-              [ptahSetupAction]="'primaryCompact'"
+              [ptahSetupAction]="setupReady() ? 'primaryCompact' : 'ghost'"
               [disabled]="!setupReady()"
               (click)="continuePrevious()"
             >
@@ -743,7 +743,13 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
           const state = response.data.state;
           this.setupState.set(state);
           this.setupReadFailed.set(false);
-          if (state.kind === 'set' || state.kind === 'unset') {
+          // A failed "Use workspace model" write is stale once Setup is healthy
+          // or already follows the workspace model (Settings cleared it).
+          if (
+            state.kind === 'set' ||
+            state.kind === 'unset' ||
+            state.source === 'workspace'
+          ) {
             this.setupActionError.set(null);
           }
         } else {

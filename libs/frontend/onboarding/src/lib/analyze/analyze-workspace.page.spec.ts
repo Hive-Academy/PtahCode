@@ -385,7 +385,14 @@ describe('AnalyzeWorkspacePage', () => {
         kind: 'unset',
         effective: { provider: 'claude', model: 'claude-sonnet-4' },
       },
-    ])('clears a failed Setup write alert on return from Settings with $kind Setup', async (recoveredState) => {
+      {
+        kind: 'invalid',
+        source: 'workspace',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      },
+    ])('clears a failed Setup write alert on return from Settings with $kind Setup ($source)', async (recoveredState) => {
       setupStateResponse = {
         kind: 'invalid',
         source: 'setup',
@@ -418,9 +425,18 @@ describe('AnalyzeWorkspacePage', () => {
       fixture.detectChanges();
 
       expect(element.textContent).not.toContain(alertText);
-      expect(
-        element.querySelector('[data-testid="setup-model-alert"]'),
-      ).toBeNull();
+      const issueAlert = element.querySelector(
+        '[data-testid="setup-model-alert"]',
+      );
+      if (recoveredState.kind === 'invalid') {
+        // The workspace issue stays visible; only the stale write error goes.
+        expect(issueAlert?.textContent).toContain('The workspace model');
+        expect(
+          element.querySelector('[data-testid="setup-model-use-workspace"]'),
+        ).toBeNull();
+      } else {
+        expect(issueAlert).toBeNull();
+      }
       fixture.destroy();
     });
 
@@ -453,6 +469,38 @@ describe('AnalyzeWorkspacePage', () => {
 
       expect(start?.disabled).toBe(false);
       expect(start?.classList.contains('btn-primary')).toBe(true);
+      fixture.destroy();
+    });
+
+    it('only gives Continue previous run the primary treatment when Setup is ready', async () => {
+      setupStateResponse = {
+        kind: 'invalid',
+        source: 'setup',
+        provider: 'claude',
+        model: 'claude-retired',
+        cause: 'model-stale',
+      };
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.componentInstance['interrupted'].set(true);
+      fixture.detectChanges();
+      const element = fixture.nativeElement as HTMLElement;
+      const continueButton = Array.from(
+        element.querySelectorAll<HTMLButtonElement>('button'),
+      ).find((button) => button.textContent?.trim() === 'Continue previous run');
+      expect(continueButton?.disabled).toBe(true);
+      expect(continueButton?.classList.contains('btn-primary')).toBe(false);
+
+      setupStateResponse = {
+        kind: 'unset',
+        effective: { provider: 'claude', model: 'claude-sonnet-4' },
+      };
+      await fixture.componentInstance['refreshSetupModel']();
+      fixture.detectChanges();
+
+      expect(continueButton?.disabled).toBe(false);
+      expect(continueButton?.classList.contains('btn-primary')).toBe(true);
       fixture.destroy();
     });
 
