@@ -147,7 +147,8 @@ class RuntimeContext implements CodexContext {
   private revision = 0;
   private turnRevision = 0;
   private sentInitialInput = false;
-  private observedModel?: string;
+  private reportedModel: string | null = null;
+  private reportedEffort: string | null = null;
   private turnHistory = false;
   private settings: CodexTurnSettings;
   private levelPolicy: Pick<
@@ -314,6 +315,10 @@ class RuntimeContext implements CodexContext {
     return this.turnHistory;
   }
 
+  reportedSettings(): { model: string | null; effort: string | null } {
+    return { model: this.reportedModel, effort: this.reportedEffort };
+  }
+
   get turnPermissionLevel(): CodexPermissionLevel {
     if (this.state === 'running' || this.state === 'interrupting')
       return (
@@ -363,7 +368,8 @@ class RuntimeContext implements CodexContext {
       throw new Error('Codex resumed a different thread');
     if (this.isClosed()) throw new Error('Codex context closed');
     this.translator.setThreadModel(result.thread.id, result.model);
-    this.observedModel = result.model;
+    this.reportedModel = result.model;
+    this.reportedEffort = result.reasoningEffort ?? null;
     const identity: CodexThreadIdentity = Object.freeze({
       threadId: result.thread.id,
       contextId: this.profile.contextId,
@@ -536,11 +542,18 @@ class RuntimeContext implements CodexContext {
     if (frame.method === 'thread/settings/updated') {
       const settings = z.object({ threadId: z.string(), threadSettings: z.object({
         model: z.string().min(1),
+        effort: z.string().nullish(),
+        reasoningEffort: z.string().nullish(),
       }) }).safeParse(frame.params);
       if (settings.success) {
-        this.translator.setThreadModel(settings.data.threadId, settings.data.threadSettings.model);
-        if (settings.data.threadId === this.identity.threadId)
-          this.observedModel = settings.data.threadSettings.model;
+        const { threadId, threadSettings } = settings.data;
+        this.translator.setThreadModel(threadId, threadSettings.model);
+        if (threadId === this.identity.threadId) {
+          this.reportedModel = threadSettings.model;
+          this.reportedEffort = threadSettings.effort === undefined
+            ? threadSettings.reasoningEffort ?? null
+            : threadSettings.effort;
+        }
       }
     }
     // Compaction owns admission, so thread item activity belongs to its work.
@@ -1046,10 +1059,8 @@ class RuntimeContext implements CodexContext {
       this.wirePermissionLevel = level;
       // Usage notifications may arrive before the turn/start response. The
       // validated request is the effective model for this accepted turn.
-      if (params.model) {
-        this.observedModel = params.model;
+      if (params.model)
         this.translator.setThreadModel(this.identity.threadId, params.model);
-      }
       const result = await this.process.request('turn/start', params);
       if (!input.preservePendingUserInput) this.cancelPendingUserInput();
       const turnId = result.turn.id;
@@ -1469,9 +1480,14 @@ class RuntimeContext implements CodexContext {
               displayName: model.displayName || model.model,
               description: model.description,
               isDefault: model.isDefault ?? false,
-              supportedEfforts: (model.supportedReasoningEfforts ?? []).map(
-                (effort) => effort.reasoningEffort,
-              ),
+              ...(model.supportedReasoningEfforts === undefined ? {} : {
+                supportedEfforts: model.supportedReasoningEfforts.map(
+                  (effort) => effort.reasoningEffort,
+                ),
+              }),
+              ...(model.defaultReasoningEffort === undefined ? {} : {
+                defaultEffort: model.defaultReasoningEffort,
+              }),
             })),
           );
           if (result.nextCursor == null) return models;

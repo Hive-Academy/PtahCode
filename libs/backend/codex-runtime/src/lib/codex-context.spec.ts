@@ -18,7 +18,7 @@ describe('native child event admission', () => {
     translator.setThreadModel('root', 'gpt-4o');
     const context = Object.assign(Object.create(RuntimeContext.prototype), {
       committedIdentity: { contextId: 'context', processGeneration: 1, threadId: 'root' },
-      observedModel: 'gpt-4o', translator,
+      translator,
       knownChildParents: new Map<string, string>(),
       childParentThreads: new Map<string, string>(),
       pendingChildParents: new Map<string, string>(),
@@ -51,7 +51,6 @@ describe('native child event admission', () => {
       terminalTurns: new Set<string>(), targets: new Map(), asyncQuestionItems: new Set(),
       subscribers: new Set(), turnController: new AbortController(), sequence: 0,
       options: { logger },
-      observedModel: 'gpt-4o',
     }) as RuntimeContext;
     const feed = (method: string, params: Record<string, unknown>): void => {
       Reflect.apply(Reflect.get(context, 'onNotification'), context, [{ method, params }]);
@@ -828,6 +827,78 @@ it('flushes v1 child notifications once toolStarted supplies agentThreadIds', ()
 });
 
 describe('CodexContext thread frame boundary', () => {
+  it.each(['thread/start', 'thread/resume'] as const)(
+    'reports native settings from %s and subsequent root settings frames',
+    async (method) => {
+      const request = jest.fn()
+        .mockResolvedValueOnce({
+          thread: { id: 'root', turns: [] },
+          model: 'server/model',
+          reasoningEffort: 'server-effort',
+        })
+        .mockResolvedValueOnce({ turn: { id: 'turn', status: 'inProgress' } });
+      const sandboxPolicy = { mode: 'read-only', networkAccess: false };
+      const identity = {
+        threadId: 'root', contextId: 'context', processGeneration: 1,
+        normalizedHome: '/home', workspaceId: '/work', providerId: 'openai-codex',
+        profileFingerprint: 'fp',
+      };
+      const context = Object.assign(Object.create(RuntimeContext.prototype), {
+        state: 'opening',
+        generation: 1,
+        operation: Promise.resolve(),
+        process: { start: jest.fn(), request, verifiedCodexHome: '/home' },
+        profile: {
+          ...identity, cwd: '/work', instructionSources: [], attachments: [],
+          model: 'requested-model', approvalPolicy: 'never', sandboxPolicy,
+        },
+        settings: { model: 'requested-model', effort: 'low' },
+        levelPolicy: { approvalPolicy: 'never', sandboxPolicy },
+        options: {
+          store: { persist: jest.fn().mockResolvedValue(undefined) },
+          logger: { debug: jest.fn() },
+        },
+        translator: new CodexEventTranslator('context', 1),
+        terminalTurns: new Set<string>(),
+        childTools: new Map([['child', 'spawn']]),
+        nativeChildren: new Map(),
+        unlinkedMethodsLogged: new Set<string>(),
+      }) as RuntimeContext;
+      await context.open(method === 'thread/resume' ? identity : undefined);
+      expect(request).toHaveBeenNthCalledWith(1, method,
+        expect.objectContaining({ model: 'requested-model' }));
+      expect(context.reportedSettings()).toEqual({
+        model: 'server/model', effort: 'server-effort',
+      });
+
+      await context.startTurn({ text: 'hello', preservePendingUserInput: true });
+      expect(request).toHaveBeenNthCalledWith(2, 'turn/start',
+        expect.objectContaining({ model: 'requested-model', effort: 'low' }));
+      expect(context.reportedSettings()).toEqual({
+        model: 'server/model', effort: 'server-effort',
+      });
+
+      const settingsUpdate = (threadId: string, threadSettings: Record<string, unknown>) => {
+        Reflect.apply(Reflect.get(context, 'onNotification'), context, [{
+          method: 'thread/settings/updated',
+          params: { threadId, threadSettings },
+        }]);
+      };
+      settingsUpdate('child', { model: 'child-model', effort: 'child-effort' });
+      expect(context.reportedSettings()).toEqual({
+        model: 'server/model', effort: 'server-effort',
+      });
+      settingsUpdate('root', { model: 'server/new-model', effort: 'new-effort' });
+      expect(context.reportedSettings()).toEqual({
+        model: 'server/new-model', effort: 'new-effort',
+      });
+      settingsUpdate('root', { model: 'server/new-model', reasoningEffort: 'another-effort' });
+      expect(context.reportedSettings().effort).toBe('another-effort');
+      settingsUpdate('root', { model: 'server/new-model', effort: null });
+      expect(context.reportedSettings().effort).toBeNull();
+    },
+  );
+
   it('refuses a changed turn before sending a steer request', async () => {
     const request = jest.fn();
     const context = Object.assign(Object.create(RuntimeContext.prototype), {
@@ -859,6 +930,39 @@ describe('CodexContext thread frame boundary', () => {
     expect(start.config).toEqual(config);
     expect(resume.config).toEqual(config);
     expect(start.config).not.toHaveProperty(['mcp_servers.ptah']);
+  });
+});
+
+describe('RuntimeContext listModels', () => {
+  it('preserves native entries, explicit empty effort lists, and omitted effort fields', async () => {
+    const request = jest.fn().mockResolvedValue({
+      data: [
+        {
+          id: 'catalog-key', model: 'server/model',
+          defaultReasoningEffort: 'native-default',
+          supportedReasoningEfforts: [
+            { reasoningEffort: 'native-new' },
+            { reasoningEffort: 'native-default' },
+          ],
+        },
+        { id: 'empty', model: 'empty', supportedReasoningEfforts: [] },
+        { id: 'absent', model: 'absent' },
+      ],
+    });
+    const context = Object.assign(Object.create(RuntimeContext.prototype), {
+      state: 'idle',
+      operation: Promise.resolve(),
+      process: { request },
+    }) as RuntimeContext;
+    const [native, empty, absent] = await context.listModels();
+    expect(native).toMatchObject({
+      id: 'catalog-key', model: 'server/model', defaultEffort: 'native-default',
+      supportedEfforts: ['native-new', 'native-default'],
+    });
+    expect(empty).toHaveProperty('supportedEfforts', []);
+    expect(absent).toBeDefined();
+    expect(absent).not.toHaveProperty('supportedEfforts');
+    expect(absent).not.toHaveProperty('defaultEffort');
   });
 });
 

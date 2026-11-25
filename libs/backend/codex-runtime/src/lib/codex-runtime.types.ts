@@ -419,6 +419,7 @@ export interface CodexModelInfo {
   readonly description?: string;
   readonly isDefault: boolean;
   readonly supportedEfforts?: readonly string[];
+  readonly defaultEffort?: string;
 }
 export interface CodexUserInputAnswer {
   readonly threadId: string;
@@ -431,6 +432,8 @@ export interface CodexContext {
   /** Call after thread/read and before admitting resumed child notifications. */
   seedSubagentActivity?(history: CodexSessionHistory): void;
   readonly turnPermissionLevel: CodexPermissionLevel;
+  /** Settings reported by the app server. */
+  reportedSettings?(): { model: string | null; effort: string | null };
   listModels(): Promise<readonly CodexModelInfo[]>;
   events(signal: AbortSignal): AsyncIterable<CodexRuntimeEvent>;
   startTurn(input: CodexTurnInput): Promise<CodexTurnReceipt>;

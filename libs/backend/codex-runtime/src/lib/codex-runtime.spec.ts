@@ -1024,6 +1024,7 @@ describe('CodexRuntime', () => {
         description: 'Model description',
         isDefault: true,
         supportedEfforts: ['medium', 'high'],
+        defaultEffort: 'medium',
       },
     ]);
     expect(children[0].frames).toContainEqual(
@@ -1075,12 +1076,12 @@ describe('CodexRuntime', () => {
     ).toEqual([{ limit: 100 }, { limit: 100 }, { limit: 100, cursor: '' }]);
   });
 
-  it('normalizes missing optional model metadata', async () => {
+  it('normalizes display metadata and preserves omitted effort fields', async () => {
     const context = await runtime.open(profile);
     children[0].modelPages = [{ data: [{ id: 'future', model: 'future-model' }] }];
-    await expect(context.listModels()).resolves.toEqual([{
+    await expect(context.listModels()).resolves.toStrictEqual([{
       id: 'future', model: 'future-model', displayName: 'future-model',
-      description: undefined, isDefault: false, supportedEfforts: [],
+      description: undefined, isDefault: false,
     }]);
   });
 
