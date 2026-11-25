@@ -594,8 +594,17 @@ describe('PiCliAdapter (RPC mode)', () => {
       expect(segments.filter((segment) => !segment.turnTelemetry)).toHaveLength(0);
     });
 
-    it('captures the session id from a get_state response', async () => {
-      const handle = await adapter.runSdk(baseOptions);
+    it.each([
+      {
+        label: 'native',
+        fields: { model: { provider: 'anthropic', id: 'claude-sonnet', name: 'Sonnet' }, thinkingLevel: 'high' },
+        model: 'anthropic/claude-sonnet',
+        effort: 'high',
+      },
+      { label: 'unknown', fields: {}, model: null, effort: null },
+      { label: 'effort only', fields: { model: { id: 'invalid' }, thinkingLevel: 'off' }, model: null, effort: 'off' },
+    ])('captures session identity and $label settings from get_state', async ({ fields, model, effort }) => {
+      const handle = await adapter.runSdk({ ...baseOptions, model: 'requested-model', reasoningEffort: 'medium' });
       collect(handle);
 
       currentChild?.stdout.write(
@@ -604,7 +613,7 @@ describe('PiCliAdapter (RPC mode)', () => {
           command: 'get_state',
           success: true,
           id: 's0',
-          data: { sessionId: 'uuid-gs', sessionFile: '/sessions/uuid-gs.json' },
+          data: { sessionId: 'uuid-gs', sessionFile: '/sessions/uuid-gs.json', ...fields },
         }) + '\n',
       );
       currentChild?.stdout.write(
@@ -614,6 +623,7 @@ describe('PiCliAdapter (RPC mode)', () => {
 
       expect(handle.getSessionId?.()).toBe('uuid-gs');
       expect(handle.supportsContinuation?.()).toBe(true);
+      expect(handle.reportedSession?.()).toEqual({ model, effort, efforts: { provenance: 'unknown' } });
     });
   });
 

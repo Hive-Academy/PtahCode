@@ -1,3 +1,4 @@
+import { LANE_DEFAULT_MODEL, type LaneOutcomeSummary } from '@ptah-extension/shared';
 import {
   buildDecisionPayload,
   type DecisionPayload,
@@ -9,6 +10,8 @@ import {
   SystemOneClient,
 } from '../decision-model/system-one.client';
 import { SYSTEM_ONE_KEEP_ALIVE } from '../decision-model/system-one.residency';
+import { SystemOneRequestBodySchema } from '../decision-model/system-one.schema';
+import { outcomeFiguresFrom } from '../matrix/outcome-figures';
 import {
   fitPasses,
   runFixedRequest,
@@ -147,6 +150,65 @@ describe('runLaneRequest outcome figures', () => {
     });
     expect(lookedUp).toEqual(['codex/implement']);
     expect(Object.keys(captured.payloads[0].state.pastOutcomes)).toEqual(['codex/implement']);
+  });
+
+  it('sends separate System One figures and sample counts for each offered choice', async () => {
+    const captured = capture();
+    const options = [
+      { ...lanes[0], effort: 'high' },
+      { ...lanes[0], effort: 'max' },
+      { ...lanes[0], model: 'alternate', effort: 'high' },
+      { ...lanes[1], model: LANE_DEFAULT_MODEL, effort: 'high' },
+    ] as const;
+    const summaries = options.map((option, index): LaneOutcomeSummary => ({
+      runId: String(index), laneId: option.laneId, family: option.family,
+      model: option.model, effort: index === 1 ? 'medium' : option.effort, taskKind: 'implement',
+      verdict: index === 1 ? 'failed' : 'delivered',
+      finalReview: null, failureClass: null, reviseRounds: 0, endedAt: 0,
+      durationMs: null, inputTokens: null, outputTokens: null, costUsd: null,
+      routingSource: 'not-routed',
+      ...(option.model === LANE_DEFAULT_MODEL
+        ? { resolvedModel: 'native-model', resolvedModelProvenance: 'native', effort: null }
+        : {}),
+    }));
+    summaries.push({ ...summaries[2], runId: 'review', taskKind: 'review', effort: null });
+    const result = await runLaneRequest({
+      provider: 'ollama', request: 'ship',
+      phases: [
+        { ...phases[0], primaryCount: 1, options },
+        {
+          ...phases[0],
+          phaseId: 'check',
+          taskKind: 'review',
+          primaryCount: 2,
+          options: [options[2], options[3]],
+        },
+      ],
+      outcomes: outcomeFiguresFrom(summaries, { byModelEffort: true }),
+      maxRequestBytes: 100_000, dispatch: captured.dispatch, logger,
+    });
+    const [payload] = captured.payloads;
+    expect(result.outcomeFigures).toBe(5);
+    expect(SystemOneRequestBodySchema.safeParse(JSON.parse(serializeSystemOneRequest({
+      model: 'nimble', payload,
+    }))).success).toBe(true);
+    expect(payload.state.availableExecutors).toEqual({
+      e1: ['codex', 'codex', 'test-model', 'high'],
+      e2: ['codex', 'codex', 'test-model', 'max'],
+      e3: ['codex', 'codex', 'alternate', 'high'],
+      e4: ['grok', 'grok', LANE_DEFAULT_MODEL, 'high'],
+    });
+    expect(payload.state.pastOutcomes).toEqual({
+      '["codex","implement","test-model","high"]': [100, 1],
+      '["codex","implement","test-model","*"]': [50, 2],
+      '["codex","implement","alternate","high"]': [100, 1],
+      '["codex","review","alternate","*"]': [100, 1],
+      '["grok","implement","*","*"]': [100, 1],
+    });
+    expect(payload.questions['build']?.criteria).toEqual({
+      o1: 'e1 80 unknown 1', o2: 'e2 80 unknown 2', o3: 'e3 80 unknown 1', o4: 'e4 80 unknown 1',
+    });
+    expect(payload.questions['check']?.criteria).toEqual({ o1: 'e3 80 unknown 1', o2: 'e4 80 unknown 0' });
   });
 
   it('looks up each phase using its own task kind', async () => {

@@ -8,6 +8,7 @@ import {
   type CodexExecutionProfile,
   type CodexExecutionProfileInput,
   type CodexMcpSecrets,
+  type CodexModelInfo,
   type CodexRuntimeEvent,
   type CodexSelection,
   type CodexThreadIdentity,
@@ -19,6 +20,7 @@ import {
   type CliDetectionResult,
   type CliOutputSegment,
   type CodexSandboxMode,
+  type LaneReportedSession,
   type LaneTurnContent,
   type LaneTurnSettings,
 } from '@ptah-extension/shared';
@@ -72,7 +74,7 @@ import {
   FileCodexLaneCredentialProbe,
   type CodexLaneCredentialProbe,
 } from './codex-app-server-lane-auth';
-import { codexAdvertisedEfforts, codexLaneModels } from './codex-app-server-lane-models';
+import { codexAdvertisedEfforts, codexLaneModels, codexUnsendableEfforts } from './codex-app-server-lane-models';
 import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
 /** Safety bound for app-server builds that omit a trailing usage notification. */
@@ -294,7 +296,13 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         () => this.runtime.openCatalog(binary.path, home, binary.selection),
         this.logger,
       );
-      return { models: codexLaneModels(catalog), efforts: codexAdvertisedEfforts(catalog) };
+      const efforts = codexAdvertisedEfforts(catalog);
+      const unsendableEfforts = codexUnsendableEfforts(efforts);
+      return {
+        models: codexLaneModels(catalog),
+        efforts,
+        ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
+      };
     } catch (error: unknown) {
       // degradation-audit: reported - logged here and rethrown to the caller.
       this.logger.warn(
@@ -691,6 +699,23 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     }
     if (!context) throw new Error('Codex lane context did not open');
     let opened: CodexContext = context;
+    let catalogSnapshot: { context: CodexContext; models: CliModelInfo[] } | undefined;
+    const readModelCatalog = async (source: CodexContext): Promise<{
+      catalog: readonly CodexModelInfo[];
+      models: CliModelInfo[];
+    }> => {
+      const catalog = await source.listModels();
+      const models = codexLaneModels(catalog);
+      if (context === source) catalogSnapshot = { context: source, models };
+      return { catalog, models };
+    };
+    const reportedSession = (): LaneReportedSession => {
+      const { model, effort } = context?.reportedSettings?.() ?? { model: null, effort: null };
+      const efforts = catalogSnapshot && catalogSnapshot.context === context
+        ? catalogSnapshot.models.find((entry) => entry.id === model)?.efforts
+        : undefined;
+      return { model, effort, efforts: efforts ?? { provenance: 'unknown' } };
+    };
     let fallbackUsed = false;
     const processEvent = (event: CodexRuntimeEvent): void => {
       if (
@@ -872,7 +897,25 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       this.name,
     );
     initialTurnPending = false;
-    const done = runTurn(prompt);
+    const done = runTurn(prompt).then(async (code) => {
+      // Model listing shares the live context's command queue. Read after the
+      // first turn so catalog discovery cannot delay an in-flight steer or interrupt.
+      const source = context;
+      if (
+        code === 0 && !closed && source?.reportedSettings?.().model &&
+        catalogSnapshot?.context !== source
+      ) {
+        try {
+          await readModelCatalog(source);
+        } catch (error: unknown) {
+          // degradation-audit: optional-capability - session settings still report without a catalog.
+          this.logger.warn('[CodexAppServerLaneAdapter] Lane model catalog failed', {
+            errorClass: error instanceof Error ? error.constructor.name : typeof error,
+          });
+        }
+      }
+      return code;
+    });
     const delivered = fullPromptPreambles({
       ...options,
       lanePolicyDelivery: 'developer-instructions',
@@ -912,13 +955,15 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     };
     const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
       if (closed || !context) throw new Error('Codex lane is closed');
-      const catalog = await context.listModels();
+      const { catalog, models } = await readModelCatalog(context);
       const advertised = codexAdvertisedEfforts(catalog);
+      const unsendableEfforts = codexUnsendableEfforts(advertised);
       return {
-        models: codexLaneModels(catalog),
+        models,
         efforts: advertised.length > 0
           ? advertised
           : CLI_REASONING_EFFORT_VALUES.filter((effort) => validatedEffort(effort) !== undefined),
+        ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
         commands: [],
@@ -935,6 +980,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         ? { accountBindingId: options.accountBindingId }
         : {}),
       getSessionId: () => sessionId,
+      reportedSession,
       onSessionResolved: sessionResolved.subscribe,
       getLanePolicyDelivery: () => 'developer-instructions',
       getRoleDelivery: () => roleDelivery,

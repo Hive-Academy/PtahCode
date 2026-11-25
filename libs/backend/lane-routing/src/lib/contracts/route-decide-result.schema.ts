@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import {
+  EFFORT_DISPOSITIONS,
+  MAX_OUTCOME_EFFORT_LENGTH,
   OUTCOME_TASK_KINDS,
   TASK_TYPES,
   PHASE_KINDS,
+  VALUE_PROVENANCE,
   type LaneLimitState,
   type OutcomeRoutingSource,
   type ProviderAccountUsageStatus,
@@ -99,6 +102,10 @@ const LimitEvidenceSchema = z.object({
   readAt: z.number().nullable(),
 }).strict();
 
+export const MODEL_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const ModelEffortSchema = z.enum(MODEL_EFFORTS);
+export type ModelEffort = z.infer<typeof ModelEffortSchema>;
+
 const ScorePartsSchema = z.object({
   prior: z.number(),
   learned: z.number(),
@@ -109,6 +116,9 @@ const ScorePartsSchema = z.object({
   sampleCount: z.number().int().nonnegative().optional(),
   override: z.number().optional(),
   overrideLabel: z.string().min(1).max(120).optional(),
+  effort: ModelEffortSchema.optional(),
+  evidence: z.enum(['pair', 'model', 'family', 'prior']).optional(),
+  explore: z.literal(true).optional(),
 }).strict();
 
 const CandidateTraceSchema = z.object({
@@ -188,10 +198,6 @@ export const MODEL_TIERS = ['haiku', 'sonnet', 'opus'] as const;
 export const ModelTierSchema = z.enum(MODEL_TIERS);
 export type ModelTier = z.infer<typeof ModelTierSchema>;
 
-export const MODEL_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-export const ModelEffortSchema = z.enum(MODEL_EFFORTS);
-export type ModelEffort = z.infer<typeof ModelEffortSchema>;
-
 export const ChosenEntrySchema = z
   .object({
     phaseId: z.string(),
@@ -200,6 +206,13 @@ export const ChosenEntrySchema = z
     model: z.string(),
     tier: ModelTierSchema,
     effort: ModelEffortSchema,
+    effortCheck: z.object({
+      requested: ModelEffortSchema,
+      provenance: z.enum(VALUE_PROVENANCE),
+      supported: z.array(z.string().max(MAX_OUTCOME_EFFORT_LENGTH)).max(32).nullable(),
+      inList: z.boolean().nullable(),
+      expected: z.enum(EFFORT_DISPOSITIONS),
+    }).strict().optional(),
     provenance: z.enum(PROVENANCE),
     score: z.number().int().min(SCORE_MIN).max(SCORE_MAX),
     source: z.enum(CHOSEN_SOURCES),
@@ -320,6 +333,7 @@ export const PreflightResultSchema = z
 export const GateResultSchema = z
   .object({
     stage: z.literal('gate-0.1'),
+    routeId: z.string().min(1).max(64).optional(),
     roster: z.array(
       z.discriminatedUnion('status', [
         ChosenEntrySchema,

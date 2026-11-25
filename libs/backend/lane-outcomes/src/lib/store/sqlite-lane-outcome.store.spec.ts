@@ -2,6 +2,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MIGRATIONS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
+import { MAX_OUTCOME_EFFORT_LENGTH } from '@ptah-extension/shared';
+import { LaneOutcomeRowSchema } from '../lane-outcome.schema';
 import {
   hostDeliverablesReportId,
   reportEffectOf,
@@ -33,6 +35,9 @@ function fixture(file = ':memory:', migrate = false) {
     }
     // The lane half of migration 0075; its grade half needs skill_task_grades.
     db.exec('ALTER TABLE lane_outcome_records ADD COLUMN phase_kind TEXT;');
+    const migration78 = MIGRATIONS.find((entry) => entry.version === 78);
+    if (!migration78?.sql) throw new Error('Missing SQL migration 78');
+    db.exec(migration78.sql);
   } else db.exec(`
     CREATE TABLE IF NOT EXISTS lane_outcome_records (
       run_id TEXT NOT NULL PRIMARY KEY, executor_kind TEXT NOT NULL,
@@ -45,8 +50,12 @@ function fixture(file = ':memory:', migrate = false) {
       ended_at INTEGER NOT NULL, duration_ms INTEGER, input_tokens INTEGER,
       output_tokens INTEGER, cost_usd REAL, routing_source TEXT NOT NULL,
       revise_rounds INTEGER NOT NULL DEFAULT 0, final_review TEXT,
-      deliverables_declared_at INTEGER, created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      deliverables_declared_at INTEGER, model_source TEXT, resolved_model TEXT,
+      resolved_model_provenance TEXT, requested_effort TEXT, effort TEXT,
+      effort_source TEXT, effort_provenance TEXT, effort_disposition TEXT,
+      resolved_effort TEXT, resolved_effort_provenance TEXT, routed_model TEXT,
+      routed_effort TEXT, decision_model TEXT, proposal_confidence REAL,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS lane_outcome_report_receipts (
       report_id TEXT NOT NULL PRIMARY KEY, run_id TEXT NOT NULL,
@@ -131,6 +140,168 @@ describe('SqliteLaneOutcomeStore', () => {
     } finally {
       db.close();
     }
+  });
+
+  it('round-trips all 14 choice-key fields and decodes pre-0078 rows as null (migration 0078)', async () => {
+    const db = new DatabaseConstructor(':memory:');
+    try {
+      for (const version of [54, 64]) {
+        const migration = MIGRATIONS.find((entry) => entry.version === version);
+        if (!migration?.sql) throw new Error(`Missing SQL migration ${version}`);
+        db.exec(migration.sql);
+      }
+      db.exec('ALTER TABLE lane_outcome_records ADD COLUMN phase_kind TEXT;');
+      // Insert a pre-0078 row before applying migration 0078.
+      db.prepare(`INSERT INTO lane_outcome_records
+        (run_id, executor_kind, lane_id, agent_id, family, model, verdict,
+         ended_at, created_at, updated_at)
+        VALUES ('pre-0078', 'cli', 'claude-code', 'old', 'claude', 'claude-sonnet-4-6', 'delivered', 1, 1, 1)`)
+        .run();
+
+      const migration78 = MIGRATIONS.find((entry) => entry.version === 78);
+      if (!migration78?.sql) throw new Error('Missing SQL migration 78');
+      db.exec(migration78.sql);
+
+      const connection = Object.create(
+        SqliteConnectionService.prototype,
+      ) as SqliteConnectionService;
+      Object.defineProperty(connection, 'db', { value: db });
+      Object.defineProperty(connection, 'isOpen', { value: true });
+      const store = new SqliteLaneOutcomeStore(connection, testLogger());
+
+      const nullChoiceKeys = {
+        modelSource: null,
+        resolvedModel: null,
+        resolvedModelProvenance: null,
+        requestedEffort: null,
+        effort: null,
+        effortSource: null,
+        effortProvenance: null,
+        effortDisposition: null,
+        resolvedEffort: null,
+        resolvedEffortProvenance: null,
+        routedModel: null,
+        routedEffort: null,
+        decisionModel: null,
+        proposalConfidence: null,
+      };
+      expect(await store.get('pre-0078')).toMatchObject(nullChoiceKeys);
+
+      const choiceKeys = {
+        modelSource: 'setting' as const,
+        resolvedModel: 'claude-sonnet-4-6',
+        resolvedModelProvenance: 'native' as const,
+        requestedEffort: 'high',
+        effort: 'high',
+        effortSource: 'role-default' as const,
+        effortProvenance: 'native' as const,
+        effortDisposition: 'native-match' as const,
+        resolvedEffort: 'high',
+        resolvedEffortProvenance: 'native' as const,
+        routedModel: 'claude-sonnet-4-6',
+        routedEffort: 'high',
+        decisionModel: 'anthropic:claude-haiku-4-5',
+        proposalConfidence: 0.875,
+      };
+      await store.insertIfAbsent({
+        ...outcomeRow('choice-full'),
+        executorKind: 'cli',
+        ...choiceKeys,
+      });
+      expect(await store.get('choice-full')).toMatchObject(choiceKeys);
+      expect(
+        db
+          .prepare(
+            `SELECT model_source, resolved_model, resolved_model_provenance,
+                    requested_effort, effort, effort_source, effort_provenance,
+                    effort_disposition, resolved_effort, resolved_effort_provenance,
+                    routed_model, routed_effort, decision_model, proposal_confidence
+             FROM lane_outcome_records WHERE run_id = ?`,
+          )
+          .get('choice-full'),
+      ).toEqual({
+        model_source: 'setting',
+        resolved_model: 'claude-sonnet-4-6',
+        resolved_model_provenance: 'native',
+        requested_effort: 'high',
+        effort: 'high',
+        effort_source: 'role-default',
+        effort_provenance: 'native',
+        effort_disposition: 'native-match',
+        resolved_effort: 'high',
+        resolved_effort_provenance: 'native',
+        routed_model: 'claude-sonnet-4-6',
+        routed_effort: 'high',
+        decision_model: 'anthropic:claude-haiku-4-5',
+        proposal_confidence: 0.875,
+      });
+
+      await store.update('choice-full', { failureClass: 'crash' });
+      expect(await store.get('choice-full')).toMatchObject({
+        ...choiceKeys,
+        failureClass: 'crash',
+      });
+
+      await store.insertIfAbsent({
+        ...outcomeRow('choice-zero-confidence'),
+        proposalConfidence: 0,
+      });
+      expect((await store.get('choice-zero-confidence'))?.proposalConfidence).toBe(0);
+
+      // Old JSON-shaped rows (without the 14 properties) default to null.
+      expect(LaneOutcomeRowSchema.parse(outcomeRow('old-json'))).toMatchObject(
+        nullChoiceKeys,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it('enforces choice-key schema bounds and native-only resolved provenance', () => {
+    const base = outcomeRow('schema-check');
+    expect(
+      LaneOutcomeRowSchema.safeParse({
+        ...base,
+        resolvedModel: 'm'.repeat(200),
+        routedModel: 'm'.repeat(200),
+        requestedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH),
+        effort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH),
+        resolvedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH),
+        routedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH),
+        decisionModel: 'd'.repeat(128),
+        proposalConfidence: 1,
+      }).success,
+    ).toBe(true);
+
+    const invalidCases: Record<string, unknown>[] = [
+      { resolvedModel: '' },
+      { resolvedModel: 'm'.repeat(201) },
+      { routedModel: '' },
+      { routedModel: 'm'.repeat(201) },
+      { resolvedModelProvenance: 'ptah-fallback' },
+      { resolvedEffortProvenance: 'ptah-fallback' },
+      { requestedEffort: '' },
+      { requestedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH + 1) },
+      { effort: '' },
+      { effort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH + 1) },
+      { resolvedEffort: '' },
+      { resolvedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH + 1) },
+      { routedEffort: '' },
+      { routedEffort: 'e'.repeat(MAX_OUTCOME_EFFORT_LENGTH + 1) },
+      { decisionModel: 'd'.repeat(129) },
+      { proposalConfidence: -0.01 },
+      { proposalConfidence: 1.01 },
+    ];
+    for (const bad of invalidCases) {
+      expect(LaneOutcomeRowSchema.safeParse({ ...base, ...bad }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it.each(['', '  '])('reads a blank decision model %j as unattributed', (decisionModel) => {
+    const row = LaneOutcomeRowSchema.parse({ ...outcomeRow('blank-decision-model'), decisionModel });
+    expect(row.decisionModel).toBeNull();
   });
 
   it('round-trips provenance and guards classification', async () => {

@@ -130,6 +130,72 @@ describe('KeyValueLaneOutcomeStore', () => {
     expect(await store.get('subagent:valid')).toBeNull();
     expect(logger.warn).toHaveBeenCalledTimes(1);
   });
+
+  it('parses old JSON rows with null choice keys and round-trips new rows across reload', async () => {
+    const memory = storage();
+    const nullChoiceKeys = {
+      modelSource: null,
+      resolvedModel: null,
+      resolvedModelProvenance: null,
+      requestedEffort: null,
+      effort: null,
+      effortSource: null,
+      effortProvenance: null,
+      effortDisposition: null,
+      resolvedEffort: null,
+      resolvedEffortProvenance: null,
+      routedModel: null,
+      routedEffort: null,
+      decisionModel: null,
+      proposalConfidence: null,
+    };
+    await memory.state.update(LANE_OUTCOME_RECORDS_KEY, {
+      rows: [outcomeRow('old-json')],
+      receipts: [],
+      held: [],
+      budgetStopped: [],
+    });
+
+    const loadLogger = testLogger();
+    const store = new KeyValueLaneOutcomeStore(memory.state, loadLogger);
+    expect(loadLogger.warn).not.toHaveBeenCalled();
+    expect(await store.get('old-json')).toMatchObject(nullChoiceKeys);
+
+    const choiceKeys = {
+      modelSource: 'setting' as const,
+      resolvedModel: 'claude-sonnet-4-6',
+      resolvedModelProvenance: 'native' as const,
+      requestedEffort: 'high',
+      effort: 'high',
+      effortSource: 'role-default' as const,
+      effortProvenance: 'native' as const,
+      effortDisposition: 'native-match' as const,
+      resolvedEffort: 'high',
+      resolvedEffortProvenance: 'native' as const,
+      routedModel: 'claude-sonnet-4-6',
+      routedEffort: 'high',
+      decisionModel: 'anthropic:claude-haiku-4-5',
+      proposalConfidence: 0.875,
+    };
+    await store.insertIfAbsent({
+      ...outcomeRow('choice-full'),
+      executorKind: 'cli',
+      ...choiceKeys,
+    });
+    await store.insertIfAbsent({
+      ...outcomeRow('choice-zero-confidence'),
+      proposalConfidence: 0,
+    });
+
+    const reopenLogger = testLogger();
+    const reopened = new KeyValueLaneOutcomeStore(memory.state, reopenLogger);
+    expect(reopenLogger.warn).not.toHaveBeenCalled();
+    expect(await reopened.get('old-json')).toMatchObject(nullChoiceKeys);
+    expect(await reopened.get('choice-full')).toMatchObject(choiceKeys);
+    expect((await reopened.get('choice-zero-confidence'))?.proposalConfidence)
+      .toBe(0);
+  });
+
   it('round-trips subagent session identifiers through persisted state', async () => {
     const memory = storage();
     const store = new KeyValueLaneOutcomeStore(memory.state, testLogger());

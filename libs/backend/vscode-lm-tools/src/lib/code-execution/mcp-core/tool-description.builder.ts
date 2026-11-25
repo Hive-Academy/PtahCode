@@ -967,6 +967,29 @@ export function buildAgentSpawnTool({
           enum: ['model', 'ranking', 'pin'],
           description: 'What routed this lane: model, ranking, or pin.',
         },
+        route: {
+          type: 'object',
+          description:
+            'Route identity from ptah_route_decide when spawning a routed phase. ' +
+            'Pass route: { routeId, phaseId } from the ptah_route_decide result so the host records routed facts. ' +
+            'Unknown ids are ignored; callers never set routeFacts.',
+          properties: {
+            routeId: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+              description: 'routeId returned by ptah_route_decide.',
+            },
+            phaseId: {
+              type: 'string',
+              minLength: 1,
+              maxLength: 64,
+              description: 'phaseId of the routed entry in ptah_route_decide.',
+            },
+          },
+          required: ['routeId', 'phaseId'],
+          additionalProperties: false,
+        },
         force: {
           type: 'boolean',
           description:

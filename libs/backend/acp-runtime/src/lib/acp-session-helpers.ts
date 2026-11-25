@@ -171,6 +171,13 @@ export interface AcpModelEntryShape {
   readonly isDefault?: boolean;
 }
 
+/** The current model from a session reply, independent of its model list. */
+export function readCurrentModelId(response: unknown): string | null {
+  if (!isRecord(response) || !isRecord(response['models'])) return null;
+  const current = response['models']['currentModelId'];
+  return typeof current === 'string' && current ? current : null;
+}
+
 /**
  * The models a session reply advertises in `models.availableModels` (agy
  * lists the full `agy models` ids there), `currentModelId` marked default.

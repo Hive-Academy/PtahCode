@@ -47,6 +47,7 @@ import {
 } from '@ptah-extension/platform-core';
 import { HARNESS_SYNC_TOKENS } from '@ptah-extension/harness-sync';
 import { ProviderAccountRpcHandlers } from './handlers/provider-account-rpc.handlers';
+import { RoutingEvidenceRpcHandlers } from './handlers/routing-evidence-rpc.handlers';
 import { LocalItemApprovals } from './handlers/marketplace/local-item-approvals';
 import { InstallLocalItemsService } from './handlers/marketplace/install-local-items.service';
 import { MarketplaceLocalItemsService } from './handlers/marketplace/marketplace-local-items.service';
@@ -145,6 +146,7 @@ export function registerSharedRpcHandlers(
   // injected: the handler resolves it per call and fails closed when the
   // public read method is absent.
   container.registerSingleton(CapabilityMatrixRpcHandlers);
+  container.registerSingleton(RoutingEvidenceRpcHandlers);
   // Decision-model picker (TASK_2026_684, C10). The catalog is registered by
   // `registerLaneRoutingServices`; it makes no request until a call.
   container.registerSingleton(DecisionModelCatalogRpcHandlers);

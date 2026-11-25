@@ -34,6 +34,7 @@ import {
   AgentMessageRpcHandlers,
   AgentOutcomeRpcHandlers,
   CapabilityMatrixRpcHandlers,
+  RoutingEvidenceRpcHandlers,
   AnalyticsRpcHandlers,
   DecisionModelCatalogRpcHandlers,
   ConfigScopeRpcHandlers,
@@ -179,6 +180,12 @@ export const RPC_HANDLER_MANIFEST = [
     methods: CapabilityMatrixRpcHandlers.METHODS,
     requires: [],
     handler: CapabilityMatrixRpcHandlers,
+  },
+  {
+    key: 'routingEvidence',
+    methods: RoutingEvidenceRpcHandlers.METHODS,
+    requires: [],
+    handler: RoutingEvidenceRpcHandlers,
   },
   {
     // Usage dashboard read (TASK_2026_707 PR 2). Every host serves it; sources

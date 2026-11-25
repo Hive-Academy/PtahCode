@@ -28,6 +28,7 @@
  * for.
  */
 import { expect, type Page } from '@playwright/test';
+import type { AgentGetRoutingEvidenceResult } from '@ptah-extension/shared';
 import {
   installHost,
   installRpcAutoResponder,
@@ -265,6 +266,9 @@ function settingsGetResolver(params: unknown): {
   if (key === 'skills.enhancement.timeoutMs') {
     return { success: true, value: 120000 };
   }
+  if (key === 'agentOrchestration.performanceRouting') {
+    return { success: true, value: true };
+  }
   if (
     typeof key === 'string' &&
     Object.hasOwn(SESSION_BUDGET_SETTINGS_FIXTURE, key)
@@ -486,6 +490,14 @@ export const LLM_PROVIDER_STATUS_FIXTURE = {
 /** `llm:listProviderModels` — the model `<select>` options for the card above. */
 export const VSCODE_LM_MODELS_FIXTURE = {
   models: [{ id: 'copilot-gpt-4o', displayName: 'GitHub Copilot GPT-4o' }],
+};
+
+/** `agent:getRoutingEvidence` — fresh-profile empty state for the decision matrix page (FA6). */
+export const ROUTING_EVIDENCE_FIXTURE: AgentGetRoutingEvidenceResult = {
+  windowDays: 30,
+  performanceRouting: true,
+  lanes: [],
+  decisionModels: [],
 };
 
 /** `agent:listCliModels` — delegated-model pickers' option lists. */
@@ -823,6 +835,7 @@ function statefulSettingsFixtures(
     // Electron mounts the capability matrix. Without an answer it stays in its `aria-busy` loading state for the
     // 5 s RPC timeout, and `waitForSettled` fails. No ratings is the fresh-profile state ("empty").
     'agent:getCapabilityMatrix': { profiles: [] },
+    'agent:getRoutingEvidence': ROUTING_EVIDENCE_FIXTURE,
     'auth:saveSettings': (params: unknown) => {
       record(state, 'auth:saveSettings', params);
       Object.assign(state.authStatus, params as Partial<MutableAuthStatus>);

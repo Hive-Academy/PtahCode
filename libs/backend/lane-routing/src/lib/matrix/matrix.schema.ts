@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelEffortSchema } from '../contracts/route-decide-result.schema';
 import { SCORE_MAX, SCORE_MIN } from '../routing-constants';
 import {
   CAPABILITY_MATRIX_VERSION,
@@ -15,15 +16,25 @@ import {
  * path of a rejection names the entry (Requirement 6.7).
  */
 
-const NonBlank = (max: number) =>
+export const NonBlank = (max: number) =>
   z.string().max(max).regex(/\S/, 'must not be blank');
 
-/** Publication date (`YYYY-MM-DD`) or the timestamp of an outcome record. */
-const AsOf = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+/** ISO date or an ISO date-time with a time zone. */
+export const AsOf = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+
+/** Stable id of a benchmark source. */
+export const SourceId = NonBlank(64).regex(/^[a-z0-9._-]+$/);
 
 export const UnknownMatrixCellSchema = z
   .object({ kind: z.literal('unknown') })
   .strict();
+
+const SEED_ONLY_FIELDS = [
+  'sourceId',
+  'licenseId',
+  'fetchedAt',
+  'sourceRow',
+] as const;
 
 export const ValueMatrixCellSchema = z
   .object({
@@ -35,9 +46,29 @@ export const ValueMatrixCellSchema = z
     stale: z.boolean(),
     note: NonBlank(500).optional(),
     sampleCount: z.number().int().min(1).optional(),
+    sourceId: SourceId.optional(),
+    licenseId: NonBlank(64).optional(),
+    fetchedAt: AsOf.optional(),
+    sourceRow: NonBlank(200).optional(),
   })
   .strict()
   .superRefine((cell, ctx) => {
+    for (const field of SEED_ONLY_FIELDS) {
+      if (cell.source === 'seed' && cell[field] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `a seed value must carry ${field}`,
+        });
+      }
+      if (cell.source !== 'seed' && cell[field] !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [field],
+          message: `only a seed value carries ${field}`,
+        });
+      }
+    }
     if (cell.source === 'seed') {
       if (cell.sourceRef === undefined) {
         ctx.addIssue({
@@ -99,6 +130,7 @@ export const MatrixProfileSchema = z
   .object({
     family: NonBlank(200),
     model: NonBlank(200),
+    effort: ModelEffortSchema.optional(),
     cells: MatrixCellsSchema,
   })
   .strict() satisfies z.ZodType<MatrixProfile>;
@@ -113,14 +145,18 @@ export const CapabilityMatrixSchema = z
   .superRefine((matrix, ctx) => {
     const seen = new Set<string>();
     matrix.profiles.forEach((profile, index) => {
-      const key = JSON.stringify([profile.family, profile.model]);
+      const key = JSON.stringify([
+        profile.family,
+        profile.model,
+        profile.effort ?? '*',
+      ]);
       if (seen.has(key)) {
         ctx.addIssue({
           code: 'custom',
           path: ['profiles', index, 'model'],
           message:
             `duplicate profile for family "${profile.family}" ` +
-            `and model "${profile.model}"`,
+            `and model "${profile.model}" and effort "${profile.effort ?? '*'}"`,
         });
       }
       seen.add(key);

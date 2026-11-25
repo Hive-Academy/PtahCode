@@ -118,14 +118,15 @@ export function buildRouteDecideTool(): MCPToolDefinition {
       '"taskType", "depth", "phases" and optional "pins", "preferenceSource" ' +
       'and "preferences", and returns one roster entry per phase. Each phase ' +
       'may include "shape" (mechanical, logic, contract, test, docs, review) ' +
-      'and "weight" (estimated source tokens in its batch read and write sets, ' +
+      'and "weight" (source tokens in its read and write sets, ' +
       'plus 10% framing). ' +
       'Each row has "model", "tier" and "effort". For subagents, ' +
       '"tier" is the model alias to pass. For ptah-cli and "claude" rows, pass ' +
       '"tier" as "modelTier"; for other CLI rows, pass "model" unless ' +
-      '"lane-default", and "effort". Pins win. Invalid ' +
+      '"lane-default", and "effort". Pass route: { routeId, phaseId } to ' +
+      'ptah_agent_spawn. Pins win. Invalid ' +
       'arguments are an error that names the field. The call updates rotation ' +
-      `state. Results are capped at 64,000 characters and 25,600 tokens; a larger result is returned as a tool error. When routing is not registered in this host, the error is: ${ROUTING_UNAVAILABLE_MESSAGE}.`,
+      `state. A result over 64,000 characters or 25,600 tokens is a tool error. When routing is not registered in this host, the error is: ${ROUTING_UNAVAILABLE_MESSAGE}.`,
     inputSchema: inputSchemaOf(RouteDecideArgsSchema),
     annotations: { readOnlyHint: false },
   };

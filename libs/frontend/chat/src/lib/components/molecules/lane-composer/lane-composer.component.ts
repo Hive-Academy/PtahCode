@@ -375,11 +375,19 @@ export class LaneComposerComponent {
     if (status === 'idle' || status === 'loading' || this.checking()) return MODELS_LOADING_LABEL;
     return `${this.cli()} default`;
   });
-  protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => [
-    COMPOSER_EFFORT_OPTIONS[0],
-    ...(this.catalog().options?.efforts ?? []).filter((id) => id !== '')
-      .map((id) => laneEffortOption(id, this.record()?.cli === 'claude')),
-  ]);
+  protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => {
+    const options = this.catalog().options;
+    const isClaude = this.record()?.cli === 'claude';
+    return [
+      COMPOSER_EFFORT_OPTIONS[0],
+      ...(options?.efforts ?? []).filter((id) => id !== '').map((id) => {
+        const option = laneEffortOption(id, isClaude);
+        return options?.unsendableEfforts?.includes(id)
+          ? { ...option, description: 'Codex reports this level; this lane cannot send it' }
+          : option;
+      }),
+    ];
+  });
   protected readonly selectedEffort = computed(
     () => (this.pending().reasoningEffort ?? this.record()?.reasoningEffort ?? this.catalog().options?.currentEffort ?? '') as EffortLevel | '',
   );

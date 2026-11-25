@@ -1,10 +1,15 @@
 import { z } from 'zod';
 import {
+  EFFORT_DISPOSITIONS,
+  MAX_OUTCOME_EFFORT_LENGTH,
+  OUTCOME_EFFORT_SOURCES,
+  OUTCOME_MODEL_SOURCES,
   STORED_LANE_FAILURE_CLASSES,
   OUTCOME_ROUTING_SOURCES,
   OUTCOME_TASK_KIND_SOURCES,
   OUTCOME_TASK_KINDS,
   PHASE_KINDS,
+  VALUE_PROVENANCE,
 } from '@ptah-extension/shared';
 
 export const OutcomeTargetSchema = z.union([
@@ -39,6 +44,14 @@ export const OutcomeReportArgsSchema = z.discriminatedUnion('kind', [
 ]);
 
 const nonnegative = z.number().finite().nonnegative();
+const RESOLVED_VALUE_PROVENANCE = ['native', 'unknown'] as const;
+const outcomeModelId = z.string().min(1).max(200).nullable().default(null);
+const outcomeEffort = z
+  .string()
+  .min(1)
+  .max(MAX_OUTCOME_EFFORT_LENGTH)
+  .nullable()
+  .default(null);
 export const LaneOutcomeRowSchema = z.object({
   runId: z.string().min(1),
   executorKind: z.enum(['cli', 'ptah-cli', 'subagent']),
@@ -77,4 +90,32 @@ export const LaneOutcomeRowSchema = z.object({
   ]),
   skillsLoaded: z.array(z.string()).nullable(),
   sessionEvidenceClass: z.string().nullable(),
+  modelSource: z.enum(OUTCOME_MODEL_SOURCES).nullable().default(null),
+  resolvedModel: outcomeModelId,
+  resolvedModelProvenance: z
+    .enum(RESOLVED_VALUE_PROVENANCE)
+    .nullable()
+    .default(null),
+  requestedEffort: outcomeEffort,
+  effort: outcomeEffort,
+  effortSource: z.enum(OUTCOME_EFFORT_SOURCES).nullable().default(null),
+  effortProvenance: z.enum(VALUE_PROVENANCE).nullable().default(null),
+  effortDisposition: z.enum(EFFORT_DISPOSITIONS).nullable().default(null),
+  resolvedEffort: outcomeEffort,
+  resolvedEffortProvenance: z
+    .enum(RESOLVED_VALUE_PROVENANCE)
+    .nullable()
+    .default(null),
+  routedModel: outcomeModelId,
+  routedEffort: outcomeEffort,
+  // Older rows can contain a blank model. Keep them readable as unattributed.
+  decisionModel: z.string().max(128).nullable().default(null)
+    .transform((model) => model?.trim() || null),
+  proposalConfidence: z
+    .number()
+    .finite()
+    .min(0)
+    .max(1)
+    .nullable()
+    .default(null),
 });

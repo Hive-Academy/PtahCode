@@ -344,6 +344,10 @@ export class CursorCliAdapter implements CliAdapter {
     return stripAnsiCodes(raw);
   }
 
+  laneEfforts(): readonly string[] {
+    return [];
+  }
+
   /**
    * List models available to the authenticated key via Cursor.models.list(),
    * the only source. No key means the lane is not configured and lists

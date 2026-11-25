@@ -1,5 +1,11 @@
 import { basename } from 'path';
-import { LANE_DEFAULT_MODEL, laneFamilyOf, normalizeWorkspaceRoot, SessionId } from '@ptah-extension/shared';
+import {
+  LANE_DEFAULT_MODEL,
+  MAX_OUTCOME_EFFORT_LENGTH,
+  laneFamilyOf,
+  normalizeWorkspaceRoot,
+  SessionId,
+} from '@ptah-extension/shared';
 import type {
   AgentProcessInfo,
   CliOutputSegment,
@@ -18,6 +24,12 @@ import { classifyLaneFailureClass } from './limits/lane-failure-class';
 import { phaseKindFromAgentInfo } from './lane-completion-result';
 
 let recorderUnavailableWarned = false;
+
+const MAX_OUTCOME_MODEL_LENGTH = 200;
+
+function normalizeOutcomeValue(value: string | null | undefined, maxLength: number): string | null {
+  return value?.trim().slice(0, maxLength) || null;
+}
 
 /** Synchronous enqueue. Store I/O belongs to the recorder's later drain. */
 export function enqueueLaneCompletionOutcome(
@@ -46,6 +58,12 @@ export function enqueueLaneCompletionOutcome(
       logger.debug('[LaneCompletionNotifier] Outcome not recorded', { runId });
       return;
     }
+    const { reportedSession, spawnEffort, routeFacts } = info;
+    const resolvedModel = normalizeOutcomeValue(
+      reportedSession ? reportedSession.model : info.observedModel,
+      MAX_OUTCOME_MODEL_LENGTH,
+    );
+    const resolvedEffort = normalizeOutcomeValue(reportedSession?.effort, MAX_OUTCOME_EFFORT_LENGTH);
     recorder.recordLaneCompletion({
       runId,
       executorKind: info.cli === 'ptah-cli' ? 'ptah-cli' : 'cli',
@@ -60,6 +78,20 @@ export function enqueueLaneCompletionOutcome(
       }),
       provider: info.providerId ?? info.quotaOwner?.providerId ?? null,
       model: info.model ?? LANE_DEFAULT_MODEL,
+      modelSource: info.modelSource ?? null,
+      resolvedModel,
+      resolvedModelProvenance: resolvedModel === null ? 'unknown' : 'native',
+      requestedEffort: normalizeOutcomeValue(spawnEffort?.requested, MAX_OUTCOME_EFFORT_LENGTH),
+      effort: normalizeOutcomeValue(spawnEffort?.sent, MAX_OUTCOME_EFFORT_LENGTH),
+      effortSource: spawnEffort?.source ?? null,
+      effortProvenance: spawnEffort?.provenance ?? null,
+      effortDisposition: spawnEffort?.disposition ?? null,
+      resolvedEffort,
+      resolvedEffortProvenance: resolvedEffort === null ? 'unknown' : 'native',
+      routedModel: normalizeOutcomeValue(routeFacts?.model, MAX_OUTCOME_MODEL_LENGTH),
+      routedEffort: normalizeOutcomeValue(routeFacts?.effort, MAX_OUTCOME_EFFORT_LENGTH),
+      decisionModel: normalizeOutcomeValue(routeFacts?.decisionModel, 128),
+      proposalConfidence: routeFacts?.proposalConfidence ?? null,
       role: info.role ?? null,
       taskKind: info.taskKind ?? null,
       phaseKind: phaseKindFromAgentInfo(info),
@@ -80,7 +112,7 @@ export function enqueueLaneCompletionOutcome(
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       costUsd: usage?.costUsd ?? null,
-      routingSource: info.routingSource ?? 'not-routed',
+      routingSource: info.routingSource ?? routeFacts?.source ?? 'not-routed',
       reviseRounds: 0,
       finalReview: null,
       deliverablesDeclaredAt: null,

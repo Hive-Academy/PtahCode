@@ -193,6 +193,28 @@ describe('ClaudeCliAdapter constructibility', () => {
 });
 
 describe('ClaudeCliAdapter native SDK execution', () => {
+  it('lists native effort support only when the SDK reports a definite answer', async () => {
+    const f = fixture();
+    const description = 'fixture';
+    f.models.mockResolvedValue([
+      { value: 'none', displayName: 'None', description, supportsEffort: false },
+      {
+        value: 'supported', displayName: 'Supported', description,
+        supportsEffort: true, supportedEffortLevels: ['max', 'low'],
+      },
+      { value: 'absent-levels', displayName: 'Absent levels', description, supportsEffort: true },
+      { value: 'empty-levels', displayName: 'Empty levels', description, supportsEffort: true, supportedEffortLevels: [] },
+      { value: 'absent-flag', displayName: 'Absent flag', description, supportedEffortLevels: ['high'] },
+    ]);
+    await expect(f.adapter.listModels()).resolves.toStrictEqual([
+      { id: 'none', name: 'None', efforts: { provenance: 'native', supported: [], default: null } },
+      { id: 'supported', name: 'Supported', efforts: { provenance: 'native', supported: ['max', 'low'], default: null } },
+      { id: 'absent-levels', name: 'Absent levels' },
+      { id: 'empty-levels', name: 'Empty levels' },
+      { id: 'absent-flag', name: 'Absent flag' },
+    ]);
+  });
+
   it('passes phase denials into MCP assembly and SDK options', async () => {
     const f = fixture();
     const toolProfile = { disallowedTools: ['ptah_task_create'], permission: 'allow' as const };
@@ -379,26 +401,56 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     async (request, setting, chat, expected) => {
       const f = fixture();
       f.defaults.mockReturnValue({ effort: setting, chatEffort: chat });
-      await f.adapter.runSdk({
+      const handle = await f.adapter.runSdk({
         ...f.input,
         model: 'native-model',
         reasoningEffort: request,
         role: { name: 'code-reviewer', body: '' } as AgentRoleDefinition,
       });
       expect(f.run.mock.calls[0][0].options.effort).toBe(expected);
+      expect(handle).not.toHaveProperty('effortDelivery');
       f.finish(0);
     },
   );
 
+  it.each(['native-model', 'future-model'])(
+    'keeps the spawn policy omission for %s even when adapter defaults are configured',
+    async (model) => {
+      const f = fixture();
+      const handle = await f.adapter.runSdk({
+        ...f.input,
+        model,
+        reasoningEffortResolved: true,
+        phaseKind: 'review',
+      });
+      expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+      expect(handle).not.toHaveProperty('effortDelivery');
+      f.finish(0);
+    },
+  );
+
+  it('reports when the Claude transport refuses the only effort selected by spawn policy', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({
+      ...f.input,
+      reasoningEffort: 'unsupported',
+      reasoningEffortResolved: true,
+    });
+    expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'lane-refused' });
+    f.finish(0);
+  });
+
   it('does not infer reviewer effort from a name in an implement phase', async () => {
     const f = fixture();
     f.defaults.mockReturnValue({});
-    await f.adapter.runSdk({
+    const handle = await f.adapter.runSdk({
       ...f.input,
       phaseKind: 'implement',
       role: { name: 'custom-reviewer', body: '' } as AgentRoleDefinition,
     });
     expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle).not.toHaveProperty('effortDelivery');
     f.finish(0);
   });
 
@@ -493,8 +545,9 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     const f = fixture();
     f.models.mockRejectedValue(new Error('unavailable'));
     await expect(f.adapter.listModels()).resolves.toEqual([]);
-    await f.adapter.runSdk({ ...f.input, reasoningEffort: 'high' });
+    const handle = await f.adapter.runSdk({ ...f.input, reasoningEffort: 'high' });
     expect(f.run.mock.calls[0][0].options.effort).toBeUndefined();
+    expect(handle.effortDelivery).toEqual({ sent: null, disposition: 'lane-refused' });
     f.finish(0);
   });
 

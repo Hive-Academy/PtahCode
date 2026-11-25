@@ -14,7 +14,7 @@ import {
   STALENESS_AGE_MS,
 } from '../routing-constants';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
-import { SEED_NOTE, SEED_SOURCE_REF, isStale } from './seed-matrix';
+import * as seedMatrix from './seed-matrix';
 import {
   FAMILY_PROFILE_MODEL,
   type MatrixCell,
@@ -38,6 +38,7 @@ const HOME = join('C:', 'ptah-home');
 const USER_PATH = capabilityMatrixUserPath(HOME);
 const VIEW_PATH = capabilityMatrixViewPath(HOME);
 const NOW = Date.parse('2026-10-15T00:00:00.000Z');
+const { SEED_NOTE, SEED_SOURCE_REF, isStale } = seedMatrix;
 
 function coded(message: string, code: string): Error {
   const error = new Error(message);
@@ -195,6 +196,7 @@ function summary(
     inputTokens: null,
     outputTokens: null,
     costUsd: null,
+    effort: partial.effort,
   };
 }
 
@@ -410,6 +412,63 @@ describe('CapabilityMatrixStore', () => {
     expect(snapshot.resolve('z-ai', 'glm-5', 'plan').layers).toEqual({});
   });
 
+  it('resolves pair profiles before model-wide profiles in each layer and excludes them from the view', async () => {
+    const seed = seedMatrix.buildSeedMatrix(NOW);
+    const [modelSeed] = seed.profiles;
+    if (modelSeed === undefined) throw new Error('expected a model seed');
+    const highSeed: MatrixProfile = {
+      ...modelSeed,
+      effort: 'high',
+      cells: { ...modelSeed.cells, implement: { ...valueCell(modelSeed.cells.implement), score: 95 } },
+    };
+    const seedSpy = jest.spyOn(seedMatrix, 'buildSeedMatrix')
+      .mockReturnValue({ ...seed, profiles: [modelSeed, highSeed] });
+
+    try {
+      const { store, files } = harness();
+      writeUser(files, [
+        profile('z-ai', 'glm-5', { implement: userCell(42), plan: userCell(73) }),
+        { ...profile('z-ai', 'glm-5', { implement: userCell(64) }), effort: 'high' },
+        { ...profile('z-ai', 'glm-5', { implement: userCell(35) }), effort: 'low' },
+        { ...profile('z-ai', 'effort-only', { implement: userCell(71) }), effort: 'high' },
+      ]);
+
+      const off = await load(store);
+      const before = files.files.get(VIEW_PATH);
+      const on = await store.load({ nowMs: NOW, outcomeQueries: [], choice: true });
+      expect(on.resolvePair?.('z-ai', 'glm-5', 'implement', 'high')?.layers).toMatchObject({
+        user: { score: 64 },
+        seed: { score: 95 },
+      });
+      expect(on.resolvePair?.('z-ai', 'glm-5', 'plan', 'high')?.layers).toMatchObject({
+        user: { score: 73 },
+      });
+      expect(on.resolvePair?.('z-ai', 'glm-5', 'implement', 'low')?.layers).toMatchObject({
+        user: { score: 35 },
+        seed: { score: 80 },
+      });
+      expect(on.resolvePair?.('z-ai', 'glm-5', 'implement', 'medium')?.layers).toMatchObject({
+        user: { score: 42 },
+        seed: { score: 80 },
+      });
+      expect(on.resolvePair?.('z-ai', 'effort-only', 'implement', 'high')).toMatchObject({
+        score: 71,
+        profileModel: 'effort-only',
+      });
+      expect(on.resolve('z-ai', 'effort-only', 'implement').noProfile).toBe(true);
+      const ordinary = on.resolve('z-ai', 'glm-5', 'implement');
+      expect(ordinary.layers).toMatchObject({ user: { score: 42 }, seed: { score: 80 } });
+      expect(off.resolve('z-ai', 'glm-5', 'implement')).toEqual(ordinary);
+      expect(files.files.get(VIEW_PATH)).toBe(before);
+      const view = await store.readMergedView();
+      expect(view.profiles.map(({ model }) => model)).toEqual(['glm-5']);
+      expect(view.profiles[0]?.cells.implement).toMatchObject({ source: 'user', score: 42 });
+      expect(on.evidence?.cells()).toEqual([]);
+    } finally {
+      seedSpy.mockRestore();
+    }
+  });
+
   it('replaces the seed with blended local cells (Req 6.6, Req 8)', async () => {
     const four = harness({
       reader: outcomeReader({ summaries: deliveredRuns(4) }).reader,
@@ -457,6 +516,10 @@ describe('CapabilityMatrixStore', () => {
           score: 80,
           source: 'seed',
           sourceRef: SEED_SOURCE_REF,
+          sourceId: 'swe-bench-verified',
+          licenseId: 'NOASSERTION',
+          fetchedAt: '2026-10-14',
+          sourceRow: 'GLM-5 high',
           asOf: '2026-02-17',
           stale: true,
           note: SEED_NOTE,
@@ -729,6 +792,48 @@ describe('CapabilityMatrixStore', () => {
     expect(
       snapshot.resolve('z-ai', LANE_DEFAULT_MODEL, 'implement').profileModel,
     ).toBe(FAMILY_PROFILE_MODEL);
+  });
+
+  it('shares one outcome read per load and gates choice evidence and figure keys on choice mode', async () => {
+    const summaries: LaneOutcomeSummary[] = [
+      ...deliveredRuns(1).map((run) => ({ ...run, effort: 'high' as const })),
+      summary({
+        runId: 'failed-medium',
+        family: 'z-ai',
+        model: 'glm-5',
+        taskKind: 'implement',
+        verdict: 'failed',
+        effort: 'medium',
+        endedAt: NOW,
+      }),
+    ];
+    const { reader, calls } = outcomeReader({ summaries });
+    const { store } = harness({ reader });
+    const input = { nowMs: NOW, outcomeQueries: [{ laneId: 'codex', subagent: false }] };
+    const off = await store.load(input);
+    const explicitOff = await store.load({ ...input, choice: false });
+    const on = await store.load({ ...input, choice: true });
+
+    for (const snapshot of [off, explicitOff]) {
+      expect(Object.keys(snapshot)).toEqual(['reasons', 'outcomeFigures', 'resolve']);
+      expect(snapshot.outcomeFigures('codex', 'implement')).toEqual({
+        laneId: 'codex', taskKind: 'implement', delivered: 1, failed: 1,
+      });
+    }
+    expect(on.outcomeFigures('codex', 'implement')).toBeNull();
+    expect(on.outcomeFigures('codex', 'implement', 'glm-5', 'high')).toEqual({
+      laneId: 'codex', taskKind: 'implement', model: 'glm-5', effort: 'high', delivered: 1, failed: 0,
+    });
+    expect(on.outcomeFigures('codex', 'implement', 'glm-5', 'medium')).toEqual({
+      laneId: 'codex', taskKind: 'implement', model: 'glm-5', effort: 'medium', delivered: 0, failed: 1,
+    });
+    expect(on.evidence?.cell({ family: 'z-ai', model: 'glm-5', effort: 'high', taskKind: 'implement' })?.funnel)
+      .toMatchObject({ delivered: 1, failed: 0 });
+    expect(on.evidence?.routedRuns('codex', 'implement')).toBe(2);
+    expect(on.resolve('z-ai', 'glm-5', 'implement')).toEqual(off.resolve('z-ai', 'glm-5', 'implement'));
+    expect(calls).toEqual(Array.from({ length: 3 }, () => ({
+      laneId: 'codex', sinceMs: NOW - OUTCOME_WINDOW_MS,
+    })));
   });
 
   it('skips local cells when the outcome store is not persistent', async () => {

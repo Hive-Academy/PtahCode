@@ -53,6 +53,20 @@ const columns = [
   ['reviseRounds', 'revise_rounds'],
   ['finalReview', 'final_review'],
   ['deliverablesDeclaredAt', 'deliverables_declared_at'],
+  ['modelSource', 'model_source'],
+  ['resolvedModel', 'resolved_model'],
+  ['resolvedModelProvenance', 'resolved_model_provenance'],
+  ['requestedEffort', 'requested_effort'],
+  ['effort', 'effort'],
+  ['effortSource', 'effort_source'],
+  ['effortProvenance', 'effort_provenance'],
+  ['effortDisposition', 'effort_disposition'],
+  ['resolvedEffort', 'resolved_effort'],
+  ['resolvedEffortProvenance', 'resolved_effort_provenance'],
+  ['routedModel', 'routed_model'],
+  ['routedEffort', 'routed_effort'],
+  ['decisionModel', 'decision_model'],
+  ['proposalConfidence', 'proposal_confidence'],
 ] as const;
 const names = columns.map(([, column]) => column);
 const INSERT = `INSERT OR IGNORE INTO lane_outcome_records (${names.join(', ')}, created_at, updated_at) VALUES (${names.map(() => '?').join(', ')}, ?, ?)`;

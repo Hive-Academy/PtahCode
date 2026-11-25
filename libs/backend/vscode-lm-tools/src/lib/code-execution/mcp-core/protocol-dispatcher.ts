@@ -1417,6 +1417,7 @@ async function handleIndividualTool(
                   effort: spawnArgs.effort,
                   taskKind: spawnArgs.taskKind,
                   routingSource: spawnArgs.routingSource,
+                  route: spawnArgs.route,
                   accountSelection: spawnArgs.accountSelection,
                   permission: spawnArgs.permission,
                   network: spawnArgs.network,

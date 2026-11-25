@@ -245,15 +245,16 @@ describe('migration 0077_code_symbol_files — real runner (skipped without nati
   });
 
   maybe(
-    'applies through the runner: user_version 77, recorded once, reopen applies nothing',
+    'applies through the runner: user_version reaches latest, recorded once, reopen applies nothing',
     async () => {
+      const latestVersion = MIGRATIONS[MIGRATIONS.length - 1].version;
       const dbPath = makeTempDbPath();
       const service = new SqliteConnectionService(dbPath, createMockLogger());
       await service.openAndMigrate();
 
       expect(
         service.db.prepare('PRAGMA user_version').get(),
-      ).toEqual({ user_version: 77 });
+      ).toEqual({ user_version: latestVersion });
       expect(
         service.db
           .prepare(
@@ -272,7 +273,7 @@ describe('migration 0077_code_symbol_files — real runner (skipped without nati
 
       expect(
         reopened.db.prepare('PRAGMA user_version').get(),
-      ).toEqual({ user_version: 77 });
+      ).toEqual({ user_version: latestVersion });
       expect(
         reopened.db
           .prepare(`SELECT COUNT(*) AS n FROM schema_migrations`)

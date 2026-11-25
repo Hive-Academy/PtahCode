@@ -6,6 +6,7 @@
  * `recheckAfterLiveNotFound`. This service never calls `markUnsupported`
  * (decision #46, R3-2).
  */
+import { randomUUID } from 'node:crypto';
 import {
   GateResultSchema,
   PreflightResultSchema,
@@ -22,7 +23,9 @@ import {
   isRetiredRole,
   loggableErrorName,
   type LoggableErrorName,
+  type RouteSpawnFacts,
 } from '@ptah-extension/shared';
+import type { LaneCatalogRefresher, LaneCatalogSnapshotReader } from './catalog/lane-catalog.types';
 import type { DecisionModelConfig } from './decision-model/decision-model.config';
 import { DecisionCaller } from './decision-model/decision-caller';
 import type { StructuredDecisionCompleter } from './decision-model/structured-decision.port';
@@ -91,6 +94,7 @@ import {
 import { overallConfidence } from './reasons/confidence';
 import { compilePreflightReasons } from './reasons/compile-reasons';
 import { gateSummary, preflightSummary, type DecisionSummaryFacts } from './reasons/decision-summary';
+import { RouteRecordRegistry, type RouteRecordReader } from './route/route-record.registry';
 import type { PreflightReuseCache } from './scope/preflight-reuse-cache';
 import type { RoutingRulesSetting } from './scope/routing-rules-setting';
 import {
@@ -117,6 +121,9 @@ export interface RouteDecideSeams {
 export interface RouteDecideDependencies {
   readonly routingRulesSetting?: Pick<RoutingRulesSetting, 'read'>;
   readonly rotationSetting?: { isEnabled(): boolean };
+  readonly performanceRouting?: { isEnabled(): boolean };
+  readonly catalog?: Pick<LaneCatalogSnapshotReader, 'get'> & LaneCatalogRefresher;
+  readonly newRouteId?: () => string;
   readonly config: DecisionModelConfig;
   readonly readPrefillTokensPerSecond?: () => unknown;
   readonly matrix: RouteMatrix;
@@ -142,9 +149,10 @@ export interface RotationStateReader {
   getLastPicks(): { readonly entries: readonly RotationPick[]; readonly reason: string | null };
 }
 
-export class RouteDecideService implements RotationStateReader {
+export class RouteDecideService implements RotationStateReader, RouteRecordReader {
   private rotationWrites = Promise.resolve();
   private readonly decisionCaller: DecisionCaller;
+  private readonly routeRecords = new RouteRecordRegistry();
 
   constructor(private readonly deps: RouteDecideDependencies) {
     this.decisionCaller = new DecisionCaller(deps);
@@ -153,6 +161,10 @@ export class RouteDecideService implements RotationStateReader {
   getLastPicks(): { readonly entries: readonly RotationPick[]; readonly reason: string | null } {
     const loaded = this.deps.rotation.load();
     return { entries: loaded.state.entries, reason: loaded.reason };
+  }
+
+  spawnFacts(routeId: string, phaseId: string): RouteSpawnFacts | null {
+    return this.routeRecords.spawnFacts(routeId, phaseId);
   }
 
   async decide(
@@ -276,6 +288,8 @@ export class RouteDecideService implements RotationStateReader {
     deadline: RouteDeadline,
     ioDeadline: RouteDeadline,
   ): Promise<GateResult> {
+    const choice = this.deps.performanceRouting?.isEnabled() ?? false;
+    const routeId = (this.deps.newRouteId ?? randomUUID)();
     const rotate = this.deps.rotationSetting?.isEnabled() ?? true;
     const routingRules = this.deps.routingRulesSetting?.read();
     const [caller, gathered] = await Promise.all([
@@ -283,6 +297,8 @@ export class RouteDecideService implements RotationStateReader {
       gatherRouteCall({
         source,
         listing: this.deps.listing,
+        choice,
+        catalog: this.deps.catalog,
         matrix: this.deps.matrix,
         rotation: this.deps.rotation,
         logger: this.deps.logger,
@@ -355,6 +371,7 @@ export class RouteDecideService implements RotationStateReader {
       inputRowIds,
       tally,
       [pass1Run.outcome, pass2Run.outcome],
+      routeId,
     );
     const costReasons = new Map<string, string>();
     for (const [pass, run] of [[pass1, pass1Run], [pass2, pass2Run]] as const) {
@@ -393,6 +410,7 @@ export class RouteDecideService implements RotationStateReader {
     if (!validated.success) {
       throw schemaError('route decide result failed schema', validated.error);
     }
+    this.routeRecords.store(routeId, validated.data.roster, decisionModelIdOf(caller));
     if (!gathered.rotationUnavailable) {
       let picks = emptyRotationState();
       for (const row of validated.data.roster) {
@@ -667,6 +685,12 @@ function unavailableReadTimedOut(
   const target = inventory.find((candidate) => candidate.id === pin) ??
     inventory.find((candidate) => candidate.kind === 'lane' && candidate.cli === pin);
   return target !== undefined && timedOut.has(target.id);
+}
+
+function decisionModelIdOf(caller: OpenedCaller): string | null {
+  if (caller.kind === 'system-one') return `${caller.selection.kind}:${caller.target.model}`;
+  if (caller.kind === 'structured') return `structured:${caller.providerId}/${caller.model}`;
+  return null;
 }
 
 function errorFacts(error: unknown): { readonly name: LoggableErrorName } {

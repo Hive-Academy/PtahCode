@@ -21,6 +21,7 @@ export {
   AgentMessageRpcHandlers,
   AgentOutcomeRpcHandlers,
   CapabilityMatrixRpcHandlers,
+  RoutingEvidenceRpcHandlers,
   AnalyticsRpcHandlers,
   DecisionModelCatalogRpcHandlers,
   CommandRpcHandlers,

@@ -8,12 +8,14 @@ import {
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
+import type { ModelEffort } from '../contracts/route-decide-result.schema';
 import { NEUTRAL_SCORE, OUTCOME_WINDOW_MS } from '../routing-constants';
 import type {
   LaneRoutingLogMeta,
   LaneRoutingLogger,
 } from '../lane-routing-logger';
 import { CapabilityMatrixSchema } from './matrix.schema';
+import { ANY_EFFORT, deriveChoiceEvidence, type ChoiceEvidence } from './choice-evidence';
 import {
   CAPABILITY_MATRIX_VERSION,
   FAMILY_PROFILE_MODEL,
@@ -93,6 +95,7 @@ export interface MatrixOutcomeQuery {
 export interface MatrixLoadInput {
   readonly nowMs: number;
   readonly outcomeQueries: readonly MatrixOutcomeQuery[];
+  readonly choice?: boolean;
 }
 
 /** Value cells for the same resolved profile and task kind. */
@@ -123,10 +126,17 @@ export interface CapabilityMatrixSnapshot {
   /** `matrix-invalid:` entries, then an outcome-reader reason when one applies. */
   readonly reasons: readonly string[];
   readonly outcomeFigures: OutcomeFigureLookup;
+  readonly evidence?: ChoiceEvidence;
   resolve(
     family: string,
     model: string,
     taskKind: OutcomeTaskKind,
+  ): ResolvedMatrixCell;
+  resolvePair?(
+    family: string,
+    model: string,
+    taskKind: OutcomeTaskKind,
+    effort: ModelEffort,
   ): ResolvedMatrixCell;
 }
 
@@ -169,8 +179,9 @@ interface LayerLoad {
   readonly reasons: readonly string[];
 }
 
-interface LocalLoad extends LayerLoad {
-  readonly outcomeFigures: OutcomeFigureLookup;
+interface OutcomeLoad {
+  readonly summaries?: readonly LaneOutcomeSummary[];
+  readonly reasons: readonly string[];
 }
 
 interface ProfileIndex {
@@ -211,26 +222,41 @@ export class CapabilityMatrixStore {
    * Reads the user file at most once. Writes the view only on change.
    */
   async load(input: MatrixLoadInput): Promise<CapabilityMatrixSnapshot> {
-    if (!Number.isFinite(input.nowMs)) {
+    const { nowMs, outcomeQueries, choice = false } = input;
+    if (!Number.isFinite(nowMs)) {
       throw new Error('nowMs must be a finite epoch millisecond');
     }
     const userLoad = await this.readUserMatrix();
-    const localLoad = await this.readLocalMatrix(
-      input.nowMs,
-      input.outcomeQueries,
-    );
+    const { summaries, reasons } = await this.readLaneOutcomes(nowMs, outcomeQueries);
+    const local = summaries === undefined ? emptyMatrix() : deriveLocalMatrix(summaries, nowMs);
+    const outcomeFigures = summaries === undefined
+      ? EMPTY_OUTCOME_FIGURES
+      : outcomeFiguresFrom(summaries, { byModelEffort: choice });
+    const seed = buildSeedMatrix(nowMs);
     const layers = [
       indexMatrix(userLoad.matrix),
-      indexMatrix(localLoad.matrix),
-      indexMatrix(buildSeedMatrix(input.nowMs)),
+      indexMatrix(local),
+      indexMatrix(seed),
     ] as const;
-    await this.writeViewIfChanged(layers, input.nowMs);
-    return {
-      reasons: [...userLoad.reasons, ...localLoad.reasons],
-      outcomeFigures: localLoad.outcomeFigures,
+    const snapshot: CapabilityMatrixSnapshot = {
+      reasons: [...userLoad.reasons, ...reasons],
+      outcomeFigures,
       resolve: (family, model, taskKind) =>
-        resolveIndexed(layers, family, model, taskKind, input.nowMs),
+        resolveIndexed(layers, family, model, taskKind, nowMs),
+      ...(choice
+        ? {
+            evidence: deriveChoiceEvidence(summaries ?? [], nowMs, seed.profiles),
+            resolvePair: (
+              family: string,
+              model: string,
+              taskKind: OutcomeTaskKind,
+              effort: ModelEffort,
+            ) => resolveIndexed(layers, family, model, taskKind, nowMs, effort),
+          }
+        : {}),
     };
+    await this.writeViewIfChanged(layers, nowMs);
+    return snapshot;
   }
 
   private async readUserMatrix(createTemplate = true): Promise<LayerLoad> {
@@ -296,62 +322,36 @@ export class CapabilityMatrixStore {
     return { matrix: validated.data, reasons: [] };
   }
 
-  private async readLocalMatrix(
+  private async readLaneOutcomes(
     nowMs: number,
     queries: readonly MatrixOutcomeQuery[],
-  ): Promise<LocalLoad> {
+  ): Promise<OutcomeLoad> {
     const reader = this.deps.outcomeReader;
     if (reader === undefined) {
-      return {
-        matrix: emptyMatrix(),
-        reasons: [OUTCOMES_UNAVAILABLE_REASON],
-        outcomeFigures: EMPTY_OUTCOME_FIGURES,
-      };
+      return { reasons: [OUTCOMES_UNAVAILABLE_REASON] };
     }
     const persistent = this.readPersistent(reader);
     if (persistent === 'unavailable') {
-      return {
-        matrix: emptyMatrix(),
-        reasons: [OUTCOMES_UNAVAILABLE_REASON],
-        outcomeFigures: EMPTY_OUTCOME_FIGURES,
-      };
+      return { reasons: [OUTCOMES_UNAVAILABLE_REASON] };
     }
     if (persistent === 'no') {
-      return {
-        matrix: emptyMatrix(),
-        reasons: [NO_OUTCOME_HISTORY_REASON],
-        outcomeFigures: EMPTY_OUTCOME_FIGURES,
-      };
+      return { reasons: [NO_OUTCOME_HISTORY_REASON] };
     }
     const laneIds = readerLaneIds(queries);
     if (laneIds.length === 0) {
-      return {
-        matrix: emptyMatrix(),
-        reasons: [],
-        outcomeFigures: EMPTY_OUTCOME_FIGURES,
-      };
+      return { reasons: [] };
     }
     const sinceMs = nowMs - OUTCOME_WINDOW_MS;
-    let summaries: readonly LaneOutcomeSummary[];
     try {
       const batches = await Promise.all(
         laneIds.map((laneId) => reader.recentOutcomes(laneId, { sinceMs })),
       );
-      summaries = flattenSummaries(batches);
+      return { summaries: flattenSummaries(batches), reasons: [] };
     } catch (error: unknown) {
       // degradation-audit: reported - the reader contract never rejects; a throw or a non-array drops local cells for this call
       this.warn('lane outcome read failed', error);
-      return {
-        matrix: emptyMatrix(),
-        reasons: [OUTCOMES_UNAVAILABLE_REASON],
-        outcomeFigures: EMPTY_OUTCOME_FIGURES,
-      };
+      return { reasons: [OUTCOMES_UNAVAILABLE_REASON] };
     }
-    return {
-      matrix: deriveLocalMatrix(summaries, nowMs),
-      reasons: [],
-      outcomeFigures: outcomeFiguresFrom(summaries),
-    };
   }
 
   private async readWorkspaceLocalMatrix(nowMs: number): Promise<LayerLoad> {
@@ -465,13 +465,13 @@ function flattenSummaries(
 function indexMatrix(matrix: CapabilityMatrix): ProfileIndex {
   const byKey = new Map<string, MatrixProfile>();
   for (const profile of matrix.profiles) {
-    byKey.set(profileKey(profile.family, profile.model), profile);
+    byKey.set(profileKey(profile.family, profile.model, profile.effort), profile);
   }
   return { byKey };
 }
 
-function profileKey(family: string, model: string): string {
-  return JSON.stringify([family, model]);
+function profileKey(family: string, model: string, effort?: ModelEffort): string {
+  return JSON.stringify([family, model, effort ?? ANY_EFFORT]);
 }
 
 function resolveIndexed(
@@ -480,16 +480,20 @@ function resolveIndexed(
   model: string,
   taskKind: OutcomeTaskKind,
   nowMs: number,
+  effort?: ModelEffort,
 ): ResolvedMatrixCell {
   const profileModel = profileModelFor(
     model,
-    hasProfile(layers, family, model),
+    hasProfile(layers, profileKey(family, model)) ||
+      (effort !== undefined && hasProfile(layers, profileKey(family, model, effort))),
   );
   const key = profileKey(family, profileModel);
+  const pairKey = effort === undefined ? undefined : profileKey(family, profileModel, effort);
   const [userIndex, localIndex, seedIndex] = layers;
-  const user = valueAt(userIndex, key, taskKind, nowMs);
-  const local = valueAt(localIndex, key, taskKind, nowMs);
-  const seed = valueAt(seedIndex, key, taskKind, nowMs);
+  const user = valueAt(userIndex, key, taskKind, nowMs, pairKey);
+  // The scorer selects pair-local cells from ChoiceEvidence.
+  const local = effort === undefined ? valueAt(localIndex, key, taskKind, nowMs) : undefined;
+  const seed = valueAt(seedIndex, key, taskKind, nowMs, pairKey);
   const cell = user ?? local ?? seed ?? { kind: 'unknown' };
   const scoreLayers: ScoreLayers = {
     ...(user === undefined ? {} : { user }),
@@ -524,12 +528,7 @@ function profileModelFor(model: string, hasExact: boolean): string {
   return model;
 }
 
-function hasProfile(
-  layers: readonly ProfileIndex[],
-  family: string,
-  model: string,
-): boolean {
-  const key = profileKey(family, model);
+function hasProfile(layers: readonly ProfileIndex[], key: string): boolean {
   return layers.some((layer) => layer.byKey.has(key));
 }
 
@@ -553,8 +552,10 @@ function valueAt(
   key: string,
   taskKind: OutcomeTaskKind,
   nowMs: number,
+  pairKey?: string,
 ): ValueMatrixCell | undefined {
-  const cell = index.byKey.get(key)?.cells[taskKind];
+  const pairCell = pairKey === undefined ? undefined : index.byKey.get(pairKey)?.cells[taskKind];
+  const cell = pairCell?.kind === 'value' ? pairCell : index.byKey.get(key)?.cells[taskKind];
   return cell?.kind === 'value' ? { ...cell, stale: isStale(cell.asOf, nowMs) } : undefined;
 }
 
@@ -565,6 +566,7 @@ function viewDocument(
   const keys = new Map<string, { family: string; model: string }>();
   for (const layer of layers) {
     for (const profile of layer.byKey.values()) {
+      if (profile.effort !== undefined) continue;
       keys.set(profileKey(profile.family, profile.model), {
         family: profile.family,
         model: profile.model,

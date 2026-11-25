@@ -4,10 +4,13 @@ import {
   AGENT_SPAWN_ACCOUNT_CLI,
   AgentSpawnArgsSchema,
   MAX_EFFORT_LENGTH,
+  MAX_ROUTE_ID_LENGTH,
+  MAX_ROUTE_PHASE_ID_LENGTH,
   MAX_TASK_LENGTH,
   agentSpawnAccountRefusal,
 } from './agent-spawn-args.schema';
 import { buildAgentSpawnTool } from './tool-description.builder';
+import { buildRouteDecideTool } from './route-tools';
 import { HELP_DOCS } from '../namespace-builders/system-namespace.builders';
 
 describe('AgentSpawnArgsSchema', () => {
@@ -134,6 +137,7 @@ describe('AgentSpawnArgsSchema', () => {
       effort: 'high',
       taskKind: 'review',
       routingSource: 'ranking',
+      route: { routeId: 'route-1', phaseId: 'B9' },
       force: true,
     });
     expect(parsed.success).toBe(true);
@@ -425,5 +429,144 @@ describe('spawn descriptions stay truthful about the claude lane', () => {
     }
     expect(HELP_DOCS['agent']).toContain('accountSelection?');
     expect(HELP_DOCS['orchestration']).not.toContain('Available CLI agents:');
+  });
+
+  it('documents route: { routeId, phaseId } on spawn and route_decide without exposing routeFacts', () => {
+    const routeProp = properties['route'] as
+      | {
+          type?: string;
+          description?: string;
+          required?: string[];
+          additionalProperties?: boolean;
+          properties?: Record<string, { type?: string; minLength?: number; maxLength?: number }>;
+        }
+      | undefined;
+    expect(routeProp?.type).toBe('object');
+    expect(routeProp?.additionalProperties).toBe(false);
+    expect(routeProp?.required).toEqual(['routeId', 'phaseId']);
+    expect(routeProp?.properties?.['routeId']).toMatchObject({
+      type: 'string',
+      minLength: 1,
+      maxLength: MAX_ROUTE_ID_LENGTH,
+    });
+    expect(routeProp?.properties?.['phaseId']).toMatchObject({
+      type: 'string',
+      minLength: 1,
+      maxLength: MAX_ROUTE_PHASE_ID_LENGTH,
+    });
+    expect(routeProp?.description).toContain('route: { routeId, phaseId }');
+    expect(routeProp?.description).toContain('ptah_route_decide');
+    expect(properties['routeFacts']).toBeUndefined();
+
+    const routeDecideDescription = buildRouteDecideTool().description;
+    expect(routeDecideDescription).toContain('route: { routeId, phaseId }');
+    expect(routeDecideDescription).toContain('ptah_agent_spawn');
+  });
+});
+
+describe('AgentSpawnArgsSchema — route', () => {
+  it('accepts route with routeId and phaseId and carries it through JSON', () => {
+    const route = {
+      routeId: '11111111-1111-4111-8111-111111111111',
+      phaseId: 'B9',
+    };
+    const parsed = AgentSpawnArgsSchema.safeParse({ task: 't', route });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.route).toEqual(route);
+    expect(
+      AgentSpawnArgsSchema.parse(
+        JSON.parse(JSON.stringify(parsed.success ? parsed.data : {})),
+      ).route,
+    ).toEqual(route);
+  });
+
+  it('leaves route undefined when omitted', () => {
+    const parsed = AgentSpawnArgsSchema.safeParse({ task: 't' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.route).toBeUndefined();
+  });
+
+  it('bounds routeId to 1..MAX_ROUTE_ID_LENGTH and phaseId to 1..MAX_ROUTE_PHASE_ID_LENGTH', () => {
+    expect(MAX_ROUTE_ID_LENGTH).toBe(64);
+    expect(MAX_ROUTE_PHASE_ID_LENGTH).toBe(64);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: {
+          routeId: 'r'.repeat(MAX_ROUTE_ID_LENGTH),
+          phaseId: 'p'.repeat(MAX_ROUTE_PHASE_ID_LENGTH),
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: {
+          routeId: 'r'.repeat(MAX_ROUTE_ID_LENGTH + 1),
+          phaseId: 'p1',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: {
+          routeId: 'r1',
+          phaseId: 'p'.repeat(MAX_ROUTE_PHASE_ID_LENGTH + 1),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { routeId: '', phaseId: 'p1' },
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { routeId: 'r1', phaseId: '' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects missing fields or an extra key inside route', () => {
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { routeId: 'r1' },
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { phaseId: 'p1' },
+      }).success,
+    ).toBe(false);
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { routeId: 'r1', phaseId: 'p1', laneId: 'codex' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects caller-set routeFacts', () => {
+    expect(
+      AgentSpawnArgsSchema.safeParse({
+        task: 't',
+        route: { routeId: 'r1', phaseId: 'p1' },
+        routeFacts: {
+          routeId: 'r1',
+          phaseId: 'p1',
+          laneId: 'codex',
+          model: 'gpt-5',
+          effort: 'high',
+          source: 'ranking',
+          decisionModel: null,
+          proposalConfidence: null,
+        },
+      }).success,
+    ).toBe(false);
   });
 });

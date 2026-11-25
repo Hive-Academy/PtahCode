@@ -166,6 +166,7 @@ export * from './rpc/rpc-lane-plan-limits.types';
 export * from './rpc/rpc-lane-outcome.types';
 
 export * from './rpc/rpc-capability-matrix.types';
+export * from './rpc/rpc-routing-evidence.types';
 
 export * from './rpc/rpc-decision-model-catalog.types';
 
@@ -201,6 +202,11 @@ import type {
   AgentGetCapabilityMatrixParams,
   AgentGetCapabilityMatrixResult,
 } from './rpc/rpc-capability-matrix.types';
+
+import type {
+  AgentGetRoutingEvidenceParams,
+  AgentGetRoutingEvidenceResult,
+} from './rpc/rpc-routing-evidence.types';
 
 import type {
   AgentListDecisionModelsParams,
@@ -2069,6 +2075,10 @@ export interface RpcMethodRegistry
   'agent:getCapabilityMatrix': {
     params: AgentGetCapabilityMatrixParams;
     result: AgentGetCapabilityMatrixResult;
+  };
+  'agent:getRoutingEvidence': {
+    params: AgentGetRoutingEvidenceParams;
+    result: AgentGetRoutingEvidenceResult;
   };
   /**
    * Decision-capable models of one host, for the decision-model picker
@@ -3972,6 +3982,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:outcomeSignals': true,
   // Routing-learning item 7. `agent:` is already in ALLOWED_METHOD_PREFIXES.
   'agent:getCapabilityMatrix': true,
+  'agent:getRoutingEvidence': true,
   'agent:listDecisionModels': true,
   'ptahCli:list': true,
   'ptahCli:create': true,

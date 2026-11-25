@@ -63,6 +63,18 @@ describe('probeCliStdout', () => {
     });
   });
 
+  it('discards stdout from failed exits when a successful command is required', async () => {
+    const child = createChild();
+    mockSpawnCli.mockReturnValue(child);
+
+    const result = probeCliStdout('tool', ['--help'], { timeoutMs: 1000, requireSuccess: true });
+    child.stdout.write('  --effort <level>');
+    await flush();
+    child.emit('close', 1);
+
+    await expect(result).resolves.toBeUndefined();
+  });
+
   it('resolves undefined for empty output', async () => {
     const child = createChild();
     mockSpawnCli.mockReturnValue(child);

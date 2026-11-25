@@ -14,6 +14,7 @@
  */
 
 import type { AgentStatus, LaneCompletionVerdict } from './agent-process.types';
+import type { EffortDisposition, ValueProvenance } from './lane-native-values.types';
 import type { PhaseKind } from './phase-contract.types';
 
 /**
@@ -84,6 +85,15 @@ export const SUBAGENT_LANE_ID = 'subagent';
  */
 export const LANE_DEFAULT_MODEL = 'lane-default';
 
+/** How the requested model was chosen (cli-agent-runtime `LaneModelSource`, cli-adapter.interface.ts:142-143). */
+export const OUTCOME_MODEL_SOURCES = ['request', 'setting', 'ptah-default', 'cli-default'] as const;
+export type OutcomeModelSource = (typeof OUTCOME_MODEL_SOURCES)[number];
+/** Which R2.3 step produced the sent effort (lane-spawn-policy.ts:310-311). */
+export const OUTCOME_EFFORT_SOURCES = ['request', 'setting', 'chat', 'role-default', 'chat-fallback', 'none'] as const;
+export type OutcomeEffortSource = (typeof OUTCOME_EFFORT_SOURCES)[number];
+/** Same value as vscode-lm-tools MAX_EFFORT_LENGTH (agent-spawn-args.schema.ts:75). */
+export const MAX_OUTCOME_EFFORT_LENGTH = 32;
+
 /** One completed lane run, as the outcome pipeline persists it. */
 export interface LaneOutcomeRecord {
   /** Lane: `${agentId}:${completedAt}` (the notifier dedup key); subagent: `subagent:${agentId}`. */
@@ -134,6 +144,27 @@ export interface LaneOutcomeRecord {
   readonly skillsLoaded: readonly string[] | null;
   /** `skill_session_verdicts.evidence_class` for the run's session, if a row exists. */
   readonly sessionEvidenceClass: string | null;
+  readonly modelSource?: OutcomeModelSource | null;
+  /** Model the lane reported it ran (2.12.3). Null: not reported, or old row. */
+  readonly resolvedModel?: string | null;
+  /** `native` when resolvedModel is set, `unknown` when the lane reported none. Null: old row. */
+  readonly resolvedModelProvenance?: Extract<ValueProvenance, 'native' | 'unknown'> | null;
+  /** First effort value offered by the R2.3 precedence (FA8.4 "requested value"). */
+  readonly requestedEffort?: string | null;
+  /** Effort sent to the CLI. Null: none sent, or old row. */
+  readonly effort?: string | null;
+  readonly effortSource?: OutcomeEffortSource | null;
+  /** Provenance of the list that checked or mapped the effort. */
+  readonly effortProvenance?: ValueProvenance | null;
+  readonly effortDisposition?: EffortDisposition | null;
+  /** Effort the lane reported for its session (2.12.3). Null: not reported, or old row. */
+  readonly resolvedEffort?: string | null;
+  readonly resolvedEffortProvenance?: Extract<ValueProvenance, 'native' | 'unknown'> | null;
+  readonly routedModel?: string | null;
+  readonly routedEffort?: string | null;
+  /** `<kind>:<model>` of the System One model that proposed; null: no proposal. */
+  readonly decisionModel?: string | null;
+  readonly proposalConfidence?: number | null;
 }
 
 /** What routing reads. Holds no text. */
@@ -154,6 +185,20 @@ export type LaneOutcomeSummary = Pick<
   | 'inputTokens'
   | 'outputTokens'
   | 'costUsd'
+  | 'modelSource'
+  | 'resolvedModel'
+  | 'resolvedModelProvenance'
+  | 'requestedEffort'
+  | 'effort'
+  | 'effortSource'
+  | 'effortProvenance'
+  | 'effortDisposition'
+  | 'resolvedEffort'
+  | 'resolvedEffortProvenance'
+  | 'routedModel'
+  | 'routedEffort'
+  | 'decisionModel'
+  | 'proposalConfidence'
 >;
 
 export interface OutcomeRatio {

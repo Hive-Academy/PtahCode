@@ -13,7 +13,10 @@ import type {
   CodexAuthService,
   CopilotAuthService,
 } from '@ptah-extension/auth-providers';
-import type { AgentListCliModelsResult } from '@ptah-extension/shared';
+import type {
+  AgentListCliModelsResult,
+  EffortSupport,
+} from '@ptah-extension/shared';
 import { providerReported } from '@ptah-extension/shared';
 import { CliModelListService } from './cli-model-list.service';
 
@@ -28,12 +31,17 @@ function makeHarness() {
     grok: [{ id: 'grok-model', name: 'Grok model' }],
     claude: [{ id: 'claude-model', name: 'Claude model' }],
   };
-  const codexAdapter = { listCatalogModels: jest.fn().mockResolvedValue([]) };
+  const codexAdapter = {
+    listCatalogModels: jest.fn().mockResolvedValue([]),
+    laneEfforts: jest.fn(),
+  };
   const cliDetection = {
     listModelsForAll: jest.fn().mockResolvedValue(modelMap),
     getAdapter: jest.fn((cli: string) =>
       cli === 'codex' ? codexAdapter : undefined,
     ),
+    nativeEfforts: jest.fn((): EffortSupport => ({ provenance: 'unknown' })),
+    recordNativeCatalog: jest.fn(),
   };
   const modelDiscovery = { getCopilotModels: jest.fn().mockResolvedValue([]) };
   const codexAuth = { listModels: jest.fn().mockResolvedValue([]) };
@@ -59,14 +67,29 @@ describe('CliModelListService', () => {
   describe('lane source order', () => {
     it('prefers the installed Codex CLI catalog over the account list', async () => {
       const h = makeHarness();
-      h.codexAdapter.listCatalogModels.mockResolvedValue([
-        { id: 'gpt-6-sol', name: 'GPT-6-Sol' },
-      ]);
+      const catalog = [
+        {
+          id: 'gpt-6-sol',
+          name: 'GPT-6-Sol',
+          isDefault: true,
+          efforts: {
+            provenance: 'native',
+            supported: ['vendor-max', 'low'],
+            default: 'vendor-max',
+          },
+        },
+      ] as const;
+      h.codexAdapter.listCatalogModels.mockResolvedValue(catalog);
       h.codexAuth.listModels.mockResolvedValue([
         { id: 'gpt-6.1-sol', name: 'Too new for this CLI' },
       ]);
       const result = await h.service.listForClassification();
-      expect(result.codex).toEqual([{ id: 'gpt-6-sol', name: 'GPT-6-Sol' }]);
+      expect(result.codex).toEqual(catalog);
+      expect(h.cliDetection.recordNativeCatalog).toHaveBeenCalledTimes(1);
+      expect(h.cliDetection.recordNativeCatalog).toHaveBeenCalledWith(
+        'codex',
+        catalog,
+      );
       expect(h.codexAuth.listModels).not.toHaveBeenCalled();
     });
 
@@ -81,6 +104,69 @@ describe('CliModelListService', () => {
       ]);
       expect(result.copilot[0]).not.toHaveProperty('isFallback');
     });
+  });
+
+  describe('effortSupport', () => {
+    it('prefers native registry efforts, including a known empty list', () => {
+      const h = makeHarness();
+      const native = {
+        provenance: 'native',
+        supported: [],
+        default: null,
+      } as const;
+      h.cliDetection.nativeEfforts.mockReturnValue(native);
+
+      expect(h.service.effortSupport('codex', 'test-model')).toBe(native);
+      expect(h.cliDetection.nativeEfforts).toHaveBeenCalledWith(
+        'codex',
+        'test-model',
+      );
+      expect(h.cliDetection.getAdapter).not.toHaveBeenCalled();
+    });
+
+    it.each([{ supported: ['high', 'low'] }, { supported: [] }])(
+      'labels the adapter fallback list $supported',
+      ({ supported }) => {
+        const h = makeHarness();
+        h.codexAdapter.laneEfforts.mockReturnValue(supported);
+
+        expect(h.service.effortSupport('codex', 'test-model')).toEqual({
+          provenance: 'ptah-fallback',
+          supported,
+          default: null,
+        });
+        expect(h.codexAdapter.laneEfforts).toHaveBeenCalledWith('test-model');
+      },
+    );
+
+    it('returns unknown when there is no native list or adapter fallback', () => {
+      const h = makeHarness();
+      expect(h.service.effortSupport('cursor', 'test-model')).toEqual({
+        provenance: 'unknown',
+      });
+      expect(h.cliDetection.getAdapter).toHaveBeenCalledWith('cursor');
+    });
+  });
+
+  it('shares concurrent model reads and starts a new load after success', async () => {
+    const h = makeHarness();
+    const [first, classified, second] = await Promise.all([
+      h.service.listAll(),
+      h.service.listForClassification(),
+      h.service.listAll(),
+    ]);
+
+    expect(first).toBe(second);
+    expect(classified.cursor).toBe(first.cursor);
+    expect(h.cliDetection.listModelsForAll).toHaveBeenCalledTimes(1);
+    expect(h.codexAdapter.listCatalogModels).toHaveBeenCalledTimes(1);
+    expect(h.cliDetection.recordNativeCatalog).not.toHaveBeenCalled();
+    expect(h.codexAuth.listModels).toHaveBeenCalledTimes(1);
+    expect(h.modelDiscovery.getCopilotModels).toHaveBeenCalledTimes(1);
+    expect(h.copilotAuth.listModels).toHaveBeenCalledTimes(1);
+
+    await h.service.listAll();
+    expect(h.cliDetection.listModelsForAll).toHaveBeenCalledTimes(2);
   });
 
   describe('listForClassification', () => {
@@ -292,12 +378,18 @@ describe('CliModelListService', () => {
     expect(result.copilot).toEqual([]);
   });
 
-  it('propagates a top-level detector failure to the existing RPC error handler', async () => {
+  it('propagates a shared detector failure and retries the next load', async () => {
     const h = makeHarness();
     const error = new Error('detector failed');
-    h.cliDetection.listModelsForAll.mockRejectedValue(error);
-    await expect(h.service.listAll()).rejects.toBe(error);
+    h.cliDetection.listModelsForAll.mockRejectedValueOnce(error);
+    await Promise.all([
+      expect(h.service.listAll()).rejects.toBe(error),
+      expect(h.service.listForClassification()).rejects.toBe(error),
+    ]);
+    expect(h.cliDetection.listModelsForAll).toHaveBeenCalledTimes(1);
     expect(h.codexAuth.listModels).not.toHaveBeenCalled();
     expect(h.modelDiscovery.getCopilotModels).not.toHaveBeenCalled();
+    await expect(h.service.listAll()).resolves.toEqual(h.modelMap);
+    expect(h.cliDetection.listModelsForAll).toHaveBeenCalledTimes(2);
   });
 });

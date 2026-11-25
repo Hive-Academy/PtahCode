@@ -21,11 +21,13 @@ import {
 } from '@ptah-extension/platform-core';
 import type { LaneOutcomeReader } from '@ptah-extension/shared';
 
+import { LaneCatalogStore } from '../catalog/lane-catalog.store';
 import { DecisionModelCatalog } from '../decision-model/decision-model.catalog';
 import { DecisionModelConfig } from '../decision-model/decision-model.config';
 import { DecisionCaller } from '../decision-model/decision-caller';
 import { SkillRankingCallerService } from '../decision-model/skill-ranking-caller.service';
 import type { StructuredDecisionCompleter } from '../decision-model/structured-decision.port';
+import { RoutingEvidenceService } from '../evidence/routing-evidence.service';
 import { DecisionModelFailureClassifier } from '../failure-class/decision-model-failure-classifier';
 import type { LaneModelListing } from '../lane-model-listing.port';
 import type { PhaseDefinitionReader } from '../phase-definition-reader.port';
@@ -35,6 +37,7 @@ import { RotationStore } from '../ranking/rotation.store';
 import { RouteDecideService } from '../route-decide.service';
 import { HostRoutingSetting } from '../scope/host-routing-setting';
 import { LaneRotationSetting } from '../scope/lane-rotation-setting';
+import { PerformanceRoutingSetting } from '../scope/performance-routing-setting';
 import { RoutingRulesSetting } from '../scope/routing-rules-setting';
 import { PreflightReuseCache } from '../scope/preflight-reuse-cache';
 import { ScopeCheckService } from '../scope/scope-check.service';
@@ -203,6 +206,25 @@ export function registerLaneRoutingServices(
     ),
   });
 
+  container.register(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE, {
+    useFactory: instanceCachingFactory((c) => new LaneCatalogStore(
+      c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
+      c.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING),
+      c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+    )),
+  });
+
+  container.register(LANE_ROUTING_TOKENS.ROUTING_EVIDENCE_SERVICE, {
+    useFactory: instanceCachingFactory((c) => new RoutingEvidenceService({
+      catalog: c.resolve<LaneCatalogStore>(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE),
+      outcomeReader: optional<LaneOutcomeReader>(c, LANE_ROUTING_TOKENS.LANE_OUTCOME_READER),
+      performanceRouting: new PerformanceRoutingSetting(
+        c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+        c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+      ),
+    })),
+  });
+
   container.register(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE, {
     useFactory: instanceCachingFactory((c) => {
       const phaseDefinitionReader = optional<PhaseDefinitionReader>(
@@ -231,6 +253,10 @@ export function registerLaneRoutingServices(
           workspace,
           c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
         ),
+        performanceRouting: new PerformanceRoutingSetting(
+          workspace,
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ),
         config: c.resolve<DecisionModelConfig>(
           LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG,
         ),
@@ -242,7 +268,10 @@ export function registerLaneRoutingServices(
         reuse: c.resolve<PreflightReuseCache>(
           LANE_ROUTING_TOKENS.PREFLIGHT_REUSE_CACHE,
         ),
-        ...(listing !== undefined ? { listing } : {}),
+        ...(listing !== undefined ? {
+          listing,
+          catalog: c.resolve<LaneCatalogStore>(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE),
+        } : {}),
         ...(structured !== undefined ? { structured } : {}),
         ...(phaseDefinitionReader !== undefined
           ? { phaseDefinitionReader }

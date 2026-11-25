@@ -16,10 +16,10 @@ jest.mock('@ptah-extension/auth-providers', () => ({
 }));
 
 import type {
-  AgentListCliModelsResult,
   AgentModelEntry,
   AgentModelProvider,
   CliDetectionResult,
+  EffortSupport,
   PtahCliConfig,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -33,7 +33,9 @@ type FetchResult = {
   failureReason?: string;
 };
 
-function emptyListed(): AgentListCliModelsResult {
+type ListedCliModels = Awaited<ReturnType<CliModelListService['listAll']>>;
+
+function emptyListed(): ListedCliModels {
   return {
     codex: [],
     copilot: [],
@@ -82,7 +84,7 @@ function ptahConfig(overrides: Partial<PtahCliConfig> = {}): PtahCliConfig {
 }
 
 function makeHarness(options?: {
-  listed?: AgentListCliModelsResult;
+  listed?: ListedCliModels;
   classified?: Record<AgentModelProvider, AgentModelEntry[]>;
   configs?: PtahCliConfig[];
   apiKey?: string | undefined;
@@ -97,6 +99,9 @@ function makeHarness(options?: {
   );
   const listForClassification = jest.fn(() =>
     Promise.resolve(options?.classified ?? emptyClassified()),
+  );
+  const effortSupport = jest.fn(
+    (): EffortSupport => ({ provenance: 'unknown' }),
   );
   const loadConfigs = jest.fn(() => options?.configs ?? []);
   const fetchModels = jest.fn(
@@ -116,13 +121,9 @@ function makeHarness(options?: {
   const getCredential = jest.fn(() => Promise.resolve(options?.sharedKey));
   const debug = jest.fn();
   const logger: Pick<Logger, 'debug'> = { debug };
-  const cliModels: Pick<
-    CliModelListService,
-    'listAll' | 'listForClassification'
-  > = { listAll, listForClassification };
   const adapter = new LaneModelListingAdapter(
     logger,
-    cliModels,
+    { listAll, listForClassification, effortSupport },
     { loadConfigs },
     { fetchModels },
     { getProviderKey, getCredential },
@@ -131,6 +132,7 @@ function makeHarness(options?: {
     adapter,
     listAll,
     listForClassification,
+    effortSupport,
     loadConfigs,
     fetchModels,
     getProviderKey,
@@ -140,21 +142,32 @@ function makeHarness(options?: {
 }
 
 describe('LaneModelListingAdapter', () => {
-  it('tags a live system-cli id reported and a fallback id fallback', async () => {
+  it('keeps model provenance and prefers native row efforts over the service lookup', async () => {
+    const native = {
+      provenance: 'native',
+      supported: ['vendor-max', 'low'],
+      default: 'vendor-max',
+    } as const;
+    const fallback = {
+      provenance: 'ptah-fallback',
+      supported: ['low', 'high'],
+      default: null,
+    } as const;
     const listed = emptyListed();
     listed.codex = [
-      { id: 'gpt-live', name: 'GPT Live' },
-      { id: 'gpt-old', name: 'GPT Old' },
+      { id: 'gpt-live', name: 'GPT Live', efforts: native },
+      { id: ' gpt-old ', name: 'GPT Old' },
     ];
     const classified = emptyClassified();
     classified.codex = [
       { id: 'gpt-live' },
       { id: 'gpt-old', isFallback: true },
     ];
-    const { adapter, listAll, listForClassification } = makeHarness({
+    const { adapter, listAll, listForClassification, effortSupport } = makeHarness({
       listed,
       classified,
     });
+    effortSupport.mockReturnValue(fallback);
 
     const entries = await adapter.list(
       cliRow('codex'),
@@ -163,10 +176,13 @@ describe('LaneModelListingAdapter', () => {
 
     expect(listAll).toHaveBeenCalledTimes(1);
     expect(listForClassification).toHaveBeenCalledTimes(1);
+    expect(effortSupport).toHaveBeenCalledTimes(1);
+    expect(effortSupport).toHaveBeenCalledWith('codex', 'gpt-old');
     expect(entries).toEqual([
-      { id: 'gpt-live', provenance: 'reported' },
-      { id: 'gpt-old', provenance: 'fallback' },
+      { id: 'gpt-live', provenance: 'reported', efforts: native },
+      { id: 'gpt-old', provenance: 'fallback', efforts: fallback },
     ]);
+    expect(entries[0].efforts).toBe(native);
   });
 
   it('tags an unclassified curated cli list as reported when isFallback is unset', async () => {
@@ -176,7 +192,7 @@ describe('LaneModelListingAdapter', () => {
 
     await expect(
       adapter.list(cliRow('pi'), new AbortController().signal),
-    ).resolves.toEqual([{ id: 'pi-model', provenance: 'reported' }]);
+    ).resolves.toEqual([{ id: 'pi-model', provenance: 'reported', efforts: { provenance: 'unknown' } }]);
   });
 
   it('keeps configured, then tier, then live discovery ids without duplicates', async () => {
@@ -202,10 +218,10 @@ describe('LaneModelListingAdapter', () => {
 
     expect(fetchModels).toHaveBeenCalledWith('openrouter', 'sk-test', false);
     expect(entries).toEqual([
-      { id: 'chosen', provenance: 'configured' },
-      { id: 'tier-s', provenance: 'tier' },
-      { id: 'tier-h', provenance: 'tier' },
-      { id: 'live-new', provenance: 'reported' },
+      { id: 'chosen', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'tier-s', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'tier-h', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'live-new', provenance: 'reported', efforts: { provenance: 'unknown' } },
     ]);
   });
 
@@ -228,8 +244,8 @@ describe('LaneModelListingAdapter', () => {
         new AbortController().signal,
       ),
     ).resolves.toEqual([
-      { id: 'chosen', provenance: 'configured' },
-      { id: 'saved-id', provenance: 'fallback' },
+      { id: 'chosen', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'saved-id', provenance: 'fallback', efforts: { provenance: 'unknown' } },
     ]);
   });
 
@@ -246,10 +262,10 @@ describe('LaneModelListingAdapter', () => {
     );
 
     expect(entries).toEqual([
-      { id: 'chosen', provenance: 'configured' },
-      { id: 'tier-s', provenance: 'tier' },
-      { id: 'tier-o', provenance: 'tier' },
-      { id: 'tier-h', provenance: 'tier' },
+      { id: 'chosen', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'tier-s', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'tier-o', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'tier-h', provenance: 'tier', efforts: { provenance: 'unknown' } },
     ]);
     expect(debug).toHaveBeenCalledTimes(1);
     expect(debug).toHaveBeenCalledWith(
@@ -304,8 +320,8 @@ describe('LaneModelListingAdapter', () => {
         new AbortController().signal,
       ),
     ).resolves.toEqual([
-      { id: 'chosen', provenance: 'configured' },
-      { id: 'tier-s', provenance: 'tier' },
+      { id: 'chosen', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'tier-s', provenance: 'tier', efforts: { provenance: 'unknown' } },
     ]);
     expect(debug).toHaveBeenCalledWith(
       '[LaneModelListing] discovery unavailable',
@@ -418,16 +434,16 @@ describe('LaneModelListingAdapter', () => {
     });
 
     await expect(first).resolves.toEqual([
-      { id: 'chosen-a', provenance: 'configured' },
-      { id: 'tier-s', provenance: 'tier' },
-      { id: 'tier-o', provenance: 'tier' },
-      { id: 'tier-h', provenance: 'tier' },
-      { id: 'live-new', provenance: 'reported' },
+      { id: 'chosen-a', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'tier-s', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'tier-o', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'tier-h', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'live-new', provenance: 'reported', efforts: { provenance: 'unknown' } },
     ]);
     await expect(second).resolves.toEqual([
-      { id: 'chosen-b', provenance: 'configured' },
-      { id: 'tier-b', provenance: 'tier' },
-      { id: 'live-new', provenance: 'reported' },
+      { id: 'chosen-b', provenance: 'configured', efforts: { provenance: 'unknown' } },
+      { id: 'tier-b', provenance: 'tier', efforts: { provenance: 'unknown' } },
+      { id: 'live-new', provenance: 'reported', efforts: { provenance: 'unknown' } },
     ]);
   });
 
@@ -481,13 +497,13 @@ describe('LaneModelListingAdapter', () => {
       jest.advanceTimersByTime(2000);
 
       await expect(ptahPending).resolves.toEqual([
-        { id: 'chosen', provenance: 'configured' },
-        { id: 'tier-s', provenance: 'tier' },
-        { id: 'tier-o', provenance: 'tier' },
-        { id: 'tier-h', provenance: 'tier' },
+        { id: 'chosen', provenance: 'configured', efforts: { provenance: 'unknown' } },
+        { id: 'tier-s', provenance: 'tier', efforts: { provenance: 'unknown' } },
+        { id: 'tier-o', provenance: 'tier', efforts: { provenance: 'unknown' } },
+        { id: 'tier-h', provenance: 'tier', efforts: { provenance: 'unknown' } },
       ]);
       await expect(cliPending).resolves.toEqual([
-        { id: 'gpt-live', provenance: 'reported' },
+        { id: 'gpt-live', provenance: 'reported', efforts: { provenance: 'unknown' } },
       ]);
       expect(debug).toHaveBeenCalledTimes(1);
       expect(debug).toHaveBeenCalledWith(

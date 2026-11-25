@@ -1623,6 +1623,28 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     });
     f.finish(0);
   });
+
+  it('uses the selected model’s native effort list, including an empty list for unsupported effort', async () => {
+    const f = fixture();
+    const models = [
+      { value: 'claude-opus-x', displayName: 'Opus X', description: '',
+        supportsEffort: true, supportedEffortLevels: ['high', 'low'] },
+      { value: 'claude-haiku-x', displayName: 'Haiku X', description: '', supportsEffort: false },
+      { value: 'claude-sonnet-x', displayName: 'Sonnet X', description: '',
+        supportsEffort: true, supportedEffortLevels: [] },
+    ];
+    f.query.supportedModels.mockResolvedValue(models);
+
+    await f.handle.applyTurnSettings?.({ model: 'claude-opus-x' });
+    await expect(f.handle.listTurnOptions?.()).resolves.toHaveProperty('efforts', ['high', 'low']);
+    await f.handle.applyTurnSettings?.({ model: 'claude-haiku-x' });
+    await expect(f.handle.listTurnOptions?.()).resolves.toHaveProperty('efforts', []);
+    await f.handle.applyTurnSettings?.({ model: 'claude-sonnet-x' });
+    await expect(f.handle.listTurnOptions?.()).resolves.toHaveProperty(
+      'efforts', ['low', 'medium', 'high', 'xhigh', 'max'],
+    );
+    f.finish(0);
+  });
 });
 
 describe('Claude lane steer fold-in (B6, manifest supported since live L4)', () => {

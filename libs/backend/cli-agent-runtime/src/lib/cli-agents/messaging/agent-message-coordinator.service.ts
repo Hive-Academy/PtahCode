@@ -129,12 +129,12 @@ const DELIVERABLE = new Set<AgentMessageEnvelope['state']>(['not-started', 'bloc
  */
 function stoppedLaneView(
   current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
-  models: LaneTurnOptionsView['models'],
-  efforts: readonly string[],
+  { models, efforts, unsendableEfforts }: Pick<LaneTurnOptionsCatalog, 'models' | 'efforts' | 'unsendableEfforts'>,
   effortsFixedByModel = false,
 ): LaneTurnOptionsView {
   return {
     ...current, models, efforts: [...efforts], commands: [],
+    ...(unsendableEfforts ? { unsendableEfforts } : {}),
     unavailableReason: efforts.length > 0
       ? 'Commands and skills appear when the lane is running.'
       : effortsFixedByModel
@@ -546,6 +546,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     const adapter = this.deps.detection.getAdapter(info.cli);
     const blocked = (info.potentialCapabilities ?? adapter?.capabilities())?.turnInput?.commands.blocked ?? [];
     const cached = this.catalogs.get(lineage);
+    const unsendableEfforts = cached?.unsendableEfforts;
     try {
       const handle = this.liveHandle(laneId);
       if (handle?.listTurnOptions) {
@@ -559,15 +560,20 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       if (!cached && adapter?.stoppedLaneCatalog) {
         // One live catalog read serves the models and the efforts (D4).
         const catalog = await bounded(adapter.stoppedLaneCatalog(), LANE_TURN_OPTIONS_TIMEOUT_MS);
-        return stoppedLaneView(current, catalog.models, catalog.efforts);
+        return stoppedLaneView(current, catalog);
       }
       const models = adapter?.listModels
         ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
         : cached?.models ?? [];
-      if (cached) return { ...current, models, efforts: cached.efforts, commands: cached.commands };
+      if (cached) {
+        return {
+          ...current, models, efforts: cached.efforts, commands: cached.commands,
+          ...(unsendableEfforts ? { unsendableEfforts } : {}),
+        };
+      }
       const laneEfforts = adapter?.laneEfforts?.bind(adapter);
       const efforts = laneEfforts?.(info.model) ?? [];
-      return stoppedLaneView(current, models, efforts, effortsFixedByModel(laneEfforts, info.model, efforts));
+      return stoppedLaneView(current, { models, efforts }, effortsFixedByModel(laneEfforts, info.model, efforts));
     } catch (error: unknown) {
       // degradation-audit: reported - logged here, and the result carries `error` for the composer.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane turn options unavailable', {
@@ -576,6 +582,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       return {
         ...current, models: cached?.models ?? [], efforts: cached?.efforts
           ?? (adapter?.stoppedLaneCatalog ? [] : [...(adapter?.laneEfforts?.(info.model) ?? [])]),
+        ...(unsendableEfforts ? { unsendableEfforts } : {}),
         commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
       };
     }

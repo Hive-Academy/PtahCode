@@ -63,6 +63,7 @@ const GROK_ARGS: readonly string[] = ['agent', '--no-leader', 'stdio'];
 const EXTENSION_NOTIFICATION = /^_?x\.ai\//;
 const MCP_SERVERS_UPDATED = '_x.ai/mcp/servers_updated';
 const SIGN_IN_HINT = 'run `grok login`';
+const EFFORT_CONFIG_ID = 'reasoning_effort';
 const SESSION_NOTIFICATION = '_x.ai/session_notification';
 
 const tokenCount = z.number().int().nonnegative();
@@ -179,6 +180,7 @@ export const grokAcpProfile: AcpVendorProfile = {
   displayName: 'Grok',
   signInHint: SIGN_IN_HINT,
   cancelBehavior: 'await-reply',
+  effortConfigId: EFFORT_CONFIG_ID,
   // `/always-approve` toggles "skip all permission prompts" (grok-plain-turn
   // fixture); a lane's approval mode is set at spawn, so lanes hide it.
   hiddenLaneCommands: ['always-approve'],
@@ -207,7 +209,7 @@ export const grokAcpProfile: AcpVendorProfile = {
     }
     if (options.reasoningEffort) {
       entries.push({
-        configId: 'reasoning_effort',
+        configId: EFFORT_CONFIG_ID,
         value: options.reasoningEffort,
       });
     }

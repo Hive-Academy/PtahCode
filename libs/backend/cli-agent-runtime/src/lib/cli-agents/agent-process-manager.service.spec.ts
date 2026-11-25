@@ -353,6 +353,7 @@ function createMockCliDetection(
 
   return {
     getAdapter: jest.fn().mockReturnValue(adapter),
+    nativeEfforts: jest.fn().mockReturnValue({ provenance: 'unknown' }),
     getDetection: jest.fn().mockResolvedValue(det),
     getInstalledClis: jest.fn().mockResolvedValue([det]),
     detectAll: jest.fn().mockResolvedValue([det]),
@@ -2030,7 +2031,11 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
       const runSdkCall = await spawnCodex();
 
-      expect(runSdkCall.reasoningEffort).toBeUndefined();
+      expect(runSdkCall).toMatchObject({
+        reasoningEffort: undefined,
+        reasoningEffortResolved: true,
+        cliVersion: '1.0.0',
+      });
     });
 
     const spawnPi = async () => {

@@ -172,6 +172,10 @@ describe('grokAcpProfile', () => {
     const sessionConfig = grokAcpProfile.sessionConfig;
     if (!sessionConfig) throw new Error('grokAcpProfile.sessionConfig missing');
 
+    it('identifies reasoning_effort as the reported effort option', () => {
+      expect(grokAcpProfile.effortConfigId).toBe('reasoning_effort');
+    });
+
     it('sets the model and forwards the already-mapped effort as-is', () => {
       expect(
         sessionConfig({

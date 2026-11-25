@@ -49,7 +49,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
-import type { LanePermissionMode } from '@ptah-extension/shared';
+import type { EffortSupport, LanePermissionMode } from '@ptah-extension/shared';
 import type {
   ProviderApprovalSink,
   ProviderSessionErrorCode,
@@ -97,6 +97,7 @@ import {
   readAuthoritativeConfigOptions,
   readAcpStandardUsage,
   readConfigOptions,
+  readCurrentModelId,
   readJsonRpcError,
   readModeIds,
   readModels,
@@ -258,6 +259,12 @@ export interface AcpSession {
    * current one.
    */
   getModels(): readonly AcpModelEntry[];
+  /** Current model, effort and effort choices reported by the agent. */
+  getReportedState(): {
+    model: string | null;
+    effort: string | null;
+    efforts: EffortSupport;
+  };
   /**
    * The latest `available_commands_update` of this session, in the agent's
    * order (empty until one arrives). Each update replaces the whole list.
@@ -417,6 +424,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let advertisedModes: readonly string[] = [];
   /** `models` of the session reply (`session/new|resume|load`), read defensively. */
   let advertisedModels: readonly AcpModelEntry[] = [];
+  let reportedModelId: string | null = null;
   /** Latest `available_commands_update` list (session state, not history). */
   let availableCommands: readonly AcpAvailableCommand[] = [];
   /**
@@ -1317,6 +1325,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     advertisedConfig = readConfigOptions(response);
     advertisedModes = readModeIds(response);
     advertisedModels = readModels(response);
+    reportedModelId = readCurrentModelId(response);
 
     sessionId = id;
     // Reported before the config is applied on purpose: a refused config fails
@@ -1825,6 +1834,30 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     );
   };
 
+  const getReportedState = (): ReturnType<AcpSession['getReportedState']> => {
+    const currentModel = optionFor('model')?.['currentValue'];
+    const model =
+      reportedModelId ??
+      (typeof currentModel === 'string' && currentModel ? currentModel : null);
+    const effortConfigId = profile.effortConfigId;
+    const effortOption =
+      effortConfigId === undefined
+        ? undefined
+        : advertisedConfig.find((option) => option['id'] === effortConfigId);
+    const currentEffort = effortOption?.['currentValue'];
+    const effort =
+      typeof currentEffort === 'string' && currentEffort ? currentEffort : null;
+    const supported = effortOption ? advertisedValuesOf(effortOption) : [];
+    return {
+      model,
+      effort,
+      efforts:
+        supported.length > 0
+          ? { provenance: 'native', supported, default: null }
+          : { provenance: 'unknown' },
+    };
+  };
+
   /**
    * The first generation's setup, shared by every `start()` call: a second
    * concurrent setup would open another SDK connection on the same byte
@@ -1856,6 +1889,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     getAgentCapabilities: () => gen.init?.agentCapabilities ?? undefined,
     getModes,
     getModels,
+    getReportedState,
     getAvailableCommands: () => availableCommands,
     get exited() {
       return gen.transport.exited;

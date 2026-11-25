@@ -93,6 +93,7 @@ export const KNOWN_CONFIG_KEYS = [
   'agentOrchestration.decisionModelPrefillTokensPerSecond',
   'agentOrchestration.hostRouting',
   'agentOrchestration.laneRotation',
+  'agentOrchestration.performanceRouting',
   'agentOrchestration.routingRules',
   'agentOrchestration.disabledClis',
   'provider.github-copilot.tokenExchangeUrl',

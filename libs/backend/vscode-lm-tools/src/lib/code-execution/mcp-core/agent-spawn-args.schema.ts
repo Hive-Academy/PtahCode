@@ -74,6 +74,15 @@ export const MAX_DELIVERABLES = 20;
  */
 export const MAX_EFFORT_LENGTH = 32;
 
+/** Longest `routeId` accepted on a spawn `route` object (FA5). */
+export const MAX_ROUTE_ID_LENGTH = 64;
+
+/**
+ * Longest `phaseId` accepted on a spawn `route` object; matches
+ * `PhaseSchema.id` in `route-decide-args.schema.ts`.
+ */
+export const MAX_ROUTE_PHASE_ID_LENGTH = 64;
+
 export const AgentSpawnArgsSchema = z
   .object({
     task: z.string().min(1).max(MAX_TASK_LENGTH),
@@ -107,6 +116,16 @@ export const AgentSpawnArgsSchema = z
     // 'not-routed' default is recorded at write time, so the spawn never
     // takes it. Never forwarded to the CLI.
     routingSource: z.enum(['model', 'ranking', 'pin']).optional(),
+    // Route identity returned by `ptah_route_decide`, forwarded so the host
+    // can stamp `routeFacts` on the lane record (FA5). Callers never set
+    // `routeFacts` (rejected by `.strict()`).
+    route: z
+      .object({
+        routeId: z.string().min(1).max(MAX_ROUTE_ID_LENGTH),
+        phaseId: z.string().min(1).max(MAX_ROUTE_PHASE_ID_LENGTH),
+      })
+      .strict()
+      .optional(),
     // Bypasses duplicate and memory gates; the fixed concurrent cap still applies.
     force: z.boolean().optional(),
     idempotencyKey: z.string().min(1).max(128).optional(),

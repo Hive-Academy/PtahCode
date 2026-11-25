@@ -288,6 +288,8 @@ export interface AcpVendorProfile {
    * whose `configId` the session did not advertise are skipped with an `info`.
    */
   sessionConfig?(options: AcpSessionConfigInput): readonly AcpSessionConfigEntry[];
+  /** Id of the agent's select option that reports the current effort and choices. */
+  readonly effortConfigId?: string;
   /** Vendor extension hooks. Omit to report every unknown notification once. */
   readonly extensions?: AcpExtensionHooks;
   /**

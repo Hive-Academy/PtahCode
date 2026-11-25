@@ -173,6 +173,7 @@ export class AgentMessageRpcHandlers {
           id: model.id, name: model.name, ...(model.isFallback ? { isFallback: true } : {}),
         })),
         efforts: [...view.efforts],
+        ...(view.unsendableEfforts?.length ? { unsendableEfforts: [...view.unsendableEfforts] } : {}),
         ...(view.currentModel ? { currentModel: view.currentModel } : {}),
         ...(view.currentEffort ? { currentEffort: view.currentEffort } : {}),
         commands: view.commands.map((command) => ({

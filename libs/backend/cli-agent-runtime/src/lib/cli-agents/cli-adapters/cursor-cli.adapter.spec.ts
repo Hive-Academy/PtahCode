@@ -137,6 +137,10 @@ describe('CursorCliAdapter', () => {
     process.env = ORIGINAL_ENV;
   });
 
+  it('advertises an empty effort list for routing', () => {
+    expect(adapter.laneEfforts()).toEqual([]);
+  });
+
   describe('API key resolution (env → injected resolver)', () => {
     it('prefers CURSOR_API_KEY over the resolver value', async () => {
       resolveKey.mockResolvedValue('secret-key');
