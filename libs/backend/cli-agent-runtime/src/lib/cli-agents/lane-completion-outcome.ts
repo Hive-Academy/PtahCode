@@ -46,6 +46,9 @@ export function enqueueLaneCompletionOutcome(
       logger.debug('[LaneCompletionNotifier] Outcome not recorded', { runId });
       return;
     }
+    const { reportedSession, spawnEffort, routeFacts } = info;
+    const resolvedModel = (reportedSession ? reportedSession.model : info.observedModel) ?? null;
+    const resolvedEffort = reportedSession?.effort ?? null;
     recorder.recordLaneCompletion({
       runId,
       executorKind: info.cli === 'ptah-cli' ? 'ptah-cli' : 'cli',
@@ -60,6 +63,20 @@ export function enqueueLaneCompletionOutcome(
       }),
       provider: info.providerId ?? info.quotaOwner?.providerId ?? null,
       model: info.model ?? LANE_DEFAULT_MODEL,
+      modelSource: info.modelSource ?? null,
+      resolvedModel,
+      resolvedModelProvenance: resolvedModel === null ? 'unknown' : 'native',
+      requestedEffort: spawnEffort?.requested ?? null,
+      effort: spawnEffort?.sent ?? null,
+      effortSource: spawnEffort?.source ?? null,
+      effortProvenance: spawnEffort?.provenance ?? null,
+      effortDisposition: spawnEffort?.disposition ?? null,
+      resolvedEffort,
+      resolvedEffortProvenance: resolvedEffort === null ? 'unknown' : 'native',
+      routedModel: routeFacts?.model ?? null,
+      routedEffort: routeFacts?.effort ?? null,
+      decisionModel: routeFacts?.decisionModel?.slice(0, 128) ?? null,
+      proposalConfidence: routeFacts?.proposalConfidence ?? null,
       role: info.role ?? null,
       taskKind: info.taskKind ?? null,
       phaseKind: phaseKindFromAgentInfo(info),
@@ -78,7 +95,7 @@ export function enqueueLaneCompletionOutcome(
       inputTokens: usage?.inputTokens ?? null,
       outputTokens: usage?.outputTokens ?? null,
       costUsd: usage?.costUsd ?? null,
-      routingSource: info.routingSource ?? 'not-routed',
+      routingSource: info.routingSource ?? routeFacts?.source ?? 'not-routed',
       reviseRounds: 0,
       finalReview: null,
       deliverablesDeclaredAt: null,

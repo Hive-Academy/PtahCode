@@ -16,7 +16,7 @@ residual notes applied below). Team-leader, decomposition mode. No production co
 | Work units | 32 plan units (WU0-WU19b) + 1 user-approved unit (WU20) = 40 executable units after the splits below |
 | Team-leader splits | WU3b -> WU3b-w (writer) + WU3b-a (APM); WU13 -> WU13a (adapter) + WU13b (runner); WU7 -> WU7 (score) + WU7r (reasons); WU8 -> WU8a (store, absorbs WU8b) + WU8c (gather) + WU8d (plan/assemble); new WU9c (service-level spec); WU20 -> WU20a/b/c |
 | Nx projects written | 14: shared, persistence-sqlite, lane-outcomes, codex-runtime, acp-runtime, cli-agent-runtime, lane-routing, rpc-handlers, vscode-lm-tools, platform-core, agent-sdk, chat, webview-e2e-harness (+ gate on ptah-extension-webview, ptah-electron) |
-| Status | B1-B10, B12 COMPLETE. B11, B13 IN_PROGRESS. All others PENDING |
+| Status | B1-B10, B12, B13 COMPLETE. B11, B14 IN_PROGRESS. All others PENDING |
 | Estimated executor context | 4,500-13,500 tokens per batch (see each batch). None above the 16,000 ceiling |
 | Plan validation | PASS with 0 BLOCKER, 11 RISK (all have a batch-level mitigation), 4 ASSUMPTION |
 | Status | B1 IN_PROGRESS. All others PENDING |
@@ -378,8 +378,8 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B13 - WU3b-w completion writer + WU13a Claude adapter + WU16 Pi session state
 
-- **Status**: IN_PROGRESS (codex 649578a3)
-- **Shape / weight**: logic / lane A (WU3b-w) est. 7,300; lane B (WU13a) est. 9,800; lane C (WU16) est. 8,600. **Actual tokens**: pending
+- **Status**: COMPLETE (codex 649578a3, one lane for A+B+C)
+- **Shape / weight**: logic / lane A (WU3b-w) est. 7,300; lane B (WU13a) est. 9,800; lane C (WU16) est. 8,600. **Actual tokens**: unavailable
 - **Projects**: cli-agent-runtime (1)
 - **Read set** (prefix `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/`):
   - A: `lane-completion-outcome.ts` (whole); `lane-completion-outcome.spec.ts` (whole); `W/libs/shared/src/lib/types/lane-outcome.types.ts`, `agent-process.types.ts` new fields (after B2); `W/libs/backend/lane-outcomes/src/lib/lane-outcome.schema.ts` (after B5); PLAN:209-219, PLAN:867-884
@@ -398,7 +398,7 @@ phase reviewer comes from a different model family than the executor of the batc
 
 ### B14 - WU10a listing efforts and shared flight
 
-- **Status**: PENDING
+- **Status**: IN_PROGRESS (codex d6e1ac6a)
 - **Shape / weight**: logic / est. 11,600. **Actual tokens**: pending
 - **Projects**: rpc-handlers (1)
 - **Read set**: `W/libs/backend/rpc-handlers/src/lib/services/lane-model-listing.adapter.ts` (whole); `.../services/lane-model-listing.adapter.spec.ts:1-120`; `.../services/cli-model-list.service.ts` (whole); `.../services/cli-model-list.service.spec.ts:1-100`; `W/libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-detection.service.ts` (new public methods, after B6); `W/libs/backend/lane-routing/src/lib/lane-model-listing.port.ts` (after B10); PLAN:859-865, PLAN:675-681

@@ -48,6 +48,7 @@ import { stripAnsiCodes } from './cli-adapter.utils';
 import type {
   ClaudeCliAdapterContract,
   ClaudeCliCommandOptions,
+  CliModelInfo,
   SdkHandle,
   LaneAccountBindingPort,
 } from './cli-adapter.interface';
@@ -159,17 +160,26 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     return stripAnsiCodes(raw);
   }
 
-  /** Claude lanes accept every shared effort level (`claude-sdk-lane-runner`). */
+  /** Ptah fallback when the native model catalog has no effort metadata. */
   laneEfforts(): readonly string[] {
     return EFFORT_LEVELS;
   }
 
-  async listModels() {
+  async listModels(): Promise<CliModelInfo[]> {
     try {
-      return (await this.deps.models.getNativeClaudeModels()).map((model) => ({
-        id: model.value,
-        name: model.displayName,
-      }));
+      return (await this.deps.models.getNativeClaudeModels()).map((model) => {
+        const entry = { id: model.value, name: model.displayName };
+        if (model.supportsEffort === false) {
+          return { ...entry, efforts: { provenance: 'native', supported: [], default: null } };
+        }
+        if (model.supportsEffort === true && model.supportedEffortLevels?.length) {
+          return {
+            ...entry,
+            efforts: { provenance: 'native', supported: model.supportedEffortLevels, default: null },
+          };
+        }
+        return entry;
+      });
     } catch {
       // degradation-audit: optional-capability - listing never runs inference;
       // an unreadable native catalog is the specified empty model list.
@@ -217,7 +227,14 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       hostStep = 'assembly';
       const defaults = this.deps.defaults();
       const model = input.model?.trim() || defaults.model || '';
-      const effort = await this.resolveEffort(input, model, defaults);
+      const candidates = [input.reasoningEffort];
+      if (defaults.effort && defaults.effort !== 'inherit')
+        candidates.push(defaults.effort);
+      if (defaults.effort === 'inherit') candidates.push(defaults.chatEffort);
+      if (isReviewerOrTester(input.role?.name, input.phaseKind)) candidates.push('medium');
+      candidates.push(defaults.chatEffort);
+      const hasCandidates = candidates.some(Boolean);
+      const effort = hasCandidates ? await this.resolveEffort(candidates, model) : undefined;
       const policy = await this.deps.policy(input.workingDirectory);
       await this.deps.syncHarness(policy);
       const assembly = await this.deps.assembly.assembleSpawnOptions(
@@ -381,6 +398,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         }).handle;
         return {
           ...handle,
+          ...(hasCandidates && effort === undefined && {
+            effortDelivery: { sent: null, disposition: 'lane-refused' },
+          }),
           // The shared builder gated every tool path of this lane: the
           // PreToolUse hook (all permission modes) and `canUseTool`.
           ...(input.laneToolGate && { honorsLaneToolGate: true }),
@@ -570,17 +590,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
   }
 
   private async resolveEffort(
-    input: ClaudeCliCommandOptions,
+    candidates: readonly (string | undefined)[],
     model: string,
-    defaults: ReturnType<ClaudeCliAdapterDependencies['defaults']>,
   ): Promise<Options['effort']> {
-    const candidates = [input.reasoningEffort];
-    if (defaults.effort && defaults.effort !== 'inherit')
-      candidates.push(defaults.effort);
-    if (defaults.effort === 'inherit') candidates.push(defaults.chatEffort);
-    if (isReviewerOrTester(input.role?.name, input.phaseKind)) candidates.push('medium');
-    candidates.push(defaults.chatEffort);
-    if (!candidates.some(Boolean)) return undefined;
     try {
       const metadata = model
         ? (await this.deps.models.getNativeClaudeModels()).find(

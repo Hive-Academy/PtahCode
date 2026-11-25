@@ -148,12 +148,7 @@ interface PiEvent {
   /** `response` lines: which request they answer (e.g. 'get_state'). */
   readonly command?: string;
   readonly success?: boolean;
-  /** `response` payload — get_state carries sessionId / sessionFile. */
-  readonly data?: {
-    readonly sessionId?: string;
-    readonly sessionFile?: string;
-    readonly [key: string]: unknown;
-  };
+  readonly data?: unknown;
   readonly assistantMessageEvent?: PiAssistantMessageEvent;
   readonly toolCallId?: string;
   readonly toolName?: string;
@@ -165,6 +160,16 @@ interface PiEvent {
   /** Error text or the assistant message on a completion event. */
   readonly message?: unknown;
 }
+
+const piSessionStateSchema = z.object({
+  sessionId: z.string().optional().catch(undefined),
+  sessionFile: z.string().optional().catch(undefined),
+  model: z.object({
+    provider: z.string().min(1),
+    id: z.string().min(1),
+  }).optional().catch(undefined),
+  thinkingLevel: z.string().min(1).optional().catch(undefined),
+});
 
 const piMessageUsageSchema = z.object({
   role: z.literal('assistant'),
@@ -319,7 +324,7 @@ export class PiCliAdapter implements CliAdapter {
    * List available models from `pi --list-models` (see parsePiModelList).
    * Falls back to an empty list when the probe fails.
    */
-  /** The fixed effort list its lanes accept, also for a stopped lane. */
+  /** Ptah fallback effort list, also available for a stopped lane. */
   laneEfforts(): readonly string[] {
     return PI_LANE_EFFORTS;
   }
@@ -419,6 +424,8 @@ export class PiCliAdapter implements CliAdapter {
       : options;
     let capturedSessionId: string | undefined;
     let capturedSessionFile: string | undefined;
+    let reportedModel: string | null = null;
+    let reportedEffort: string | null = null;
     let activeChild: ReturnType<typeof spawnCli> | undefined;
 
     const output = createBufferedEmitter<string>();
@@ -509,6 +516,21 @@ export class PiCliAdapter implements CliAdapter {
         },
       );
       activeChild = child;
+      reportedModel = null;
+      reportedEffort = null;
+      const onSessionId = (id: string | undefined): void => {
+        if (id && !capturedSessionId) capturedSessionId = id;
+      };
+      const capture = {
+        onSessionId,
+        onState: ({ sessionId, sessionFile, model, thinkingLevel }: z.infer<typeof piSessionStateSchema>) => {
+          onSessionId(sessionId);
+          if (sessionFile && !capturedSessionFile) capturedSessionFile = sessionFile;
+          if (activeChild !== child) return;
+          reportedModel = model ? `${model.provider}/${model.id}` : null;
+          reportedEffort = thinkingLevel ?? null;
+        },
+      };
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');
       // Defensive no-op: an async EPIPE/ERR_STREAM_DESTROYED on a write into a
@@ -585,14 +607,7 @@ export class PiCliAdapter implements CliAdapter {
                 turnModel = completion.usage.model || turnModel;
               }
             }
-            const isSettled = this.handleLine(line, output.emit, segment.emit, {
-              onSessionId: (id) => {
-                if (id && !capturedSessionId) capturedSessionId = id;
-              },
-              onSessionFile: (file) => {
-                if (file && !capturedSessionFile) capturedSessionFile = file;
-              },
-            });
+            const isSettled = this.handleLine(line, output.emit, segment.emit, capture);
             if (isSettled) {
               const records = messageUsage.length ? messageUsage : endUsage;
               const usage = !incompleteUsage && records.length ? {
@@ -638,14 +653,7 @@ export class PiCliAdapter implements CliAdapter {
           // The process exited before an `agent_settled` — flush any trailing
           // line, then resolve with the exit code as a fallback.
           if (lineBuf.trim()) {
-            this.handleLine(lineBuf, output.emit, segment.emit, {
-              onSessionId: (id) => {
-                if (id && !capturedSessionId) capturedSessionId = id;
-              },
-              onSessionFile: (file) => {
-                if (file && !capturedSessionFile) capturedSessionFile = file;
-              },
-            });
+            this.handleLine(lineBuf, output.emit, segment.emit, capture);
             lineBuf = '';
           }
           const exitCode = code ?? (signal ? 1 : 0);
@@ -744,6 +752,11 @@ export class PiCliAdapter implements CliAdapter {
       outcomeUsageIsTurnTotal: true,
       usageScope: 'turn',
       getObservedNativeThreadId: () => capturedSessionId,
+      reportedSession: () => ({
+        model: reportedModel,
+        effort: reportedEffort,
+        efforts: { provenance: 'unknown' },
+      }),
     };
   }
 
@@ -752,8 +765,8 @@ export class PiCliAdapter implements CliAdapter {
    * Non-JSON / partial lines are skipped defensively. Returns `true` when the
    * line is the RPC-only `agent_settled` event (the caller resolves the turn).
    *
-   * Session id / file are surfaced via the `capture` callbacks from either the
-   * `session` header line or the `get_state` response payload.
+   * The `session` header carries the session id. The `get_state` response
+   * carries session identity and native model and effort values.
    */
   private handleLine(
     line: string,
@@ -761,7 +774,7 @@ export class PiCliAdapter implements CliAdapter {
     emitSegment: (segment: CliOutputSegment) => void,
     capture: {
       onSessionId: (id: string | undefined) => void;
-      onSessionFile: (file: string | undefined) => void;
+      onState: (state: z.infer<typeof piSessionStateSchema>) => void;
     },
   ): boolean {
     const trimmed = line.trim();
@@ -784,10 +797,9 @@ export class PiCliAdapter implements CliAdapter {
         capture.onSessionId(event.id);
         return false;
       case 'response':
-        // RPC response envelope — get_state carries the session id / file.
-        if (event.command === 'get_state' && event.data) {
-          capture.onSessionId(event.data.sessionId);
-          capture.onSessionFile(event.data.sessionFile);
+        if (event.command === 'get_state' && event.success === true) {
+          const state = piSessionStateSchema.safeParse(event.data);
+          if (state.success) capture.onState(state.data);
         }
         return false;
       case 'agent_settled':
