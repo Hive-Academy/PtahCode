@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2325_lvrf
-status: in_progress
+status: in_review
 type: FEATURE
 title: Live test the lane parity follow-ups and flip Claude steer
 description: >-
