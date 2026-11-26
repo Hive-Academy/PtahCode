@@ -1253,48 +1253,96 @@ describe('createAcpProviderSessionRuntime: yolo auto-approval and getPermission'
     await session.close();
   });
 
-  it('still routes kind: switch_mode to approvals.request even under yolo', async () => {
-    const replies: FakeAcpMessage[] = [];
-    const { open } = harness({}, (fake) => {
+  it('cancels late permission requests after interrupting a yolo turn', async () => {
+    let finishPrompt!: () => void;
+    const promptMayFinish = new Promise<void>((resolve) => {
+      finishPrompt = resolve;
+    });
+    const { agent, open } = harness({}, (fake) => {
       fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
-      fake.handle('session/prompt', async (prompt, agent) => {
-        replies.push(
-          await agent.request(
-            'session/request_permission',
-            permissionRequest(prompt['sessionId'], {
-              toolCallId: 'mode-1',
-              kind: 'switch_mode',
-              title: 'Switch mode',
-            }),
-          ),
-        );
-        return fastEndTurn;
+      fake.handle('session/prompt', async () => {
+        await promptMayFinish;
+        return { result: { stopReason: 'cancelled' } };
       });
     });
     const sink: ProviderApprovalSink = {
-      request: jest.fn(async () => 'accept' as const),
+      request: jest.fn(async () => 'decline' as const),
     };
     const session = await open({
       approvals: sink,
       policy: { permission: 'yolo', cwd: process.cwd() },
     });
 
-    const events = await untilTerminal(session, () =>
-      session.prompt({ text: 'switch' }),
-    );
-    expect(events.some((event) => event.type === 'approvalRequested')).toBe(
-      true,
-    );
-    expect(sink.request).toHaveBeenCalledTimes(1);
-    expect(sink.request).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'switch_mode' }),
-      expect.anything(),
-    );
-    expect(replies[0]?.result).toEqual({
-      outcome: { outcome: 'selected', optionId: 'allow-once-1' },
-    });
-    await session.close();
+    try {
+      const { turnId } = await session.prompt({ text: 'interruptible work' });
+      const stopping = session.interrupt(turnId);
+      await agent.next((message) => message.method === 'session/cancel');
+      const reply = await agent.request(
+        'session/request_permission',
+        permissionRequest(SESSION_ID, {
+          toolCallId: 'late-1',
+          kind: 'execute',
+          title: 'Run bash command',
+        }),
+      );
+      finishPrompt();
+      await expect(stopping).resolves.toBe(true);
+
+      expect(reply).toMatchObject({
+        result: { outcome: { outcome: 'cancelled' } },
+      });
+      expect(sink.request).not.toHaveBeenCalled();
+    } finally {
+      finishPrompt();
+      await session.close();
+    }
   });
+
+  it.each(['switch_mode', undefined])(
+    'routes mode changes with kind %p through the approval sink in yolo',
+    async (kind) => {
+      const replies: FakeAcpMessage[] = [];
+      const { open } = harness({}, (fake) => {
+        fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+        fake.handle('session/prompt', async (prompt, agent) => {
+          replies.push(
+            await agent.request(
+              'session/request_permission',
+              permissionRequest(prompt['sessionId'], {
+                toolCallId: 'mode-1',
+                ...(kind === undefined ? {} : { kind }),
+                title: 'Leave plan',
+              }),
+            ),
+          );
+          return fastEndTurn;
+        });
+      });
+      const sink: ProviderApprovalSink = {
+        request: jest.fn(async () => 'accept' as const),
+      };
+      const session = await open({
+        approvals: sink,
+        policy: { permission: 'yolo', cwd: process.cwd() },
+      });
+
+      const events = await untilTerminal(session, () =>
+        session.prompt({ text: 'switch' }),
+      );
+      expect(events.some((event) => event.type === 'approvalRequested')).toBe(
+        true,
+      );
+      expect(sink.request).toHaveBeenCalledTimes(1);
+      expect(sink.request).toHaveBeenCalledWith(
+        expect.objectContaining({ toolCallId: 'mode-1' }),
+        expect.anything(),
+      );
+      expect(replies[0]?.result).toEqual({
+        outcome: { outcome: 'selected', optionId: 'allow-once-1' },
+      });
+      await session.close();
+    },
+  );
 
   it('falls back to approvals.request in yolo when no allow_once option is offered', async () => {
     const replies: FakeAcpMessage[] = [];

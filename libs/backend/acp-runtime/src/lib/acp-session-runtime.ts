@@ -566,9 +566,17 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       return decision.response;
     }
     if (livePermission === 'yolo') {
+      if (signal.aborted || !isLive(target) || turnApprovals?.signal.aborted) {
+        return cancelledResponse();
+      }
       const toolCall = isRecord(request) ? request.toolCall : undefined;
       const kind = isRecord(toolCall) ? toolCall['kind'] : undefined;
-      if (kind !== 'switch_mode') {
+      // Antigravity can omit kind on mode switches. Ask when the kind is absent.
+      if (
+        typeof kind === 'string' &&
+        kind.length > 0 &&
+        kind !== 'switch_mode'
+      ) {
         const decision = decideAcpPermission(request, {
           autoApprove: true,
           mode: livePermission,
