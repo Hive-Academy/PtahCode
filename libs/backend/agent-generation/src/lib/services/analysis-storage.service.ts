@@ -679,6 +679,7 @@ export class AnalysisStorageService {
         phaseCount: completedPhases.length,
         model: manifest.model,
         durationMs: manifest.totalDurationMs,
+        lifecycle: manifest.lifecycle,
       };
     });
     items.sort(

@@ -219,7 +219,8 @@ export interface MultiPhaseManifestV4 {
   phases: Record<string, PhaseResultV4>;
 }
 
-export type StackItemKind = 'language' | 'framework' | 'library' | 'test-tool' | 'pattern';
+export type StackItemKind =
+  'language' | 'framework' | 'library' | 'test-tool' | 'pattern';
 export interface StackSummaryItem {
   kind: StackItemKind;
   name: string;
@@ -375,6 +376,10 @@ export interface ResumableGenerationRun {
 export interface WizardGetResumableRunResponse {
   analysis: MultiPhaseAnalysisResponse | null;
   generation: ResumableGenerationRun | null;
+  /** True when an analysis run is currently executing in-process for this workspace. */
+  analysisActive?: boolean;
+  /** ISO 8601 timestamp when the active in-process analysis run started. */
+  activeAnalysisStartedAt?: string;
 }
 
 /** Response from wizard:submit-selection RPC method */

@@ -153,13 +153,16 @@ describe('AnalysisFreshnessService', () => {
     ['.ptah/**\n', 'ignored-by-gitignore'],
     ['/.ptah\n', 'ignored-by-gitignore'],
     ['.ptah/**\n!.ptah/analysis/\n!.ptah/analysis/**\n', 'shareable'],
-  ] as const)('reports analysis sharing under root ignore rules', async (ignore, sharing) => {
-    await saveManifest();
-    await fs.writeFile(join(ROOT, '.gitignore'), ignore);
-    jest.clearAllMocks();
-    expect(await service.getStatus(ROOT)).toMatchObject({ sharing });
-    expectNoWrites();
-  });
+  ] as const)(
+    'reports analysis sharing under root ignore rules',
+    async (ignore, sharing) => {
+      await saveManifest();
+      await fs.writeFile(join(ROOT, '.gitignore'), ignore);
+      jest.clearAllMocks();
+      expect(await service.getStatus(ROOT)).toMatchObject({ sharing });
+      expectNoWrites();
+    },
+  );
 
   it('skips rejected v2 and malformed manifests beside a newer fresh v4 run', async () => {
     const v4 = await saveManifest();
@@ -299,7 +302,9 @@ describe('AnalysisFreshnessService', () => {
 
   it('keeps a matching analysis fresh after 30 days', async () => {
     await saveManifest({
-      updatedAt: new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(
+        NOW.getTime() - 30 * 24 * 60 * 60 * 1000,
+      ).toISOString(),
     });
     expect(await service.getStatus(ROOT)).toMatchObject({
       state: 'fresh',
@@ -310,14 +315,23 @@ describe('AnalysisFreshnessService', () => {
 
   it('accepts CRLF copies of phase markdown', async () => {
     const manifest = await saveManifest();
-    await fs.writeFile(join(DIR, manifest.phases['project-profile'].file), 'verified analysis\r\n');
-    expect(await service.getStatus(ROOT)).toMatchObject({ state: 'fresh', reason: 'ok' });
+    await fs.writeFile(
+      join(DIR, manifest.phases['project-profile'].file),
+      'verified analysis\r\n',
+    );
+    expect(await service.getStatus(ROOT)).toMatchObject({
+      state: 'fresh',
+      reason: 'ok',
+    });
   });
 
   it('checks v1 manifests with the v1 fingerprint algorithm', async () => {
     const v1 = await computeWorkspaceFingerprint(ROOT, fs, 'sha256-v1');
     await saveManifest({ workspaceFingerprint: v1 });
-    expect(await service.getStatus(ROOT)).toMatchObject({ state: 'fresh', reason: 'ok' });
+    expect(await service.getStatus(ROOT)).toMatchObject({
+      state: 'fresh',
+      reason: 'ok',
+    });
   });
 
   it('detects changed workspace metadata', async () => {
@@ -404,5 +418,103 @@ describe('AnalysisFreshnessService', () => {
     expect((await computeWorkspaceFingerprint(ROOT, fs)).digest).not.toBe(
       original.digest,
     );
+  });
+
+  describe('active run exclusion', () => {
+    it('returns missing when the only run is excluded by excludeRunId or excludeSlug', async () => {
+      await saveManifest({
+        runId: 'RUN-ACTIVE',
+        slug: 'demo',
+        lifecycle: 'running',
+      });
+
+      expect(await service.getStatus(ROOT)).toMatchObject({
+        state: 'stale',
+        reason: 'incomplete',
+        analysisDir: REL_DIR,
+      });
+      expect(
+        await service.getStatus(ROOT, { excludeRunId: 'RUN-ACTIVE' }),
+      ).toMatchObject({
+        state: 'missing',
+        reason: 'no-analysis',
+        analysisDir: null,
+      });
+      expect(
+        await service.getStatus(ROOT, { excludeSlug: 'demo' }),
+      ).toMatchObject({
+        state: 'missing',
+        reason: 'no-analysis',
+        analysisDir: null,
+      });
+      expectNoWrites();
+    });
+
+    it('skips an excluded active run and qualifies a prior completed run', async () => {
+      const priorDir = join(ROOT, '.ptah', 'analysis', 'demo-prev');
+      const priorManifest = await saveManifest({
+        runId: 'RUN-PRIOR',
+        slug: 'demo-prev',
+        analyzedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+        lifecycle: 'completed',
+      });
+      // Move the saved completed run to demo-prev and write a newer running manifest in demo.
+      await fs.writeFile(
+        join(priorDir, 'manifest.json'),
+        JSON.stringify(priorManifest),
+      );
+      for (const id of IDS) {
+        await fs.writeFileBytes(
+          join(priorDir, priorManifest.phases[id].file),
+          OUTPUT,
+        );
+      }
+      await saveManifest({
+        runId: 'RUN-ACTIVE',
+        slug: 'demo',
+        analyzedAt: NOW.toISOString(),
+        lifecycle: 'running',
+      });
+
+      expect(await service.getStatus(ROOT)).toMatchObject({
+        state: 'stale',
+        reason: 'incomplete',
+        analysisDir: REL_DIR,
+      });
+      expect(
+        await service.getStatus(ROOT, { excludeRunId: 'RUN-ACTIVE' }),
+      ).toMatchObject({
+        state: 'fresh',
+        reason: 'ok',
+        analysisDir: '.ptah/analysis/demo-prev',
+      });
+      expect(
+        await service.getStatus(ROOT, { excludeSlug: 'demo' }),
+      ).toMatchObject({
+        state: 'fresh',
+        reason: 'ok',
+        analysisDir: '.ptah/analysis/demo-prev',
+      });
+      expectNoWrites();
+    });
+
+    it('skips an excluded slug directory even when its manifest is unreadable mid-write', async () => {
+      await fs.writeFile(join(DIR, 'manifest.json'), '{half-written');
+      jest.clearAllMocks();
+
+      expect(await service.getStatus(ROOT)).toMatchObject({
+        state: 'stale',
+        reason: 'unreadable',
+        analysisDir: REL_DIR,
+      });
+      expect(
+        await service.getStatus(ROOT, { excludeSlug: 'demo' }),
+      ).toMatchObject({
+        state: 'missing',
+        reason: 'no-analysis',
+        analysisDir: null,
+      });
+      expectNoWrites();
+    });
   });
 });

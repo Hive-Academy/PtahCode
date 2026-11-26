@@ -499,7 +499,9 @@ describe('AnalysisStorageService', () => {
     it('accepts legacy pair-less v4 manifests without mutating disk bytes', async () => {
       const legacyV4 = manifestV4();
       expect(legacyV4.analysisPair).toBeUndefined();
-      expect(legacyV4.phases['project-profile'].input?.provider).toBeUndefined();
+      expect(
+        legacyV4.phases['project-profile'].input?.provider,
+      ).toBeUndefined();
       const raw = JSON.stringify(legacyV4, null, 2);
       await fs.writeFile(join(slugDir, 'manifest.json'), raw);
 
@@ -1066,7 +1068,55 @@ describe('AnalysisStorageService', () => {
       const items = await service.list(WORKSPACE);
 
       expect(items.map((i) => i.filename)).toEqual(['full', 'partial']);
+      expect(items[0].lifecycle).toBe('completed');
       expect(items[1].phaseCount).toBe(3);
+      expect(items[1].lifecycle).toBe('failed');
+    });
+
+    it('populates lifecycle on listed v4 runs for running, paused, completed, and failed states', async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-running'),
+        manifestV4({
+          slug: 'run-running',
+          analyzedAt: '2026-08-29T00:00:00.000Z',
+          lifecycle: 'running',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-paused'),
+        manifestV4({
+          slug: 'run-paused',
+          analyzedAt: '2026-08-28T00:00:00.000Z',
+          lifecycle: 'paused',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-completed'),
+        manifestV4({
+          slug: 'run-completed',
+          analyzedAt: '2026-08-27T00:00:00.000Z',
+          lifecycle: 'completed',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-failed'),
+        manifestV4({
+          slug: 'run-failed',
+          analyzedAt: '2026-08-26T00:00:00.000Z',
+          lifecycle: 'failed',
+        }),
+      );
+
+      const items = await service.list(WORKSPACE);
+
+      expect(
+        items.map((i) => ({ filename: i.filename, lifecycle: i.lifecycle })),
+      ).toEqual([
+        { filename: 'run-running', lifecycle: 'running' },
+        { filename: 'run-paused', lifecycle: 'paused' },
+        { filename: 'run-completed', lifecycle: 'completed' },
+        { filename: 'run-failed', lifecycle: 'failed' },
+      ]);
     });
 
     it('loads only completed phase contents and exposes v3 manifest fields', async () => {
