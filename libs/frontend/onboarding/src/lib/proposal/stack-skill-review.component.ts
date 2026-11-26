@@ -44,6 +44,7 @@ import {
 import {
   buildStackCoverage,
   canonicalCandidateId,
+  compareSkillsByInstallsDesc,
   splitStackEvidence,
 } from './stack-coverage';
 import {
@@ -111,7 +112,10 @@ export class StackSkillReviewComponent {
   public readonly runId = input('');
   public readonly draftPreviewRequested = output<SkillDraftPreviewAction>();
   public readonly draftCreateRequested = output<SkillDraftCreateAction>();
-  public readonly itemSearchRequested = output<{ itemId: string; query: string }>();
+  public readonly itemSearchRequested = output<{
+    itemId: string;
+    query: string;
+  }>();
   public readonly recommendations = input.required<SkillRecommendation[]>();
   public readonly searchResults = input.required<SkillShEntry[]>();
   public readonly retainedSearchResults = input<SkillShEntry[]>([]);
@@ -158,42 +162,65 @@ export class StackSkillReviewComponent {
   public readonly previewScriptCount = input<number | null>(null);
   public readonly headingLevel = input<1 | 2>(2);
   public readonly retryRequested = output<void>();
-  protected readonly judgedMode = computed(() => this.store()?.judgedMode() ?? false);
+  protected readonly judgedMode = computed(
+    () => this.store()?.judgedMode() ?? false,
+  );
   protected readonly judgeItemsById = computed(
-    () => new Map(this.store()?.judge()?.items.map((item) => [item.itemId, item])),
+    () =>
+      new Map(
+        this.store()
+          ?.judge()
+          ?.items.map((item) => [item.itemId, item]),
+      ),
   );
   protected readonly installCards = computed(() => {
     const store = this.store();
     const cards = new Map<string, InstallCard>();
-    if (!store || !['all', 'install'].includes(store.verdictFilter())) return [];
+    if (!store || !['all', 'install'].includes(store.verdictFilter()))
+      return [];
     for (const row of store.visibleItemRows()) {
       for (const outcome of row.installOutcomes) {
         const id = canonicalCandidateId(outcome.candidateId);
         const candidate = store.candidateById().get(id);
         if (!candidate) continue;
-        const card = cards.get(id) ?? { candidate, coveredItems: [], reasons: new Set<string>() };
+        const card = cards.get(id) ?? {
+          candidate,
+          coveredItems: [],
+          reasons: new Set<string>(),
+        };
         card.coveredItems.push(row.item.name);
-        const model = outcome.stage === 'decision' ? 'Decision model' : 'Normal model';
+        const model =
+          outcome.stage === 'decision' ? 'Decision model' : 'Normal model';
         card.reasons.add(`${model}: ${outcome.reason}`);
         cards.set(id, card);
       }
     }
-    return [...cards.values()].map(({ candidate, coveredItems, reasons }) => ({
-      candidate,
-      coveredItems: [...new Set(coveredItems)],
-      reason: [...reasons].join(' · '),
-    }));
+    return [...cards.values()]
+      .sort((a, b) =>
+        compareSkillsByInstallsDesc(a.candidate.skill, b.candidate.skill),
+      )
+      .map(({ candidate, coveredItems, reasons }) => ({
+        candidate,
+        coveredItems: [...new Set(coveredItems)],
+        reason: [...reasons].join(' · '),
+      }));
   });
   protected readonly residualCards = computed(() =>
-    (this.store()?.residualCandidates() ?? []).map((entry) => ({
-      ...entry,
-      coveredItems: [...entry.itemNames],
-      reason: entry.rejections.length
-        ? entry.rejections
-            .map(({ itemName, reason }) => `Rejected for ${itemName}. ${reason}`)
-            .join(' · ')
-        : 'No verdict',
-    })),
+    [...(this.store()?.residualCandidates() ?? [])]
+      .sort((a, b) =>
+        compareSkillsByInstallsDesc(a.candidate.skill, b.candidate.skill),
+      )
+      .map((entry) => ({
+        ...entry,
+        coveredItems: [...entry.itemNames],
+        reason: entry.rejections.length
+          ? entry.rejections
+              .map(
+                ({ itemName, reason }) => `Rejected for ${itemName}. ${reason}`,
+              )
+              .join(' · ')
+          : 'No verdict',
+      })),
   );
   protected readonly judgedUnmatchedItems = computed(() => {
     const items = this.judgeItemsById();
@@ -212,9 +239,12 @@ export class StackSkillReviewComponent {
         .map(({ itemId }) => itemId),
     );
   });
-  protected readonly draftDisabledReason = computed(() =>
-    this.store()?.draftBlockedReason() ??
-    (this.store()?.openDraft()?.busy ? 'Wait for skill creation to finish.' : null),
+  protected readonly draftDisabledReason = computed(
+    () =>
+      this.store()?.draftBlockedReason() ??
+      (this.store()?.openDraft()?.busy
+        ? 'Wait for skill creation to finish.'
+        : null),
   );
   protected readonly lastBlankCreatedPath = computed(() => {
     let path: string | null = null;
@@ -223,9 +253,11 @@ export class StackSkillReviewComponent {
     }
     return path;
   });
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+  private readonly host =
+    inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
   private readonly injector = inject(Injector);
-  private readonly discardDialog = viewChild<ElementRef<HTMLDialogElement>>('discardDialog');
+  private readonly discardDialog =
+    viewChild<ElementRef<HTMLDialogElement>>('discardDialog');
   private readonly title = viewChild<ElementRef<HTMLElement>>('reviewTitle');
   private draftOpener: HTMLButtonElement | null = null;
   private previewParams: WizardGenerateSkillDraftParams | null = null;
@@ -254,7 +286,8 @@ export class StackSkillReviewComponent {
     () => this.busy() || this.previewing() || this.loading(),
   );
   protected readonly initialLoading = computed(
-    () => this.loading() && !this.judgedMode() && !this.recommendations().length,
+    () =>
+      this.loading() && !this.judgedMode() && !this.recommendations().length,
   );
   protected readonly coverage = computed(() => {
     const store = this.store();
@@ -272,7 +305,7 @@ export class StackSkillReviewComponent {
   );
   protected readonly filteredRecommendations = computed(() =>
     [...this.recommendations()]
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => compareSkillsByInstallsDesc(a.skill, b.skill))
       .filter(
         (row) =>
           !this.activeItem() ||
@@ -282,9 +315,9 @@ export class StackSkillReviewComponent {
       ),
   );
   protected readonly otherResults = computed(() =>
-    this.searchResults().filter(
-      (skill) => !this.recommendationIds().has(this.key(skill)),
-    ),
+    this.searchResults()
+      .filter((skill) => !this.recommendationIds().has(this.key(skill)))
+      .sort(compareSkillsByInstallsDesc),
   );
   protected readonly selectedSkills = computed(() => {
     const store = this.store();
@@ -295,22 +328,37 @@ export class StackSkillReviewComponent {
         ...this.searchResults(),
         ...(store?.judge()?.candidates.map(({ skill }) => skill) ?? []),
         ...[...(store?.itemSearchResultsByItemId().values() ?? [])].flat(),
-        ...[...(store?.retainedItemSearchResultsByItemId().values() ?? [])].flat(),
+        ...[
+          ...(store?.retainedItemSearchResultsByItemId().values() ?? []),
+        ].flat(),
       ].map((skill) => [this.key(skill), skill]),
     );
-    const selected = store?.judgedMode() ? store.selectedSelectionKeys() : this.selectedIds();
-    return [...selected].map((key) => ({
-      key,
-      name: skills.get(key)?.name ?? key,
-    }));
+    const selected = store?.judgedMode()
+      ? store.selectedSelectionKeys()
+      : this.selectedIds();
+    return [...selected]
+      .sort((a, b) => {
+        const skillA = skills.get(a);
+        const skillB = skills.get(b);
+        if (skillA && skillB) {
+          return compareSkillsByInstallsDesc(skillA, skillB);
+        }
+        if (skillA) return -1;
+        if (skillB) return 1;
+        return a.localeCompare(b);
+      })
+      .map((key) => ({
+        key,
+        name: skills.get(key)?.name ?? key,
+      }));
   });
   protected readonly totalSkills = computed(() => {
     const store = this.store();
     if (store?.judgedMode()) return store.selectionKeyByCandidateId().size;
     return new Set([
-        ...this.recommendations().map((row) => this.key(row.skill)),
-        ...this.searchResults().map((skill) => this.key(skill)),
-        ...this.selectedIds(),
+      ...this.recommendations().map((row) => this.key(row.skill)),
+      ...this.searchResults().map((skill) => this.key(skill)),
+      ...this.selectedIds(),
     ]).size;
   });
 
@@ -318,7 +366,10 @@ export class StackSkillReviewComponent {
     afterRenderEffect(() => {
       const draft = this.store()?.openDraft();
       const previous = this.focusedDraft;
-      if (draft && (draft.key !== previous?.key || draft.mode !== previous.mode)) {
+      if (
+        draft &&
+        (draft.key !== previous?.key || draft.mode !== previous.mode)
+      ) {
         this.focusOpenDraft(draft);
       } else if (!draft) {
         this.focusedDraft = null;
@@ -334,28 +385,47 @@ export class StackSkillReviewComponent {
 
   private focusOpenDraft(draft: OpenSkillDraft): void {
     const selector = draft.mode === 'edit' ? 'input' : 'h4';
-    const target = this.host.querySelector<HTMLElement>(`ptah-skill-draft-preview ${selector}`);
+    const target = this.host.querySelector<HTMLElement>(
+      `ptah-skill-draft-preview ${selector}`,
+    );
     if (!target) return;
     this.focusedDraft = { key: draft.key, mode: draft.mode };
     if (draft.mode === 'preview') target.tabIndex = -1;
     target.focus();
   }
 
-  private rememberDraftOpener(opener: HTMLButtonElement, draft: OpenSkillDraft): void {
+  private rememberDraftOpener(
+    opener: HTMLButtonElement,
+    draft: OpenSkillDraft,
+  ): void {
     this.draftOpener = opener;
-    afterNextRender(() => {
-      if (this.store()?.openDraft()?.revision === draft.revision &&
-          this.focusedDraft?.key !== draft.key) this.focusOpenDraft(draft);
-    }, { injector: this.injector });
+    afterNextRender(
+      () => {
+        if (
+          this.store()?.openDraft()?.revision === draft.revision &&
+          this.focusedDraft?.key !== draft.key
+        )
+          this.focusOpenDraft(draft);
+      },
+      { injector: this.injector },
+    );
   }
 
-  protected openProposalDraft(store: StackSkillStore, request: SkillBuildPreviewRequest): void {
+  protected openProposalDraft(
+    store: StackSkillStore,
+    request: SkillBuildPreviewRequest,
+  ): void {
     const proposalId = request.params.proposalId;
-    if (this.draftDisabledReason() || !request.params.runId ||
-        store.openDraft()?.key === `proposal:${proposalId}`) return;
+    if (
+      this.draftDisabledReason() ||
+      !request.params.runId ||
+      store.openDraft()?.key === `proposal:${proposalId}`
+    )
+      return;
     this.transitionDraft(
       store,
-      (forceDiscardDirty) => store.openProposalDraft(proposalId, { forceDiscardDirty }),
+      (forceDiscardDirty) =>
+        store.openProposalDraft(proposalId, { forceDiscardDirty }),
       (result) => {
         if (result.status !== 'ok') return;
         this.rememberDraftOpener(request.opener, result.draft);
@@ -365,15 +435,24 @@ export class StackSkillReviewComponent {
     );
   }
 
-  protected openManualDraft(store: StackSkillStore, request: ManualDraftRequest): void {
+  protected openManualDraft(
+    store: StackSkillStore,
+    request: ManualDraftRequest,
+  ): void {
     const { item, opener } = request;
     const itemId = request.itemId ?? `${item.kind}:${item.name}`;
-    if (this.draftDisabledReason() || store.openDraft()?.key === `manual:${itemId}`) return;
+    if (
+      this.draftDisabledReason() ||
+      store.openDraft()?.key === `manual:${itemId}`
+    )
+      return;
     this.transitionDraft(
       store,
-      (forceDiscardDirty) => store.openManualDraft(itemId, { item, forceDiscardDirty }),
+      (forceDiscardDirty) =>
+        store.openManualDraft(itemId, { item, forceDiscardDirty }),
       (result) => {
-        if (result.status === 'ok') this.rememberDraftOpener(opener, result.draft);
+        if (result.status === 'ok')
+          this.rememberDraftOpener(opener, result.draft);
       },
     );
   }
@@ -384,23 +463,38 @@ export class StackSkillReviewComponent {
     row: HTMLFieldSetElement,
   ): void {
     const opener = row.querySelector<HTMLButtonElement>('button');
-    if (opener) this.openManualDraft(store, { itemId: item.itemId, item: item.item, opener });
+    if (opener)
+      this.openManualDraft(store, {
+        itemId: item.itemId,
+        item: item.item,
+        opener,
+      });
   }
 
-  protected openBlankDraft(store: StackSkillStore, opener: HTMLButtonElement): void {
+  protected openBlankDraft(
+    store: StackSkillStore,
+    opener: HTMLButtonElement,
+  ): void {
     const draft = store.openDraft();
-    if (this.draftDisabledReason() || (draft?.kind === 'manual' && draft.itemId === null)) return;
+    if (
+      this.draftDisabledReason() ||
+      (draft?.kind === 'manual' && draft.itemId === null)
+    )
+      return;
     this.transitionDraft(
       store,
       (forceDiscardDirty) => store.openBlankManualDraft({ forceDiscardDirty }),
       (result) => {
-        if (result.status === 'ok') this.rememberDraftOpener(opener, result.draft);
+        if (result.status === 'ok')
+          this.rememberDraftOpener(opener, result.draft);
       },
     );
   }
 
   protected closeDraft(store: StackSkillStore): void {
-    this.transitionDraft(store, (forceDiscardDirty) => store.closeDraft({ forceDiscardDirty }));
+    this.transitionDraft(store, (forceDiscardDirty) =>
+      store.closeDraft({ forceDiscardDirty }),
+    );
   }
 
   protected retryDraft(store: StackSkillStore): void {
@@ -408,7 +502,8 @@ export class StackSkillReviewComponent {
     if (!params || this.draftDisabledReason()) return;
     this.transitionDraft(
       store,
-      (forceDiscardDirty) => store.beginRetryDraftGeneration({ forceDiscardDirty }),
+      (forceDiscardDirty) =>
+        store.beginRetryDraftGeneration({ forceDiscardDirty }),
       (result) => {
         if (result.status === 'ok') this.emitDraftPreview(result.draft, params);
       },
@@ -421,13 +516,19 @@ export class StackSkillReviewComponent {
     if (action) this.draftCreateRequested.emit(action);
   }
 
-  protected searchJudgedItem(store: StackSkillStore, itemId: string, query: string): void {
+  protected searchJudgedItem(
+    store: StackSkillStore,
+    itemId: string,
+    query: string,
+  ): void {
     if (this.searching()) return;
     this.transitionDraft(
       store,
-      (forceDiscardDirty) => store.requestCloseDraftForItemSearch({ forceDiscardDirty }),
+      (forceDiscardDirty) =>
+        store.requestCloseDraftForItemSearch({ forceDiscardDirty }),
       (result) => {
-        if (result.status === 'closed') this.itemSearchRequested.emit({ itemId, query });
+        if (result.status === 'closed')
+          this.itemSearchRequested.emit({ itemId, query });
       },
     );
   }
@@ -439,7 +540,10 @@ export class StackSkillReviewComponent {
     if (confirmed) action?.();
   }
 
-  private emitDraftPreview(draft: OpenSkillDraft, params: WizardGenerateSkillDraftParams): void {
+  private emitDraftPreview(
+    draft: OpenSkillDraft,
+    params: WizardGenerateSkillDraftParams,
+  ): void {
     this.draftPreviewRequested.emit({
       params,
       revision: draft.revision,
