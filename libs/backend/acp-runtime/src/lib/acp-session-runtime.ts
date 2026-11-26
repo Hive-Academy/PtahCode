@@ -63,7 +63,10 @@ import {
   requestAcpApproval,
   toProviderApprovalRequest,
 } from './acp-approval-adapter';
-import { cancelledResponse, decideAcpPermission } from './acp-permission-policy';
+import {
+  cancelledResponse,
+  decideAcpPermission,
+} from './acp-permission-policy';
 import { spawnAcpProcess } from './acp-process-transport';
 import type {
   AcpCommandPreparer,
@@ -313,8 +316,14 @@ export interface AcpAvailableCommand {
  * an entry without a string name is skipped; `undefined` when the update
  * carries no list at all.
  */
-export function readAvailableCommands(update: unknown): AcpAvailableCommand[] | undefined {
-  if (!isRecord(update) || update['sessionUpdate'] !== 'available_commands_update') return undefined;
+export function readAvailableCommands(
+  update: unknown,
+): AcpAvailableCommand[] | undefined {
+  if (
+    !isRecord(update) ||
+    update['sessionUpdate'] !== 'available_commands_update'
+  )
+    return undefined;
   const list = update['availableCommands'];
   if (!Array.isArray(list)) return undefined;
   const commands: AcpAvailableCommand[] = [];
@@ -327,7 +336,9 @@ export function readAvailableCommands(update: unknown): AcpAvailableCommand[] | 
     const path = isRecord(meta) ? meta['path'] : undefined;
     commands.push({
       name,
-      ...(typeof description === 'string' && description ? { description } : {}),
+      ...(typeof description === 'string' && description
+        ? { description }
+        : {}),
       ...(typeof path === 'string' && path ? { path } : {}),
     });
   }
@@ -495,10 +506,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   ): void => {
     emit({ type: 'error', error: { code, message } });
   };
-  const emitInfo = (
-    message: string,
-    notice?: 'permission-refused',
-  ): void => {
+  const emitInfo = (message: string, notice?: 'permission-refused'): void => {
     emit({ type: 'info', message, ...(notice ? { notice } : {}) });
   };
 
@@ -516,12 +524,15 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
 
   const dropStale = (target: Generation, what: string): boolean => {
     if (target === gen) return false;
-    logger?.debug('[AcpSessionHandle] dropped a late message from an ended agent process', {
-      ...logContext,
-      what,
-      generation: target.number,
-      current: gen.number,
-    });
+    logger?.debug(
+      '[AcpSessionHandle] dropped a late message from an ended agent process',
+      {
+        ...logContext,
+        what,
+        generation: target.number,
+        current: gen.number,
+      },
+    );
     return true;
   };
 
@@ -538,23 +549,43 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       const decision = decideAcpPermission(request, {
         autoApprove: options.autoApprove,
         grant: profile.grantsWithoutAutoApprove
-          ? (asked) => profile.grantsWithoutAutoApprove?.(asked, options) === true
+          ? (asked) =>
+              profile.grantsWithoutAutoApprove?.(asked, options) === true
           : undefined,
         mode: options.permission,
       });
       if (decision.info) {
-        emitInfo(decision.info, decision.refused ? 'permission-refused' : undefined);
+        emitInfo(
+          decision.info,
+          decision.refused ? 'permission-refused' : undefined,
+        );
       }
       if (decision.refused && promptInFlight && !refusedThisTurn) {
         refusedThisTurn = decision.toolTitle ?? FALLBACK_REFUSED_TITLE;
       }
       return decision.response;
     }
+    if (livePermission === 'yolo') {
+      const toolCall = isRecord(request) ? request.toolCall : undefined;
+      const kind = isRecord(toolCall) ? toolCall['kind'] : undefined;
+      if (kind !== 'switch_mode') {
+        const decision = decideAcpPermission(request, {
+          autoApprove: true,
+          mode: livePermission,
+        });
+        if (!decision.refused) {
+          return decision.response;
+        }
+      }
+    }
     const neutral = toProviderApprovalRequest(
       request,
       `${sessionId ?? budgetRunId}:${runtimeInstance}:approval:${++approvalSequence}`,
     );
-    const title = profile.approvalTitle?.(request, { ...options, permission: livePermission });
+    const title = profile.approvalTitle?.(request, {
+      ...options,
+      permission: livePermission,
+    });
     const approval = title ? { ...neutral, title } : neutral;
     emit({ type: 'approvalRequested', request: approval });
     const asked = new AbortController();
@@ -564,8 +595,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     signal.addEventListener('abort', stopAsking, { once: true });
     target.gone.signal.addEventListener('abort', stopAsking, { once: true });
     turn?.addEventListener('abort', stopAsking, { once: true });
-    if (signal.aborted || target.gone.signal.aborted || turn?.aborted) asked.abort();
-    const asking = requestAcpApproval(config.approvals, request, approval, asked.signal);
+    if (signal.aborted || target.gone.signal.aborted || turn?.aborted)
+      asked.abort();
+    const asking = requestAcpApproval(
+      config.approvals,
+      request,
+      approval,
+      asked.signal,
+    );
     pendingApprovals.add(asking);
     try {
       const outcome = await asking;
@@ -639,11 +676,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       // session's policy, nor shown under it (PR #1445 review). During a
       // re-attach the attaching id is the expected one.
       if (!isOwnSession(request.sessionId)) {
-        logger?.warn('[AcpSessionHandle] cancelled a permission request for another session', {
-          ...logContext,
-          requestSessionId: request.sessionId,
-          sessionId: sessionId ?? attachingSessionId,
-        });
+        logger?.warn(
+          '[AcpSessionHandle] cancelled a permission request for another session',
+          {
+            ...logContext,
+            requestSessionId: request.sessionId,
+            sessionId: sessionId ?? attachingSessionId,
+          },
+        );
         return cancelledResponse();
       }
       return answerPermission(target, request);
@@ -658,17 +698,24 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         sessionId !== undefined &&
         params['sessionId'] === sessionId
       ) {
-        const callUsage = profile.extensions?.usage?.(method, params, (fieldPaths) => {
-          // M2: one warning per session, so a vendor shape change is visible
-          // without a line per frame. Field paths only, never frame values.
-          if (reportedMalformedUsage) return;
-          reportedMalformedUsage = true;
-          logger?.warn('[AcpSessionHandle] usage notification did not parse; live usage is off', {
-            ...logContext,
-            method,
-            fieldPaths: fieldPaths.slice(0, 8),
-          });
-        });
+        const callUsage = profile.extensions?.usage?.(
+          method,
+          params,
+          (fieldPaths) => {
+            // M2: one warning per session, so a vendor shape change is visible
+            // without a line per frame. Field paths only, never frame values.
+            if (reportedMalformedUsage) return;
+            reportedMalformedUsage = true;
+            logger?.warn(
+              '[AcpSessionHandle] usage notification did not parse; live usage is off',
+              {
+                ...logContext,
+                method,
+                fieldPaths: fieldPaths.slice(0, 8),
+              },
+            );
+          },
+        );
         if (callUsage) {
           const model = callUsage.model ?? sessionModel();
           emit({
@@ -697,7 +744,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     // unhandled agent request with -32601 itself.
     ...(profile.extensions?.request
       ? {
-          extMethod: async (method: string, params: Record<string, unknown>) => {
+          extMethod: async (
+            method: string,
+            params: Record<string, unknown>,
+          ) => {
             const result = dropStale(target, method)
               ? undefined
               : await profile.extensions?.request?.(method, params);
@@ -805,11 +855,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         target.transport.exited.then(() => 'exited' as const),
       ]);
       if (outcome === 'sent') return true;
-      logger?.warn('[AcpSessionHandle] session/cancel was not written in time', {
-        ...logContext,
-        outcome,
-        timeoutMs: ACP_CANCEL_WRITE_TIMEOUT_MS,
-      });
+      logger?.warn(
+        '[AcpSessionHandle] session/cancel was not written in time',
+        {
+          ...logContext,
+          outcome,
+          timeoutMs: ACP_CANCEL_WRITE_TIMEOUT_MS,
+        },
+      );
     } catch (error: unknown) {
       // Logged here; the agent is stopped below and the caller reads `false`
       // as "stopped".
@@ -920,8 +973,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     mcpServers: readonly McpServer[],
     target: Generation,
   ): Promise<
-    | { ok: true; response: unknown }
-    | { ok: false; reason: string }
+    { ok: true; response: unknown } | { ok: false; reason: string }
   > => {
     const capabilities = init.agentCapabilities;
     const canResume = !!capabilities?.sessionCapabilities?.resume;
@@ -935,7 +987,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         ? other
         : undefined;
     if (!method) {
-      return { ok: false, reason: `${name} does not support resuming a session` };
+      return {
+        ok: false,
+        reason: `${name} does not support resuming a session`,
+      };
     }
 
     const cwd = options.workingDirectory;
@@ -1138,7 +1193,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     mode: string,
   ): Promise<
     | { readonly ok: true }
-    | { readonly ok: false; readonly unoffered: boolean; readonly reason: string }
+    | {
+        readonly ok: false;
+        readonly unoffered: boolean;
+        readonly reason: string;
+      }
   > => {
     try {
       if (advertisedModes.includes(mode)) {
@@ -1148,7 +1207,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       } else {
         const option = optionFor('mode');
         const values = option ? advertisedValuesOf(option) : [];
-        if (!option || typeof option['id'] !== 'string' || !values.includes(mode)) {
+        if (
+          !option ||
+          typeof option['id'] !== 'string' ||
+          !values.includes(mode)
+        ) {
           return {
             ok: false,
             unoffered: true,
@@ -1194,7 +1257,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       );
     };
     const authRequired = (error: unknown): error is AcpTurnFailure =>
-      error instanceof AcpTurnFailure && error.rpcCode === ACP_AUTH_REQUIRED_CODE;
+      error instanceof AcpTurnFailure &&
+      error.rpcCode === ACP_AUTH_REQUIRED_CODE;
     const signInFailure = (error: AcpTurnFailure): AcpTurnFailure =>
       // The profile's own wording wins; otherwise name the sign-in step.
       new AcpTurnFailure(
@@ -1218,7 +1282,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         methodId: method,
       });
       try {
-        await call('authenticate', () => conn.authenticate({ methodId: method }));
+        await call('authenticate', () =>
+          conn.authenticate({ methodId: method }),
+        );
       } catch (authError: unknown) {
         throw authError instanceof AcpTurnFailure
           ? signInFailure(authError)
@@ -1244,7 +1310,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     resumeId: string | undefined,
     attachFailure: 'new-session' | 'error',
   ): Promise<{ restoredContext: boolean }> => {
-    const conn = await connectAcp(target.transport.stream, createHandlers(target));
+    const conn = await connectAcp(
+      target.transport.stream,
+      createHandlers(target),
+    );
     target.connection = conn;
     void conn.closed.then(() => onConnectionClosed(target));
 
@@ -1340,7 +1409,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         ? {}
         : { reasoningEffort: acknowledgedEffort.value }),
     });
-    const mode = acknowledgedMode ?? profile.modeFor?.(options);
+    const mode =
+      acknowledgedMode ??
+      profile.modeFor?.({ ...options, permission: livePermission });
     if (mode) await applyMode(conn, id, mode);
     // `onSessionResolved` or the config writes may have aborted the session
     // or retired this process: setup did not succeed then (PR #1450 review).
@@ -1524,7 +1595,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       const conn = target.connection;
       const id = sessionId;
-      if (setupComplete && target.retired && !target.closed && !signal.aborted) {
+      if (
+        setupComplete &&
+        target.retired &&
+        !target.closed &&
+        !signal.aborted
+      ) {
         notStarted = true;
         emitError(
           `${name} is being stopped after an earlier turn failed; resume the session to continue`,
@@ -1567,7 +1643,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       // or is not sent at all. Set on every prompt, never from a cached mode:
       // the agent can change mode without telling the client (an approval
       // with no `kind`, a standing grant), and one `set_mode` per turn is cheap.
-      const startMode = profile.turnStartMode?.({ ...options, permission: livePermission });
+      const startMode = profile.turnStartMode?.({
+        ...options,
+        permission: livePermission,
+      });
       if (startMode) {
         const switched = await switchMode(conn, id, startMode);
         if (dropStale(target, 'session/set_mode reply')) return 1;
@@ -1584,7 +1663,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         }
       }
       const content: ContentBlock[] =
-        typeof input === 'string' ? [{ type: 'text', text: input }] : [...input];
+        typeof input === 'string'
+          ? [{ type: 'text', text: input }]
+          : [...input];
       const owed = pendingInstructions;
       // Sent once: whatever this prompt's outcome, the agent has seen them.
       pendingInstructions = undefined;
@@ -1707,7 +1788,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     if (turnAccepted) {
       // Overlapping prompts would share one turn's state (PR #1444 review).
       return Promise.reject(
-        new Error(`${name} is still running a turn; wait for it before prompting again`),
+        new Error(
+          `${name} is still running a turn; wait for it before prompting again`,
+        ),
       );
     }
     turnAccepted = true;
@@ -1725,7 +1808,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     const conn = target.connection;
     const id = sessionId;
     const settled = promptSettled;
-    if (!promptInFlight || !conn || !id || !settled || !isLive(target) || signal.aborted) {
+    if (
+      !promptInFlight ||
+      !conn ||
+      !id ||
+      !settled ||
+      !isLive(target) ||
+      signal.aborted
+    ) {
       return false;
     }
     turnCancelledByPtah = true;
@@ -1761,10 +1851,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         late,
       ]);
       if (outcome === 'answered' && !target.closed) return true;
-      logger?.warn('[AcpSessionHandle] the agent did not answer the cancelled turn', {
-        ...logContext,
-        outcome,
-      });
+      logger?.warn(
+        '[AcpSessionHandle] the agent did not answer the cancelled turn',
+        {
+          ...logContext,
+          outcome,
+        },
+      );
       stopProcess(target);
       return false;
     } finally {
@@ -1785,9 +1878,16 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     const id = sessionId;
     if (!conn || !id || !setupComplete || !isLive(gen)) return false;
     const option = optionFor('model');
-    const configId = typeof option?.['id'] === 'string' ? option['id'] : 'model';
+    const configId =
+      typeof option?.['id'] === 'string' ? option['id'] : 'model';
     try {
-      await writeConfig(conn, id, configId, model, option ? advertisedValuesOf(option) : []);
+      await writeConfig(
+        conn,
+        id,
+        configId,
+        model,
+        option ? advertisedValuesOf(option) : [],
+      );
       acknowledgedModel = model;
       emit({ type: 'configChanged' });
       return true;
@@ -1810,7 +1910,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         model: sessionModel(),
         reasoningEffort: effort,
       }) ?? []
-    ).filter((entry) => entry.configId !== 'model' && entry.configId !== modelId);
+    ).filter(
+      (entry) => entry.configId !== 'model' && entry.configId !== modelId,
+    );
     const applied = await applyConfigEntries(conn, id, entries);
     acknowledgedEffort = { value: effort };
     if (entries.length > 0) emit({ type: 'configChanged' });

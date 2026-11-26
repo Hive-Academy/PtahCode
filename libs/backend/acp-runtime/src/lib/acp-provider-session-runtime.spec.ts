@@ -77,7 +77,12 @@ const AGY_SESSION_REPLY = {
       category: 'thought_level',
       type: 'select',
       currentValue: 'high',
-      options: [{ value: 'low' }, { value: 'medium' }, { value: 'high' }, { value: 'xhigh' }],
+      options: [
+        { value: 'low' },
+        { value: 'medium' },
+        { value: 'high' },
+        { value: 'xhigh' },
+      ],
     },
   ],
 };
@@ -177,7 +182,9 @@ async function untilTerminal(
 
 /** Wait for a matching `session/prompt` request and answer it via the default handler. */
 const promptsOf = (agent: FakeAcpAgent): unknown[][] =>
-  sent(agent, 'session/prompt').map((message) => params(message)['prompt'] as unknown[]);
+  sent(agent, 'session/prompt').map(
+    (message) => params(message)['prompt'] as unknown[],
+  );
 
 afterEach(async () => {
   await Promise.all(live.splice(0).map((agent) => agent.close()));
@@ -206,14 +213,18 @@ describe('createAcpProviderSessionRuntime: open', () => {
     });
     await expect(session.listModels()).resolves.toEqual([
       { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)' },
-      { id: 'gemini-4-hydrogen-high', name: 'Gemini 4 Hydrogen (High)', isDefault: true },
+      {
+        id: 'gemini-4-hydrogen-high',
+        name: 'Gemini 4 Hydrogen (High)',
+        isDefault: true,
+      },
     ]);
     // The chat's `ask` (Manual) maps to agy's read-only `plan` mode: agy's
     // `default` self-approves workspace edits (live test 2026-11-21). No
     // approve-everything flag.
-    expect(sent(agent, 'session/set_mode').map((m) => params(m)['modeId'])).toEqual([
-      'plan',
-    ]);
+    expect(
+      sent(agent, 'session/set_mode').map((m) => params(m)['modeId']),
+    ).toEqual(['plan']);
     await session.close();
   });
 
@@ -247,7 +258,10 @@ describe('createAcpProviderSessionRuntime: open', () => {
 
   it('reports images false when the agent did not advertise image input', async () => {
     const { open } = harness({
-      agentCapabilities: { loadSession: false, promptCapabilities: { image: false } },
+      agentCapabilities: {
+        loadSession: false,
+        promptCapabilities: { image: false },
+      },
     });
     const session = await open({ profile: 'grok' });
     expect(session.capabilities()).toMatchObject({
@@ -262,7 +276,11 @@ describe('createAcpProviderSessionRuntime: open', () => {
   it('resumes by native id: restored context, no replay', async () => {
     const { agent, open } = harness();
     const session = await open({
-      attach: { nativeSessionId: 'old-1', method: 'resume', onFailure: 'error' },
+      attach: {
+        nativeSessionId: 'old-1',
+        method: 'resume',
+        onFailure: 'error',
+      },
     });
     expect(session.nativeSessionId).toBe('old-1');
     expect(session.restoredContext).toBe(true);
@@ -275,8 +293,14 @@ describe('createAcpProviderSessionRuntime: open', () => {
   it('loads by native id and keeps the replayed history, flagged replayed', async () => {
     const { agent, open } = harness({
       replay: [
-        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'earlier question' } },
-        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'earlier answer' } },
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'earlier question' },
+        },
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'earlier answer' },
+        },
       ],
     });
     const session = await open({
@@ -284,17 +308,26 @@ describe('createAcpProviderSessionRuntime: open', () => {
     });
     expect(session.restoredContext).toBe(true);
     expect(sent(agent, 'session/load')).toHaveLength(1);
-    expect(session.replay.map((event) => event.type)).toEqual(['userText', 'textDelta']);
+    expect(session.replay.map((event) => event.type)).toEqual([
+      'userText',
+      'textDelta',
+    ]);
     expect(session.replay.every((event) => event.replayed === true)).toBe(true);
     await session.close();
   });
 
   it('rejects with resume-failed when the attach fails and onFailure is error', async () => {
     const { transport, open } = harness({}, (fake) => {
-      fake.handle('session/resume', () => ({ error: { code: -32002, message: 'unknown session' } }));
+      fake.handle('session/resume', () => ({
+        error: { code: -32002, message: 'unknown session' },
+      }));
     });
     const opening = open({
-      attach: { nativeSessionId: 'gone-1', method: 'resume', onFailure: 'error' },
+      attach: {
+        nativeSessionId: 'gone-1',
+        method: 'resume',
+        onFailure: 'error',
+      },
     });
     await expect(opening).rejects.toBeInstanceOf(AcpProviderSessionError);
     await expect(opening).rejects.toMatchObject({ code: 'resume-failed' });
@@ -303,11 +336,17 @@ describe('createAcpProviderSessionRuntime: open', () => {
 
   it('starts a new session when the attach fails and onFailure is new-session', async () => {
     const { agent, open } = harness({}, (fake) => {
-      fake.handle('session/resume', () => ({ error: { code: -32002, message: 'unknown session' } }));
+      fake.handle('session/resume', () => ({
+        error: { code: -32002, message: 'unknown session' },
+      }));
     });
     const session = await open({
       instructions: INSTRUCTIONS,
-      attach: { nativeSessionId: 'gone-2', method: 'resume', onFailure: 'new-session' },
+      attach: {
+        nativeSessionId: 'gone-2',
+        method: 'resume',
+        onFailure: 'new-session',
+      },
     });
     expect(session.nativeSessionId).toBe(SESSION_ID);
     expect(session.restoredContext).toBe(false);
@@ -320,7 +359,9 @@ describe('createAcpProviderSessionRuntime: open', () => {
 
   it('rejects with the setup error code (auth-required) and stops the agent', async () => {
     const { transport, open } = harness({}, (fake) => {
-      fake.handle('session/new', () => ({ error: { code: -32000, message: 'Authentication required' } }));
+      fake.handle('session/new', () => ({
+        error: { code: -32000, message: 'Authentication required' },
+      }));
     });
     await expect(open()).rejects.toMatchObject({ code: 'auth-required' });
     await transport.exited;
@@ -341,7 +382,9 @@ describe('createAcpProviderSessionRuntime: open', () => {
         return { hold: true };
       });
     });
-    await expect(open({}, abort.signal)).rejects.toMatchObject({ code: 'cancelled' });
+    await expect(open({}, abort.signal)).rejects.toMatchObject({
+      code: 'cancelled',
+    });
   });
 });
 
@@ -353,7 +396,9 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
       const receipt = await session.prompt({
         text: 'Describe these',
         images: [{ mimeType: 'image/png', data: 'iVBORw0KGgo=' }],
-        files: [{ path: 'C:\\Users\\dev\\project\\notes 1.md', name: 'notes 1.md' }],
+        files: [
+          { path: 'C:\\Users\\dev\\project\\notes 1.md', name: 'notes 1.md' },
+        ],
       });
       expect(receipt.turnId).toBeTruthy();
     });
@@ -381,7 +426,10 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
     const { agent, open } = harness();
     const session = await open();
     await untilTerminal(session, () =>
-      session.prompt({ text: '', files: [{ path: '/home/dev/a.ts', name: 'a.ts' }] }),
+      session.prompt({
+        text: '',
+        files: [{ path: '/home/dev/a.ts', name: 'a.ts' }],
+      }),
     );
     expect(promptsOf(agent)[0]).toEqual([
       { type: 'resource_link', uri: 'file:///home/dev/a.ts', name: 'a.ts' },
@@ -390,10 +438,15 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
   });
 
   it('refuses an image when the agent did not advertise image input, sending nothing', async () => {
-    const { agent, open } = harness({ agentCapabilities: { promptCapabilities: { image: false } } });
+    const { agent, open } = harness({
+      agentCapabilities: { promptCapabilities: { image: false } },
+    });
     const session = await open({ profile: 'grok' });
     await expect(
-      session.prompt({ text: 'look', images: [{ mimeType: 'image/png', data: 'AAAA' }] }),
+      session.prompt({
+        text: 'look',
+        images: [{ mimeType: 'image/png', data: 'AAAA' }],
+      }),
     ).rejects.toMatchObject({ code: 'turn-failed' });
     expect(sent(agent, 'session/prompt')).toHaveLength(0);
     expect(session.isTurnRunning()).toBe(false);
@@ -406,7 +459,9 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
     });
     const session = await open();
     const { turnId } = await session.prompt({ text: 'first' });
-    await expect(session.prompt({ text: 'second' })).rejects.toThrow('still running a turn');
+    await expect(session.prompt({ text: 'second' })).rejects.toThrow(
+      'still running a turn',
+    );
     await expect(session.interrupt(turnId)).resolves.toBe(true);
     await session.close();
   });
@@ -422,12 +477,22 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
     await before.close();
     const second = harness({
       replay: [
-        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'first process' } },
-        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
+        {
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'first process' },
+        },
+        {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'answer' },
+        },
       ],
     });
     const after = await second.open({
-      attach: { nativeSessionId: SESSION_ID, method: 'load', onFailure: 'error' },
+      attach: {
+        nativeSessionId: SESSION_ID,
+        method: 'load',
+        onFailure: 'error',
+      },
     });
     const { turnId: later } = await after.prompt({ text: 'after restart' });
     expect(later).not.toBe(earlier);
@@ -438,14 +503,23 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
   it('repeats the turn usage on its terminal', async () => {
     const { open } = harness({}, (fake) => {
       fake.handle('session/prompt', () => ({
-        result: { stopReason: 'end_turn', usage: { inputTokens: 12, outputTokens: 3 } },
+        result: {
+          stopReason: 'end_turn',
+          usage: { inputTokens: 12, outputTokens: 3 },
+        },
       }));
     });
     const session = await open({ model: 'gemini-4-hydrogen-low' });
-    const events = await untilTerminal(session, () => session.prompt({ text: 'hi' }));
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'hi' }),
+    );
     expect(events.at(-1)).toMatchObject({
       type: 'terminal',
-      usage: { inputTokens: 12, outputTokens: 3, model: 'gemini-4-hydrogen-low' },
+      usage: {
+        inputTokens: 12,
+        outputTokens: 3,
+        model: 'gemini-4-hydrogen-low',
+      },
     });
     await session.close();
   });
@@ -465,7 +539,10 @@ describe('createAcpProviderSessionRuntime: instructions', () => {
 
   it('prefixes the first prompt only when the agent has no hook', async () => {
     const { agent, open } = harness({
-      agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+      agentCapabilities: {
+        loadSession: true,
+        sessionCapabilities: { resume: {} },
+      },
     });
     const session = await open({ instructions: INSTRUCTIONS });
     expect(params(sent(agent, 'session/new')[0])['_meta']).toBeUndefined();
@@ -497,7 +574,10 @@ describe('createAcpProviderSessionRuntime: instructions', () => {
     'never re-sends instructions to a session restored by %s',
     async (method) => {
       const { agent, open } = harness({
-        agentCapabilities: { loadSession: true, sessionCapabilities: { resume: {} } },
+        agentCapabilities: {
+          loadSession: true,
+          sessionCapabilities: { resume: {} },
+        },
       });
       const session = await open({
         instructions: INSTRUCTIONS,
@@ -507,7 +587,9 @@ describe('createAcpProviderSessionRuntime: instructions', () => {
       await untilTerminal(session, () => session.prompt({ text: 'continue' }));
       expect(promptsOf(agent)[0]).toEqual([{ type: 'text', text: 'continue' }]);
       expect(
-        agent.received.some((message) => JSON.stringify(message).includes(INSTRUCTIONS)),
+        agent.received.some((message) =>
+          JSON.stringify(message).includes(INSTRUCTIONS),
+        ),
       ).toBe(false);
       await session.close();
     },
@@ -540,7 +622,11 @@ describe('createAcpProviderSessionRuntime: instructions', () => {
     const { agent, open } = harness();
     const session = await open({
       instructions: INSTRUCTIONS,
-      attach: { nativeSessionId: 'old-5', method: 'resume', onFailure: 'error' },
+      attach: {
+        nativeSessionId: 'old-5',
+        method: 'resume',
+        onFailure: 'error',
+      },
     });
     expect(params(sent(agent, 'session/resume')[0])['_meta']).toBeUndefined();
     await session.close();
@@ -555,7 +641,8 @@ describe('createAcpProviderSessionRuntime: spawn report', () => {
         'session/new',
         () =>
           new Promise((resolve) => {
-            resolveSession = () => resolve({ result: { sessionId: SESSION_ID } });
+            resolveSession = () =>
+              resolve({ result: { sessionId: SESSION_ID } });
           }),
       );
     });
@@ -590,8 +677,17 @@ describe('createAcpProviderSessionRuntime: spawn report', () => {
 describe('createAcpProviderSessionRuntime: MCP attachments', () => {
   it('maps Ptah http, user sse and user stdio attachments to ACP entries', async () => {
     const mcp: ProviderMcpAttachment[] = [
-      { name: 'ptah', url: 'http://127.0.0.1:5000/mcp', headers: [{ name: 'Authorization', value: 'Bearer t' }] },
-      { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+      {
+        name: 'ptah',
+        url: 'http://127.0.0.1:5000/mcp',
+        headers: [{ name: 'Authorization', value: 'Bearer t' }],
+      },
+      {
+        type: 'sse',
+        name: 'docs',
+        url: 'https://docs.example/sse',
+        headers: [],
+      },
       {
         type: 'stdio',
         name: 'files',
@@ -609,7 +705,12 @@ describe('createAcpProviderSessionRuntime: MCP attachments', () => {
         url: 'http://127.0.0.1:5000/mcp',
         headers: [{ name: 'Authorization', value: 'Bearer t' }],
       },
-      { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+      {
+        type: 'sse',
+        name: 'docs',
+        url: 'https://docs.example/sse',
+        headers: [],
+      },
       {
         name: 'files',
         command: 'node',
@@ -634,8 +735,12 @@ describe('createAcpProviderSessionRuntime: controls', () => {
       timing: 'effectiveNow',
       revision: 1,
     });
-    await expect(session.setEffort('max')).resolves.toMatchObject({ revision: 2 });
-    await expect(session.setPermission('auto-edit')).resolves.toMatchObject({ revision: 3 });
+    await expect(session.setEffort('max')).resolves.toMatchObject({
+      revision: 2,
+    });
+    await expect(session.setPermission('auto-edit')).resolves.toMatchObject({
+      revision: 3,
+    });
     const writes = sent(agent, 'session/set_config_option').map((m) => [
       params(m)['configId'],
       params(m)['value'],
@@ -644,10 +749,9 @@ describe('createAcpProviderSessionRuntime: controls', () => {
       ['model', 'gemini-4-hydrogen'],
       ['thought_level', 'xhigh'],
     ]);
-    expect(sent(agent, 'session/set_mode').map((m) => params(m)['modeId'])).toEqual([
-      'plan',
-      'accept-edits',
-    ]);
+    expect(
+      sent(agent, 'session/set_mode').map((m) => params(m)['modeId']),
+    ).toEqual(['plan', 'accept-edits']);
     await session.close();
   });
 
@@ -658,7 +762,9 @@ describe('createAcpProviderSessionRuntime: controls', () => {
     const session = await open({ model: 'gemini-4-hydrogen-low' });
     await session.setEffort('high');
     expect(
-      sent(agent, 'session/set_config_option').filter((m) => params(m)['configId'] === 'thought_level'),
+      sent(agent, 'session/set_config_option').filter(
+        (m) => params(m)['configId'] === 'thought_level',
+      ),
     ).toHaveLength(0);
     await session.close();
   });
@@ -666,11 +772,17 @@ describe('createAcpProviderSessionRuntime: controls', () => {
   it('rejects a model the agent refuses', async () => {
     const { open } = harness({}, (fake) => {
       fake.handle('session/set_config_option', () => ({
-        error: { code: -32602, message: 'Invalid params', data: 'unknown model' },
+        error: {
+          code: -32602,
+          message: 'Invalid params',
+          data: 'unknown model',
+        },
       }));
     });
     const session = await open();
-    await expect(session.setModel('nope')).rejects.toMatchObject({ code: 'request-failed' });
+    await expect(session.setModel('nope')).rejects.toMatchObject({
+      code: 'request-failed',
+    });
     await session.close();
   });
 
@@ -706,13 +818,20 @@ describe('createAcpProviderSessionRuntime: process lifetime', () => {
     });
     owner.transport = h.transport;
     const session = await h.open();
-    const events = await untilTerminal(session, () => session.prompt({ text: 'crash' }));
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'crash' }),
+    );
     expect(events.at(-1)).toMatchObject({
       type: 'terminal',
       status: 'failed',
       disposition: 'broken',
     });
-    expect(events.some((event) => event.type === 'error' && event.error.code === 'process-exited')).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'error' && event.error.code === 'process-exited',
+      ),
+    ).toBe(true);
     await session.close();
   });
 
@@ -723,7 +842,9 @@ describe('createAcpProviderSessionRuntime: process lifetime', () => {
     await expect(session.prompt({ text: 'hello?' })).rejects.toMatchObject({
       code: 'process-exited',
     });
-    await expect(session.setModel('x')).rejects.toMatchObject({ code: 'process-exited' });
+    await expect(session.setModel('x')).rejects.toMatchObject({
+      code: 'process-exited',
+    });
     expect(session.getPid()).toBeUndefined();
     await session.close();
   });
@@ -732,7 +853,8 @@ describe('createAcpProviderSessionRuntime: process lifetime', () => {
     const sink: ProviderApprovalSink = { request: jest.fn() };
     const { transport, open } = harness();
     const session = await open({ approvals: sink });
-    const iterator = session.events(new AbortController().signal)[Symbol.asyncIterator]();
+    const events = session.events(new AbortController().signal);
+    const iterator = events[Symbol.asyncIterator]();
     const pending = iterator.next();
     await session.close();
     await expect(pending).resolves.toEqual({ done: true, value: undefined });
@@ -740,9 +862,11 @@ describe('createAcpProviderSessionRuntime: process lifetime', () => {
     expect(transport.killCount).toBe(1);
     // The pool that minted the MCP credential revokes it; close asks nothing.
     expect(sink.request).not.toHaveBeenCalled();
-    await expect(session.prompt({ text: 'after close' })).rejects.toMatchObject({
-      code: 'cancelled',
-    });
+    await expect(session.prompt({ text: 'after close' })).rejects.toMatchObject(
+      {
+        code: 'cancelled',
+      },
+    );
   });
 });
 
@@ -784,7 +908,10 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
         }
         // Usage on the reply: no usage-drain wait per turn.
         return {
-          result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+          result: {
+            stopReason: 'end_turn',
+            _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+          },
         };
       });
     };
@@ -793,9 +920,13 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
   /** The `session/set_mode` and `session/prompt` requests the agent received, in order. */
   const modeAndPrompts = (agent: FakeAcpAgent): string[] =>
     agent.received
-      .filter((m) => m.method === 'session/set_mode' || m.method === 'session/prompt')
+      .filter(
+        (m) => m.method === 'session/set_mode' || m.method === 'session/prompt',
+      )
       .map((m) =>
-        m.method === 'session/set_mode' ? `set_mode:${String(params(m)['modeId'])}` : 'prompt',
+        m.method === 'session/set_mode'
+          ? `set_mode:${String(params(m)['modeId'])}`
+          : 'prompt',
       );
 
   const accepting = (): ProviderApprovalSink => ({
@@ -805,7 +936,11 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
   it.each([
     ['agy reports the switch (current_mode_update)', true, true],
     ['agy does not report the switch', false, true],
-    ['the approval has no kind and agy does not report the switch', false, false],
+    [
+      'the approval has no kind and agy does not report the switch',
+      false,
+      false,
+    ],
   ])(
     'turn 2 starts in plan mode after a plan exit approved in turn 1: %s',
     async (_label, report, withKind) => {
@@ -813,17 +948,30 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
       const sink = accepting();
       const session = await open({ approvals: sink });
 
-      const first = await untilTerminal(session, () => session.prompt({ text: 'plan it' }));
-      expect(first.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+      const first = await untilTerminal(session, () =>
+        session.prompt({ text: 'plan it' }),
+      );
+      expect(first.at(-1)).toMatchObject({
+        type: 'terminal',
+        status: 'completed',
+      });
       if (withKind) {
         // The card says plainly what approving allows.
         expect(sink.request).toHaveBeenCalledWith(
-          expect.objectContaining({ kind: 'switch_mode', title: ANTIGRAVITY_PLAN_EXIT_TITLE }),
+          expect.objectContaining({
+            kind: 'switch_mode',
+            title: ANTIGRAVITY_PLAN_EXIT_TITLE,
+          }),
           expect.anything(),
         );
       }
-      const second = await untilTerminal(session, () => session.prompt({ text: 'next' }));
-      expect(second.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+      const second = await untilTerminal(session, () =>
+        session.prompt({ text: 'next' }),
+      );
+      expect(second.at(-1)).toMatchObject({
+        type: 'terminal',
+        status: 'completed',
+      });
 
       // Open sets plan; every prompt re-enters plan first, whatever happened before.
       expect(modeAndPrompts(agent)).toEqual([
@@ -841,7 +989,10 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
     const { agent, open } = harness({}, (fake) => {
       fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
       fake.handle('session/prompt', () => ({
-        result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+        result: {
+          stopReason: 'end_turn',
+          _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+        },
       }));
     });
     const session = await open({ approvals: accepting() });
@@ -868,7 +1019,9 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
       error: { code: -32603, message: 'mode switch failed' },
     }));
 
-    const events = await untilTerminal(session, () => session.prompt({ text: 'next' }));
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'next' }),
+    );
     expect(sent(agent, 'session/prompt')).toHaveLength(1);
     const error = events.find((event) => event.type === 'error');
     expect(error).toMatchObject({ error: { code: 'request-failed' } });
@@ -883,9 +1036,17 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
 
     // The session stays usable: once the switch works, the next prompt goes out in plan.
     agent.handle('session/set_mode', () => ({ result: {} }));
-    const retry = await untilTerminal(session, () => session.prompt({ text: 'again' }));
-    expect(retry.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
-    expect(modeAndPrompts(agent).slice(-2)).toEqual(['set_mode:plan', 'prompt']);
+    const retry = await untilTerminal(session, () =>
+      session.prompt({ text: 'again' }),
+    );
+    expect(retry.at(-1)).toMatchObject({
+      type: 'terminal',
+      status: 'completed',
+    });
+    expect(modeAndPrompts(agent).slice(-2)).toEqual([
+      'set_mode:plan',
+      'prompt',
+    ]);
     await session.close();
   });
 
@@ -936,7 +1097,260 @@ describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn
     await untilTerminal(session, () => session.prompt({ text: 'one' }));
     await untilTerminal(session, () => session.prompt({ text: 'two' }));
     // A lane's ask is agy's `default`, set once at open.
-    expect(modeAndPrompts(agent)).toEqual(['set_mode:default', 'prompt', 'prompt']);
+    expect(modeAndPrompts(agent)).toEqual([
+      'set_mode:default',
+      'prompt',
+      'prompt',
+    ]);
+    await session.close();
+  });
+});
+
+describe('createAcpProviderSessionRuntime: yolo auto-approval and getPermission', () => {
+  const permissionRequest = (
+    sessionId: unknown,
+    toolCall: Record<string, unknown>,
+    options: readonly Record<string, unknown>[] = [
+      { optionId: 'allow-once-1', kind: 'allow_once', name: 'Allow' },
+      { optionId: 'reject-once-1', kind: 'reject_once', name: 'Reject' },
+    ],
+  ) => ({
+    sessionId,
+    toolCall,
+    options,
+  });
+
+  const fastEndTurn = {
+    result: {
+      stopReason: 'end_turn',
+      _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+    },
+  };
+
+  it('returns the initial permission from getPermission and updates it after setPermission', async () => {
+    const { open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+    });
+    const session = await open({
+      policy: { permission: 'ask', cwd: process.cwd() },
+    });
+    expect(session.getPermission?.()).toBe('ask');
+
+    await session.setPermission('yolo');
+    expect(session.getPermission?.()).toBe('yolo');
+
+    await session.setPermission('auto-edit');
+    expect(session.getPermission?.()).toBe('auto-edit');
+
+    await session.close();
+  });
+
+  it('auto-approves MCP (kind: other) and bash (kind: execute) requests in yolo without calling approvals or emitting approvalRequested', async () => {
+    const replies: FakeAcpMessage[] = [];
+    const { open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      fake.handle('session/prompt', async (prompt, agent) => {
+        replies.push(
+          await agent.request(
+            'session/request_permission',
+            permissionRequest(prompt['sessionId'], {
+              toolCallId: 'mcp-1',
+              kind: 'other',
+              title: 'Run mcp_ptah_lane_ptah_agent_list',
+            }),
+          ),
+        );
+        replies.push(
+          await agent.request(
+            'session/request_permission',
+            permissionRequest(prompt['sessionId'], {
+              toolCallId: 'bash-1',
+              kind: 'execute',
+              title: 'Run bash command',
+            }),
+          ),
+        );
+        return fastEndTurn;
+      });
+    });
+    const sink: ProviderApprovalSink = {
+      request: jest.fn(async () => 'decline' as const),
+    };
+    const session = await open({
+      approvals: sink,
+      policy: { permission: 'yolo', cwd: process.cwd() },
+    });
+
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'do work' }),
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: 'terminal',
+      status: 'completed',
+    });
+    expect(events.some((event) => event.type === 'approvalRequested')).toBe(
+      false,
+    );
+    expect(sink.request).not.toHaveBeenCalled();
+    expect(replies.map((reply) => reply.result)).toEqual([
+      { outcome: { outcome: 'selected', optionId: 'allow-once-1' } },
+      { outcome: { outcome: 'selected', optionId: 'allow-once-1' } },
+    ]);
+    await session.close();
+  });
+
+  it('follows live permission toggles between ask and yolo immediately', async () => {
+    const replies: FakeAcpMessage[] = [];
+    let turn = 0;
+    const { open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      fake.handle('session/prompt', async (prompt, agent) => {
+        turn += 1;
+        replies.push(
+          await agent.request(
+            'session/request_permission',
+            permissionRequest(prompt['sessionId'], {
+              toolCallId: `tool-${turn}`,
+              kind: 'execute',
+              title: `Run command ${turn}`,
+            }),
+          ),
+        );
+        return fastEndTurn;
+      });
+    });
+    const sink: ProviderApprovalSink = {
+      request: jest.fn(async () => 'accept' as const),
+    };
+    const session = await open({
+      approvals: sink,
+      policy: { permission: 'ask', cwd: process.cwd() },
+    });
+
+    await session.setPermission('yolo');
+    const yoloEvents = await untilTerminal(session, () =>
+      session.prompt({ text: 'in yolo' }),
+    );
+    expect(yoloEvents.some((event) => event.type === 'approvalRequested')).toBe(
+      false,
+    );
+    expect(sink.request).not.toHaveBeenCalled();
+    expect(replies[0]?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once-1' },
+    });
+
+    await session.setPermission('ask');
+    const askEvents = await untilTerminal(session, () =>
+      session.prompt({ text: 'back to ask' }),
+    );
+    expect(askEvents.some((event) => event.type === 'approvalRequested')).toBe(
+      true,
+    );
+    expect(sink.request).toHaveBeenCalledTimes(1);
+    expect(replies[1]?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once-1' },
+    });
+    await session.close();
+  });
+
+  it('still routes kind: switch_mode to approvals.request even under yolo', async () => {
+    const replies: FakeAcpMessage[] = [];
+    const { open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      fake.handle('session/prompt', async (prompt, agent) => {
+        replies.push(
+          await agent.request(
+            'session/request_permission',
+            permissionRequest(prompt['sessionId'], {
+              toolCallId: 'mode-1',
+              kind: 'switch_mode',
+              title: 'Switch mode',
+            }),
+          ),
+        );
+        return fastEndTurn;
+      });
+    });
+    const sink: ProviderApprovalSink = {
+      request: jest.fn(async () => 'accept' as const),
+    };
+    const session = await open({
+      approvals: sink,
+      policy: { permission: 'yolo', cwd: process.cwd() },
+    });
+
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'switch' }),
+    );
+    expect(events.some((event) => event.type === 'approvalRequested')).toBe(
+      true,
+    );
+    expect(sink.request).toHaveBeenCalledTimes(1);
+    expect(sink.request).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'switch_mode' }),
+      expect.anything(),
+    );
+    expect(replies[0]?.result).toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once-1' },
+    });
+    await session.close();
+  });
+
+  it('falls back to approvals.request in yolo when no allow_once option is offered', async () => {
+    const replies: FakeAcpMessage[] = [];
+    const { open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      fake.handle('session/prompt', async (prompt, agent) => {
+        replies.push(
+          await agent.request(
+            'session/request_permission',
+            permissionRequest(
+              prompt['sessionId'],
+              {
+                toolCallId: 'no-allow-once-1',
+                kind: 'execute',
+                title: 'Run privileged command',
+              },
+              [
+                {
+                  optionId: 'allow-always-1',
+                  kind: 'allow_always',
+                  name: 'Always allow',
+                },
+                {
+                  optionId: 'reject-once-1',
+                  kind: 'reject_once',
+                  name: 'Reject',
+                },
+              ],
+            ),
+          ),
+        );
+        return fastEndTurn;
+      });
+    });
+    const sink: ProviderApprovalSink = {
+      request: jest.fn(async () => 'accept' as const),
+    };
+    const session = await open({
+      approvals: sink,
+      policy: { permission: 'yolo', cwd: process.cwd() },
+    });
+
+    const events = await untilTerminal(session, () =>
+      session.prompt({ text: 'privileged' }),
+    );
+    expect(events.some((event) => event.type === 'approvalRequested')).toBe(
+      true,
+    );
+    expect(events.some((event) => event.type === 'approvalSettled')).toBe(true);
+    expect(sink.request).toHaveBeenCalledTimes(1);
+    // `requestAcpApproval` never widens to `allow_always`, so an accepted
+    // request with no `allow_once` settles as `cancelled` rather than
+    // `decideAcpPermission`'s silent `reject_once`.
+    expect(replies[0]?.result).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
     await session.close();
   });
 });
