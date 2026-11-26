@@ -4,6 +4,7 @@ import {
   ProvidersSettingsStateService,
   type ProvidersSettingsCommit,
 } from '@ptah-extension/core';
+import { NativeDrawerComponent } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from './settings-save-feedback.service';
 import { SettingsToastComponent, TOAST_PLACEMENT_STYLES } from './settings-toast.component';
 import { isDisabledControl } from './busy-disabled.testing';
@@ -35,7 +36,7 @@ describe('SettingsToastComponent', () => {
   beforeEach(() => {
     commit = signal<ProvidersSettingsCommit>(EMPTY);
     TestBed.configureTestingModule({
-      imports: [SettingsToastComponent],
+      imports: [SettingsToastComponent, NativeDrawerComponent],
       providers: [
         SettingsSaveFeedbackService,
         { provide: ProvidersSettingsStateService, useValue: { commit } },
@@ -472,17 +473,19 @@ describe('SettingsToastComponent', () => {
       return query('settings-toast-region');
     }
 
-    /** Builds `<ptah-native-drawer><div role=dialog class=...><div data-testid=native-drawer-body>`. */
-    function mountDrawer(panelClass: string): { drawer: HTMLElement; body: HTMLElement } {
-      const drawer = document.createElement('ptah-native-drawer');
-      const panel = document.createElement('div');
-      panel.setAttribute('role', 'dialog');
-      panel.className = panelClass;
-      const body = document.createElement('div');
-      body.setAttribute('data-testid', 'native-drawer-body');
-      panel.appendChild(body);
-      drawer.appendChild(panel);
-      document.body.appendChild(drawer);
+    function mountDrawer(widthClass: string): {
+      drawer: ComponentFixture<NativeDrawerComponent>;
+      body: HTMLElement;
+    } {
+      const toastHost: HTMLElement = fixture.nativeElement;
+      const drawer = TestBed.createComponent(NativeDrawerComponent);
+      // TestBed removes the previous root when it creates the drawer fixture.
+      document.body.appendChild(toastHost);
+      drawer.componentRef.setInput('widthClass', widthClass);
+      drawer.componentRef.setInput('isOpen', true);
+      drawer.detectChanges();
+      const body = document.querySelector<HTMLElement>('.cdk-overlay-container [data-testid="native-drawer-body"]');
+      if (!body) throw new Error('Expected a portaled drawer body');
       return { drawer, body };
     }
 
@@ -566,25 +569,25 @@ describe('SettingsToastComponent', () => {
         expect(document.querySelector(condition(lift.selector))).toBe(document.body);
         expect(document.querySelector(condition(lgBeside.selector))).toBe(document.body);
         // No page toast yet: no space is reserved.
-        expect(lg.body.matches(reserveLg.selector)).toBe(false);
+        expect(document.querySelector(reserveLg.selector)).toBeNull();
         const region = await showToast();
         expect(region).not.toBeNull();
-        expect(lg.body.matches(reserveLg.selector)).toBe(true);
-        expect(lg.body.matches(reserveOther.selector)).toBe(false);
+        expect(document.querySelector(reserveLg.selector)).toBe(lg.body);
+        expect(document.querySelector(reserveOther.selector)).toBeNull();
         expect(region?.matches(lift.selector)).toBe(true);
       } finally {
-        lg.drawer.remove();
+        lg.drawer.destroy();
       }
 
       const wide = mountDrawer('w-full max-w-2xl');
       try {
         expect(document.querySelector(condition(lgBeside.selector))).toBeNull();
-        expect(wide.body.matches(reserveOther.selector)).toBe(true);
+        expect(document.querySelector(reserveOther.selector)).toBe(wide.body);
         feedback.dismiss();
         fixture.detectChanges();
-        expect(wide.body.matches(reserveOther.selector)).toBe(false);
+        expect(document.querySelector(reserveOther.selector)).toBeNull();
       } finally {
-        wide.drawer.remove();
+        wide.drawer.destroy();
       }
     });
   });

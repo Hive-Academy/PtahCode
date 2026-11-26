@@ -135,9 +135,9 @@ export async function drawerTabOf(page: Page, providerName: string, tab: string,
 export const credentialsOf = (page: Page, providerName: string): Promise<Locator> =>
   drawerTabOf(page, providerName, 'Credentials', 'connection-credentials');
 
-/** Closes the connection drawer through its footer Close. Best-effort: used from `finally`. */
+/** Closes the connection drawer through its footer Close. */
 export async function closeConnectionDrawer(page: Page): Promise<void> {
-  await page.locator('[data-testid="connection-drawer-close"]').click({ timeout: 5000 }).catch(() => undefined);
+  await page.locator('[data-testid="connection-drawer-close"]').click({ timeout: 5000 });
   await expect(page.locator('[data-testid="connection-detail-drawer"]')).toHaveCount(0);
 }
 
