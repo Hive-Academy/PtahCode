@@ -1,3 +1,4 @@
+import type { LiveChatSession } from '@ptah-extension/platform-core';
 import {
   streamCodexChatTurn,
   type CodexChatSession as Session,
@@ -224,6 +225,24 @@ export class CodexChatAdapter implements NativeChatAdapter {
    * (`ptahMcpSessionUrl`). Returns an id only for a session this adapter
    * holds now; an unknown, closed, or ambiguous caller yields `undefined`.
    */
+  findLiveChatSessions(callerId: string): LiveChatSession[] {
+    const matches: LiveChatSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.consumer !== 'chat' || session.abort.signal.aborted) continue;
+      if (session.id !== callerId && session.tabId !== callerId) continue;
+      matches.push({
+        runtime: 'codex-app-server',
+        sessionId: session.id,
+        tabId: session.tabId,
+        workspaceRoot: session.profile.workspaceId,
+        cwd: session.profile.cwd,
+        model: session.settings.model,
+        permissionLevel: session.context.turnPermissionLevel,
+      });
+    }
+    return matches;
+  }
+
   resolveLiveSessionId(callerId: string): SessionId | undefined {
     if (callerId.trim() === '') return undefined;
     if (SessionId.validate(callerId) && this.sessions.has(callerId)) {

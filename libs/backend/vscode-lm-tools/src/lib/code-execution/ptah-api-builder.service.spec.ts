@@ -61,6 +61,7 @@
  */
 
 import 'reflect-metadata';
+import type { LiveChatSession, LiveChatSessionResolver } from '@ptah-extension/platform-core';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -105,6 +106,13 @@ jest.mock('./namespace-builders/route-namespace.builder', () => {
     typeof import('./namespace-builders/route-namespace.builder')
   >('./namespace-builders/route-namespace.builder');
   return { ...actual, buildRouteNamespace: jest.fn(actual.buildRouteNamespace) };
+});
+
+jest.mock('./namespace-builders/cron-namespace.builder', () => {
+  const actual = jest.requireActual<
+    typeof import('./namespace-builders/cron-namespace.builder')
+  >('./namespace-builders/cron-namespace.builder');
+  return { ...actual, buildCronNamespace: jest.fn(actual.buildCronNamespace) };
 });
 
 jest.mock('./services/web-search.service', () => ({
@@ -216,6 +224,7 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
 }));
 
 import * as namespaceBuilders from './namespace-builders';
+import { buildCronNamespace } from './namespace-builders/cron-namespace.builder';
 import { HELP_DOCS } from './namespace-builders/system-namespace.builders';
 import { buildRouteNamespace } from './namespace-builders/route-namespace.builder';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
@@ -406,6 +415,61 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
       'codex-tab',
     );
   });
+
+  it('wires ACP attribution into harness proposals, cron creation, and lane permission', () => {
+    const tabId = 'acp-tab';
+    const sessionId = 'acp-session';
+    const resolver: LiveChatSessionResolver = {
+      resolve: (id) => id === tabId ? {
+        kind: 'resolved',
+        session: { runtime: 'provider-session', sessionId, tabId, permissionLevel: 'auto-edit' },
+      } : { kind: 'ambiguous' },
+    };
+    const manager = makeSessionManager();
+    manager.find.mockReturnValue({ realSessionId: 'unrelated-sdk' });
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(), manager, undefined, undefined, undefined,
+      undefined, undefined, makeLogger(), undefined, resolver,
+    );
+    Object.assign(builder, { pluginLoader: {} });
+    builder.build();
+
+    const harness = jest.mocked(namespaceBuilders.buildHarnessNamespace).mock.calls.at(-1)?.[0];
+    const cron = jest.mocked(buildCronNamespace).mock.calls.at(-1)?.[0];
+    const agent = jest.mocked(namespaceBuilders.buildAgentNamespace).mock.calls.at(-1)?.[0];
+    expect(harness).toBeDefined();
+    expect(cron).toBeDefined();
+    expect(agent).toBeDefined();
+    runWithMcpRequestContext({ callerSessionId: tabId }, () => {
+      expect(harness?.getCallerSdkSessionId?.()).toBe(sessionId);
+      expect(cron?.getSessionId()).toBe(sessionId);
+      expect(agent?.getParentLevel?.(tabId)).toBe('auto-edit');
+    });
+    runWithMcpRequestContext({ callerSessionId: 'ambiguous-tab' }, () => {
+      expect(harness?.getCallerSdkSessionId?.()).toBeUndefined();
+      expect(cron?.getSessionId()).toBeUndefined();
+      expect(agent?.getParentLevel?.('ambiguous-tab')).toBe('plan');
+    });
+  });
+
+  it.each<LiveChatSession['runtime']>(['claude-sdk', 'codex-app-server', 'provider-session'])(
+    'passes the ask ceiling from a live %s caller to lane spawn',
+    (runtime) => {
+      const resolver: LiveChatSessionResolver = {
+        resolve: () => ({
+          kind: 'resolved',
+          session: { runtime, sessionId: 'session', tabId: 'tab', permissionLevel: 'ask' },
+        }),
+      };
+      buildTestBuilder(
+        makeRawWorkspaceProvider(), makeSessionManager(), undefined, undefined, undefined,
+        undefined, undefined, makeLogger(), undefined, resolver,
+      ).build();
+
+      const agent = jest.mocked(namespaceBuilders.buildAgentNamespace).mock.calls.at(-1)?.[0];
+      expect(agent?.getParentLevel?.('tab')).toBe('ask');
+    },
+  );
 
   it('passes the live native thread to session start and preserves unresolved callers', async () => {
     const spawner = { start: jest.fn().mockResolvedValue({ ok: false }) };
@@ -671,6 +735,7 @@ function buildTestBuilder(
     getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
     resolveLiveSessionId?(callerId: string): string | undefined;
   },
+  liveChatSessions?: LiveChatSessionResolver,
 ): PtahAPIBuilder {
   return new PtahAPIBuilder(
     {} as unknown as WorkspaceAnalyzerService,
@@ -726,6 +791,11 @@ function buildTestBuilder(
     undefined, // laneLimitLookup
     undefined, // taskEndRunReader
     codexPermissionReader,
+    undefined, // taskEndDetector
+    undefined, // closeOutPrStatus
+    undefined, // taskSessionStore
+    undefined, // taskCloseOutService
+    liveChatSessions,
   );
 }
 
@@ -1163,6 +1233,7 @@ describe('PtahAPIBuilder.build() — MCP worktree capture (TASK_2026_580, L15)',
     recorder?: ISessionOrganizationRecorder,
     webviewManager?: WebviewManager,
     logger?: Logger,
+    resolver?: LiveChatSessionResolver,
   ) {
     (namespaceBuilders.buildGitNamespace as jest.Mock).mockImplementationOnce(
       realBuildGitNamespace,
@@ -1176,6 +1247,8 @@ describe('PtahAPIBuilder.build() — MCP worktree capture (TASK_2026_580, L15)',
       webviewManager,
       recorder,
       logger,
+      undefined,
+      resolver,
     ).build();
   }
 
@@ -1208,6 +1281,23 @@ describe('PtahAPIBuilder.build() — MCP worktree capture (TASK_2026_580, L15)',
         path: WORKTREE,
         sessionId: SDK_ID,
       },
+    );
+  });
+
+  it('records an ACP caller worktree under its canonical session', async () => {
+    execGitMock.mockResolvedValueOnce({ stdout: '', stderr: '', exitCode: 0 });
+    const recorder = makeRecorder();
+    const api = buildWithRealGit(makeCallerSessionManager(null), recorder, undefined, undefined, {
+      resolve: (id) => id === TAB_ID ? {
+        kind: 'resolved', session: { runtime: 'provider-session', sessionId: 'acp-session' },
+      } : { kind: 'unresolved' },
+    });
+    const result = await runWithMcpRequestContext({ callerSessionId: TAB_ID }, () =>
+      api.git.worktreeAdd({ branch: 'feat/x', path: WORKTREE }),
+    );
+    expect(result.success).toBe(true);
+    expect(recorder.recordWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'acp-session', worktreePath: WORKTREE }),
     );
   });
 
@@ -1380,7 +1470,10 @@ describe('PtahAPIBuilder.build() — sessionOrganization.linkTask (TASK_2026_580
     return manager;
   }
 
-  function buildApi(recorder?: ISessionOrganizationRecorder) {
+  function buildApi(
+    recorder?: ISessionOrganizationRecorder,
+    resolver?: LiveChatSessionResolver,
+  ) {
     return buildTestBuilder(
       makeRawWorkspaceProvider(),
       makeCallerSessionManager(),
@@ -1389,6 +1482,9 @@ describe('PtahAPIBuilder.build() — sessionOrganization.linkTask (TASK_2026_580
       undefined,
       undefined,
       recorder,
+      makeLogger(),
+      undefined,
+      resolver,
     ).build();
   }
 
@@ -1421,6 +1517,28 @@ describe('PtahAPIBuilder.build() — sessionOrganization.linkTask (TASK_2026_580
       source: 'agent',
     });
     expect(recorder.linkTask.mock.calls[0][0].sessionId).not.toBe(TAB_ID);
+  });
+
+  it('links a task to the canonical ACP caller', () => {
+    const recorder: ISessionOrganizationRecorder = {
+      recordWorktree: jest.fn(),
+      recordLineage: jest.fn(),
+      linkTask: jest.fn(),
+      addPrLink: jest.fn(),
+      recordAgentStartedSession: jest.fn(),
+    };
+    const api = buildApi(recorder, {
+      resolve: (id) => id === TAB_ID ? {
+        kind: 'resolved', session: { runtime: 'provider-session', sessionId: 'acp-session' },
+      } : { kind: 'unresolved' },
+    });
+    const result = runWithMcpRequestContext({ callerSessionId: TAB_ID }, () =>
+      api.sessionOrganization.linkTask({ taskId: TASK_ID }),
+    );
+    expect(result).toMatchObject({ ok: true, sessionId: 'acp-session' });
+    expect(recorder.linkTask).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'acp-session', taskId: TASK_ID }),
+    );
   });
 
   it('returns organization-unavailable when no recorder is registered', () => {

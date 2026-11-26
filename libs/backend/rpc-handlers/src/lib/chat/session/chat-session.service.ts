@@ -221,6 +221,7 @@ export interface HandoffSessionStartParams extends MainSessionAccountSelection {
   readonly prompt: string;
   readonly sessionName: string;
   readonly model?: string;
+  readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   /** The handing-off session's level; absent → the global default. */
   readonly permissionLevel?: PermissionLevel;
 }
@@ -235,6 +236,7 @@ interface AgentSessionPathLabels {
 
 /** What {@link ChatSessionService.launchSdkSession} needs from its callers. */
 interface SdkSessionLaunch {
+  readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   readonly admissionTiming?: ChatAdmissionTiming;
   readonly phase?: PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
@@ -1639,6 +1641,7 @@ export class ChatSessionService {
 
       await this.launchSdkSession({
         logLabel: 'handoff session',
+        expectedRuntime: params.expectedRuntime,
         tabId,
         workspaceId: workspaceRoot,
         projectPath: cwd,
@@ -1810,6 +1813,9 @@ export class ChatSessionService {
               currentModel,
               modelIsStored,
             );
+        if (input.expectedRuntime && input.expectedRuntime !== execution.runtime) {
+          throw new Error('The workspace runtime changed since the predecessor started');
+        }
         return { config, execution };
       },
     );

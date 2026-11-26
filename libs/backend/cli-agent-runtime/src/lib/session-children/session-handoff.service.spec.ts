@@ -11,7 +11,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { container as rootContainer, type DependencyContainer } from 'tsyringe';
-import type { IStateStorage } from '@ptah-extension/platform-core';
+import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import type { IStateStorage, LiveChatSessionResolver } from '@ptah-extension/platform-core';
 import {
   SESSION_HANDOFF_START_FAILED_DETAIL,
   SESSION_HANDOFF_START_TIMEOUT_DETAIL,
@@ -220,6 +221,7 @@ function makeHarness(storage?: IStateStorage) {
       idResolved?: unknown;
       chain?: unknown;
       spawner?: unknown;
+      liveChatSessions?: LiveChatSessionResolver;
     } = {},
   ) =>
     new SessionHandoffService(
@@ -240,6 +242,7 @@ function makeHarness(storage?: IStateStorage) {
       ackStore,
       ('spawner' in overrides ? overrides.spawner : null) as never,
       sessionEnds as never,
+      overrides.liveChatSessions,
     );
 
   const request = (
@@ -254,6 +257,7 @@ function makeHarness(storage?: IStateStorage) {
   return {
     service: build(),
     build,
+    containerWith,
     request,
     host,
     records,
@@ -566,6 +570,51 @@ describe('SessionHandoffService', () => {
     expect(h.closer.close).toHaveBeenCalledTimes(1);
     expect(h.closer.close).toHaveBeenCalledWith(CALLER, CALLER_SDK);
   });
+  it.each(['codex-app-server', 'provider-session'] as const)(
+    'starts a successor and retires a %s predecessor after verified acknowledgement',
+    async (runtime) => {
+      const h = makeHarness();
+      const closeSession = jest.fn().mockResolvedValue(undefined);
+      const scope = h.containerWith(h.host);
+      scope.register(
+        runtime === 'codex-app-server' ? SDK_TOKENS.CODEX_CHAT_ADAPTER : SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+        { useValue: { closeSession } },
+      );
+      h.host.startHandoffSession.mockImplementationOnce(async (input) => {
+        h.notifyResolved({ tabId: input.tabId, realSessionId: CALLER_NEW_TAB });
+        return { started: true, uiAnnounced: true };
+      });
+      const service = h.build({
+        container: scope,
+        liveChatSessions: {
+          resolve: (id) => id === CALLER || id === CALLER_SDK
+            ? {
+                kind: 'resolved',
+                session: { runtime, sessionId: CALLER_SDK, tabId: CALLER, workspaceRoot: root, cwd: root },
+              }
+            : { kind: 'unresolved' },
+        },
+      });
+      const started = await service.handoff(h.request());
+      if (!started.ok) throw new Error('handoff should start');
+      expect(h.host.startHandoffSession).toHaveBeenCalledWith(
+        expect.objectContaining({ expectedRuntime: runtime, workspaceRoot: root, cwd: root }),
+      );
+      service.onCallerTurnFlushed({ tabId: CALLER, sessionId: CALLER_SDK });
+      expect(closeSession).not.toHaveBeenCalled();
+      const acknowledgement = {
+        callerSessionId: CALLER_NEW_TAB,
+        predecessorSessionId: CALLER,
+        handoffPath,
+      };
+      expect((await service.acknowledge({ ...acknowledgement, callerSessionId: CALLER_SDK })).status)
+        .toBe('refused');
+      expect((await service.acknowledge(acknowledgement)).status).toBe('closed');
+      expect(closeSession).toHaveBeenCalledWith(CALLER_SDK);
+      expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+    },
+  );
+
   it('removes a reservation when the predecessor ends', async () => {
     const h = makeHarness();
     await h.service.handoff(h.request());

@@ -247,6 +247,7 @@ export type {
   IModelDiscovery,
   IFileDialog,
 } from './interfaces/platform-abstractions.interface';
+export type { LiveChatSession, LiveChatSessionResolution, LiveChatSessionResolver } from './live-chat-session';
 export { PLATFORM_TOKENS } from './di';
 export { createEvent } from './utils/event-emitter';
 export { isUnsafeWorkspacePath } from './utils/workspace-path-guards';

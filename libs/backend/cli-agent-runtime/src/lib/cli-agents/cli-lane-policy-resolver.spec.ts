@@ -64,6 +64,37 @@ describe('CLI lane policy resolver', () => {
     });
   });
 
+  it.each([
+    ['plan', 'plan'],
+    ['ask', 'ask'],
+    ['auto-edit', 'auto-edit'],
+    ['yolo', 'yolo'],
+    ['unknown', 'plan'],
+  ])('caps built-in and saved defaults for a %s parent at %s', (parentLevel, permission) => {
+    const claudeManifest = { ...manifest, ...PTAH_CLI_PERMISSION_CAPABILITIES };
+    for (const saved of [{}, { claude: { permission: 'yolo' } }]) {
+      expect(resolveCliLanePolicy({
+        cli: 'claude', manifest: claudeManifest, saved, request: {}, parentLevel,
+      }).permission).toBe(permission);
+    }
+  });
+
+  it.each([
+    ['ask', 'plan', 'deny'],
+    ['auto-edit', 'auto-edit', 'allow'],
+  ])('caps an explicit Codex yolo request for a %s parent', (parentLevel, permission, network) => {
+    expect(resolveCliLanePolicy({
+      cli: 'codex', manifest, saved: {}, request: { permission: 'yolo', network: 'allow' }, parentLevel,
+    })).toMatchObject({ permission, network, permissionSource: 'parent-plan' });
+  });
+
+  it('preserves an explicit permission below the parent ceiling', () => {
+    expect(resolveCliLanePolicy({
+      cli: 'claude', manifest: { ...manifest, ...PTAH_CLI_PERMISSION_CAPABILITIES },
+      saved: {}, request: { permission: 'ask' }, parentLevel: 'auto-edit',
+    })).toMatchObject({ permission: 'ask', permissionSource: 'spawn' });
+  });
+
   it('resolves each field independently', () => {
     expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {
       codex: { permission: 'auto-edit', network: 'allow' },

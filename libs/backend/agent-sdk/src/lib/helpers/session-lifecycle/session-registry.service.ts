@@ -491,6 +491,14 @@ export class SessionRegistry {
    *
    * Both lookups are O(1) — no scanning.
    */
+  findMatches(idOrTabId: string): SessionRecord[] {
+    const byTab = this.byTabId.get(idOrTabId);
+    const bySession = this.bySessionId.get(idOrTabId);
+    return [byTab, bySession === byTab ? undefined : bySession].filter(
+      (record): record is SessionRecord => record !== undefined,
+    );
+  }
+
   find(idOrTabId: string): SessionRecord | undefined {
     return this.byTabId.get(idOrTabId) ?? this.bySessionId.get(idOrTabId);
   }

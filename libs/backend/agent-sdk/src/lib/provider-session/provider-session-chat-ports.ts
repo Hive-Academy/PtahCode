@@ -176,6 +176,7 @@ export interface ProviderSessionChatPorts {
    * next turn's `acquire` attaches the replacement.
    */
   holds(sessionId: SessionId, session: ProviderSession): boolean;
+  initialPermission?(sessionId: SessionId, session: ProviderSession): AgentSessionStartConfig['permissionLevel'];
   /** Give one session back to the pool (which closes or keeps the process). */
   release(
     sessionId: SessionId,

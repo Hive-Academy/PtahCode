@@ -9,6 +9,7 @@
  */
 
 export const PLATFORM_TOKENS = {
+  LIVE_CHAT_SESSION_RESOLVER: Symbol.for('LiveChatSessionResolver'),
   /** IWindowsJobAssigner - owned Windows process job. */
   WINDOWS_JOB_ASSIGNER: Symbol.for('PlatformWindowsJobAssigner'),
   /** IFileSystemProvider — file read/write/watch/search */

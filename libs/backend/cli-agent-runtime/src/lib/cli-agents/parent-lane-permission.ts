@@ -27,7 +27,6 @@ export function parentLanePermission(
   const codexId = codex?.resolveLiveSessionId?.(record?.realSessionId ?? callerId)
     ?? record?.realSessionId ?? callerId;
   const level = codex?.getPermissionLevel(codexId) ?? record?.permissionLevel;
-  if (level === undefined) return options.unknownParent === 'uncapped' ? undefined : 'plan';
-  if (level === 'plan' || level === 'auto-edit' || level === 'yolo') return level;
-  return undefined;
+  if (level === 'plan' || level === 'ask' || level === 'auto-edit' || level === 'yolo') return level;
+  return options.unknownParent === 'uncapped' ? undefined : 'plan';
 }

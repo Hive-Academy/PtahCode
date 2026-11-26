@@ -42,7 +42,11 @@ describe('parentLanePermission', () => {
     expect(parentLanePermission('other', { find: () => ({ permissionLevel: 'yolo' }) }, codex)).toBe('yolo');
   });
 
-  it('does not cap an ask parent', () => {
-    expect(parentLanePermission('other', { find: () => ({ permissionLevel: 'ask' }) }, codex)).toBeUndefined();
+  it.each(['plan', 'ask', 'auto-edit', 'yolo'])('inherits Claude mode %s', (permissionLevel) => {
+    expect(parentLanePermission('other', { find: () => ({ permissionLevel }) }, codex)).toBe(permissionLevel);
+  });
+
+  it('caps unrecognized Claude permission metadata to plan on spawn', () => {
+    expect(parentLanePermission('other', { find: () => ({ permissionLevel: 'unknown' }) }, codex)).toBe('plan');
   });
 });
