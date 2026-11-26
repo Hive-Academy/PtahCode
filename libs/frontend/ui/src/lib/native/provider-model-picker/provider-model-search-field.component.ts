@@ -173,6 +173,7 @@ let nextPopupId = 0;
     `
       :host {
         display: block;
+        min-width: 0;
       }
     `,
   ],

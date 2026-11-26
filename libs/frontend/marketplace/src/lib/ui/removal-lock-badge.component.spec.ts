@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
 import { RemovalLockBadgeComponent } from './removal-lock-badge.component';
@@ -52,7 +53,13 @@ describe('RemovalLockBadgeComponent', () => {
       '[data-testid="removal-lock-button"]',
     ) as HTMLButtonElement;
   const details = (): HTMLElement | null =>
-    element.querySelector('[data-testid="removal-lock-details"]');
+    element.querySelector('[data-testid="removal-lock-details"]') ??
+    Array.from(
+      TestBed.inject(OverlayContainer)
+        .getContainerElement()
+        .querySelectorAll<HTMLElement>('[data-testid="removal-lock-details"]'),
+    ).at(-1) ??
+    null;
 
   async function open(): Promise<void> {
     lockButton().click();
@@ -92,7 +99,7 @@ describe('RemovalLockBadgeComponent', () => {
     expect(panel?.getAttribute('role')).toBe('dialog');
     const headingId = panel?.getAttribute('aria-labelledby');
     expect(headingId).toBeTruthy();
-    expect(element.querySelector(`#${headingId}`)?.textContent).toContain(
+    expect(panel?.querySelector(`#${headingId}`)?.textContent).toContain(
       'sentry',
     );
     expect(

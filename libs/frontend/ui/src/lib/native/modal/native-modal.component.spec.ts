@@ -1,435 +1,399 @@
+import { CdkConnectedOverlay, FlexibleConnectedPositionStrategy } from '@angular/cdk/overlay';
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-
-import { NativeDrawerComponent } from '../drawer/native-drawer.component';
-import {
-  NativeModalComponent,
-  NativeModalLayout,
-  NativeModalSize,
-} from './native-modal.component';
-
-/**
- * jsdom implements no HTMLDialogElement methods, so the modal's
- * showModal()/close() would throw the moment it opens. The stub reflects the
- * `open` attribute, which is all these specs observe (same approach as
- * `diff-view.component.spec.ts:55-69`).
- */
-beforeAll(() => {
-  if (!HTMLDialogElement.prototype.showModal) {
-    HTMLDialogElement.prototype.showModal = function showModal(
-      this: HTMLDialogElement,
-    ) {
-      this.setAttribute('open', '');
-    } as HTMLDialogElement['showModal'];
-  }
-  if (!HTMLDialogElement.prototype.close) {
-    HTMLDialogElement.prototype.close = function close(
-      this: HTMLDialogElement,
-    ) {
-      this.removeAttribute('open');
-    } as HTMLDialogElement['close'];
-  }
-});
+import { By } from '@angular/platform-browser';
+import { PtahRichSelectComponent } from '../../form-controls/rich-select/rich-select.component';
+import { NativeModalComponent, NativeModalLayout, NativeModalSize } from './native-modal.component';
 
 @Component({
-  standalone: true,
-  imports: [NativeModalComponent],
+  imports: [NativeModalComponent, PtahRichSelectComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <button id="modal-opener" type="button" (click)="open.set(true)">Open</button>
     <ptah-native-modal
-      [isOpen]="isOpen()"
-      [ariaLabel]="ariaLabel()"
-      [ariaLabelledby]="ariaLabelledby()"
-      [size]="size()"
+      [isOpen]="open()"
+      [ariaLabel]="label()"
+      [ariaLabelledby]="labelledBy()"
       [layout]="layout()"
-      (closed)="onClosed()"
+      [size]="size()"
+      (closed)="requestClose()"
     >
-      <h3 modal-header>Header <button id="modal-first" type="button">✕</button></h3>
-      <p id="modal-body">Body <button id="modal-disabled" type="button" disabled>Off</button></p>
-      <div modal-footer><span id="modal-footer">Footer</span> <button id="modal-last" type="button">Done</button></div>
+      <h2 id="modal-title" modal-header>Choose a provider</h2>
+      <ptah-select label="Provider" searchable [options]="options" />
+      <button modal-footer type="button" id="modal-footer">Cancel</button>
     </ptah-native-modal>
   `,
 })
 class HostComponent {
-  readonly isOpen = signal(false);
-  readonly ariaLabel = signal<string | undefined>('Connect a provider');
-  readonly ariaLabelledby = signal<string | undefined>(undefined);
-  readonly size = signal<NativeModalSize>('md');
+  readonly open = signal(false);
+  readonly label = signal<string | undefined>('Provider settings');
+  readonly labelledBy = signal<string | undefined>(undefined);
   readonly layout = signal<NativeModalLayout>('plain');
-  closedCount = 0;
+  readonly size = signal<NativeModalSize>('md');
+  readonly options = [{ value: 'one', label: 'Provider One' }];
+  closeRequests = 0;
 
-  onClosed(): void {
-    this.closedCount++;
+  requestClose(): void {
+    this.closeRequests++;
   }
 }
 
 describe('NativeModalComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
   let host: HostComponent;
-
-  const root = (): HTMLElement => fixture.nativeElement as HTMLElement;
-
-  const dialogEl = (): HTMLDialogElement =>
-    root().querySelector(
-      '[data-testid="native-modal-dialog"]',
-    ) as HTMLDialogElement;
-
-  const modalBox = (): HTMLElement =>
-    root().querySelector('.modal-box') as HTMLElement;
-
-  const backdropButton = (): HTMLButtonElement =>
-    root().querySelector('.modal-backdrop button') as HTMLButtonElement;
-
-  const open = (): void => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
+  const dialog = (): HTMLElement | null => document.querySelector('.cdk-dialog-container');
+  const box = (): HTMLElement => dialog()?.querySelector('.modal-box') as HTMLElement;
+  const backdrop = (): HTMLElement => document.querySelector('.cdk-overlay-backdrop') as HTMLElement;
+  const escape = (target: Element): void => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   };
 
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({
-      imports: [HostComponent],
-    }).compileComponents();
+  beforeEach(() => {
     fixture = TestBed.createComponent(HostComponent);
     host = fixture.componentInstance;
     fixture.detectChanges();
   });
 
-  it('calls showModal when opened and close when closed', () => {
-    const dialog = dialogEl();
-    const show = jest.spyOn(dialog, 'showModal');
-    const close = jest.spyOn(dialog, 'close');
-
-    host.isOpen.set(true);
+  async function render(): Promise<void> {
     fixture.detectChanges();
-    expect(show).toHaveBeenCalledTimes(1);
-
-    host.isOpen.set(false);
+    await fixture.whenStable();
     fixture.detectChanges();
-    expect(close).toHaveBeenCalledTimes(1);
+  }
+
+  async function openModal(): Promise<void> {
+    host.open.set(true);
+    await render();
+  }
+
+  async function openSelect(): Promise<{ trigger: HTMLButtonElement; search: HTMLInputElement }> {
+    const trigger = box().querySelector<HTMLButtonElement>('.ptah-select__trigger') as HTMLButtonElement;
+    trigger.click();
+    await render();
+    const search = document.querySelector<HTMLInputElement>('.cdk-overlay-pane .ptah-select__search') as HTMLInputElement;
+    return { trigger, search };
+  }
+
+  it('attaches the dialog only while its controlled open input is true', async () => {
+    expect(dialog()).toBeNull();
+    await openModal();
+    expect(dialog()?.getAttribute('role')).toBe('dialog');
+    expect(dialog()?.getAttribute('aria-label')).toBe('Provider settings');
+    expect(fixture.nativeElement.contains(dialog())).toBe(false);
+    host.open.set(false);
+    await render();
+    expect(dialog()).toBeNull();
+    expect(host.closeRequests).toBe(0);
+    await openModal();
+    expect(dialog()).not.toBeNull();
   });
 
-  // Gate V 36 V36-1: daisyUI .modal is display:grid + opacity:0, so a closed dialog's controls were Tab stops.
-  it('keeps a closed dialog inert, and an open one interactive', () => {
-    const dialog = dialogEl();
-    expect(dialog.inert).toBe(true);
-
-    open();
-    expect(dialog.inert).toBe(false);
-
-    host.isOpen.set(false);
-    fixture.detectChanges();
-    expect(dialog.inert).toBe(true);
+  it('names the dialog through the projected heading', async () => {
+    host.label.set(undefined);
+    host.labelledBy.set('modal-title');
+    await openModal();
+    expect(dialog()?.getAttribute('aria-labelledby')).toBe('modal-title');
+    expect(dialog()?.querySelector('#modal-title')?.textContent).toBe('Choose a provider');
   });
 
-  it('lifts inert before showModal, so the opened dialog can take focus', () => {
-    const dialog = dialogEl();
-    let inertAtShow: boolean | undefined;
-    jest.spyOn(dialog, 'showModal').mockImplementation(function (this: HTMLDialogElement) {
-      inertAtShow = this.inert;
-      this.setAttribute('open', '');
-    });
-    open();
-    expect(inertAtShow).toBe(false);
+  it('updates the accessible name while the dialog is open', async () => {
+    await openModal();
+    host.label.set(undefined);
+    host.labelledBy.set('modal-title');
+    await render();
+    expect(dialog()?.hasAttribute('aria-label')).toBe(false);
+    expect(dialog()?.getAttribute('aria-labelledby')).toBe('modal-title');
   });
 
-  it('emits closed on cancel without closing the dialog itself', () => {
-    open();
-    const dialog = dialogEl();
-    const close = jest.spyOn(dialog, 'close');
-
-    dialog.dispatchEvent(new Event('cancel'));
-
-    expect(host.closedCount).toBe(1);
-    expect(close).not.toHaveBeenCalled();
-    expect(dialog.hasAttribute('open')).toBe(true);
+  it('requests closing without changing caller-owned visibility on Escape and backdrop clicks', async () => {
+    await openModal();
+    escape(box());
+    backdrop().click();
+    expect(host.closeRequests).toBe(2);
+    expect(dialog()).not.toBeNull();
   });
 
-  it('emits closed when the backdrop button is clicked', () => {
-    open();
-    // The bubbling click still runs jsdom's button activation behaviour
-    // after the handler, which logs a requestSubmit "Not implemented"
-    // console error. The test stays green: Jest does not fail on
-    // console.error, and in a real browser `method="dialog"` closes the
-    // dialog without any submission.
-    backdropButton().dispatchEvent(
-      new MouseEvent('click', { bubbles: true }),
-    );
-    expect(host.closedCount).toBe(1);
+  it('projects the plain slots and applies each width preset', async () => {
+    await openModal();
+    for (const [size, widthClass] of [['sm', 'max-w-sm'], ['md', 'max-w-lg'], ['lg', 'max-w-2xl']] as const) {
+      host.size.set(size);
+      await render();
+      expect(box().classList).toContain(widthClass);
+    }
+    for (const part of ['header', 'body', 'footer']) {
+      expect(box().querySelector(`[data-ptah-modal-part="${part}"]`)?.classList).toContain('ptah-modal-part');
+    }
+    expect(box().querySelector('#modal-title')).not.toBeNull();
+    expect(box().querySelector('ptah-select')).not.toBeNull();
+    expect(box().querySelector('#modal-footer')).not.toBeNull();
   });
 
-  it('exposes the aria label on the dialog and omits it when unset', () => {
-    open();
-    expect(dialogEl().getAttribute('aria-label')).toBe('Connect a provider');
-
-    host.ariaLabel.set(undefined);
-    host.ariaLabelledby.set('modal-title');
-    fixture.detectChanges();
-    expect(dialogEl().hasAttribute('aria-label')).toBe(false);
-  });
-
-  it('names the dialog through aria-labelledby when given', () => {
-    host.ariaLabel.set(undefined);
-    host.ariaLabelledby.set('modal-title');
-    fixture.detectChanges();
-    expect(dialogEl().getAttribute('aria-labelledby')).toBe('modal-title');
-  });
-
-  it('reports a missing accessible name in dev mode until one is provided', () => {
-    const errorSpy = jest
-      .spyOn(console, 'error')
-      .mockImplementation(() => undefined);
-
-    host.ariaLabel.set(undefined);
-    host.ariaLabelledby.set(undefined);
-    fixture.detectChanges();
-    expect(errorSpy).toHaveBeenCalledWith(
-      'ptah-native-modal requires an accessible name: pass ariaLabel or ariaLabelledby.',
-    );
-
-    errorSpy.mockClear();
-    host.ariaLabelledby.set('modal-title');
-    fixture.detectChanges();
-    expect(errorSpy).not.toHaveBeenCalled();
-
-    errorSpy.mockRestore();
-  });
-
-  it('maps each size preset to a modal-box width class', () => {
-    open();
-    expect(modalBox().className).toContain('max-w-lg');
-
-    host.size.set('sm');
-    fixture.detectChanges();
-    expect(modalBox().className).toContain('max-w-sm');
-
+  it('has a scrollable shell body between pinned header and footer slots', async () => {
+    host.layout.set('shell');
     host.size.set('lg');
-    fixture.detectChanges();
-    expect(modalBox().className).toContain('max-w-2xl');
+    await openModal();
+    expect(box().style.getPropertyValue('--ptah-modal-size')).toBe('42rem');
+    expect(box().querySelector('[data-ptah-modal-part="header"]')?.classList).toContain('shrink-0');
+    expect(box().querySelector('[data-ptah-modal-part="body"]')?.classList).toContain('overflow-y-auto');
+    expect(box().querySelector('[data-ptah-modal-part="footer"]')?.classList).toContain('shrink-0');
   });
 
-  it('projects the header, body and footer slots', () => {
-    open();
-    const dialog = dialogEl();
-    expect(dialog.textContent).toContain('Header');
-    expect(dialog.textContent).toContain('Body');
-    expect(root().querySelector('#modal-footer')).toBeTruthy();
-  });
-
-  describe('layout', () => {
-    const part = (name: 'header' | 'body' | 'footer'): HTMLElement =>
-      root().querySelector(`[data-ptah-modal-part="${name}"]`) as HTMLElement;
-
-    it('defaults to plain: every slot wrapper is display: contents and the box keeps its classes', () => {
-      const bare = TestBed.createComponent(NativeModalComponent);
-      expect(bare.componentInstance.layout()).toBe('plain');
-      bare.destroy();
-
-      open();
-      for (const name of ['header', 'body', 'footer'] as const) {
-        // jsdom does not cascade component styles into getComputedStyle: the class carries `display: contents`.
-        expect(part(name).className).toBe('ptah-modal-part');
-      }
-      expect(modalBox().className).toBe('modal-box max-w-lg');
-      expect(modalBox().hasAttribute('style')).toBe(false);
-      expect(part('header').querySelector('[modal-header]')).toBeTruthy();
-      expect(part('body').querySelector('#modal-body')).toBeTruthy();
-      expect(part('footer').querySelector('#modal-footer')).toBeTruthy();
-    });
-
-    it('shell: caps the box, scrolls the body, borders the header and footer', () => {
-      host.layout.set('shell');
-      open();
-      const box = modalBox().classList;
-      for (const cls of ['flex', 'flex-col', 'overflow-hidden', 'p-0', 'max-h-[var(--ptah-modal-max-h)]']) {
-        expect(box.contains(cls)).toBe(true);
-      }
-      const body = part('body').classList;
-      for (const cls of ['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain', 'ptah-modal-scroll-shadow']) {
-        expect(body.contains(cls)).toBe(true);
-      }
-      expect(part('header').classList.contains('border-b')).toBe(true);
-      expect(part('header').classList.contains('shrink-0')).toBe(true);
-      expect(part('footer').classList.contains('border-t')).toBe(true);
-      expect(part('footer').classList.contains('shrink-0')).toBe(true);
-      expect(part('header').classList.contains('ptah-modal-part')).toBe(false);
-    });
-
-    it('shell: one max-width, the minimum of the size preset and the viewport less 2rem', () => {
-      host.layout.set('shell');
-      open();
-      const widths: Record<NativeModalSize, string> = { sm: '24rem', md: '32rem', lg: '42rem' };
-      for (const size of ['sm', 'md', 'lg'] as const) {
-        host.size.set(size);
-        fixture.detectChanges();
-        const maxWidths = Array.from(modalBox().classList).filter((cls) => cls.startsWith('max-w-'));
-        expect(maxWidths).toEqual(['max-w-[min(var(--ptah-modal-size),calc(100vw-2rem))]']);
-        expect(modalBox().style.getPropertyValue('--ptah-modal-size')).toBe(widths[size]);
-      }
-    });
-
-    it('plain: the size class only, with no width variable, for each size', () => {
-      open();
-      const classes: Record<NativeModalSize, string> = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
-      for (const size of ['sm', 'md', 'lg'] as const) {
-        host.size.set(size);
-        fixture.detectChanges();
-        expect(modalBox().className).toBe(`modal-box ${classes[size]}`);
-        expect(modalBox().style.getPropertyValue('--ptah-modal-size')).toBe('');
-      }
-    });
-  });
-
-  it('emits closed and closes the dialog when destroyed while open', () => {
-    open();
-    const dialog = dialogEl();
-    expect(dialog.hasAttribute('open')).toBe(true);
-
-    fixture.destroy();
-    expect(dialog.hasAttribute('open')).toBe(false);
-    expect(host.closedCount).toBe(1);
-  });
-
-  it('does not emit closed when destroyed while already closed', () => {
-    fixture.destroy();
-    expect(host.closedCount).toBe(0);
-  });
-
-  // TASK_2026_555 Batch 32: Chromium lets Tab leave a showModal() dialog for the browser UI at its last control.
-  describe('Tab wrap', () => {
-    const button = (id: string) => root().querySelector(`#${id}`) as HTMLButtonElement;
-    const tab = (shiftKey = false): KeyboardEvent => {
-      const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
-      (root().ownerDocument.activeElement ?? dialogEl()).dispatchEvent(event);
-      return event;
-    };
-
-    beforeEach(() => {
-      // jsdom has no layout: every control counts as rendered.
-      jest.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
-      open();
-    });
-    afterEach(() => jest.restoreAllMocks());
-
-    it('moves Tab from the last control to the first', () => {
-      button('modal-last').focus();
-      const event = tab();
-      expect(event.defaultPrevented).toBe(true);
-      expect(root().ownerDocument.activeElement).toBe(button('modal-first'));
-    });
-
-    it('moves Shift+Tab from the first control to the last, skipping disabled ones', () => {
-      button('modal-first').focus();
-      const event = tab(true);
-      expect(event.defaultPrevented).toBe(true);
-      expect(root().ownerDocument.activeElement).toBe(button('modal-last'));
-    });
-
-    it('leaves Tab between inner controls to the browser', () => {
-      button('modal-first').focus();
-      expect(tab().defaultPrevented).toBe(false);
-      expect(root().ownerDocument.activeElement).toBe(button('modal-first'));
-    });
-
-    it('wraps across header, body and footer in the shell layout', () => {
-      host.layout.set('shell');
-      fixture.detectChanges();
-      button('modal-last').focus();
-      expect(tab().defaultPrevented).toBe(true);
-      expect(root().ownerDocument.activeElement).toBe(button('modal-first'));
-      expect(tab(true).defaultPrevented).toBe(true);
-      expect(root().ownerDocument.activeElement).toBe(button('modal-last'));
-    });
-
-    it('does nothing while the dialog is closed', () => {
-      host.isOpen.set(false);
-      fixture.detectChanges();
-      button('modal-last').focus();
-      expect(tab().defaultPrevented).toBe(false);
-    });
-  });
-});
-
-@Component({
-  standalone: true,
-  imports: [NativeDrawerComponent, NativeModalComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <ptah-native-drawer [isOpen]="drawerOpen()" ariaLabel="Accounts" (closed)="onDrawerClosed()">
-      <button type="button" id="drawer-control">Remove account</button>
-      <ptah-native-modal [isOpen]="modalOpen()" ariaLabel="Remove account?" (closed)="onModalClosed()">
-        <div modal-footer><button id="modal-cancel" type="button">Cancel</button></div>
-      </ptah-native-modal>
-    </ptah-native-drawer>
-  `,
-})
-class DrawerHostComponent {
-  readonly drawerOpen = signal(true);
-  readonly modalOpen = signal(false);
-  drawerClosedCount = 0;
-  modalClosedCount = 0;
-
-  onDrawerClosed(): void {
-    this.drawerClosedCount++;
-    this.drawerOpen.set(false);
+  function trapAnchors(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('.cdk-focus-trap-anchor'));
   }
 
-  onModalClosed(): void {
-    this.modalClosedCount++;
-    this.modalOpen.set(false);
+  function tabOrder(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>(
+      'button, input, textarea, select, a[href], [tabindex]',
+    )).filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'));
   }
-}
 
-// TASK_2026_719 P5 review F2: Escape inside a modal nested in a drawer bubbled to the drawer panel and closed the drawer.
-describe('NativeModalComponent inside a NativeDrawerComponent', () => {
-  let fixture: ComponentFixture<DrawerHostComponent>;
-  let host: DrawerHostComponent;
+  /** The browser's Tab lands on the next tab stop. The trap's anchors then wrap. */
+  function pressTab(shift = false): void {
+    const order = tabOrder();
+    const active = document.activeElement as HTMLElement | null;
+    const index = active ? order.indexOf(active) : -1;
+    const next = order[shift ? index - 1 : index + 1];
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: shift,
+      bubbles: true,
+      cancelable: true,
+    });
+    active?.dispatchEvent(event);
+    if (!event.defaultPrevented && next) next.focus();
+  }
 
-  const q = <T extends HTMLElement>(selector: string): T =>
-    (fixture.nativeElement as HTMLElement).querySelector<T>(selector) as T;
-  const escape = (target: HTMLElement): KeyboardEvent => {
-    const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    target.dispatchEvent(event);
+  /** Tab from the portaled search. The select closes and restores its trigger. */
+  async function tabFromSearch(shift: boolean): Promise<KeyboardEvent> {
+    const search = document.querySelector<HTMLInputElement>('.cdk-overlay-pane .ptah-select__search');
+    expect(search).not.toBeNull();
+    search?.focus();
+    const event = new KeyboardEvent('keydown', {
+      key: 'Tab',
+      shiftKey: shift,
+      bubbles: true,
+      cancelable: true,
+    });
+    search?.dispatchEvent(event);
+    await render();
     return event;
-  };
+  }
 
-  beforeEach(async () => {
-    await TestBed.configureTestingModule({ imports: [DrawerHostComponent] }).compileComponents();
-    fixture = TestBed.createComponent(DrawerHostComponent);
-    host = fixture.componentInstance;
-    fixture.detectChanges();
-    await Promise.resolve();
-    fixture.detectChanges();
+  it('wraps Tab and Shift+Tab inside the dialog while the child is closed', async () => {
+    const rects = jest.spyOn(Element.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+      item: () => null,
+    } as unknown as DOMRectList);
+    try {
+      await openModal();
+      const [start, end] = trapAnchors();
+      const trigger = box().querySelector('.ptah-select__trigger') as HTMLButtonElement;
+      const footer = document.getElementById('modal-footer') as HTMLButtonElement;
+      expect(start).toBeTruthy();
+      expect(end).toBeTruthy();
+
+      footer.focus();
+      pressTab(false);
+      expect(document.activeElement).toBe(trigger);
+
+      trigger.focus();
+      pressTab(true);
+      expect(document.activeElement).toBe(footer);
+    } finally {
+      rects.mockRestore();
+    }
   });
 
-  it('keeps the drawer open when Escape is pressed inside the open modal', () => {
-    host.modalOpen.set(true);
-    fixture.detectChanges();
+  it('consumes Tab at the panel boundaries and wraps focus itself', async () => {
+    const rects = jest.spyOn(Element.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+      item: () => null,
+    } as unknown as DOMRectList);
+    try {
+      await openModal();
+      const trigger = box().querySelector('.ptah-select__trigger') as HTMLButtonElement;
+      const footer = document.getElementById('modal-footer') as HTMLButtonElement;
+      const tab = (shiftKey: boolean): KeyboardEvent =>
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true });
 
-    const event = escape(q<HTMLButtonElement>('#modal-cancel'));
+      footer.focus();
+      const forward = tab(false);
+      footer.dispatchEvent(forward);
+      expect(forward.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(trigger);
 
-    expect(host.drawerClosedCount).toBe(0);
-    expect(q('[data-testid="native-drawer-panel"]')).toBeTruthy();
-    // The default action stays, so the browser still fires the dialog's native `cancel`.
-    expect(event.defaultPrevented).toBe(false);
+      trigger.focus();
+      const backward = tab(true);
+      trigger.dispatchEvent(backward);
+      expect(backward.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(footer);
+    } finally {
+      rects.mockRestore();
+    }
   });
 
-  it('still closes the modal through its native cancel event', () => {
-    host.modalOpen.set(true);
-    fixture.detectChanges();
-    const dialog = q<HTMLDialogElement>('[data-testid="native-modal-dialog"]');
+  it('moves Tab across the open child back to its trigger, and the first Escape does the same', async () => {
+    const rects = jest.spyOn(Element.prototype, 'getClientRects').mockReturnValue({
+      length: 1,
+      item: () => null,
+    } as unknown as DOMRectList);
+    try {
+      const opener = document.getElementById('modal-opener') as HTMLButtonElement;
+      opener.focus();
+      await openModal();
+      const footer = document.getElementById('modal-footer') as HTMLButtonElement;
+      const opened = await openSelect();
+      expect(document.activeElement).toBe(opened.search);
+      expect(box().contains(opened.search)).toBe(false);
 
-    dialog.dispatchEvent(new Event('cancel'));
-    fixture.detectChanges();
+      // Dialog ends still wrap while the child is open. Tab on the footer hits
+      // the trap's end anchor, which returns to the trigger. The child stays
+      // open because that Tab is not the select's own key.
+      footer.focus();
+      pressTab(false);
+      expect(document.activeElement).toBe(opened.trigger);
+      expect(document.querySelector('.ptah-select__panel')).not.toBeNull();
+      expect(host.closeRequests).toBe(0);
 
-    expect(host.modalClosedCount).toBe(1);
-    expect(dialog.hasAttribute('open')).toBe(false);
-    expect(host.drawerClosedCount).toBe(0);
+      footer.focus();
+      pressTab(true);
+      expect(document.activeElement).toBe(opened.trigger);
+      expect(document.querySelector('.ptah-select__panel')).not.toBeNull();
+      expect(host.closeRequests).toBe(0);
+
+      // Tab and Shift+Tab inside the portaled search close only the child and
+      // continue from its trigger. The dialog stays open.
+      const tab = await tabFromSearch(false);
+      expect(tab.defaultPrevented).toBe(false);
+      expect(host.closeRequests).toBe(0);
+      expect(document.querySelector('.ptah-select__panel')).toBeNull();
+      expect(document.activeElement).toBe(opened.trigger);
+      pressTab(false);
+      expect(document.activeElement).toBe(footer);
+
+      const shifted = await openSelect();
+      const shiftTab = await tabFromSearch(true);
+      expect(shiftTab.defaultPrevented).toBe(false);
+      expect(host.closeRequests).toBe(0);
+      expect(document.querySelector('.ptah-select__panel')).toBeNull();
+      expect(document.activeElement).toBe(shifted.trigger);
+      pressTab(true);
+      expect(document.activeElement).toBe(footer);
+
+      const escaped = await openSelect();
+      escape(escaped.search);
+      await render();
+      expect(host.closeRequests).toBe(0);
+      expect(document.activeElement).toBe(escaped.trigger);
+      expect(document.querySelector('.ptah-select__panel')).toBeNull();
+      escape(escaped.trigger);
+      expect(host.closeRequests).toBe(1);
+      host.open.set(false);
+      await render();
+      expect(document.activeElement).toBe(opener);
+    } finally {
+      rects.mockRestore();
+    }
   });
 
-  it('lets Escape close the drawer while the modal is closed', () => {
-    escape(q<HTMLButtonElement>('#drawer-control'));
+  it('retains CDK focus containment while a portaled search takes focus and Escape dismisses it first', async () => {
+    const opener = document.getElementById('modal-opener') as HTMLButtonElement;
+    opener.focus();
+    host.layout.set('shell');
+    await openModal();
+    expect(dialog()?.previousElementSibling?.classList).toContain('cdk-focus-trap-anchor');
+    const { trigger, search } = await openSelect();
+    expect(search).not.toBeNull();
+    expect(box().contains(search)).toBe(false);
+    expect(document.activeElement).toBe(search);
 
-    expect(host.drawerClosedCount).toBe(1);
-    expect(host.modalClosedCount).toBe(0);
+    escape(search);
+    await render();
+    expect(host.closeRequests).toBe(0);
+    expect(document.activeElement).toBe(trigger);
+    expect(document.querySelector('.ptah-select__panel')).toBeNull();
+    escape(trigger);
+    expect(host.closeRequests).toBe(1);
+    host.open.set(false);
+    await render();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('dismisses the select before the dialog when clicking the dialog backdrop', async () => {
+    await openModal();
+    const { trigger } = await openSelect();
+    backdrop().click();
+    await render();
+    expect(host.closeRequests).toBe(0);
+    expect(document.querySelector('.ptah-select__panel')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    backdrop().click();
+    expect(host.closeRequests).toBe(1);
+  });
+
+  it('matches the field width and repositions when the registered dialog body scrolls', async () => {
+    host.layout.set('shell');
+    await openModal();
+    const select = box().querySelector('ptah-select') as HTMLElement;
+    jest.spyOn(select, 'getBoundingClientRect').mockReturnValue(new DOMRect(12, 20, 240, 32));
+    await openSelect();
+    const connected = fixture.debugElement.queryAllNodes(By.directive(CdkConnectedOverlay))[0]
+      .injector.get(CdkConnectedOverlay);
+    expect(connected.overlayRef.overlayElement.style.width).toBe('240px');
+    const update = jest.spyOn(connected.overlayRef, 'updatePosition');
+    const body = box().querySelector('[data-ptah-modal-part="body"]');
+    body?.dispatchEvent(new Event('scroll'));
+    expect(update).toHaveBeenCalled();
+  });
+
+  it.each([
+    [8, 8, 'bottom'],
+    [192, 8, 'bottom'],
+    [8, 260, 'top'],
+    [192, 260, 'top'],
+  ] as const)('chooses a usable placement for a searchable select at (%i, %i)', async (x, y, originY) => {
+    const width = jest.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(320);
+    const height = jest.spyOn(document.documentElement, 'clientHeight', 'get').mockReturnValue(300);
+    try {
+      await openModal();
+      const select = box().querySelector('ptah-select') as HTMLElement;
+      jest.spyOn(select, 'getBoundingClientRect').mockReturnValue(new DOMRect(x, y, 120, 32));
+      const { search } = await openSelect();
+      const connected = fixture.debugElement.queryAllNodes(By.directive(CdkConnectedOverlay))[0]
+        .injector.get(CdkConnectedOverlay);
+      const overlayRef = connected.overlayRef;
+      const strategy = overlayRef.getConfig().positionStrategy as FlexibleConnectedPositionStrategy;
+      const placement = jest.fn();
+      strategy.positionChanges.subscribe(placement);
+      jest.spyOn(overlayRef.overlayElement, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(0, 0, 120, 190));
+      overlayRef.updatePosition();
+      expect(placement).toHaveBeenLastCalledWith(expect.objectContaining({
+        connectionPair: expect.objectContaining({ originY }),
+      }));
+      expect(overlayRef.getConfig().maxWidth).toBe('calc(100vw - 16px)');
+      expect(document.activeElement).toBe(search);
+    } finally {
+      width.mockRestore();
+      height.mockRestore();
+    }
+  });
+
+  it('detaches the select on a programmatic parent close and can reopen it', async () => {
+    await openModal();
+    await openSelect();
+    host.open.set(false);
+    await render();
+    expect(document.querySelector('.ptah-select__panel')).toBeNull();
+    await openModal();
+    expect((await openSelect()).search).not.toBeNull();
+  });
+
+  it('removes the panes and scroll lock on destroy while both layers are open', async () => {
+    await openModal();
+    await openSelect();
+    fixture.destroy();
+    expect(document.querySelectorAll('.cdk-overlay-pane')).toHaveLength(0);
+    expect(document.documentElement.classList).not.toContain('cdk-global-scrollblock');
   });
 });

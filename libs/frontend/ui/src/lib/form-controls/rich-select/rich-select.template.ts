@@ -47,7 +47,18 @@ export const RICH_SELECT_TEMPLATE = `<button
       <path d="M4 6l4 4 4-4" />
     </svg>
   </span>
-  @if (open()) {
+  <ng-template
+    [cdkConnectedOverlay]="overlayPolicy"
+    [cdkConnectedOverlayOrigin]="overlayOrigin()"
+    [cdkConnectedOverlayOpen]="open()"
+    [cdkConnectedOverlayPositions]="overlayPositions"
+    [cdkConnectedOverlayMatchWidth]="true"
+    [cdkConnectedOverlayMinHeight]="isSearchable() ? 64 : 32"
+    (attach)="onOverlayAttach()"
+    (detach)="onOverlayDetach()"
+    (overlayKeydown)="onOverlayKeydown($event)"
+    (overlayOutsideClick)="onOutsideClick($event)"
+  >
     <div #panel class="ptah-select__panel" (keydown)="onPanelKey($event)">
       @if (isSearchable()) {
         <div class="ptah-select__search-row">
@@ -104,7 +115,7 @@ export const RICH_SELECT_TEMPLATE = `<button
       </ul>
       <span class="sr-only" role="status">{{ statusText() }}</span>
     </div>
-  }
+  </ng-template>
   <ng-template #optionRow let-item>
     <li
       role="option"

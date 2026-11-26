@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { PtahInputDirective } from '../form-controls/input.directive';
@@ -311,6 +312,9 @@ class InfoHost {
 }
 
 describe('PtahFieldComponent info', () => {
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
+
   it('preserves custom info hooks and removes stale ids when they change or clear', () => {
     const fixture = TestBed.createComponent(InfoHost);
     fixture.detectChanges();
@@ -354,7 +358,7 @@ describe('PtahFieldComponent info', () => {
     expect(box?.contains(button)).toBe(true);
     expect(popover?.previousElementSibling?.hasAttribute('ptahFieldTrailing')).toBe(true);
     expect(popover?.nextElementSibling?.className).toBe('ptah-field__rail');
-    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+    expect(overlay().querySelector('.ptah-field__info-panel')).toBeNull();
   });
 
   it('keeps the info description available while closed and preserves consumer and hint ids', async () => {
@@ -390,22 +394,22 @@ describe('PtahFieldComponent info', () => {
     };
     button.click();
     await flush();
-    const panel = root.querySelector('.ptah-field__info-panel') as HTMLElement;
+    const panel = overlay().querySelector('.ptah-field__info-panel') as HTMLElement;
     expect(panel.textContent).toContain('How long to wait before giving up.');
     expect(panel.getAttribute('role')).toBe('dialog');
     expect(button.getAttribute('aria-controls')).toBe(panel.id);
     expect(button.getAttribute('aria-expanded')).toBe('true');
     panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await flush();
-    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+    expect(overlay().querySelector('.ptah-field__info-panel')).toBeNull();
     expect(button.getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(button);
     button.click();
     await flush();
-    const backdrop = root.querySelector('[role="presentation"]') as HTMLElement;
+    const backdrop = overlay().querySelector('.cdk-overlay-backdrop') as HTMLElement;
     backdrop.click();
     await flush();
-    expect(root.querySelector('.ptah-field__info-panel')).toBeNull();
+    expect(overlay().querySelector('.ptah-field__info-panel')).toBeNull();
     expect(button.getAttribute('aria-expanded')).toBe('false');
   });
 });

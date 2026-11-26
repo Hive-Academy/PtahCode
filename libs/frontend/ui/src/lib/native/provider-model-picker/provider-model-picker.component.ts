@@ -17,7 +17,7 @@
  *
  * PROVIDER-AGNOSTIC BY CONSTRUCTION. There is no provider id anywhere in this
  * file. The provider list comes from the registry, the default-model label
- * comes from the chosen entry's own `defaultTiers`, and the tool-use warning
+ * names the tier alias used at runtime, and the tool-use warning
  * comes from `ProviderModelInfo.supportsToolUse`. Adding a provider to the
  * registry is the whole integration.
  *
@@ -60,6 +60,8 @@ import {
   input,
   output,
   signal,
+  untracked,
+  type OnDestroy,
 } from '@angular/core';
 import {
   getAllAnthropicProviders,
@@ -69,6 +71,8 @@ import {
 } from '@ptah-extension/shared';
 
 import { ProviderMarkComponent } from '../provider-mark/provider-mark.component';
+import { PtahRichSelectComponent } from '../../form-controls/rich-select/rich-select.component';
+import type { PtahSelectOption } from '../../form-controls/rich-select/rich-select.types';
 import { PROVIDER_MODELS_LOADER } from './provider-models-loader.port';
 import { ProviderModelsNoticeComponent } from './provider-models-notice.component';
 import { isProcessDump, savedModelListNotice } from './saved-model-list-notice';
@@ -121,20 +125,6 @@ const TOOL_USE_OPTION_SUFFIX = ' · tool use';
  */
 const SUGGESTED_CHARS_PER_CONTEXT_TOKEN = 2;
 
-/**
- * Label for the "no model pinned" sentinel.
- *
- * The backend sends a bare tier alias in this case, so the label must name a
- * tier, never a model id. An earlier version read `Default (<some claude id>)`
- * for every provider, which told a user on a third-party provider that their
- * work ran on a Claude model (TASK_2026_159).
- *
- * The concrete model is named only where this component can actually know it:
- * a chosen provider whose registry entry declares `defaultTiers[tier]`. With
- * no provider chosen, resolution happens server-side against whichever
- * provider the host settled on, and this component has no business guessing
- * which one that is.
- */
 const MODEL_LOAD_FAILED = 'Could not load models for this provider.';
 
 /** One short sentence for the page. A probe dump becomes the fixed status. */
@@ -150,8 +140,6 @@ function buildDefaultModelLabel(
 ): string {
   if (!providerId) return `Default (active provider's ${tier} tier)`;
   const provider = getAnthropicProvider(providerId);
-  const pinned = provider?.defaultTiers?.[tier];
-  if (pinned) return `Default (${pinned})`;
   return `Default (${provider?.name ?? providerId} ${tier} tier)`;
 }
 
@@ -160,23 +148,28 @@ function buildDefaultModelLabel(
   standalone: true,
   imports: [
     ProviderMarkComponent,
+    PtahRichSelectComponent,
     ProviderModelSearchFieldComponent,
     ProviderModelsNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
-      class="rounded-md border border-base-300 bg-base-100"
+      class="min-w-0 break-words rounded-md border border-base-300 bg-base-100"
       [attr.aria-disabled]="disabled() || null"
     >
       <header
         class="border-b border-base-300 px-3 py-2 text-sm font-semibold text-base-content"
+        [class.pr-12]="richSelect()"
         data-testid="provider-model-picker-label"
       >
         {{ label() }}
       </header>
 
-      <div class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
+      <div
+        class="grid grid-cols-1 gap-2 p-3"
+        [class.sm:grid-cols-2]="!richSelect()"
+      >
         @if (fixedProvider(); as fixedId) {
           <div class="flex flex-col gap-1">
             <span class="text-xs font-medium text-base-content-muted"
@@ -193,6 +186,22 @@ function buildDefaultModelLabel(
               >{{ providerAriaLabel() }}: {{ fixedProviderName() }}</span
             >
           </div>
+        } @else if (richSelect()) {
+          <div class="flex min-w-0 flex-col gap-1">
+            <span class="text-xs font-medium text-base-content-muted">Provider</span>
+            <div class="flex min-w-0 items-center gap-2">
+              <ptah-provider-mark [providerId]="displayProviderId()" fallback="Bot" />
+              <ptah-select
+                class="min-w-0 flex-1"
+                data-testid="provider-model-picker-provider"
+                [label]="providerAriaLabel()"
+                [options]="richProviderOptions()"
+                [value]="selectedProvider()"
+                [disabled]="disabled()"
+                (valueChange)="selectProvider($event ?? '')"
+              />
+            </div>
+          </div>
         } @else {
           <label class="flex flex-col gap-1">
             <span class="text-xs font-medium text-base-content-muted"
@@ -200,7 +209,7 @@ function buildDefaultModelLabel(
             >
             <span class="flex min-w-0 items-center gap-2">
               <ptah-provider-mark
-                [providerId]="selectedProvider()"
+                [providerId]="displayProviderId()"
                 fallback="Bot"
               />
               <select
@@ -214,7 +223,7 @@ function buildDefaultModelLabel(
                 (change)="onProviderChange($event)"
               >
                 <option value="" [selected]="selectedProvider() === ''">
-                  {{ inheritProviderLabel }}
+                  {{ inheritProviderLabel() }}
                 </option>
                 @for (opt of providerOptions(); track opt.id) {
                   <option
@@ -229,7 +238,22 @@ function buildDefaultModelLabel(
           </label>
         }
 
-        @if (searchable()) {
+        @if (richSelect()) {
+          <div class="flex min-w-0 flex-col gap-1">
+            <span class="text-xs font-medium text-base-content-muted">Model</span>
+            <ptah-select
+              class="w-full min-w-0"
+              data-testid="provider-model-picker-model"
+              [label]="modelAriaLabel()"
+              [options]="richModelOptions()"
+              [value]="selectedModelId()"
+              [disabled]="modelEditsDisabled()"
+              [searchable]="true"
+              searchPlaceholder="Search models…"
+              (valueChange)="selectModel($event ?? '')"
+            />
+          </div>
+        } @else if (searchable()) {
           <div class="flex flex-col gap-1">
             <span class="text-xs font-medium text-base-content-muted"
               >Model</span
@@ -238,7 +262,7 @@ function buildDefaultModelLabel(
               [options]="modelOptions()"
               [selectedId]="selectedModelId()"
               [defaultLabel]="defaultModelLabel()"
-              [disabled]="modelsLoading() || disabled()"
+              [disabled]="modelsLoading() || modelEditsDisabled()"
               [ariaLabel]="modelAriaLabel()"
               (modelSelected)="selectModel($event)"
             />
@@ -252,7 +276,7 @@ function buildDefaultModelLabel(
               class="select select-sm h-8 min-h-8 rounded-lg border border-surface-border bg-surface-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
               data-testid="provider-model-picker-model"
               [value]="selectedModelId()"
-              [disabled]="modelsLoading()"
+              [disabled]="modelsLoading() || !!fallbackProviderId()"
               [attr.aria-disabled]="disabled() ? 'true' : null"
               [attr.aria-label]="modelAriaLabel()"
               (mousedown)="blockWhileDisabled($event)"
@@ -272,7 +296,11 @@ function buildDefaultModelLabel(
         }
       </div>
 
-      @if (toolUseSummary(); as summary) {
+      @if (richSelect() && modelsLoading()) {
+        <p class="px-3 pb-2 text-xs text-base-content-muted" role="status">
+          Loading models…
+        </p>
+      } @else if (toolUseSummary(); as summary) {
         <p class="px-3 pb-2">
           <span
             class="inline-flex items-center gap-1 rounded-full border border-info/40 bg-info/10 px-2 py-0.5 text-xs text-base-content"
@@ -325,7 +353,7 @@ function buildDefaultModelLabel(
       @if (modelsError(); as err) {
         <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
           <p
-            class="text-xs text-error"
+            class="min-w-0 text-xs text-error [overflow-wrap:anywhere]"
             role="alert"
             data-testid="provider-model-picker-error"
           >
@@ -351,7 +379,7 @@ function buildDefaultModelLabel(
         />
       }
 
-      @if (!disabled()) {
+      @if (!modelEditsDisabled()) {
         <details
           class="px-3 pb-2"
           data-testid="provider-model-picker-manual-entry"
@@ -365,7 +393,7 @@ function buildDefaultModelLabel(
               class="input input-sm h-8 min-h-8 w-full min-w-0 flex-1 rounded-lg border border-surface-border bg-surface-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
               data-testid="provider-model-picker-manual-input"
               [value]="manualDraft()"
-              [disabled]="!selectedProvider()"
+              [disabled]="!displayProviderId()"
               [attr.aria-label]="manualModelAriaLabel()"
               placeholder="Model ID, e.g. vendor/model-name"
               (input)="onManualDraftInput($event)"
@@ -380,7 +408,7 @@ function buildDefaultModelLabel(
               Use model ID
             </button>
           </div>
-          @if (!selectedProvider()) {
+          @if (!displayProviderId()) {
             <p class="mt-1 text-xs text-base-content-muted">
               Choose a provider first — the model ID belongs to it.
             </p>
@@ -400,7 +428,7 @@ function buildDefaultModelLabel(
     `,
   ],
 })
-export class ProviderModelPickerComponent {
+export class ProviderModelPickerComponent implements OnDestroy {
   private readonly loader = inject(PROVIDER_MODELS_LOADER);
 
   /** Registry provider id, or `''` to inherit the host's active provider. */
@@ -408,6 +436,17 @@ export class ProviderModelPickerComponent {
 
   /** Model id, or `''` to use the provider's default tier. */
   readonly model = input<string>('');
+
+  /**
+   * The host's effective route for a blank provider draft. Undefined preserves the
+   * loader's legacy fallback. Null means there is no eligible inherited route.
+   */
+  readonly inheritedProvider = input<ProviderIdentityOption | null | undefined>(
+    undefined,
+  );
+
+  /** Use the shared CDK-backed provider select and searchable model select. */
+  readonly richSelect = input(false);
 
   /** Section heading. Also seeds the two `aria-label`s. */
   readonly label = input<string>('Model');
@@ -432,6 +471,9 @@ export class ProviderModelPickerComponent {
    * are set.
    */
   readonly fixedProvider = input<string>('');
+
+  /** Catalog provider while the host's saved selection is unavailable. */
+  readonly savedProviderFallback = input<string>('');
 
   /**
    * Externally supplied identities (connections, CLI agents) appended after
@@ -468,7 +510,10 @@ export class ProviderModelPickerComponent {
   /** Fires on every user edit of either select, with both current values. */
   readonly selectionChange = output<ProviderModelSelection>();
 
-  protected readonly inheritProviderLabel = INHERIT_PROVIDER_LABEL;
+  protected readonly inheritProviderLabel = computed(() => {
+    const inherited = this.inheritedProvider();
+    return inherited ? `${inherited.name} (inherited)` : INHERIT_PROVIDER_LABEL;
+  });
   protected readonly toolUseOptionSuffix = TOOL_USE_OPTION_SUFFIX;
 
   /**
@@ -506,6 +551,12 @@ export class ProviderModelPickerComponent {
             name: `${opt.name}${EXCLUDED_PROVIDER_SUFFIX}`,
           });
         }
+      }
+      if (pinned && !options.some((option) => option.id === pinned)) {
+        options.push({
+          id: pinned,
+          name: excluded.includes(pinned) ? `${pinned}${EXCLUDED_PROVIDER_SUFFIX}` : pinned,
+        });
       }
       return options;
     },
@@ -557,6 +608,38 @@ export class ProviderModelPickerComponent {
   protected readonly selectedProvider = this._provider.asReadonly();
   protected readonly selectedModelId = this._model.asReadonly();
 
+  protected readonly fallbackProviderId = computed(() =>
+    !this.fixedProvider() && this._provider() === this.provider()
+      ? this.savedProviderFallback()
+      : '',
+  );
+
+  protected readonly displayProviderId = computed(
+    () => this.fallbackProviderId() || this._provider() || this.inheritedProvider()?.id || '',
+  );
+
+  protected readonly modelEditsDisabled = computed(
+    () => this.disabled() || !!this.fallbackProviderId(),
+  );
+
+  protected readonly richProviderOptions = computed<readonly PtahSelectOption<string>[]>(
+    () => [
+      { value: '', label: this.inheritProviderLabel() },
+      ...this.providerOptions().map(({ id, name }) => ({ value: id, label: name })),
+    ],
+  );
+
+  protected readonly richModelOptions = computed<readonly PtahSelectOption<string>[]>(
+    () => [
+      { value: '', label: this.defaultModelLabel() },
+      ...this.modelOptions().map(({ id, name, supportsToolUse }) => ({
+        value: id,
+        label: supportsToolUse ? `${name}${TOOL_USE_OPTION_SUFFIX}` : name,
+        keywords: [id],
+      })),
+    ],
+  );
+
   /**
    * Catalogue options for the model select, with one extra entry prepended
    * when the pinned model id is absent from the loaded catalogue. The extra
@@ -591,7 +674,7 @@ export class ProviderModelPickerComponent {
    * Always-on catalogue summary (#38): "`N` models · `M` support tool use",
    * counted over the loaded catalogue only (a pinned out-of-catalogue id is
    * not evidence either way). Null while the catalogue is empty, and while a
-   * load is in flight: `_models` still holds the previous provider's list then.
+   * load is in flight.
    */
   protected readonly toolUseSummary = computed<string | null>(() => {
     if (this._modelsLoading()) return null;
@@ -613,7 +696,7 @@ export class ProviderModelPickerComponent {
   );
 
   protected readonly defaultModelLabel = computed(() =>
-    buildDefaultModelLabel(this._provider(), this.defaultTier()),
+    buildDefaultModelLabel(this.displayProviderId(), this.defaultTier()),
   );
 
   protected readonly providerAriaLabel = computed(
@@ -629,7 +712,7 @@ export class ProviderModelPickerComponent {
 
   protected readonly manualApplyDisabled = computed(
     () =>
-      this.disabled() || this._manualDraft().trim() === '' || !this._provider(),
+      this.modelEditsDisabled() || this._manualDraft().trim() === '' || !this.displayProviderId(),
   );
 
   /** The loaded entry for the pinned model, when the catalogue knows it. */
@@ -672,16 +755,22 @@ export class ProviderModelPickerComponent {
    * change, and the parent echoing a provider this control just selected,
    * must not start another `listModels` round trip.
    */
-  private catalogueProvider: string | undefined;
+  private catalogueProvider: string | null | undefined;
 
   constructor() {
     effect(() => {
-      const providerId = this.fixedProvider() || this.provider();
-      this._provider.set(providerId);
+      this._provider.set(this.fixedProvider() || this.provider());
       this._model.set(this.model());
-      if (this.catalogueProvider === providerId) return;
-      void this.loadModels(providerId);
     });
+    effect(() => {
+      const providerId = this.catalogueId();
+      if (this.catalogueProvider === providerId) return;
+      untracked(() => void this.loadModels(providerId));
+    });
+  }
+
+  ngOnDestroy(): void {
+    ++this.loadGeneration;
   }
 
   /**
@@ -705,17 +794,23 @@ export class ProviderModelPickerComponent {
       select.value = this.selectedProvider();
       return;
     }
-    const value = select.value;
+    this.selectProvider(select.value);
+  }
+
+  protected selectProvider(value: string): void {
+    if (this.disabled() || value === this._provider()) return;
     this._provider.set(value);
     // A model id from the previous provider is meaningless here.
     this._model.set('');
-    void this.loadModels(value);
+    this._manualDraft.set('');
+    const providerId = this.catalogueId();
+    if (providerId !== this.catalogueProvider) void this.loadModels(providerId);
     this.emit();
   }
 
   protected onModelChange(event: Event): void {
     const select = event.target as HTMLSelectElement;
-    if (this.disabled()) {
+    if (this.modelEditsDisabled()) {
       select.value = this.selectedModelId();
       return;
     }
@@ -724,6 +819,7 @@ export class ProviderModelPickerComponent {
 
   /** Shared by the `<select>` and the searchable field. */
   protected selectModel(modelId: string): void {
+    if (this.modelEditsDisabled()) return;
     this._model.set(modelId);
     this.emit();
   }
@@ -761,7 +857,14 @@ export class ProviderModelPickerComponent {
    * and the saved-list notice row each render a Retry wired to this.
    */
   refreshCatalog(): void {
-    void this.loadModels(this._provider());
+    void this.loadModels(this.catalogueId());
+  }
+
+  private catalogueId(): string | null {
+    const provider = this.displayProviderId();
+    const hasRouteContext = this.inheritedProvider() !== undefined;
+    if (!hasRouteContext) return provider;
+    return provider && !this.excludedProviders().includes(provider) ? provider : null;
   }
 
   private emit(): void {
@@ -771,13 +874,15 @@ export class ProviderModelPickerComponent {
     });
   }
 
-  private async loadModels(providerId: string): Promise<void> {
+  private async loadModels(providerId: string | null): Promise<void> {
     const generation = ++this.loadGeneration;
+    if (this.catalogueProvider !== providerId) this._models.set([]);
     this.catalogueProvider = providerId;
-    this._modelsLoading.set(true);
+    this._modelsLoading.set(providerId !== null);
     this._modelsLoaded.set(false);
     this._modelsError.set(null);
     this._modelsNotice.set(null);
+    if (providerId === null) return;
     try {
       // `''` is this component's "inherit" sentinel, not a provider id; the
       // loader's own contract spells that case `undefined`.

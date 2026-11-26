@@ -1,793 +1,252 @@
-import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
+import { CdkConnectedOverlay, OverlayContainer } from '@angular/cdk/overlay';
+import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { Placement } from '@floating-ui/dom';
-import * as FloatingDom from '@floating-ui/dom';
-import {
-  NativePopoverComponent,
-  POPOVER_POSITION_TIMEOUT_MS,
-} from './native-popover.component';
-import { FloatingUIService } from '../shared';
-
-jest.mock('@floating-ui/dom', () => {
-  const actual = jest.requireActual('@floating-ui/dom');
-  return {
-    ...actual,
-    computePosition: jest.fn().mockResolvedValue({ x: 0, y: 0 }),
-    autoUpdate: jest.fn().mockReturnValue(() => undefined),
-  };
-});
+import { PtahRichSelectComponent } from '../../form-controls/rich-select/rich-select.component';
+import { NativePopoverComponent } from './native-popover.component';
 
 @Component({
-  standalone: true,
-  imports: [NativePopoverComponent],
-  changeDetection: ChangeDetectionStrategy.Eager,
+  imports: [NativePopoverComponent, PtahRichSelectComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <button type="button" id="external-anchor">External anchor</button>
     <ptah-native-popover
-      [isOpen]="isOpen()"
-      [placement]="placement()"
+      [isOpen]="open()"
       [anchor]="anchor()"
-      [offset]="offsetValue()"
       [hasBackdrop]="hasBackdrop()"
       [backdropClass]="backdropClass()"
-      [capToViewport]="capToViewport()"
-      (opened)="onOpened()"
-      (closed)="onClosed()"
-      (backdropClicked)="onBackdropClicked()"
+      [capToViewport]="cap()"
+      placement="bottom-end"
+      [offset]="12"
+      (opened)="openedCount = openedCount + 1"
+      (closed)="close()"
+      (backdropClicked)="backdropCount = backdropCount + 1"
     >
-      <button trigger id="trigger-btn">Open</button>
-      <div content class="settings-panel">
-        <button id="first-btn">First</button>
+      <button trigger type="button" id="popover-trigger" (click)="open.set(true)">Open</button>
+      <div content>
+        <ptah-select label="Model" searchable [options]="options" />
       </div>
     </ptah-native-popover>
   `,
 })
 class HostComponent {
-  isOpen = signal(false);
-  placement = signal<Placement>('bottom');
-  anchor = signal<HTMLElement | null>(null);
-  offsetValue = signal(8);
-  hasBackdrop = signal(true);
-  backdropClass = signal<'transparent' | 'dark'>('dark');
-  capToViewport = signal(true);
-
+  readonly open = signal(false);
+  readonly anchor = signal<HTMLElement | null>(null);
+  readonly hasBackdrop = signal(true);
+  readonly backdropClass = signal<'transparent' | 'dark'>('dark');
+  readonly cap = signal(true);
+  readonly options = [{ value: 'one', label: 'One' }];
   openedCount = 0;
   closedCount = 0;
-  backdropClickedCount = 0;
+  backdropCount = 0;
 
-  onOpened(): void {
-    this.openedCount++;
-  }
-  onClosed(): void {
+  close(): void {
     this.closedCount++;
-  }
-  onBackdropClicked(): void {
-    this.backdropClickedCount++;
+    this.open.set(false);
   }
 }
 
 describe('NativePopoverComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
   let host: HostComponent;
-  const mockedCompute = FloatingDom.computePosition as unknown as jest.Mock;
-  const mockedAutoUpdate = FloatingDom.autoUpdate as unknown as jest.Mock;
+  let overlay: HTMLElement;
 
-  beforeEach(async () => {
-    mockedCompute.mockClear();
-    await TestBed.configureTestingModule({
-      imports: [HostComponent],
-    }).compileComponents();
+  const trigger = (): HTMLButtonElement => fixture.nativeElement.querySelector('#popover-trigger');
+  const panel = (): HTMLElement | null => overlay.querySelector('.popover-panel');
+  const backdrop = (): HTMLElement | null => overlay.querySelector('.cdk-overlay-backdrop');
+  const component = (): NativePopoverComponent => fixture.debugElement
+    .query(By.directive(NativePopoverComponent)).componentInstance;
+  const connected = (): CdkConnectedOverlay => fixture.debugElement
+    .queryAllNodes(By.directive(CdkConnectedOverlay))[0].injector.get(CdkConnectedOverlay);
 
+  beforeEach(() => {
     fixture = TestBed.createComponent(HostComponent);
     host = fixture.componentInstance;
+    overlay = TestBed.inject(OverlayContainer).getContainerElement();
     fixture.detectChanges();
   });
 
-  const flushAll = async () => {
-    await new Promise((r) => queueMicrotask(() => r(null)));
-    // The bounded positioning race adds a few promise hops before `opened`.
-    for (let i = 0; i < 8; i++) await Promise.resolve();
+  async function render(): Promise<void> {
     fixture.detectChanges();
-  };
-
-  it('should create', () => {
-    expect(host).toBeTruthy();
-  });
-
-  it('positions from the projected trigger by default', async () => {
-    host.isOpen.set(true);
+    await fixture.whenStable();
     fixture.detectChanges();
-    await flushAll();
-    const trigger = (fixture.nativeElement as HTMLElement).querySelector('.popover-trigger');
-    expect(mockedCompute.mock.calls[0][0]).toBe(trigger);
-  });
+  }
 
-  it('positions from an external anchor when supplied', async () => {
-    const external = document.createElement('button');
-    document.body.appendChild(external);
-    try {
-      host.anchor.set(external);
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(mockedCompute.mock.calls[0][0]).toBe(external);
-    } finally {
-      external.remove();
-    }
-  });
+  async function open(): Promise<void> {
+    trigger().focus();
+    trigger().click();
+    await render();
+  }
 
-  it('falls back to the projected trigger when an external anchor is detached', async () => {
-    const detached = document.createElement('button');
-    host.anchor.set(detached);
-    host.isOpen.set(true);
-    fixture.detectChanges();
-    await flushAll();
-    const trigger = (fixture.nativeElement as HTMLElement).querySelector('.popover-trigger');
-    expect(mockedCompute.mock.calls[0][0]).toBe(trigger);
+  function escape(target: HTMLElement): void {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  }
+
+  it('projects the trigger in place and opens and focuses the portaled panel', async () => {
+    expect(trigger().textContent).toBe('Open');
+    expect(panel()).toBeNull();
+    await open();
+    expect(panel()?.querySelector('ptah-select')).not.toBeNull();
+    expect(component().panel()?.nativeElement).toBe(panel());
+    expect(fixture.nativeElement.contains(panel())).toBe(false);
+    expect(document.activeElement).toBe(panel());
     expect(host.openedCount).toBe(1);
   });
 
-  it('shows and focuses an unpositioned panel when no anchor is connected', async () => {
-    const trigger = (fixture.nativeElement as HTMLElement).querySelector('.popover-trigger');
-    expect(trigger).toBeTruthy();
-    trigger?.remove();
-    host.anchor.set(document.createElement('button'));
-    host.isOpen.set(true);
-    fixture.detectChanges();
-    await flushAll();
-    const panel = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.popover-panel');
-    expect(panel).toBeTruthy();
-    expect(panel?.style.visibility).toBe('visible');
-    expect(document.activeElement).toBe(panel);
-    expect(host.openedCount).toBe(1);
-    expect(mockedCompute).not.toHaveBeenCalled();
+  it('uses matching preferred and fallback alignment and offset', async () => {
+    await open();
+    expect(connected().positions).toEqual([
+      { originX: 'end', overlayX: 'end', originY: 'bottom', overlayY: 'top', offsetY: 12 },
+      { originX: 'end', overlayX: 'end', originY: 'top', overlayY: 'bottom', offsetY: -12 },
+    ]);
+    expect(connected().viewportMargin).toBe(8);
   });
 
-  it('reposition() recomputes the live position after the next render', () => {
-    const debug = fixture.debugElement.query(
-      By.directive(NativePopoverComponent),
-    );
-    const update = jest.spyOn(debug.injector.get(FloatingUIService), 'update');
-    (debug.componentInstance as NativePopoverComponent).reposition();
-    expect(update).not.toHaveBeenCalled();
-    fixture.detectChanges();
-    expect(update).toHaveBeenCalledTimes(1);
+  it('uses a connected external anchor and falls back to the projected trigger when detached', async () => {
+    const external = fixture.nativeElement.querySelector('#external-anchor') as HTMLElement;
+    host.anchor.set(external);
+    await open();
+    expect(connected().origin).toBe(external);
+    host.anchor.set(document.createElement('div'));
+    await render();
+    expect(connected().origin).toBe(trigger().parentElement);
   });
 
-  it('a reposition() scheduled before close has no effect: update() is a no-op after cleanup', async () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-    await flushAll();
-    const debug = fixture.debugElement.query(
-      By.directive(NativePopoverComponent),
-    );
-    const service = debug.injector.get(FloatingUIService);
-    const update = jest.spyOn(service, 'update');
-    const computes = mockedCompute.mock.calls.length;
-    (debug.componentInstance as NativePopoverComponent).reposition();
-    host.isOpen.set(false);
-    fixture.detectChanges();
-    await flushAll();
+  it('supports explicit reposition and row reattachment while open', async () => {
+    await open();
+    const update = jest.spyOn(connected().overlayRef, 'updatePosition');
+    component().reposition();
+    await render();
     expect(update).toHaveBeenCalled();
-    expect(mockedCompute.mock.calls.length).toBe(computes);
+    update.mockClear();
+    component().reattach();
+    await render();
+    expect(update).toHaveBeenCalled();
   });
 
-  it('should always render the trigger', () => {
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('#trigger-btn')).toBeTruthy();
+  it('captures the cap policy per open and allows the consumer to own scrolling', async () => {
+    await open();
+    expect(panel()?.classList).toContain('ptah-popover-capped');
+    host.cap.set(false);
+    await render();
+    expect(panel()?.classList).toContain('ptah-popover-capped');
+    host.open.set(false);
+    await render();
+    await open();
+    expect(panel()?.classList).not.toContain('ptah-popover-capped');
   });
 
-  it('should NOT render panel when isOpen is false', () => {
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.popover-panel')).toBeFalsy();
-    expect(compiled.querySelector('.settings-panel')).toBeFalsy();
-  });
-
-  it('should render panel and projected content when isOpen is true', () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.popover-panel')).toBeTruthy();
-    expect(compiled.querySelector('.settings-panel')).toBeTruthy();
-  });
-
-  it('should render backdrop by default (hasBackdrop defaults to true)', () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const backdrop = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="presentation"]',
-    );
-    expect(backdrop).toBeTruthy();
-  });
-
-  it('should apply dark backdrop class by default', () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const backdrop = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="presentation"]',
-    );
-    expect(backdrop?.classList.contains('bg-black/50')).toBe(true);
-  });
-
-  it('should NOT apply dark class when backdropClass is transparent', () => {
-    host.backdropClass.set('transparent');
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const backdrop = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="presentation"]',
-    );
-    expect(backdrop?.classList.contains('bg-black/50')).toBe(false);
-  });
-
-  it('should NOT render backdrop when hasBackdrop is false', () => {
-    host.hasBackdrop.set(false);
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const backdrop = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="presentation"]',
-    );
-    expect(backdrop).toBeFalsy();
-  });
-
-  it('should emit backdropClicked AND closed when backdrop is clicked', () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-
-    const backdrop = (fixture.nativeElement as HTMLElement).querySelector(
-      '[role="presentation"]',
-    ) as HTMLElement;
-    backdrop.click();
-
-    expect(host.backdropClickedCount).toBe(1);
+  it('requests closure on Escape even if focus stays on the trigger', async () => {
+    await open();
+    trigger().focus();
+    escape(trigger());
+    await render();
     expect(host.closedCount).toBe(1);
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 
-  it('should emit opened event after async positioning completes', async () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-    await flushAll();
+  it('uses the caller backdrop appearance and emits both backdrop and close events', async () => {
+    await open();
+    expect(backdrop()?.classList).toContain('cdk-overlay-dark-backdrop');
+    backdrop()?.click();
+    await render();
+    expect(host.backdropCount).toBe(1);
+    expect(host.closedCount).toBe(1);
+    expect(document.activeElement).toBe(trigger());
 
-    expect(host.openedCount).toBe(1);
+    host.backdropClass.set('transparent');
+    await open();
+    expect(overlay.querySelector('.cdk-overlay-transparent-backdrop')).not.toBeNull();
   });
 
-  it('should call computePosition when opened', async () => {
-    host.isOpen.set(true);
-    fixture.detectChanges();
-    await flushAll();
-
-    expect(mockedCompute).toHaveBeenCalled();
+  it('preserves caller-owned dismissal of a backdrop-free panel', async () => {
+    host.hasBackdrop.set(false);
+    await open();
+    expect(backdrop()).toBeNull();
+    document.body.click();
+    await render();
+    expect(host.closedCount).toBe(0);
+    expect(host.backdropCount).toBe(0);
+    expect(panel()).not.toBeNull();
   });
 
-  describe('viewport cap', () => {
-    const positionSpy = () =>
-      jest.spyOn(
-        fixture.debugElement
-          .query(By.directive(NativePopoverComponent))
-          .injector.get(FloatingUIService),
-        'position',
-      );
-    const panel = () =>
-      (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
-        '.popover-panel',
-      );
+  it('gives a nested searchable select first Escape and backdrop dismissal', async () => {
+    await open();
+    const select = panel()?.querySelector('button[role="combobox"]') as HTMLButtonElement;
+    select.click();
+    await render();
+    const search = overlay.querySelector('.ptah-select__search') as HTMLInputElement;
+    expect(search).toBe(document.activeElement);
+    expect(search.closest('.cdk-overlay-pane')).not.toBe(panel()?.closest('.cdk-overlay-pane'));
 
-    it('passes capHeight: true and marks the panel capped when capToViewport is on', async () => {
-      const position = positionSpy();
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(position.mock.calls[0][2]).toEqual(
-        expect.objectContaining({ capHeight: true }),
-      );
-      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(true);
-    });
+    escape(search);
+    await render();
+    expect(host.closedCount).toBe(0);
+    expect(document.activeElement).toBe(select);
+    select.click();
+    await render();
+    backdrop()?.click();
+    await render();
+    expect(host.closedCount).toBe(0);
+    expect(overlay.querySelector('.ptah-select__search')).toBeNull();
+    expect(document.activeElement).toBe(select);
 
-    it('passes capHeight: false and leaves the panel uncapped with [capToViewport]="false"', async () => {
-      host.capToViewport.set(false);
-      fixture.detectChanges();
-      const position = positionSpy();
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(position.mock.calls[0][2]).toEqual(
-        expect.objectContaining({ capHeight: false }),
-      );
-      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(false);
-    });
-
-    it('keeps the cap policy of the open until the next open when capToViewport changes while open', async () => {
-      const position = positionSpy();
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      host.capToViewport.set(false);
-      fixture.detectChanges();
-      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(true);
-
-      host.isOpen.set(false);
-      fixture.detectChanges();
-      await flushAll();
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(position.mock.calls.at(-1)?.[2]).toEqual(
-        expect.objectContaining({ capHeight: false }),
-      );
-      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(false);
-    });
-
-    it('defaults capToViewport to true when no binding is set', () => {
-      const bare = TestBed.createComponent(NativePopoverComponent);
-      expect(bare.componentInstance.capToViewport()).toBe(true);
-      bare.destroy();
-    });
-
-    it('keeps no token max-height on an unpositioned panel when the cap is off', async () => {
-      host.capToViewport.set(false);
-      fixture.detectChanges();
-      (fixture.nativeElement as HTMLElement)
-        .querySelector('.popover-trigger')
-        ?.remove();
-      host.anchor.set(document.createElement('button'));
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(panel()?.style.visibility).toBe('visible');
-      expect(panel()?.style.maxHeight).toBe('');
-    });
+    backdrop()?.click();
+    await render();
+    expect(host.closedCount).toBe(1);
+    expect(document.activeElement).toBe(trigger());
   });
 
-  describe('Escape key handling', () => {
-    it('should emit closed on Escape when popover is open', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
+  it('repositions for an unregistered settings pane and ignores a scroll that does not move the anchor', async () => {
+    const scroller = document.createElement('div');
+    scroller.className = 'settings-page overflow-y-auto';
+    scroller.setAttribute('data-testid', 'settings-pane');
+    const moved = fixture.nativeElement as HTMLElement;
+    moved.parentElement?.insertBefore(scroller, moved);
+    scroller.appendChild(moved);
+    await open();
+    const update = jest.spyOn(connected().overlayRef, 'updatePosition');
+    const unrelated = document.createElement('div');
+    unrelated.className = 'overflow-y-auto';
+    unrelated.style.height = '20px';
+    scroller.parentElement?.appendChild(unrelated);
 
-      const popoverEl = (fixture.nativeElement as HTMLElement).querySelector(
-        'ptah-native-popover',
-      ) as HTMLElement;
-      const event = new KeyboardEvent('keydown', {
-        key: 'Escape',
-        bubbles: true,
-        cancelable: true,
-      });
-      popoverEl.dispatchEvent(event);
+    unrelated.dispatchEvent(new Event('scroll'));
+    panel()?.querySelector('ptah-select')?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).not.toHaveBeenCalled();
 
-      expect(host.closedCount).toBe(1);
-    });
+    scroller.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).toHaveBeenCalledTimes(1);
 
-    it('closes on Escape while focus remains on the trigger', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      const trigger = (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('#trigger-btn');
-      expect(trigger).toBeTruthy();
-      trigger?.focus();
-      trigger?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
-      );
-      expect(host.closedCount).toBe(1);
-    });
-
-    it('should NOT emit closed on Escape when popover is not open', () => {
-      const popoverEl = (fixture.nativeElement as HTMLElement).querySelector(
-        'ptah-native-popover',
-      ) as HTMLElement;
-      popoverEl.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Escape',
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-
-      expect(host.closedCount).toBe(0);
-    });
-
-    it('should NOT close on non-Escape keys', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-
-      const popoverEl = (fixture.nativeElement as HTMLElement).querySelector(
-        'ptah-native-popover',
-      ) as HTMLElement;
-      popoverEl.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Enter',
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-
-      expect(host.closedCount).toBe(0);
-    });
+    host.open.set(false);
+    await render();
+    update.mockClear();
+    scroller.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).not.toHaveBeenCalled();
+    scroller.parentElement?.insertBefore(moved, scroller);
+    scroller.remove();
+    unrelated.remove();
   });
 
-  describe('Focus management', () => {
-    it('should restore focus to previously-focused element when popover closes', async () => {
-      const triggerBtn = (fixture.nativeElement as HTMLElement).querySelector(
-        '#trigger-btn',
-      ) as HTMLButtonElement;
-      // Attach to body so focus works reliably in JSDOM
-      document.body.appendChild(fixture.nativeElement);
-      triggerBtn.focus();
-      expect(document.activeElement).toBe(triggerBtn);
-
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-
-      // Close the popover
-      host.isOpen.set(false);
-      fixture.detectChanges();
-
-      expect(document.activeElement).toBe(triggerBtn);
-    });
+  it('removes its portal when the host is destroyed', async () => {
+    await open();
+    fixture.destroy();
+    expect(panel()).toBeNull();
   });
 
-  describe('Positioning failure and stale opens', () => {
-    const microtasks = async () => {
-      for (let i = 0; i < 10; i++) await Promise.resolve();
-    };
-    const settle = () => new Promise((resolve) => setTimeout(resolve));
-    const panel = () =>
-      (fixture.nativeElement as HTMLElement).querySelector(
-        '.popover-panel',
-      ) as HTMLElement;
-    const focusTrigger = () => {
-      document.body.appendChild(fixture.nativeElement);
-      const triggerBtn = (fixture.nativeElement as HTMLElement).querySelector(
-        '#trigger-btn',
-      ) as HTMLButtonElement;
-      triggerBtn.focus();
-      return triggerBtn;
-    };
-    let consoleError: jest.SpyInstance;
-    beforeEach(() => {
-      consoleError = jest.spyOn(console, 'error').mockImplementation(() => {
-        /* the dev-mode diagnostic is asserted, not printed */
-      });
-    });
-    afterEach(() => consoleError.mockRestore());
-
-    it('shows the panel unpositioned, focuses it and emits opened when positioning rejects; Escape still closes and restores focus', async () => {
-      mockedCompute.mockRejectedValueOnce(new Error('no layout'));
-      const triggerBtn = focusTrigger();
-
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await settle();
-      fixture.detectChanges();
-
-      expect(panel().style.visibility).toBe('visible');
-      expect(document.activeElement).toBe(panel());
-      expect(host.openedCount).toBe(1);
-      expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining('positioning failed'),
-      );
-
-      // The fallback panel is dismissable like a positioned one.
-      panel().dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'Escape',
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      expect(host.closedCount).toBe(1);
-      host.isOpen.set(false);
-      fixture.detectChanges();
-      expect(document.activeElement).toBe(triggerBtn);
-    });
-
-    it('shows the panel unpositioned once positioning overruns its bound', async () => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
-      try {
-        mockedCompute.mockReturnValueOnce(new Promise(() => undefined));
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await microtasks();
-
-        expect(panel().style.visibility).toBe('hidden');
-        expect(host.openedCount).toBe(0);
-
-        jest.advanceTimersByTime(POPOVER_POSITION_TIMEOUT_MS);
-        await microtasks();
-
-        expect(panel().style.visibility).toBe('visible');
-        expect(host.openedCount).toBe(1);
-        expect(consoleError).toHaveBeenCalledWith(
-          expect.stringContaining('positioning timed out'),
-        );
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('does not focus or emit opened when closed before positioning resolves', async () => {
-      let resolvePosition: (value: { x: number; y: number }) => void = () =>
-        undefined;
-      mockedCompute.mockReturnValueOnce(
-        new Promise((resolve) => (resolvePosition = resolve)),
-      );
-      const triggerBtn = focusTrigger();
-
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(mockedCompute).toHaveBeenCalledTimes(1);
-
-      host.isOpen.set(false);
-      fixture.detectChanges();
-      expect(document.activeElement).toBe(triggerBtn);
-      const autoUpdatesBefore = mockedAutoUpdate.mock.calls.length;
-
-      resolvePosition({ x: 0, y: 0 });
-      await settle();
-
-      expect(host.openedCount).toBe(0);
-      expect(document.activeElement).toBe(triggerBtn);
-      // The cancelled position never starts an auto-update.
-      expect(mockedAutoUpdate.mock.calls.length).toBe(autoUpdatesBefore);
-    });
-
-    it('close during a pending position leaves no auto-update after it resolves', async () => {
-      jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
-      try {
-        let resolvePosition: (value: { x: number; y: number }) => void = () =>
-          undefined;
-        mockedCompute.mockReturnValueOnce(
-          new Promise((resolve) => (resolvePosition = resolve)),
-        );
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await microtasks();
-
-        // The bound overruns: the panel opens unpositioned.
-        jest.advanceTimersByTime(POPOVER_POSITION_TIMEOUT_MS);
-        await microtasks();
-        expect(host.openedCount).toBe(1);
-
-        host.isOpen.set(false);
-        fixture.detectChanges();
-        const autoUpdatesBefore = mockedAutoUpdate.mock.calls.length;
-
-        resolvePosition({ x: 0, y: 0 });
-        await microtasks();
-
-        expect(mockedAutoUpdate.mock.calls.length).toBe(autoUpdatesBefore);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-  });
-
-  describe('ngOnDestroy', () => {
-    it('should cleanup without throwing', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-
-      expect(() => fixture.destroy()).not.toThrow();
-    });
-  });
-
-  describe('top-layer shell', () => {
-    const proto = HTMLElement.prototype;
-
-    function installPopoverApi(
-      show: (this: HTMLElement) => void,
-      hide: (this: HTMLElement) => void,
-    ): () => void {
-      const previous = {
-        show: Object.getOwnPropertyDescriptor(proto, 'showPopover'),
-        hide: Object.getOwnPropertyDescriptor(proto, 'hidePopover'),
-      };
-      Object.defineProperty(proto, 'showPopover', { configurable: true, value: show });
-      Object.defineProperty(proto, 'hidePopover', { configurable: true, value: hide });
-      return () => {
-        if (previous.show) Object.defineProperty(proto, 'showPopover', previous.show);
-        else Reflect.deleteProperty(proto, 'showPopover');
-        if (previous.hide) Object.defineProperty(proto, 'hidePopover', previous.hide);
-        else Reflect.deleteProperty(proto, 'hidePopover');
-      };
-    }
-
-    it('wraps the panel in a manual popover shell only while open', () => {
-      const root = fixture.nativeElement as HTMLElement;
-      expect(root.querySelector('.ptah-popover-layer')).toBeFalsy();
-
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      const layer = root.querySelector<HTMLElement>('.ptah-popover-layer');
-      expect(layer).toBeTruthy();
-      const panel = layer?.querySelector<HTMLElement>('.popover-panel');
-      expect(panel).toBeTruthy();
-      expect(layer?.getAttribute('popover')).toBe('manual');
-      expect(layer?.contains(panel)).toBe(true);
-
-      // jest-preset-angular removes inline styles; verify the rendered shell lifecycle here.
-      host.isOpen.set(false);
-      fixture.detectChanges();
-      expect(root.querySelector('.ptah-popover-layer')).toBeNull();
-    });
-
-    it('keeps the optional backdrop inside the shell', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      const layer = (fixture.nativeElement as HTMLElement).querySelector(
-        '.ptah-popover-layer',
-      );
-      const backdrop = layer?.querySelector('[role="presentation"]') as HTMLElement;
-      expect(backdrop.classList.contains('bg-black/50')).toBe(true);
-      backdrop.click();
-      expect(host.backdropClickedCount).toBe(1);
-      expect(host.closedCount).toBe(1);
-    });
-
-    it('omits the backdrop when hasBackdrop is false and still mounts the shell', () => {
-      host.hasBackdrop.set(false);
-      host.backdropClass.set('transparent');
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      const root = fixture.nativeElement as HTMLElement;
-      const layer = root.querySelector('.ptah-popover-layer');
-      expect(layer?.getAttribute('popover')).toBe('manual');
-      expect(layer?.querySelector('[role="presentation"]')).toBeFalsy();
-      expect(layer?.querySelector('.popover-panel')).toBeTruthy();
-    });
-
-    it('promotes the shell with showPopover before computePosition', async () => {
-      const order: string[] = [];
-      const restore = installPopoverApi(
-        function (this: HTMLElement) {
-          order.push(this.classList.contains('ptah-popover-layer') ? 'show' : 'other');
-        },
-        () => undefined,
-      );
-      mockedCompute.mockImplementationOnce(() => {
-        order.push('compute');
-        return Promise.resolve({ x: 4, y: 8 });
-      });
-      try {
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await flushAll();
-        expect(order).toEqual(['show', 'compute']);
-        expect(host.openedCount).toBe(1);
-      } finally {
-        restore();
-        mockedCompute.mockReset();
-        mockedCompute.mockResolvedValue({ x: 0, y: 0 });
-      }
-    });
-
-    it('does not promote when closed before the open microtask', async () => {
-      const show = jest.fn();
-      const restore = installPopoverApi(show, jest.fn());
-      try {
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        host.isOpen.set(false);
-        fixture.detectChanges();
-        await flushAll();
-        expect(show).not.toHaveBeenCalled();
-        expect(host.openedCount).toBe(0);
-      } finally {
-        restore();
-      }
-    });
-
-    it('hides on close and does not move focus on a later turn', async () => {
-      const hide = jest.fn();
-      const restore = installPopoverApi(() => undefined, hide);
-      document.body.appendChild(fixture.nativeElement);
-      const trigger = (fixture.nativeElement as HTMLElement).querySelector(
-        '#trigger-btn',
-      ) as HTMLButtonElement;
-      try {
-        trigger.focus();
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await flushAll();
-        expect(hide).not.toHaveBeenCalled();
-
-        host.isOpen.set(false);
-        fixture.detectChanges();
-        expect(hide).toHaveBeenCalledTimes(1);
-        expect(document.activeElement).toBe(trigger);
-
-        await flushAll();
-        expect(hide).toHaveBeenCalledTimes(1);
-        expect(document.activeElement).toBe(trigger);
-      } finally {
-        restore();
-      }
-    });
-
-    it('hides on destroy', async () => {
-      const hide = jest.fn();
-      const restore = installPopoverApi(() => undefined, hide);
-      try {
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await flushAll();
-        fixture.destroy();
-        expect(hide).toHaveBeenCalledTimes(1);
-      } finally {
-        restore();
-      }
-    });
-
-    it('still positions and opens when the engine has no popover API', async () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      await flushAll();
-      expect(mockedCompute).toHaveBeenCalled();
-      expect(host.openedCount).toBe(1);
-      const panel = (fixture.nativeElement as HTMLElement).querySelector(
-        '.popover-panel',
-      ) as HTMLElement;
-      expect(document.activeElement).toBe(panel);
-    });
-
-    it('pins a failed panel under the trigger instead of the viewport origin', async () => {
-      mockedCompute.mockRejectedValueOnce(new Error('no layout'));
-      const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-      document.body.appendChild(fixture.nativeElement);
-      const trigger = (fixture.nativeElement as HTMLElement).querySelector(
-        '.popover-trigger',
-      ) as HTMLElement;
-      jest.spyOn(trigger, 'getBoundingClientRect').mockReturnValue({
-        x: 40,
-        y: 50,
-        left: 40,
-        top: 50,
-        right: 80,
-        bottom: 70,
-        width: 40,
-        height: 20,
-        toJSON: () => ({}),
-      });
-      try {
-        host.isOpen.set(true);
-        fixture.detectChanges();
-        await new Promise((resolve) => setTimeout(resolve));
-        const panel = (fixture.nativeElement as HTMLElement).querySelector(
-          '.popover-panel',
-        ) as HTMLElement;
-        expect(panel.style.visibility).toBe('visible');
-        expect(panel.style.position).toBe('fixed');
-        expect(panel.style.left).toBe('40px');
-        expect(panel.style.top).toBe('70px');
-        expect(panel.style.maxHeight).toBe('var(--ptah-popover-max-h)');
-      } finally {
-        consoleError.mockRestore();
-        mockedCompute.mockReset();
-        mockedCompute.mockResolvedValue({ x: 0, y: 0 });
-      }
-    });
-
-    it('stops Escape from the panel so an ancestor does not see it', () => {
-      host.isOpen.set(true);
-      fixture.detectChanges();
-      let parentSaw = 0;
-      const parent = fixture.nativeElement as HTMLElement;
-      parent.addEventListener('keydown', () => {
-        parentSaw += 1;
-      });
-      const panel = parent.querySelector('.popover-panel') as HTMLElement;
-      const event = new KeyboardEvent('keydown', {
-        key: 'Escape',
-        bubbles: true,
-        cancelable: true,
-      });
-      panel.dispatchEvent(event);
-      expect(parentSaw).toBe(0);
-      expect(event.defaultPrevented).toBe(true);
-      expect(host.closedCount).toBe(1);
-    });
+  it('releases the select if the parent closes programmatically', async () => {
+    await open();
+    const select = panel()?.querySelector('button[role="combobox"]') as HTMLButtonElement;
+    select.click();
+    await render();
+    expect(overlay.querySelector('.ptah-select__search')).not.toBeNull();
+    host.open.set(false);
+    await render();
+    expect(overlay.querySelectorAll('.cdk-overlay-pane')).toHaveLength(0);
+    expect(document.activeElement).toBe(trigger());
   });
 });

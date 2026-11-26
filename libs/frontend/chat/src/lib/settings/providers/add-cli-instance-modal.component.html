@@ -30,6 +30,7 @@
   </div>
 
   <form
+    id="add-cli-instance-form"
     class="space-y-3 text-xs"
     (submit)="$event.preventDefault(); submit()"
     data-testid="add-cli-instance-form"
@@ -236,13 +237,6 @@
         {{ hint }}
       </p>
     }
-    <!-- Submitting with Enter from a field. The visible submit is in the footer. -->
-    <button
-      type="submit"
-      class="hidden"
-      tabindex="-1"
-      aria-hidden="true"
-    ></button>
   </form>
 
   <div
@@ -253,11 +247,11 @@
       Cancel
     </button>
     <button
-      type="button"
+      type="submit"
+      form="add-cli-instance-form"
       ptahButton
       variant="primary"
       [disabled]="!canSubmit()"
-      (click)="submit()"
       data-testid="add-cli-instance-submit"
     >
       {{ busy() ? 'Saving…' : editing() ? 'Save changes' : 'Create Instance' }}

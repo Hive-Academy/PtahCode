@@ -106,7 +106,9 @@ describe('ProviderSetupWizardComponent — stored key with a saved endpoint', ()
     fixture.detectChanges();
   });
 
-  const el = () => fixture.nativeElement as HTMLElement;
+  const el = () =>
+    (document.querySelector('[data-testid="native-drawer-panel"]') as HTMLElement | null) ??
+    (fixture.nativeElement as HTMLElement);
   const q = (id: string) => el().querySelector<HTMLElement>(`[data-testid="${id}"]`);
   function click(id: string) {
     (q(id) as HTMLButtonElement | null)?.click();

@@ -5,6 +5,8 @@ ptah-lanes-table {
   min-width: 0;
 }
 ptah-lanes-table .ptah-table-grid {
+  width: 100%;
+  max-width: 100%;
   table-layout: fixed;
 }
 ptah-lanes-table .ptah-table-grid th,
@@ -40,8 +42,32 @@ ptah-lanes-table .lane-default-value [data-popover-kind='model'] {
   text-align: start;
 }
 
-ptah-lanes-table [data-testid='lanes-colgroup'] col:nth-child(2) {
-  width: 26%;
+/* Wide columns. Fixed tracks are 4.25rem + 4.25rem + 2.5rem (11rem, about 18.5%
+   of a 950px table). The fluid tracks sum to 80% so the row stays inside the
+   table at 950px and wider. Order mode replaces the first track below. */
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-order {
+  width: 4.25rem;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-identity {
+  width: 22%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-status {
+  width: 18%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-permission {
+  width: 14%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-network {
+  width: 12%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-model {
+  width: 14%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-enabled {
+  width: 4.25rem;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-expander {
+  width: 2.5rem;
 }
 ptah-lanes-table .ptah-table-control-cell > span,
 ptah-lanes-table .ptah-table-control-cell > ptah-lane-model-effort-cell {
@@ -51,8 +77,27 @@ ptah-lanes-table .ptah-table-control-cell > ptah-lane-model-effort-cell {
 ptah-lanes-table .lane-model-value {
   display: flex;
   width: 100%;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
+}
+/* Permission, Network and Model stay in their columns. The shared control cell
+   gives every select a 8rem minimum, which is wider than the Network track and
+   paints over the Model label. Clip the cell and let the select shrink. */
+ptah-lanes-table td[data-testid='cli-matrix-model'],
+ptah-lanes-table .ptah-table:not([data-collapsed='true']) td[ptahCollapsible] {
+  overflow: hidden;
+  min-width: 0;
+}
+ptah-lanes-table td[ptahCollapsible] ptah-cli-lane-default-cell,
+ptah-lanes-table td[ptahCollapsible] ptah-select,
+ptah-lanes-table td[data-testid='cli-matrix-model'] ptah-lane-model-effort-cell {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+ptah-lanes-table .ptah-table-grid > tbody > tr[data-lane-kind] > th[scope='row'] {
+  min-width: 0;
 }
 ptah-lanes-table .lane-model-value > ptah-native-popover {
   min-width: 0;
@@ -250,6 +295,11 @@ ptah-lanes-table
   .ptah-table[data-collapsed='true'][data-model-column='true']
   .lane-status {
   width: 13rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  [data-lane-status] {
+  overflow: hidden;
 }
 ptah-lanes-table
   .ptah-table[data-collapsed='true'][data-model-column='true']
@@ -547,11 +597,12 @@ ptah-lanes-table .lanes-group-count {
 }
 ptah-lanes-table .lanes-group-push {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--ptah-gap-inline);
   margin-inline-start: auto;
   min-width: 0;
+  max-width: 100%;
 }
 ptah-lanes-table .lanes-ptah-defaults {
   display: inline-flex;

@@ -769,4 +769,31 @@ describe('LanesTableComponent visual presentation', () => {
     }
     expect(css).toMatch(/popover-trigger\s*\{[^}]*max-width: 100%;/);
   });
+
+  it('clips Model and Network to their own wide-row tracks', async () => {
+    const css = readFileSync(
+      join(__dirname, 'lanes-table.component.css'),
+      'utf8',
+    );
+    expect(css).toMatch(/col\.lane-network\s*\{[^}]*width:\s*12%;/);
+    expect(css).toMatch(/col\.lane-model\s*\{[^}]*width:\s*14%;/);
+    expect(css).toMatch(
+      /col\.lane-order\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-identity\s*\{[^}]*width:\s*22%;[\s\S]*col\.lane-status\s*\{[^}]*width:\s*18%;[\s\S]*col\.lane-permission\s*\{[^}]*width:\s*14%;[\s\S]*col\.lane-enabled\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-expander\s*\{[^}]*width:\s*2\.5rem;/,
+    );
+    expect(css).toMatch(
+      /td\[data-testid='cli-matrix-model'\][\s\S]*?overflow:\s*hidden;/,
+    );
+    expect(css).toMatch(
+      /td\[ptahCollapsible\] ptah-select,\s*ptah-lanes-table td\[data-testid='cli-matrix-model'\][\s\S]*?min-width:\s*0;/,
+    );
+    const { host } = await mount([system('codex')]);
+    const row = q(host, '[data-testid="cli-provider-card-codex"]');
+    const controls = row?.querySelectorAll('td[ptahCollapsible]');
+    const model = row?.querySelector('[data-testid="cli-matrix-model"]');
+    expect(controls).toHaveLength(2);
+    expect(model).not.toBeNull();
+    expect(model?.contains(controls?.[0] ?? null)).toBe(false);
+    expect(model?.contains(controls?.[1] ?? null)).toBe(false);
+    expect(controls?.[1].contains(model ?? null)).toBe(false);
+  });
 });

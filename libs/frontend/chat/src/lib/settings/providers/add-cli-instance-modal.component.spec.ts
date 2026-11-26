@@ -131,7 +131,10 @@ describe('AddCliInstanceModalComponent', () => {
   let fixture: ComponentFixture<Host>;
   let state: StateStub;
   let feedback: SettingsSaveFeedbackService;
-  const el = () => fixture.nativeElement as HTMLElement;
+  const el = () =>
+    (document.querySelector('.cdk-dialog-container') as HTMLElement | null) ??
+    (fixture.nativeElement as HTMLElement);
+  const dialog = () => document.querySelector('.cdk-dialog-container');
   const q = <T extends HTMLElement = HTMLElement>(id: string) =>
     el().querySelector(`[data-testid="${id}"]`) as T | null;
   const submit = () => q<HTMLButtonElement>('add-cli-instance-submit');
@@ -193,9 +196,9 @@ describe('AddCliInstanceModalComponent', () => {
     beforeEach(() => create());
 
     it('is the titled "Add Ptah CLI Agent Instance" dialog, open', () => {
-      expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(true);
+      expect(dialog()).not.toBeNull();
       expect(
-        el().querySelector('dialog')?.getAttribute('aria-labelledby'),
+        dialog()?.getAttribute('aria-labelledby'),
       ).toBe('add-cli-instance-title');
       expect(q('add-cli-instance-modal')?.textContent).toContain(
         'Add Ptah CLI Agent Instance',
@@ -204,7 +207,7 @@ describe('AddCliInstanceModalComponent', () => {
       expect(submit()?.disabled).toBe(true);
     });
 
-    it('uses the modal shell: fixed header and footer, the form in the one scroll body, no negative-margin chrome (B3.1)', () => {
+    it('uses one real form submit for Enter and the footer action in the modal shell (B3.1)', () => {
       const part = (name: string) =>
         el().querySelector<HTMLElement>(`[data-ptah-modal-part="${name}"]`);
       expect(el().querySelector('.modal-box')?.className).toContain(
@@ -225,6 +228,11 @@ describe('AddCliInstanceModalComponent', () => {
       expect(part('body')?.contains(q('add-cli-instance-form'))).toBe(true);
       expect(part('footer')?.classList.contains('shrink-0')).toBe(true);
       expect(part('footer')?.contains(submit())).toBe(true);
+      expect(submit()?.type).toBe('submit');
+      expect(submit()?.getAttribute('form')).toBe('add-cli-instance-form');
+      expect(q('add-cli-instance-form')?.id).toBe('add-cli-instance-form');
+      expect(part('body')?.querySelectorAll('button[type="submit"]')).toHaveLength(0);
+      expect(part('footer')?.querySelectorAll('button[type="submit"]')).toHaveLength(1);
       const buttons = Array.from(
         part('footer')?.querySelectorAll('button') ?? [],
       ).map((button) => button.textContent?.trim());
@@ -325,7 +333,7 @@ describe('AddCliInstanceModalComponent', () => {
     it('requires a key for an API-key provider, masked with show/hide (#49)', () => {
       type('add-cli-instance-name', 'Requesty-2');
       choose('requesty');
-      expect(el().querySelector('dialog')?.textContent).toContain(
+      expect(dialog()?.textContent).toContain(
         'API key for this instance',
       );
       expect(q('add-cli-instance-key-help')?.textContent).toContain(
@@ -348,7 +356,7 @@ describe('AddCliInstanceModalComponent', () => {
     it('makes the key optional for Kimi Code, which falls back to the shared connection (apiKeyFallback)', async () => {
       type('add-cli-instance-name', 'Kimi-2');
       choose('kimi-code');
-      expect(el().querySelector('dialog')?.textContent).toContain(
+      expect(dialog()?.textContent).toContain(
         'API key (optional)',
       );
       expect(q('add-cli-instance-key-help')?.textContent?.trim()).toBe(

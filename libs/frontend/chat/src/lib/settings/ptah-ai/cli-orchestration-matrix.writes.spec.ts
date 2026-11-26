@@ -242,6 +242,13 @@ describe('CliOrchestrationMatrixComponent', () => {
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
     (element().querySelector(selector) ??
       document.querySelector(selector)) as T | null;
+  /** Add and tier editors open in the CDK dialog shell, not a native dialog. */
+  const modalIsOpen = (testId: string) => {
+    const node = document.querySelector(`[data-testid="${testId}"]`);
+    const native = node?.closest('dialog');
+    if (native) return native.hasAttribute('open');
+    return node?.closest('.cdk-dialog-container') != null;
+  };
   const row = (id: string) =>
     q(
       `[data-testid="cli-matrix-row-${id}"], [data-testid="cli-provider-card-${id}"]`,
@@ -456,15 +463,15 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(reset).not.toBeNull();
     reset?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     // The saved plan row resets to the built-in yolo default, so full access is confirmed first.
     expect(state.saveSettings).not.toHaveBeenCalledWith(
       { orchestration: { cliLaneDefaults: { codex: null } } },
       CONTEXT,
     );
     Array.from(
-      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>(
-        'dialog[open] button',
-      ),
+      document.querySelectorAll<HTMLButtonElement>('.cdk-dialog-container button'),
     )
       .find((button) => button.textContent?.trim() === 'Confirm')
       ?.click();
@@ -846,14 +853,11 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
-  it('routes edit and tier editor outputs to existing modals', () => {
+  it('routes edit and tier editor outputs to existing modals', async () => {
     table().edit.emit(lane('glm-1'));
     fixture.detectChanges();
-    expect(
-      q('[data-testid="add-cli-instance-modal"]')
-        ?.closest('dialog')
-        ?.hasAttribute('open'),
-    ).toBe(true);
+    await fixture.whenStable();
+    expect(modalIsOpen('add-cli-instance-modal')).toBe(true);
     // Edit tiers lives in the detail footer only (decision 23).
     q<HTMLButtonElement>(
       '[data-testid="cli-matrix-row-glm-1"] ptah-table-row-expander button',
@@ -861,14 +865,11 @@ describe('CliOrchestrationMatrixComponent', () => {
     fixture.detectChanges();
     q<HTMLButtonElement>('[data-testid="cli-matrix-tiers-glm-1"]')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(
       q('#lane-detail-glm-1 [data-testid="cli-matrix-tiers-glm-1"]'),
     ).not.toBeNull();
-    expect(
-      q('[data-testid="cli-tier-mapping-modal"]')
-        ?.closest('dialog')
-        ?.hasAttribute('open'),
-    ).toBe(true);
+    expect(modalIsOpen('cli-tier-mapping-modal')).toBe(true);
   });
 
   it('routes confirmed delete to the existing delete write', async () => {

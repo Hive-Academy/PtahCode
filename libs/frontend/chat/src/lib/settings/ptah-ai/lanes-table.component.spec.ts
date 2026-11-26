@@ -177,12 +177,6 @@ describe('LanesTableComponent', () => {
   it.each(['Confirm', 'Cancel'] as const)(
     'requires confirmation for a yolo built-in detail reset: %s',
     async (action) => {
-      HTMLDialogElement.prototype.showModal = function () {
-        this.setAttribute('open', '');
-      };
-      HTMLDialogElement.prototype.close = function () {
-        this.removeAttribute('open');
-      };
       // Current resolver only supplies plan defaults. Model a yolo built-in
       // result to verify this alternate entry point obeys the cell's guard.
       const row = system('codex', { manifest: defaultManifest });
@@ -203,18 +197,20 @@ describe('LanesTableComponent', () => {
       jest.spyOn(cell, 'defaultPermission').mockReturnValue('yolo');
       trigger.click();
       fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
       expect(reset).not.toHaveBeenCalled();
-      const dialog = trigger
-        .closest('ptah-cli-lane-default-cell')!
-        .querySelector('dialog')!;
-      expect(dialog.open).toBe(true);
-      expect(dialog.textContent).toContain('Confirm full access');
-      const button = Array.from(dialog.querySelectorAll('button')).find(
+      const dialog = document.querySelector<HTMLElement>('.cdk-dialog-container');
+      expect(dialog).not.toBeNull();
+      expect(dialog?.textContent).toContain('Confirm full access');
+      const button = Array.from(dialog?.querySelectorAll('button') ?? []).find(
         (b) => b.textContent?.trim() === action,
       )!;
       button.click();
       fixture.detectChanges();
-      expect(dialog.open).toBe(false);
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
       if (action === 'Confirm') expect(reset).toHaveBeenCalledWith(row);
       else expect(reset).not.toHaveBeenCalled();
     },
@@ -232,11 +228,10 @@ describe('LanesTableComponent', () => {
     fixture.detectChanges();
     const trigger = q(host, '[data-testid="lanes-detail-reset-default"]')!;
     trigger.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
     expect(reset).toHaveBeenCalledWith(row);
-    expect(
-      trigger.closest('ptah-cli-lane-default-cell')!.querySelector('dialog')!
-        .open,
-    ).toBe(false);
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
   });
 
   it('offers reset only for a saved system default in the detail quiet actions at both widths', async () => {
@@ -282,13 +277,13 @@ describe('LanesTableComponent', () => {
         (col) => col.className,
       );
     expect(widths('table [data-testid="lanes-colgroup"]')).toEqual([
-      'w-[6%]',
+      'lane-order',
       'lane-identity',
       'lane-status',
-      'w-[14%]',
-      'w-[10%]',
-      'w-[14%]',
-      'w-[6%]',
+      'lane-permission',
+      'lane-network',
+      'lane-model',
+      'lane-enabled',
       'lane-expander',
     ]);
     expect(q(host, '[data-testid="lanes-colgroup-collapsed"]')).toBeNull();
@@ -818,13 +813,57 @@ describe('LanesTableComponent', () => {
         .queryAll(By.directive(CliLaneDefaultCellComponent))
         .map((item) => item.componentInstance as CliLaneDefaultCellComponent)
         .find((item) => item.cli() === 'ptah-cli')!;
-      expect(cell.resetVisibility()).toBe('always');
+      expect(cell.layout()).toBe('defaults');
+      const action = defaults.querySelector<HTMLButtonElement>(
+        '[data-testid="lanes-defaults-action"]',
+      );
+      expect(action?.textContent?.trim()).toBe('Defaults');
+      expect(defaults.querySelector('[role="combobox"]')).toBeNull();
       cell.selected.emit({ permission: 'plan', network: 'deny' });
       expect(selected).toHaveBeenCalledWith({ permission: 'plan', network: 'deny' });
-      const resetButton = defaults.querySelector<HTMLButtonElement>('button[aria-label^="Reset"]');
-      expect(resetButton?.textContent?.trim()).toBe('');
+      action?.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      const resetButton = document.querySelector<HTMLButtonElement>(
+        '.cdk-overlay-pane button[aria-label^="Reset"]',
+      );
+      expect(resetButton?.textContent?.trim()).toBe('Reset');
+      expect(
+        q(host, '[data-testid="lanes-group-ptah"] [role="combobox"]'),
+      ).toBeNull();
       cell.resetRequested.emit();
       expect(reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps one Defaults action in the group header when an instance row is expanded', async () => {
+      const { fixture, host } = await mount([instance('a')]);
+      fixture.componentRef.setInput('ptahDefaults', {
+        manifest: defaultManifest,
+        saved: { permission: 'ask', network: 'allow' },
+      });
+      fixture.detectChanges();
+      const header = (): HTMLElement =>
+        q(host, '[data-testid="lanes-group-ptah"]')!;
+      expect(
+        header().querySelectorAll('[data-testid="lanes-defaults-action"]'),
+      ).toHaveLength(1);
+      expect(header().querySelector('[role="combobox"]')).toBeNull();
+      q(
+        host,
+        '[data-testid="cli-matrix-row-a"] ptah-table-row-expander button',
+      )?.click();
+      fixture.detectChanges();
+      expect(
+        header().querySelectorAll('[data-testid="lanes-defaults-action"]'),
+      ).toHaveLength(1);
+      expect(header().querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(
+        1,
+      );
+      expect(header().querySelector('[role="combobox"]')).toBeNull();
+      expect(
+        q(host, '[data-testid="lanes-inherited-network"]')?.textContent,
+      ).toContain('Allowed');
     });
 
     it('shows the inherited Ptah default with "(default)" in Ptah rows (P20, P-35)', async () => {
@@ -1135,7 +1174,11 @@ describe('LanesTableComponent', () => {
       expand(fixture, host, 'cli-provider-card-cursor');
       (q(host, '#lane-detail-cursor [data-popover-kind="install"]') as HTMLButtonElement).click();
       fixture.detectChanges();
-      Array.from(host.querySelectorAll<HTMLButtonElement>('#lane-detail-cursor button'))
+      await fixture.whenStable();
+      fixture.detectChanges();
+      Array.from(
+        document.querySelectorAll<HTMLButtonElement>('.cdk-overlay-pane button'),
+      )
         .find((button) => button.textContent?.trim() === 'Re-detect')
         ?.click();
       expect(redetect).toHaveBeenCalledWith('cursor');

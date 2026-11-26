@@ -337,69 +337,48 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         </div>
       </div>
 
-      <div class="border-b border-base-300 bg-base-100 p-3" data-testid="wizard-progress">
-        <ol
-          class="steps steps-horizontal hidden w-full text-xs sm:flex"
-          data-testid="wizard-steps"
-        >
-          @for (step of STEP_DEFS; track step.id; let i = $index) {
-            <li
-              class="step"
-              [class.step-primary]="stepIndex() >= i"
-              [attr.aria-current]="isCurrentStep(step.id) ? 'step' : null"
-            >
-              @if (isCompletedStep(step.id)) {
-                <button
-                  type="button"
-                  class="min-h-9 text-xs text-base-content hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                  [disabled]="probeChecking()"
-                  (click)="goToStep(step.id)"
-                  data-testid="wizard-step-link"
-                >
-                  {{ step.label }}<span class="sr-only"> · Complete</span>
-                </button>
-              } @else {
-                <span [class.opacity-50]="!isCurrentStep(step.id)" class="text-xs">{{
-                  step.label
-                }}</span>
-              }
-            </li>
-          }
-        </ol>
-        <p
-          class="text-xs font-semibold text-base-content sm:hidden"
-          data-testid="wizard-mobile-step"
-        >
-          Step {{ stepIndex() + 1 }} of 5 · {{ currentLabel() }}
-        </p>
-        <details class="sm:hidden" data-testid="wizard-mobile-steps">
-          <summary
-            class="min-h-9 cursor-pointer text-xs text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+      <div class="border-b border-base-300 bg-base-100 px-3 py-2" data-testid="wizard-progress">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <h3
+            #stepHeading
+            tabindex="-1"
+            class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            data-testid="wizard-step-heading"
           >
-            All steps
-          </summary>
-          <ul class="mt-1 space-y-1">
-            @for (step of STEP_DEFS; track step.id; let i = $index) {
-              <li>
-                @if (isCompletedStep(step.id)) {
-                  <button
-                    type="button"
-                    class="min-h-9 text-xs text-base-content hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                    [disabled]="probeChecking()"
-                    (click)="goToStep(step.id)"
-                    data-testid="wizard-step-link"
-                  >
-                    {{ step.label }}<span class="sr-only"> · Complete</span>
-                  </button>
-                } @else if (isCurrentStep(step.id)) {
-                  <span class="text-xs font-semibold text-base-content">{{ step.label }}</span>
-                } @else {
-                  <span class="text-xs text-base-content-muted">{{ step.label }}</span>
-                }
-              </li>
-            }
-          </ul>
-        </details>
+            {{ currentLabel() }}
+          </h3>
+          <span class="text-xs text-base-content-muted">
+            Step {{ stepIndex() + 1 }} of {{ STEP_DEFS.length }}
+          </span>
+          <details class="ml-auto text-xs" data-testid="wizard-steps">
+            <summary
+              class="min-h-9 cursor-pointer text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+            >
+              All steps
+            </summary>
+            <ol class="mt-1 space-y-1">
+              @for (step of STEP_DEFS; track step.id) {
+                <li [attr.aria-current]="isCurrentStep(step.id) ? 'step' : null">
+                  @if (isCompletedStep(step.id)) {
+                    <button
+                      type="button"
+                      class="min-h-9 text-xs text-base-content hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+                      [disabled]="probeChecking()"
+                      (click)="goToStep(step.id)"
+                      data-testid="wizard-step-link"
+                    >
+                      {{ step.label }}<span class="sr-only"> · Complete</span>
+                    </button>
+                  } @else if (isCurrentStep(step.id)) {
+                    <span class="text-xs font-semibold text-base-content">{{ step.label }}</span>
+                  } @else {
+                    <span class="text-xs text-base-content-muted">{{ step.label }}</span>
+                  }
+                </li>
+              }
+            </ol>
+          </details>
+        </div>
       </div>
 
       <ptah-native-modal
@@ -440,20 +419,12 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         </div>
       </ptah-native-modal>
 
-      <div class="space-y-4 p-3" data-testid="wizard-body" #wizardHost>
+      <div class="space-y-4" data-testid="wizard-body" #wizardHost>
         @if (externalMessage()) { <p role="status">{{ externalMessage() }}</p> }
       <div ptahMotionStage [motionIndex]="stepIndex()">
       @switch (step()) {
           @case ('provider') {
             <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave" data-testid="wizard-step-provider">
-              <h3
-                #stepHeading
-                tabindex="-1"
-                class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                data-testid="wizard-step-heading"
-              >
-                Provider
-              </h3>
               <div class="mt-3 flex flex-col gap-1">
                 <span id="wizard-search-label" class="sr-only">Search providers</span>
                 <ptah-field label="Search providers" size="sm">
@@ -694,14 +665,6 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           }
           @case ('credential') {
             <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave" data-testid="wizard-step-credential">
-              <h3
-                #stepHeading
-                tabindex="-1"
-                class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                data-testid="wizard-step-heading"
-              >
-                Credential
-              </h3>
               <div ptahMotionStage [motionIndex]="authModeIndex()">
               @switch (authMode()) {
                 @case ('apiKey') {
@@ -1090,14 +1053,6 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           }
           @case ('verify') {
             <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave" data-testid="wizard-step-verify">
-              <h3
-                #stepHeading
-                tabindex="-1"
-                class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                data-testid="wizard-step-heading"
-              >
-                Verify
-              </h3>
               <p
                 class="mt-3 text-xs text-base-content-muted"
                 data-testid="wizard-verify-route"
@@ -1227,14 +1182,6 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           }
           @case ('models') {
             <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave" data-testid="wizard-step-models">
-              <h3
-                #stepHeading
-                tabindex="-1"
-                class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                data-testid="wizard-step-heading"
-              >
-                Models
-              </h3>
               @if (!tiersApply()) {
                 <p class="mt-3 text-xs text-base-content-muted" data-testid="wizard-models-native">
                   Claude chooses its own default models for this connection. No model mapping is needed.
@@ -1278,14 +1225,6 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           }
           @case ('scope') {
             <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave" data-testid="wizard-step-scope">
-              <h3
-                #stepHeading
-                tabindex="-1"
-                class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-                data-testid="wizard-step-heading"
-              >
-                Scope
-              </h3>
               <dl class="mt-3 space-y-2" data-testid="wizard-review">
                 <div class="flex gap-2">
                   <dt class="w-40 shrink-0 text-xs text-base-content-muted">Provider</dt>
@@ -1404,14 +1343,6 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 >
                   {{ savedCopy() }}
                 </p>
-                <button
-                  type="button"
-                  ptahButton variant="primary" class="mt-2"
-                  (click)="onDone()"
-                  data-testid="wizard-done"
-                >
-                  Done
-                </button>
               }
               @if (selectionId() === 'anthropic') { <p>Claude API can be saved as a connection. Using it for the main agent switches main-agent requests to API billing.</p> }
               @if (contextChanged()) { <p role="alert">The workspace changed. Review the destination before saving.</p><button type="button" ptahButton size="md" (click)="reviewContextRequested.emit()">Review current workspace</button> }
@@ -1436,47 +1367,59 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         drawer-footer
         class="flex flex-wrap items-center justify-between gap-2 border-t border-base-300 bg-base-100 px-4 py-3"
       >
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            ptahButton
-            [disabled]="stepIndex() === 0 || probeChecking() || commitBusy()"
-            (click)="goBack()"
-            data-testid="wizard-back"
-          >
-            Back
-          </button>
-          <button
-            type="button"
-            ptahButton variant="ghost"
-            [disabled]="commitBusy()"
-            #cancelButton
-            (click)="requestWizardClose()"
-            data-testid="wizard-cancel"
-          >
-            Cancel
-          </button>
-        </div>
-        @if (step() === 'scope') {
+        @if (commitState() === 'saved' && step() === 'scope') {
           <button
             type="button"
             ptahButton variant="primary"
-            [disabled]="commitBusy() || !modelsValid() || contextChanged()"
-            (click)="onCommit()"
-            data-testid="wizard-commit"
+            class="ml-auto"
+            (click)="onDone()"
+            data-testid="wizard-done"
           >
-            {{ commitState() === 'saving' ? 'Saving connection…' : commitButtonLabel() }}
+            Done
           </button>
         } @else {
-          <button
-            type="button"
-            ptahButton variant="primary"
-            [disabled]="!canContinue()"
-            (click)="goForward()"
-            data-testid="wizard-continue"
-          >
-            Continue
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              ptahButton
+              [disabled]="stepIndex() === 0 || probeChecking() || commitBusy()"
+              (click)="goBack()"
+              data-testid="wizard-back"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              ptahButton variant="ghost"
+              [disabled]="commitBusy()"
+              #cancelButton
+              (click)="requestWizardClose()"
+              data-testid="wizard-cancel"
+            >
+              Cancel
+            </button>
+          </div>
+          @if (step() === 'scope') {
+            <button
+              type="button"
+              ptahButton variant="primary"
+              [disabled]="commitBusy() || !modelsValid() || contextChanged()"
+              (click)="onCommit()"
+              data-testid="wizard-commit"
+            >
+              {{ commitState() === 'saving' ? 'Saving connection…' : commitButtonLabel() }}
+            </button>
+          } @else {
+            <button
+              type="button"
+              ptahButton variant="primary"
+              [disabled]="!canContinue()"
+              (click)="goForward()"
+              data-testid="wizard-continue"
+            >
+              Continue
+            </button>
+          }
         }
       </div>
     </ptah-native-drawer>

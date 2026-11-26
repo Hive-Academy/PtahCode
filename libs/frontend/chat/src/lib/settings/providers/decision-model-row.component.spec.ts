@@ -1,4 +1,5 @@
 /** Decision model kinds, status, persistence, validation, key handling, focus and shared field ownership. */
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -46,9 +47,13 @@ describe('DecisionModelRowComponent', () => {
   let setConfigResult: { success: boolean; error?: string };
 
   const host = (): HTMLElement => fixture.nativeElement as HTMLElement;
+  const overlay = (): HTMLElement => TestBed.inject(OverlayContainer).getContainerElement();
   const byTestId = <T extends HTMLElement = HTMLElement>(
     id: string,
-  ): T | null => host().querySelector<T>(`[data-testid="${id}"]`);
+  ): T | null => {
+    const selector = `[data-testid="${id}"]`;
+    return host().querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
+  };
   const text = (id: string): string =>
     byTestId(id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   const setConfigCalls = (): unknown[] =>
@@ -304,7 +309,7 @@ describe('DecisionModelRowComponent', () => {
       expect(byTestId('decision-model')).toBeNull();
       expect(byTestId('decision-save')).toBeNull();
       expect(
-        host().querySelector('label[for="decision-model-kind"]'),
+        overlay().querySelector('label[for="decision-model-kind"]'),
       ).not.toBeNull();
     });
 
@@ -319,7 +324,7 @@ describe('DecisionModelRowComponent', () => {
       );
       expect(listModels).not.toHaveBeenCalled();
       const suggestions = Array.from(
-        host().querySelectorAll('#decision-model-suggestions option'),
+        overlay().querySelectorAll('#decision-model-suggestions option'),
       ).map((o) => o.getAttribute('value'));
       expect(suggestions).toEqual(['tev1', 'laya']);
       expect(text('decision-footer')).toBe(
@@ -363,7 +368,7 @@ describe('DecisionModelRowComponent', () => {
       expect(notice?.textContent).toContain('Showing the list saved on 1 Nov.');
       expect(
         Array.from(
-          host().querySelectorAll('#decision-model-suggestions option'),
+          overlay().querySelectorAll('#decision-model-suggestions option'),
         ).map((o) => o.getAttribute('value')),
       ).toEqual(['saved-1']);
       byTestId<HTMLButtonElement>('decision-model-notice-retry')?.click();
@@ -372,7 +377,7 @@ describe('DecisionModelRowComponent', () => {
       expect(byTestId('decision-model-notice')).toBeNull();
       expect(
         Array.from(
-          host().querySelectorAll('#decision-model-suggestions option'),
+          overlay().querySelectorAll('#decision-model-suggestions option'),
         ).map((o) => o.getAttribute('value')),
       ).toEqual(['live-1']);
     });
@@ -393,7 +398,7 @@ describe('DecisionModelRowComponent', () => {
       expect(listModels).toHaveBeenCalledWith('anthropic');
       expect(
         Array.from(
-          host().querySelectorAll('#decision-model-suggestions option'),
+          overlay().querySelectorAll('#decision-model-suggestions option'),
         ).map((o) => o.getAttribute('value')),
       ).toEqual(['with-tools', 'no-tools']);
       expect(text('decision-model-help')).toBe(
@@ -719,15 +724,24 @@ describe('DecisionModelRowComponent', () => {
   });
 
   describe('the editor popover (P4 visual 1, 2, 5)', () => {
-    const tab = (target: HTMLElement, shiftKey = false): KeyboardEvent => {
-      const event = new KeyboardEvent('keydown', {
-        key: 'Tab',
-        shiftKey,
-        bubbles: true,
-        cancelable: true,
-      });
-      target.dispatchEvent(event);
-      return event;
+    const focusBoundary = (direction: 'before' | 'after'): void => {
+      const popover = fixture.debugElement.query(
+        By.directive(NativePopoverComponent),
+      ).componentInstance as NativePopoverComponent;
+      const panel = popover.panel()?.nativeElement;
+      const anchor =
+        direction === 'before'
+          ? panel?.previousElementSibling
+          : panel?.nextElementSibling;
+      if (!(anchor instanceof HTMLElement)) throw new Error('focus trap anchor missing');
+      expect(anchor.classList.contains('cdk-focus-trap-anchor')).toBe(true);
+      expect(anchor.tabIndex).toBe(0);
+      // jsdom supplies no layout, which CDK uses to detect focusable controls.
+      for (const control of panel?.querySelectorAll<HTMLElement>('button, input') ?? []) {
+        Object.defineProperty(control, 'offsetWidth', { value: 1, configurable: true });
+      }
+      // The browser reaches these anchors when Tab leaves the panel.
+      anchor.focus();
     };
 
     it('repositions the popover when the kind changes, so a grown editor re-flips or re-shifts at once', async () => {
@@ -814,10 +828,9 @@ describe('DecisionModelRowComponent', () => {
       const close = byTestId<HTMLButtonElement>('consumer-close-decision');
       if (!save || !close) throw new Error('editor controls missing');
       expect(save.disabled).toBe(false);
-      expect(tab(model).defaultPrevented).toBe(false);
-      expect(tab(save).defaultPrevented).toBe(true);
+      focusBoundary('after');
       expect(document.activeElement).toBe(close);
-      expect(tab(close, true).defaultPrevented).toBe(true);
+      focusBoundary('before');
       expect(document.activeElement).toBe(save);
     });
 
@@ -835,15 +848,10 @@ describe('DecisionModelRowComponent', () => {
       if (!close || !timeout || !timeoutInfo)
         throw new Error('editor controls missing');
       // Save is disabled with an empty model; the timeout info action follows its input.
-      expect(tab(timeout).defaultPrevented).toBe(false);
-      const forward = tab(timeoutInfo);
-      expect(forward.defaultPrevented).toBe(true);
+      focusBoundary('after');
       expect(document.activeElement).toBe(close);
-      const back = tab(close, true);
-      expect(back.defaultPrevented).toBe(true);
+      focusBoundary('before');
       expect(document.activeElement).toBe(timeoutInfo);
-      const inside = tab(byTestId<HTMLSelectElement>('decision-kind') ?? close);
-      expect(inside.defaultPrevented).toBe(false);
     });
 
     it('moves focus into the dialog once the popover opens, and Shift+Tab there wraps to the last control', async () => {
@@ -852,14 +860,8 @@ describe('DecisionModelRowComponent', () => {
       const editor = byTestId('consumer-editor-decision');
       if (!editor) throw new Error('editor missing');
       expect(editor.getAttribute('tabindex')).toBe('-1');
-      // The popover focuses its own panel, then reports `opened`; the row hands focus on to the dialog.
-      editor.parentElement?.focus();
-      fixture.debugElement
-        .query(By.directive(NativePopoverComponent))
-        .componentInstance.opened.emit();
       expect(document.activeElement).toBe(editor);
-      const back = tab(editor, true);
-      expect(back.defaultPrevented).toBe(true);
+      focusBoundary('before');
       // Unset: the kind picker is the last enabled control.
       expect(document.activeElement).toBe(
         document.getElementById('decision-model-kind'),
@@ -870,9 +872,6 @@ describe('DecisionModelRowComponent', () => {
       await create();
       await open();
       const editor = byTestId('consumer-editor-decision');
-      fixture.debugElement
-        .query(By.directive(NativePopoverComponent))
-        .componentInstance.opened.emit();
       editor?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
       );

@@ -71,7 +71,8 @@ describe('AccountDetailViewComponent (flat panel)', () => {
   let announce: jest.Mock<void, [string, 'status' | 'alert']>;
   const el = () => fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement = HTMLElement>(id: string) =>
-    el().querySelector(`[data-testid="${id}"]`) as T | null;
+    (el().querySelector(`[data-testid="${id}"]`) ??
+      document.querySelector(`[data-testid="${id}"]`)) as T | null;
   const btn = (id: string) => q<HTMLButtonElement>(id) as HTMLButtonElement;
   const nameInput = () => q<HTMLInputElement>('account-detail-rename-input') as HTMLInputElement;
   const text = () => el().textContent?.replace(/\s+/g, ' ') ?? '';
@@ -247,7 +248,7 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       render();
       expect(nameInput()).toBeNull();
       expect(host.events).toEqual([]);
-      expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(false);
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
     });
   });
 
@@ -415,8 +416,8 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       type('Personal');
       part('cancel')?.click();
       render();
-      expect(el().querySelector('[data-ptah-editable-confirm-body]')?.textContent).toContain('Details');
-      (el().querySelector('[data-ptah-editable-discard]') as HTMLButtonElement).click();
+      expect(document.querySelector('[data-ptah-editable-confirm-body]')?.textContent).toContain('Details');
+      (document.querySelector('[data-ptah-editable-discard]') as HTMLButtonElement).click();
       render();
       expect(nameInput()).toBeNull();
       expect(host.renames).toEqual([]);
@@ -455,7 +456,7 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(q('account-detail-locked')?.getAttribute('title')).toBe(ACCOUNT_COPY.signInLocked);
       remove.click();
       render();
-      expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(false);
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
     });
 
     it('drops the lock when the sign-in ends', () => {
@@ -474,14 +475,14 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       render();
       btn('account-detail-remove').click();
       render();
-      return el().querySelector('dialog') as HTMLDialogElement;
+      return document.querySelector('.cdk-dialog-container') as HTMLElement;
     };
 
     it('opens "Remove {name}?" with Cancel focused; Cancel returns focus to Remove account', () => {
       const dialog = openDialog();
-      expect(dialog.hasAttribute('open')).toBe(true);
+      expect(dialog).not.toBeNull();
       expect(dialog.getAttribute('aria-labelledby')).toBe('account-detail-remove-title');
-      expect(el().querySelector('#account-detail-remove-title')?.textContent).toBe('Remove Work?');
+      expect(document.querySelector('#account-detail-remove-title')?.textContent).toBe('Remove Work?');
       // The body states the host remove behavior: tombstone, cleared selections, runs kept, files kept.
       const body = q('account-detail-remove-body')?.textContent?.trim();
       expect(body).toContain('Ptah forgets this account.');
@@ -491,7 +492,7 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       expect(document.activeElement).toBe(btn('account-detail-remove-cancel'));
       btn('account-detail-remove-cancel').click();
       render();
-      expect(dialog.hasAttribute('open')).toBe(false);
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
       expect(document.activeElement).toBe(btn('account-detail-remove'));
       expect(host.events).toEqual([]);
     });
@@ -502,19 +503,18 @@ describe('AccountDetailViewComponent (flat panel)', () => {
       const outer = jest.fn();
       el().addEventListener('keydown', outer);
       dialog.dispatchEvent(escape);
-      dialog.dispatchEvent(new Event('cancel'));
       render();
       expect(outer).not.toHaveBeenCalled();
-      expect(dialog.hasAttribute('open')).toBe(false);
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
       expect(document.activeElement).toBe(btn('account-detail-remove'));
       expect(host.events).toEqual([]);
     });
 
     it('Remove emits the profile id once and assigns nothing locally (B-1)', () => {
-      const dialog = openDialog();
+      openDialog();
       btn('account-detail-remove-confirm').click();
       render();
-      expect(dialog.hasAttribute('open')).toBe(false);
+      expect(document.querySelector('.cdk-dialog-container')).toBeNull();
       expect(host.events).toEqual(['remove:p-work-7c2a']);
       expect(announce).not.toHaveBeenCalled();
     });

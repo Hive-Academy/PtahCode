@@ -219,7 +219,11 @@ describe('PopoverComponent', () => {
       ) as HTMLElement;
       expect(popoverPanel).toBeTruthy();
 
-      const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape' });
+      const escapeEvent = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
       popoverPanel.dispatchEvent(escapeEvent);
       fixture.detectChanges();
 

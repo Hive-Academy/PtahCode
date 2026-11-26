@@ -16,6 +16,7 @@ jest.mock('ngx-markdown', () => ({
 }));
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import {
   AppStateManager,
   AuthStateService,
@@ -117,6 +118,15 @@ describe('ChatInputComponent streaming fold', () => {
       `[data-testid="${testId}"]`,
     );
     if (!found) throw new Error(`Missing button: ${testId}`);
+    return found;
+  }
+
+  /** Attach-menu items are portaled outside the composer host. */
+  function menuItem(testId: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(
+      `[data-testid="${testId}"]`,
+    );
+    if (!found) throw new Error(`Missing menu item: ${testId}`);
     return found;
   }
 
@@ -383,6 +393,33 @@ describe('ChatInputComponent streaming fold', () => {
     expect(stage().hasAttribute('data-compact')).toBe(false);
   });
 
+  it('stays expanded while focus is in a portaled attach menu and folds after it closes', async () => {
+    textarea().focus();
+    await startStreaming();
+    const activity = fixture.debugElement
+      .query(By.directive(ComposerActivityDirective))
+      .injector.get(ComposerActivityDirective);
+    button('chat-attach-btn').click();
+    await settle();
+    const panel = document.querySelector('.popover-panel');
+    expect(panel).not.toBeNull();
+    expect(fullRegion().contains(panel)).toBe(false);
+    expect(document.activeElement).toBe(panel);
+    expect(activity.popoverOpen()).toBe(true);
+    expect(activity.focusWithin()).toBe(true);
+    expect(stage().hasAttribute('data-compact')).toBe(false);
+
+    panel?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(document.querySelector('.popover-panel')).toBeNull();
+    expect(activity.popoverOpen()).toBe(false);
+    (document.activeElement as HTMLElement).blur();
+    await Promise.resolve();
+    await settle();
+    expect(activity.focusWithin()).toBe(false);
+    expect(stage().hasAttribute('data-compact')).toBe(true);
+  });
+
   it('opens again when the stream ends', async () => {
     await startStreaming();
     tabs.set([{ id: 'tab-1', status: 'loaded' }]);
@@ -451,11 +488,13 @@ describe('ChatInputComponent streaming fold', () => {
       expect(el.matches('[data-glass-surface]')).toBe(false);
       expect(el.querySelector('[data-glass-surface]')).toBeNull();
     }
-    // The toolbar holds the attach menu's glass overlay: it must not fade.
+    // The attach menu's glass overlay is portaled, so it is not inside the
+    // toolbar. Neither that overlay nor the toolbar may sit in a fold fade.
     const toolbar = root().querySelector('.ptah-composer-toolbar')!;
-    const overlay = toolbar.querySelector('[data-glass-surface="overlay"]');
+    const overlay = document.querySelector('[data-glass-surface="overlay"]');
     expect(overlay).not.toBeNull();
     expect(overlay?.hasAttribute('data-composer-overlay')).toBe(true);
+    expect(overlay?.closest('.ptah-fold-fade')).toBeNull();
     expect(toolbar.closest('.ptah-fold-fade')).toBeNull();
     expect(toolbar.querySelector('.ptah-fold-fade')).toBeNull();
   });
@@ -566,13 +605,13 @@ describe('ChatInputComponent streaming fold', () => {
 
       button('chat-attach-btn').click();
       await settle();
-      button('composer-attach-files').click();
+      menuItem('composer-attach-files').click();
       await settle();
       expect(pickFiles).toHaveBeenCalledTimes(1);
 
       button('chat-attach-btn').click();
       await settle();
-      button('composer-attach-images').click();
+      menuItem('composer-attach-images').click();
       await settle();
       expect(pickImages).toHaveBeenCalledTimes(1);
     });

@@ -6,6 +6,7 @@
  * in `decisionModelCustomApiKey`; Remove stored key follows `apiKeyStored`; host fixed sentences are repeated by
  * equality only; a newer suggestions request wins.
  */
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -61,9 +62,16 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
   let setConfigResult: { success: boolean; error?: string };
 
   const host = (): HTMLElement => fixture.nativeElement as HTMLElement;
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
   const byTestId = <T extends HTMLElement = HTMLElement>(
     id: string,
-  ): T | null => host().querySelector<T>(`[data-testid="${id}"]`);
+  ): T | null => {
+    const selector = `[data-testid="${id}"]`;
+    return (
+      host().querySelector<T>(selector) ?? overlay().querySelector<T>(selector)
+    );
+  };
   const text = (id: string): string =>
     byTestId(id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
   const setConfigCalls = (): unknown[] =>
@@ -72,7 +80,7 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
       .map(([, params]) => params);
   const suggestionIds = (): (string | null)[] =>
     Array.from(
-      host().querySelectorAll('#decision-model-suggestions option'),
+      overlay().querySelectorAll('#decision-model-suggestions option'),
     ).map((option) => option.getAttribute('value'));
   const saveButton = (): HTMLButtonElement | null =>
     byTestId<HTMLButtonElement>('decision-save');
@@ -367,7 +375,7 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
         'password',
       );
       expect(
-        host().querySelector('label[for="decision-model-api-key"]')
+        overlay().querySelector('label[for="decision-model-api-key"]')
           ?.textContent,
       ).toContain('Endpoint API key (optional)');
       expect(suggestionIds()).toEqual([]);
@@ -376,14 +384,14 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
           ([method]) => method === 'agent:listDecisionModels',
         ),
       ).toBe(false);
-      const info = host().querySelector<HTMLButtonElement>(
+      const info = overlay().querySelector<HTMLButtonElement>(
         'button[aria-label="More about Base URL"]',
       );
       expect(info).not.toBeNull();
       info?.click();
       fixture.detectChanges();
       expect(
-        host().querySelector(
+        overlay().querySelector(
           '[role="dialog"][aria-label="More about Base URL"]',
         )?.textContent,
       ).toContain('unless the endpoint is on this machine');
@@ -475,6 +483,7 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
         },
       ]);
       expect(host().textContent).not.toContain('sk-secret');
+      expect(overlay().textContent).not.toContain('sk-secret');
       expect(feedback.toast()?.canUndo).toBe(false);
     });
 

@@ -253,10 +253,30 @@ describe('CliOrchestrationMatrixComponent', () => {
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
     element().querySelector(selector) as T | null;
   const card = (id: string) => q(`[data-testid="cli-provider-card-${id}"]`);
-  const button = (root: Element | null, label: string) =>
-    Array.from(root?.querySelectorAll('button') ?? []).find((candidate) =>
-      candidate.textContent?.trim().includes(label),
-    ) as HTMLButtonElement | undefined;
+  const button = (root: Element | null, label: string) => {
+    const match = (scope: ParentNode | null | undefined) =>
+      Array.from(scope?.querySelectorAll('button') ?? []).find((candidate) =>
+        candidate.textContent?.trim().includes(label),
+      ) as HTMLButtonElement | undefined;
+    // Install guides and confirms render in the CDK overlay, outside the row.
+    return (
+      match(root) ??
+      match(document.querySelector('.cdk-overlay-pane')) ??
+      match(document.querySelector('.cdk-dialog-container'))
+    );
+  };
+  /** Popover bodies and modal shells render outside the matrix host. */
+  const portaled = <T extends Element = HTMLElement>(selector: string) =>
+    document.querySelector<T>(`.cdk-overlay-pane ${selector}`) ??
+    document.querySelector<T>(`.cdk-dialog-container ${selector}`);
+  const modalIsOpen = (testId: string) => {
+    const node =
+      portaled(`[data-testid="${testId}"]`) ??
+      document.querySelector(`[data-testid="${testId}"]`);
+    const native = node?.closest('dialog');
+    if (native) return native.hasAttribute('open');
+    return node?.closest('.cdk-dialog-container') != null;
+  };
   const toggle = (id: string) =>
     card(id)?.querySelector<HTMLInputElement>('input[type="checkbox"]');
   const openDetail = (id: string) => {
@@ -497,7 +517,7 @@ describe('CliOrchestrationMatrixComponent', () => {
     ).not.toBeNull();
   });
 
-  it('reuses the Claude account cell and Cursor credentials in details', () => {
+  it('reuses the Claude account cell and Cursor credentials in details', async () => {
     state.orchestration.set(
       ready({
         ...ORCHESTRATION,
@@ -516,28 +536,21 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(credential).not.toBeNull();
     credential?.click();
     fixture.detectChanges();
-    expect(
-      q('#lane-detail-cursor ptah-cursor-credential-popover'),
-    ).not.toBeNull();
+    await fixture.whenStable();
+    expect(portaled('ptah-cursor-credential-popover')).not.toBeNull();
   });
 
-  it('exposes instance tiers, editor and add modal', () => {
+  it('exposes instance tiers, editor and add modal', async () => {
     openDetail('glm-1');
     expect(q('#lane-detail-glm-1')?.textContent).toContain('Sonnet');
     button(q('#lane-detail-glm-1'), 'Edit tiers')?.click();
     fixture.detectChanges();
-    expect(
-      q('[data-testid="cli-tier-mapping-modal"]')
-        ?.closest('dialog')
-        ?.hasAttribute('open'),
-    ).toBe(true);
+    await fixture.whenStable();
+    expect(modalIsOpen('cli-tier-mapping-modal')).toBe(true);
     q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
     fixture.detectChanges();
-    expect(
-      q('[data-testid="add-cli-instance-modal"]')
-        ?.closest('dialog')
-        ?.hasAttribute('open'),
-    ).toBe(true);
+    await fixture.whenStable();
+    expect(modalIsOpen('add-cli-instance-modal')).toBe(true);
   });
 
   it('uses fixed error text and retries without exposing a failed read message', async () => {
@@ -597,9 +610,9 @@ describe('CliOrchestrationMatrixComponent', () => {
   it('opens the install guide from the strip card and invokes Re-detect; the new row takes focus (U-7)', async () => {
     q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(
-      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers')
-        ?.textContent,
+      portaled('ptah-cli-provider-card-popovers')?.textContent,
     ).toContain('Re-detect');
     state.onRedetect = () =>
       state.orchestration.update((section) => ({
@@ -631,9 +644,7 @@ describe('CliOrchestrationMatrixComponent', () => {
     button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
     await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
-    expect(
-      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers'),
-    ).not.toBeNull();
+    expect(portaled('ptah-cli-provider-card-popovers')).not.toBeNull();
     expect(announce).toHaveBeenCalledWith(
       'Still not found. Check the step above, then try again.',
       'status',
@@ -884,7 +895,7 @@ describe('CliOrchestrationMatrixComponent', () => {
     ).not.toBeNull();
   });
 
-  it('opens the add modal from the Ptah group header Add, the only Add control', () => {
+  it('opens the add modal from the Ptah group header Add, the only Add control', async () => {
     expect(
       element().querySelectorAll('[data-testid="cli-matrix-add"]'),
     ).toHaveLength(1);
@@ -893,11 +904,8 @@ describe('CliOrchestrationMatrixComponent', () => {
     ).not.toBeNull();
     q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
     fixture.detectChanges();
-    expect(
-      q('[data-testid="add-cli-instance-modal"]')
-        ?.closest('dialog')
-        ?.hasAttribute('open'),
-    ).toBe(true);
+    await fixture.whenStable();
+    expect(modalIsOpen('add-cli-instance-modal')).toBe(true);
   });
 
   it('points the empty text to the strip', () => {

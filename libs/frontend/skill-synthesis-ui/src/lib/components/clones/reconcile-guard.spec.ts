@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -153,8 +154,15 @@ describe('ReconcileGuardComponent', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   const root = (): HTMLElement => fixture.nativeElement as HTMLElement;
-  const q = (testId: string): HTMLElement | null =>
-    root().querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
+  const q = (testId: string): HTMLElement | null => {
+    const selector = `[data-testid="${testId}"]`;
+    return (
+      root().querySelector<HTMLElement>(selector) ??
+      overlay().querySelector<HTMLElement>(selector)
+    );
+  };
   const paths = (section: string): string[] =>
     Array.from(
       q(section)?.querySelectorAll(
@@ -184,14 +192,20 @@ describe('ReconcileGuardComponent', () => {
 
     await expect(result).resolves.toBe('cancelled');
     expect(methods()).toEqual(['harness:health']);
-    expect(q('native-modal-dialog')?.hasAttribute('open')).toBe(false);
+    expect(q('native-modal-dialog')).toBeNull();
   });
 
-  it('Escape (the native dialog cancel) resolves cancelled and performs no reconcile', async () => {
+  it('Escape resolves cancelled and performs no reconcile', async () => {
     const result = host.sync();
     await settle();
 
-    q('native-modal-dialog')?.dispatchEvent(new Event('cancel'));
+    q('native-modal-dialog')?.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
     fixture.detectChanges();
 
     await expect(result).resolves.toBe('cancelled');
@@ -287,7 +301,7 @@ describe('ReconcileGuardComponent', () => {
     expect(overwriteOnly?.textContent).toContain(RECONCILE_OVERWRITE_NOTE);
     expect(overwriteOnly?.textContent).not.toContain('.history');
     expect(
-      root().querySelectorAll('[data-testid="reconcile-guard-history-note"]'),
+      overlay().querySelectorAll('[data-testid="reconcile-guard-history-note"]'),
     ).toHaveLength(1);
 
     q('reconcile-guard-cancel')?.click();
@@ -337,7 +351,7 @@ describe('ReconcileGuardComponent', () => {
     const result = host.sync({ onlyWhenEdits: true });
     await settle();
 
-    expect(q('native-modal-dialog')?.hasAttribute('open')).toBe(true);
+    expect(q('native-modal-dialog')).not.toBeNull();
     q('reconcile-guard-cancel')?.click();
     await expect(result).resolves.toBe('cancelled');
     expect(methods()).not.toContain('harness:reconcile');

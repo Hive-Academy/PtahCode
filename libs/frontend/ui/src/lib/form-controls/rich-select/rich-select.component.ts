@@ -1,3 +1,4 @@
+import { CdkConnectedOverlay } from '@angular/cdk/overlay';
 import { NgTemplateOutlet } from '@angular/common';
 import {
   afterNextRender,
@@ -12,11 +13,22 @@ import {
   Injector,
   input,
   model,
+  OnDestroy,
   signal,
   viewChild,
 } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
-import { FloatingUIService } from '../../native/shared/floating-ui.service';
+import {
+  registerOwnedOverlay,
+  watchAncestorScroll,
+  type OwnedOverlayRegistration,
+} from '../../overlays/shared/connected-overlay-watch';
+import {
+  claimOverlayDismissal,
+  connectedPopoverPositions,
+  CONNECTED_OVERLAY_POLICY,
+  registerConnectedChild,
+} from '../../overlays/shared/overlay-positions';
 import { PtahFieldControlRef } from '../../surfaces/field-control-ref';
 import { PtahSelectIconDirective } from './rich-select-icon.directive';
 import {
@@ -47,16 +59,15 @@ const PANEL_MOVES = new Map<string, ActiveMove>([
  * description line, disabled options and a clear action. The trigger is a
  * `role="combobox"` button with a `listbox` popup and `aria-activedescendant`
  * (the search input takes the combobox role while the panel is open). It
- * positions the panel with `FloatingUIService`. It works with `ngModel` and
+ * positions the panel in a CDK connected overlay. It works with `ngModel` and
  * with `[(value)]`. Inside `ptah-field` it gets the floating label.
  */
 @Component({
   selector: 'ptah-select',
   standalone: true,
-  imports: [NgTemplateOutlet],
+  imports: [NgTemplateOutlet, CdkConnectedOverlay],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [
-    FloatingUIService,
     { provide: PtahFieldControlRef, useExisting: forwardRef(() => PtahRichSelectComponent) },
     { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => PtahRichSelectComponent), multi: true },
   ],
@@ -66,12 +77,11 @@ const PANEL_MOVES = new Map<string, ActiveMove>([
     '[attr.data-open]': "open() ? 'true' : null",
     '[attr.data-size]': 'size()',
     '[attr.data-clearable]': "clearable() ? 'true' : null",
-    '(document:pointerdown)': 'onDocumentPointer($event)',
   },
   template: RICH_SELECT_TEMPLATE,
 })
 export class PtahRichSelectComponent<T = unknown>
-  implements ControlValueAccessor, PtahFieldControlRef
+  implements ControlValueAccessor, PtahFieldControlRef, OnDestroy
 {
   readonly options = input<readonly PtahSelectOption<T>[]>([]);
   readonly value = model<T | null>(null);
@@ -119,8 +129,14 @@ export class PtahRichSelectComponent<T = unknown>
   private readonly panelRef = viewChild<ElementRef<HTMLElement>>('panel');
   private readonly searchRef = viewChild<ElementRef<HTMLInputElement>>('search');
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  private readonly floating = inject(FloatingUIService);
   private readonly injector = inject(Injector);
+  private readonly overlay = viewChild.required(CdkConnectedOverlay);
+  protected readonly overlayPolicy = CONNECTED_OVERLAY_POLICY;
+  protected readonly overlayPositions = connectedPopoverPositions('bottom-start', 6);
+  private originResize?: ResizeObserver;
+  private unregisterChild?: () => void;
+  private owned?: OwnedOverlayRegistration;
+  private stopScroll?: () => void;
 
   readonly open = signal(false);
   readonly query = signal('');
@@ -184,13 +200,13 @@ export class PtahRichSelectComponent<T = unknown>
         ? current.index
         : moveActive(this.items(), -1, start === 'selected' ? 'first' : start),
     );
-    afterNextRender(() => this.afterOpen(), { injector: this.injector });
   }
 
   close(focusTrigger: boolean): void {
     if (!this.open()) return;
     this.open.set(false);
-    this.floating.cleanup();
+    clearTimeout(this.typeTimer);
+    this.typeBuffer = '';
     if (focusTrigger) this.triggerRef().nativeElement.focus();
   }
 
@@ -214,7 +230,9 @@ export class PtahRichSelectComponent<T = unknown>
   onQuery(event: Event): void {
     this.query.set((event.target as HTMLInputElement).value);
     this.activeIndex.set(moveActive(this.items(), -1, 'first'));
-    this.floating.update();
+    afterNextRender(() => {
+      if (this.open()) this.overlay().overlayRef?.updatePosition();
+    }, { injector: this.injector });
   }
 
   onTriggerKey(event: KeyboardEvent): void {
@@ -250,14 +268,44 @@ export class PtahRichSelectComponent<T = unknown>
       event.stopPropagation();
       this.close(true);
     } else if (event.key === 'Tab') {
-      this.close(false);
+      // The search is portaled. Continue Tab from the trigger in the caller's
+      // tab order, including the parent dialog's focus trap.
+      this.close(true);
     } else if (!this.isSearchable() && event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
       this.typeAhead(event.key);
     }
   }
 
-  onDocumentPointer(event: PointerEvent): void {
-    if (this.open() && !this.host.nativeElement.contains(event.target as Node)) this.close(false);
+  protected onOutsideClick(event: MouseEvent): void {
+    // One click dismisses one layer. Chromium focuses the clicked control on
+    // pointerdown, before this click. Restoring the trigger then steals that
+    // control. Put focus back only when it is still in the panel about to
+    // detach, or it would otherwise be left on the body or nowhere.
+    if (!this.open() || !claimOverlayDismissal(event)) return;
+    const active = this.triggerRef().nativeElement.ownerDocument.activeElement;
+    this.close(this.focusWouldBeStranded(active));
+  }
+
+  private focusWouldBeStranded(active: Element | null): boolean {
+    const doc = this.triggerRef().nativeElement.ownerDocument;
+    if (
+      active === null ||
+      !active.isConnected ||
+      active === doc.body ||
+      active === doc.documentElement
+    ) {
+      return true;
+    }
+    const pane =
+      this.overlay().overlayRef?.overlayElement ?? this.panelRef()?.nativeElement;
+    return !!pane?.contains(active);
+  }
+
+  protected onOverlayKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape' && !event.defaultPrevented && this.open()) {
+      event.preventDefault();
+      this.close(true);
+    }
   }
 
   onTouched(): void {
@@ -288,15 +336,55 @@ export class PtahRichSelectComponent<T = unknown>
     this.formDisabled.set(disabled);
   }
 
-  private afterOpen(): void {
-    const panel = this.panelRef()?.nativeElement;
-    if (!panel) return;
-    const anchor = this.host.nativeElement.closest<HTMLElement>('.ptah-field__box') ?? this.host.nativeElement;
-    // As wide as the anchor, but never wider than the viewport (min-width wins over max-width).
-    panel.style.minWidth = `min(${anchor.getBoundingClientRect().width}px, calc(100vw - var(--ptah-space-4)))`;
-    void this.floating.position(anchor, panel, { placement: 'bottom-start', offset: 6 });
-    this.searchRef()?.nativeElement.focus();
-    this.scrollActive();
+  protected overlayOrigin(): HTMLElement {
+    const host = this.host.nativeElement;
+    return host.closest<HTMLElement>('.ptah-field__box') ?? host;
+  }
+
+  protected onOverlayAttach(): void {
+    const ref = this.overlay().overlayRef;
+    const anchor = this.overlayOrigin();
+    ref.updateSize({ maxWidth: 'calc(100vw - 16px)' });
+    this.releaseOverlayWatch();
+    this.owned = registerOwnedOverlay(anchor);
+    this.stopScroll = watchAncestorScroll(anchor, () => ref.updatePosition());
+    this.unregisterChild = registerConnectedChild(anchor, () => ref.detach());
+    if (typeof ResizeObserver !== 'undefined') {
+      this.originResize = new ResizeObserver(() => {
+        ref.updateSize({ width: anchor.getBoundingClientRect().width });
+        ref.updatePosition();
+      });
+      this.originResize.observe(anchor);
+    }
+    afterNextRender(() => {
+      if (!this.open()) return;
+      this.owned?.attachPanel(this.panelRef()?.nativeElement ?? null);
+      this.searchRef()?.nativeElement.focus();
+      this.scrollActive();
+    }, { injector: this.injector });
+  }
+
+  protected onOverlayDetach(): void {
+    this.releaseOverlayWatch();
+    this.unregisterChild?.();
+    this.unregisterChild = undefined;
+    this.originResize?.disconnect();
+    this.originResize = undefined;
+    this.close(false);
+  }
+
+  ngOnDestroy(): void {
+    clearTimeout(this.typeTimer);
+    this.originResize?.disconnect();
+    this.releaseOverlayWatch();
+    this.unregisterChild?.();
+  }
+
+  private releaseOverlayWatch(): void {
+    this.stopScroll?.();
+    this.stopScroll = undefined;
+    this.owned?.unregister();
+    this.owned = undefined;
   }
 
   private typeAhead(key: string): void {

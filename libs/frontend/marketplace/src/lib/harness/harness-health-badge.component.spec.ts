@@ -19,6 +19,7 @@
  * stub returned what the test handed it.
  */
 
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
   AppStateManager,
@@ -131,8 +132,15 @@ describe('HarnessHealthBadgeComponent', () => {
       '[data-testid="harness-health-badge"]',
     );
 
-  const testId = (id: string): HTMLElement | null =>
-    host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+  const testId = (id: string): HTMLElement | null => {
+    const selector = `[data-testid="${id}"]`;
+    return (
+      host.querySelector<HTMLElement>(selector) ??
+      TestBed.inject(OverlayContainer)
+        .getContainerElement()
+        .querySelector<HTMLElement>(selector)
+    );
+  };
 
   /** Mount the badge with a given report already answered by `harness:health`. */
   const render = async (health: HarnessHealth | null): Promise<void> => {
@@ -588,7 +596,9 @@ describe('HarnessHealthBadgeComponent', () => {
       await fixture.whenStable();
       fixture.detectChanges();
 
-      expect(host.textContent).toContain('another host holds the lock');
+      expect(
+        TestBed.inject(OverlayContainer).getContainerElement().textContent,
+      ).toContain('another host holds the lock');
     });
 
     it('the panel refresh asks for a fresh pass, not the cache', async () => {
