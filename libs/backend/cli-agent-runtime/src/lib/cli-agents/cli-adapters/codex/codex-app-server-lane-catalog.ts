@@ -2,6 +2,18 @@ import type { CodexContext, CodexModelInfo } from '@ptah-extension/codex-runtime
 import type { Logger } from '@ptah-extension/vscode-core';
 
 const CATALOG_TIMEOUT_MS = 8_000;
+// Leave time for catalog startup and cleanup before the coordinator's 5 s deadline.
+const SKILL_CATALOG_TIMEOUT_MS = 3_000;
+
+export async function listCodexLaneSkills(
+  context: CodexContext,
+  workingDirectory?: string,
+  deadline = Date.now() + SKILL_CATALOG_TIMEOUT_MS,
+): Promise<readonly string[]> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error('Codex skill catalog timed out');
+  return context.listSkillCommands?.(workingDirectory, remaining) ?? [];
+}
 
 interface CodexLaneCatalog {
   readonly models: readonly CodexModelInfo[];
@@ -14,6 +26,7 @@ export async function readCodexLaneCatalog(
   logger: Logger,
   workingDirectory?: string,
 ): Promise<CodexLaneCatalog> {
+  const skillDeadline = Date.now() + SKILL_CATALOG_TIMEOUT_MS;
   let timedOut = false;
   let context: CodexContext | undefined;
   let closing: Promise<void> | undefined;
@@ -32,7 +45,7 @@ export async function readCodexLaneCatalog(
     try {
       const [models, skills] = await Promise.allSettled([
         opened.listModels(),
-        workingDirectory ? opened.listSkillCommands?.(workingDirectory) ?? [] : [],
+        workingDirectory ? listCodexLaneSkills(opened, workingDirectory, skillDeadline) : [],
       ]);
       if (models.status === 'rejected') throw models.reason;
       return { models: models.value, ...(skills.status === 'fulfilled' ? { skills: skills.value } : {}) };

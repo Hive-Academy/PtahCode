@@ -169,12 +169,27 @@ describe('AgentMessageDispatcher', () => {
       expect(await s.h.store.getBody(id)).toBe('\n/Always-Approve on');
     });
 
+    it.each(['rejected', 'undefined'])('holds a raw retry when catalog lookup is %s', async (failure) => {
+      const s = setup();
+      if (failure === 'rejected') s.advertisedCommands.mockRejectedValueOnce(new Error('catalog down'));
+      const { attempt, id } = await s.attempt('/session-handoff', { rawDelivery: { raw: true } });
+      await expect(s.dispatcher.attempt(attempt)).resolves.toMatchObject({
+        mode: 'unsupported', detail: 'The lane command catalog is unavailable.',
+      });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect(s.h.resume.resume).not.toHaveBeenCalled();
+      expect(await s.h.store.get(id)).toMatchObject({
+        state: 'blocked-retryable', rawDelivery: { raw: true },
+      });
+      expect(await s.h.store.getBody(id)).toBe('/session-handoff');
+    });
+
     it('retries a native command raw when the refreshed catalog admits it', async () => {
       const s = setup({ advertised: ['compact'] });
       const { attempt } = await s.attempt('/compact', { rawDelivery: { raw: true } });
       await s.dispatcher.attempt(attempt);
       expect(s.advertisedCommands).toHaveBeenCalledWith(
-        attempt.laneId, attempt.envelope.laneLineageId, true,
+        attempt.laneId, attempt.envelope.laneLineageId, true, '/compact',
       );
       expect(sentArg(s, 1)).toBe('/compact');
     });

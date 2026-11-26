@@ -58,7 +58,7 @@ import { CODEX_RESUME_RESENDS_ROLE } from './codex-lane-config.builder';
 import { CodexLaneEvents } from './codex-lane-events';
 import { readCodexUserMcpServerNames } from './codex-user-mcp-servers';
 import { withCodexLaneStartupTimeout } from './codex-app-server-lane-startup';
-import { readCodexLaneCatalog } from './codex-app-server-lane-catalog';
+import { listCodexLaneSkills, readCodexLaneCatalog } from './codex-app-server-lane-catalog';
 import {
   handledRequirements,
   identitySchema,
@@ -182,6 +182,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
   readonly displayName = 'Codex CLI';
   readonly roleChannel = 'developer-instructions' as const;
   readonly supportsMcp = true;
+  readonly builtinLaneCommands = CODEX_LANE_COMMANDS;
 
   static createWriterRegistry(): Map<string, LiveLaneWriter> {
     return new Map();
@@ -316,7 +317,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         models: codexLaneModels(models),
         efforts,
         commands: codexLaneCommands(skills ?? []),
-        ...(skills === undefined ? { unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
+        ...(skills === undefined ? { commandsUnavailable: true, unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
         ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
       };
     } catch (error: unknown) {
@@ -1022,7 +1023,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       if (closed || !context) throw new Error('Codex lane is closed');
       const [modelResult, skills] = await Promise.allSettled([
         readModelCatalog(context),
-        context.listSkillCommands?.() ?? [],
+        listCodexLaneSkills(context),
       ]);
       if (modelResult.status === 'rejected') throw modelResult.reason;
       const { catalog, models } = modelResult.value;
@@ -1037,7 +1038,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
         commands: codexLaneCommands(skills.status === 'fulfilled' ? skills.value : []),
-        ...(skills.status === 'rejected' ? { unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
+        ...(skills.status === 'rejected' ? { commandsUnavailable: true, unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
       };
     };
     const assertIdle = (): void => {

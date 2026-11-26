@@ -443,7 +443,7 @@ export interface CodexContext {
   listModels(): Promise<readonly CodexModelInfo[]>;
   events(signal: AbortSignal): AsyncIterable<CodexRuntimeEvent>;
   resolveSkillCommand?(command: string): Promise<CodexSkillInput | undefined>;
-  listSkillCommands?(cwd?: string): Promise<readonly string[]>;
+  listSkillCommands?(cwd?: string, timeoutMs?: number): Promise<readonly string[]>;
   startTurn(input: CodexTurnInput): Promise<CodexTurnReceipt>;
   /** When supplied, admit steer only while this exact turn is active. */
   steer(input: CodexTurnInput, expectedTurnId?: string): Promise<CodexTurnReceipt>;

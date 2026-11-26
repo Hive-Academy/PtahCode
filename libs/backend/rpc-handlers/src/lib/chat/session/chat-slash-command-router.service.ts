@@ -55,6 +55,7 @@ import {
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
 } from './chat-runtime-profile.service';
+import { applyLiveTurnSettings } from './live-turn-settings';
 import { providerSessionFailure } from './provider-session-failure';
 import { CHAT_TOKENS } from '../tokens';
 import type { ChatSdkContextService } from './chat-sdk-context.service';
@@ -407,7 +408,16 @@ export class ChatSlashCommandRouterService {
               !isChatBuiltinCommand(interceptResult.commandName)
             ) {
               if (!this.sdkAdapter.isSessionActive(sessionId)) {
-                await this.sdkAdapter.resumeSession(sessionId, { ...config, prompt: '' });
+                await this.sdkAdapter.resumeSession(sessionId, {
+                  ...config,
+                  prompt: '',
+                  effort: params.effort,
+                });
+              } else {
+                await applyLiveTurnSettings(this.sdkAdapter, this.logger, sessionId, {
+                  model: params.model,
+                  effort: params.effort,
+                });
               }
               if (await this.nativeAdapter.invokeSkillCommand(sessionId, command, {
                 clientMessageId: params.clientMessageId,

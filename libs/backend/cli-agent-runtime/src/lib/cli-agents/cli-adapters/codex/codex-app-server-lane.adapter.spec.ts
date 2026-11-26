@@ -95,7 +95,7 @@ class FakeContext implements CodexContext {
   readonly close = jest.fn(async () => undefined);
   readonly resolveSkillCommand = jest.fn<Promise<CodexTurnInput['skill']>, [string]>()
     .mockResolvedValue(undefined);
-  readonly listSkillCommands = jest.fn<Promise<readonly string[]>, [cwd?: string]>().mockResolvedValue([]);
+  readonly listSkillCommands = jest.fn<Promise<readonly string[]>, [cwd?: string, timeoutMs?: number]>().mockResolvedValue([]);
   readonly reportedSettings = jest.fn((): { model: string | null; effort: string | null } => ({
     model: null,
     effort: null,
@@ -1851,25 +1851,45 @@ describe('CodexAppServerLaneAdapter', () => {
     expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('catalog failed'), expect.any(Object));
   });
 
-  it('keeps models and efforts when live or stopped skill discovery rejects', async () => {
+  it.each(['rejects', 'times out'])('keeps models and efforts when live or stopped skill discovery %s', async (failure) => {
+    const skillTimeouts: (number | undefined)[] = [];
     const h = harness((context) => {
       context.models = [{
         id: 'catalog-id', model: 'gpt-6-sol', displayName: 'GPT-6-Sol', isDefault: true,
         supportedEfforts: ['low', 'high'],
       }];
-      context.listSkillCommands.mockRejectedValue(new Error('skills/list failed'));
+      if (failure === 'times out') {
+        context.listSkillCommands.mockImplementation((_cwd, timeoutMs) => new Promise((_, reject) => {
+          skillTimeouts.push(timeoutMs);
+          setTimeout(() => reject(new Error('Codex skill catalog timed out')), timeoutMs);
+        }));
+      } else {
+        context.listSkillCommands.mockRejectedValue(new Error('skills/list failed'));
+      }
     });
     const handle = await h.adapter.runSdk(options());
     const expected = {
       models: [expect.objectContaining({ id: 'gpt-6-sol' })],
       efforts: ['low', 'high'],
       commands: [expect.objectContaining({ name: 'compact' })],
+      commandsUnavailable: true,
       unavailableReason: 'Codex skills are unavailable.',
     };
-    await expect(handle.listTurnOptions?.()).resolves.toMatchObject(expected);
+    async function expectCatalog(read: () => Promise<unknown> | undefined) {
+      jest.useFakeTimers();
+      try {
+        const assertion = expect(read()).resolves.toMatchObject(expected);
+        await jest.advanceTimersByTimeAsync(4_000);
+        await assertion;
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+    await expectCatalog(() => handle.listTurnOptions?.());
     await terminal(h.context);
     await handle.done;
-    await expect(h.adapter.stoppedLaneCatalog('/workspace')).resolves.toMatchObject(expected);
+    await expectCatalog(() => h.adapter.stoppedLaneCatalog('/workspace'));
+    if (failure === 'times out') expect(skillTimeouts).toEqual([3_000, 3_000]);
     handle.abort.abort();
   });
 

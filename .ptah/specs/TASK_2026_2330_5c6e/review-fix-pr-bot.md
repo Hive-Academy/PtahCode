@@ -1,0 +1,5 @@
+﻿- `PRRT_kwDOPngTds68ix2v` — `codex-app-server-lane-catalog.ts:8` and `codex-app-server-lane.adapter.ts:1026` bound skill discovery and retain models and efforts. Spec `codex-app-server-lane.adapter.spec.ts:1854`.
+- `PRRT_kwDOPngTds68ix21` — `agent-message-dispatcher.ts:98` holds raw retries during catalog outages. `agent-message-coordinator.service.ts:605` distinguishes partial catalogs from removed skills and admits built-ins independently. Specs `agent-message-dispatcher.spec.ts:172` and `agent-message-coordinator.lane-messaging.spec.ts:481`.
+- `PRRT_kwDOPngTds68ix24` — `chat-slash-command-router.service.ts:413` applies live settings before skill invocation. Spec `chat-slash-command-router.native.spec.ts:298`.
+
+Checks passed: scoped Jest (150 runtime, 32 RPC). ESLint had zero errors and three warnings (two max-lines warnings and the unconfigured Markdown report). GitHub CLI authentication blocked full thread reads. IDs came from the task handoff. Native CLI skill discovery was unavailable. Consulted the repository agent-lanes skill.

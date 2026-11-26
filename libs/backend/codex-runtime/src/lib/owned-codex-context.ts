@@ -11,7 +11,7 @@ export function ownCodexContext(
     get turnPermissionLevel() { return context.turnPermissionLevel; },
     listModels: () => context.listModels(),
     resolveSkillCommand: async (command) => context.resolveSkillCommand?.(command),
-    listSkillCommands: async (cwd) => (await context.listSkillCommands?.(cwd)) ?? [],
+    listSkillCommands: async (cwd, timeoutMs) => (await context.listSkillCommands?.(cwd, timeoutMs)) ?? [],
     events: (signal) => context.events(signal),
     startTurn: (input) => context.startTurn(input),
     steer: (input, expectedTurnId) => context.steer(input, expectedTurnId),

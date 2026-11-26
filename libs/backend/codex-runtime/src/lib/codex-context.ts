@@ -1003,16 +1003,16 @@ class RuntimeContext implements CodexContext {
     return entry?.skill;
   }
 
-  async listSkillCommands(cwd?: string): Promise<readonly string[]> {
-    return [...new Set((await this.skillCommands(cwd)).flatMap(({ names }) => names))];
+  async listSkillCommands(cwd?: string, timeoutMs?: number): Promise<readonly string[]> {
+    return [...new Set((await this.skillCommands(cwd, timeoutMs)).flatMap(({ names }) => names))];
   }
 
-  private async skillCommands(cwd = this.profile.cwd): Promise<{ names: string[]; skill: NonNullable<CodexTurnInput['skill']> }[]> {
+  private async skillCommands(cwd = this.profile.cwd, timeoutMs?: number): Promise<{ names: string[]; skill: NonNullable<CodexTurnInput['skill']> }[]> {
     this.assertOpen();
     try {
       const { data } = await this.process.request('skills/list', {
         cwds: [cwd],
-      });
+      }, timeoutMs);
       return data.flatMap(({ skills }) => skills).filter(({ enabled }) => enabled).map(({ name, path, pluginId }) => {
         const names = [name];
         if (pluginId) names.push(`${pluginId}:${name}`, `${pluginId.split('@')[0]}:${name}`);

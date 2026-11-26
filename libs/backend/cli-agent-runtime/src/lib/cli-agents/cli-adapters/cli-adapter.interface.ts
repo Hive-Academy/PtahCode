@@ -90,6 +90,8 @@ export interface LaneTurnOptionsCatalog {
   readonly unsendableEfforts?: readonly string[];
   readonly currentModel?: string;
   readonly currentEffort?: string;
+  /** Dynamic command discovery failed, so an omitted command may still exist. */
+  readonly commandsUnavailable?: true;
   readonly unavailableReason?: string;
   readonly commands: readonly LaneComposerCommandOption[];
 }
@@ -443,6 +445,7 @@ export interface StoppedLaneCatalog {
   readonly efforts: readonly string[];
   readonly unsendableEfforts?: readonly string[];
   readonly commands?: LaneTurnOptionsCatalog['commands'];
+  readonly commandsUnavailable?: LaneTurnOptionsCatalog['commandsUnavailable'];
   readonly unavailableReason?: string;
 }
 
@@ -518,6 +521,9 @@ export interface CliAdapter {
    * error instead of a false empty list.
    */
   stoppedLaneCatalog?(workingDirectory?: string): Promise<StoppedLaneCatalog>;
+
+  /** Native commands available independently of provider catalog discovery. */
+  readonly builtinLaneCommands?: LaneTurnOptionsCatalog['commands'];
 
   /**
    * Optional: Ensure OAuth tokens are fresh (for adapters that use OAuth).

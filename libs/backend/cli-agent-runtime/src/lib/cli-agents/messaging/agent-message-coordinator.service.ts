@@ -15,7 +15,7 @@ import type { AgentProcessManager } from '../agent-process-manager.service';
 import { AgentMessageError } from '../agent-message-router.service';
 import type { CliDetectionService } from '../cli-detection.service';
 import type { LaneTurnOptionsCatalog, SdkHandle, StoppedLaneCatalog } from '../cli-adapters/cli-adapter.interface';
-import { filterLaneCommands } from '../cli-adapters/lane-command-filter';
+import { filterLaneCommands, matchesLaneCommand } from '../cli-adapters/lane-command-filter';
 import { turnInputRefusal, type TurnInputRefusal } from './agent-delivery-planner';
 import {
   AgentMessageAttachmentCapacityError,
@@ -129,11 +129,12 @@ const DELIVERABLE = new Set<AgentMessageEnvelope['state']>(['not-started', 'bloc
  */
 function stoppedLaneView(
   current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
-  { models, efforts, unsendableEfforts, unavailableReason, commands = [] }: Omit<LaneTurnOptionsCatalog, 'commands'> & Pick<StoppedLaneCatalog, 'commands'>,
+  { models, efforts, unsendableEfforts, unavailableReason, commandsUnavailable, commands = [] }: Omit<LaneTurnOptionsCatalog, 'commands'> & Pick<StoppedLaneCatalog, 'commands'>,
   effortsFixedByModel = false,
 ): LaneTurnOptionsView {
   return {
     ...current, models, efforts: [...efforts], commands,
+    ...(commandsUnavailable ? { commandsUnavailable } : {}),
     ...(unsendableEfforts ? { unsendableEfforts } : {}),
     unavailableReason: unavailableReason ?? (commands.length > 0
       ? 'Additional options may appear when the lane is running.'
@@ -182,7 +183,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       manager: deps.manager, store: deps.store, aliases: deps.aliases, resume: deps.resume,
       settleTurn: (info) => this.reconciler.settleTurn(info), logger: deps.logger,
       ...(deps.attachments ? { attachments: deps.attachments } : {}),
-      advertisedCommands: (laneId, lineage, refresh) => this.advertisedCommands(laneId, lineage, refresh),
+      advertisedCommands: (laneId, lineage, refresh, body) => this.advertisedCommands(laneId, lineage, refresh, body),
     });
     this.reconciler.attach();
   }
@@ -589,7 +590,8 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         ...current, models: cached?.models ?? [], efforts: cached?.efforts
           ?? (adapter?.stoppedLaneCatalog ? [] : [...(adapter?.laneEfforts?.(info.model) ?? [])]),
         ...(unsendableEfforts ? { unsendableEfforts } : {}),
-        commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
+        commands: cached?.commands ?? filterLaneCommands(adapter?.builtinLaneCommands ?? [], blocked),
+        error: TURN_OPTIONS_ERROR,
       };
     }
   }
@@ -600,15 +602,19 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * last loaded can admit a new message. Previously admitted raw messages
    * must check the current live or stopped catalog again before dispatch.
    */
-  private async advertisedCommands(laneId: AgentId, lineage: AgentId, refresh: boolean): Promise<readonly string[] | undefined> {
+  private async advertisedCommands(laneId: AgentId, lineage: AgentId, refresh: boolean, body: string): Promise<readonly string[] | undefined> {
+    const info = this.deps.manager.findAgentInfo(laneId);
+    const adapter = info && this.deps.detection.getAdapter(info.cli);
+    const builtins = adapter?.builtinLaneCommands?.map((command) => command.name);
+    if (builtins && matchesLaneCommand(body, builtins)) return builtins;
     const cached = this.catalogs.get(lineage);
     if (cached && !refresh) return cached.commands.map((command) => command.name);
     if (!this.liveHandle(laneId)?.listTurnOptions) {
-      const info = this.deps.manager.findAgentInfo(laneId);
-      if (!info || !this.deps.detection.getAdapter(info.cli)?.stoppedLaneCatalog) return undefined;
+      if (!adapter?.stoppedLaneCatalog) return undefined;
     }
     const view = await this.turnOptions(laneId, refresh);
-    return view.error ? undefined : view.commands.map((command) => command.name);
+    const names = view.commands.map((command) => command.name);
+    return view.error || (view.commandsUnavailable && !matchesLaneCommand(body, names)) ? undefined : names;
   }
 
   private liveHandle(laneId: AgentId): SdkHandle | undefined {

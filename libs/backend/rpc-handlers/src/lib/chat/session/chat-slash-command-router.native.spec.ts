@@ -78,6 +78,10 @@ function harness(
   const compact = jest.fn().mockResolvedValue(undefined);
   const interruptSession = jest.fn().mockResolvedValue(undefined);
   const closeSession = jest.fn().mockResolvedValue(undefined);
+  const isSessionActive = jest.fn().mockReturnValue(true);
+  const resumeSession = jest.fn().mockResolvedValue(undefined);
+  const setSessionModel = jest.fn().mockResolvedValue(undefined);
+  const setSessionEffort = jest.fn().mockResolvedValue(undefined);
   const invokeSkillCommand = jest.fn().mockResolvedValue(false);
   const broadcastMessage = jest.fn().mockResolvedValue(undefined);
   const executeSlashCommand = jest.fn().mockResolvedValue([]);
@@ -94,7 +98,7 @@ function harness(
     {
       logger: { info: jest.fn(), warn: jest.fn() },
       modelSettings: { selectedModel: { get: () => 'default' } },
-      sdkAdapter: { executeSlashCommand, interruptSession, isSessionActive: () => true },
+      sdkAdapter: { executeSlashCommand, interruptSession, setSessionModel, setSessionEffort, isSessionActive, resumeSession },
       nativeAdapter: { owns: () => true, closeSession, invokeSkillCommand },
       webviewManager: { broadcastMessage },
       slashCommandInterceptor: {
@@ -118,13 +122,13 @@ function harness(
       },
     },
   );
-  const route = () =>
+  const route = (settings: Pick<Parameters<ChatSlashCommandRouterService['routeFollowUpSlashCommand']>[4], 'model' | 'effort'> = {}) =>
     service.routeFollowUpSlashCommand(
       '/' + commandName,
       sessionId,
       'tab',
       '/workspace',
-      { prompt: '/' + commandName, sessionId, tabId: 'tab' },
+      { prompt: '/' + commandName, sessionId, tabId: 'tab', ...settings },
     );
   return {
     service,
@@ -135,6 +139,10 @@ function harness(
     interruptSession,
     closeSession,
     invokeSkillCommand,
+    isSessionActive,
+    resumeSession,
+    setSessionModel,
+    setSessionEffort,
     broadcastMessage,
     executeSlashCommand,
     resolveProviderProfileForWorkspace,
@@ -280,6 +288,24 @@ describe('native slash runtime routing', () => {
     expect(h.invokeSkillCommand).toHaveBeenCalledTimes(command === 'example:skill' ? 1 : 0);
   });
 
+  it('resumes an inactive Codex session with the selected effort before invoking a skill', async () => {
+    const h = harness(native, 'example:skill');
+    h.isSessionActive.mockReturnValue(false);
+    h.invokeSkillCommand.mockImplementation(async () => {
+      expect(h.resumeSession).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+        model: 'gpt-5.4',
+        effort: 'high',
+        prompt: '',
+      }));
+      return true;
+    });
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toEqual({
+      success: true, sessionId,
+    });
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['orchestration', 'session-handoff', 'example:skill', 'example:review', 'example@local:review'])(
     'invokes an advertised /%s as a Codex skill',
     async (command) => {
@@ -290,6 +316,20 @@ describe('native slash runtime routing', () => {
       expect(h.executeSlashCommand).not.toHaveBeenCalled();
     },
   );
+
+  it('applies the selected model and effort before invoking a skill on an open Codex session', async () => {
+    const h = harness(native, 'example:skill');
+    h.invokeSkillCommand.mockImplementation(async () => {
+      expect(h.setSessionModel).toHaveBeenCalledWith(sessionId, 'gpt-5.4');
+      expect(h.setSessionEffort).toHaveBeenCalledWith(sessionId, 'high');
+      return true;
+    });
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toEqual({
+      success: true, sessionId,
+    });
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(1);
+  });
 
   it('coalesces a claim acquired while preparation is pending', async () => {
     const h = harness();
