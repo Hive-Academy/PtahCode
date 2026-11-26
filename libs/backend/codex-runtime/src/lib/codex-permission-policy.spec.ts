@@ -52,14 +52,25 @@ describe('codexPermissionPolicy', () => {
     { writableRoots: ['/outside'] },
     { scope: 'session' },
   ])(
-    'presents scope widening or unknown file-change details %j even with a rule',
+    'presents scope widening or unknown file-change details %j for ask and auto-edit, while yolo auto-approves',
     (details) => {
-      for (const level of ['ask', 'auto-edit', 'yolo'] as const) {
+      for (const level of ['ask', 'auto-edit'] as const) {
         for (const remembered of [false, true]) {
           expect(
             codexPermissionPolicy(level, 'fileChange', remembered, details),
           ).toBe('present');
         }
+      }
+      expect(codexPermissionPolicy('yolo', 'fileChange', false, details)).toBe(
+        'accept',
+      );
+      expect(codexPermissionPolicy('yolo', 'fileChange', true, details)).toBe(
+        'acceptForSession',
+      );
+      for (const remembered of [false, true]) {
+        expect(
+          codexPermissionPolicy('yolo', 'userInput', remembered, details),
+        ).toBe('present');
       }
     },
   );
