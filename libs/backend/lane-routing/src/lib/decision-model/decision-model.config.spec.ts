@@ -6,6 +6,10 @@ import {
   type MockStateStorage,
   type MockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
+import {
+  DECISION_MODEL_TIMEOUT_MAX_MS,
+  DECISION_MODEL_TIMEOUT_MIN_MS,
+} from '@ptah-extension/shared';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import { DECISION_REQUEST_TIMEOUT_REMOTE_MS } from '../routing-constants';
 import { DecisionModelConfig } from './decision-model.config';
@@ -1046,5 +1050,37 @@ describe('DecisionModelConfig probe binding and mark read', () => {
     expect(status.selection).toEqual({ kind: 'ollama', model: 'gamma' });
     expect(status.state).toBe('unreachable');
     expect(status.detail).toBeNull();
+  });
+});
+
+describe('DecisionModelConfig.getConfiguredTimeoutMs', () => {
+  it('returns null when unset or invalid and rounds/clamps valid values', () => {
+    const h = harness();
+    expect(h.config.getConfiguredTimeoutMs()).toBeNull();
+
+    const key = 'ptah.agentOrchestration.decisionModelTimeoutMs';
+    for (const invalid of [
+      0,
+      -100,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      '5000',
+    ]) {
+      h.workspace.__state.config.set(key, invalid);
+      expect(h.config.getConfiguredTimeoutMs()).toBeNull();
+    }
+
+    h.workspace.__state.config.set(key, 100);
+    expect(h.config.getConfiguredTimeoutMs()).toBe(
+      DECISION_MODEL_TIMEOUT_MIN_MS,
+    );
+
+    h.workspace.__state.config.set(key, 12_345.6);
+    expect(h.config.getConfiguredTimeoutMs()).toBe(12_346);
+
+    h.workspace.__state.config.set(key, 999_999);
+    expect(h.config.getConfiguredTimeoutMs()).toBe(
+      DECISION_MODEL_TIMEOUT_MAX_MS,
+    );
   });
 });

@@ -36,6 +36,10 @@ export class DecisionCaller {
 
   constructor(private readonly deps: DecisionCallerDependencies) {}
 
+  getConfiguredTimeoutMs(): number | null {
+    return this.deps.config.getConfiguredTimeoutMs?.() ?? null;
+  }
+
   async openCaller(): Promise<OpenedCaller> {
     const selection = this.deps.config.getSelection();
     if (selection.kind === 'unset') return { kind: 'unset' };
@@ -87,23 +91,36 @@ export class DecisionCaller {
 
   dispatchFor(
     caller: OpenedCaller,
-    budget?: { readonly signal: AbortSignal; readonly remainingMs: () => number },
+    budget?: {
+      readonly signal: AbortSignal;
+      readonly remainingMs: () => number;
+      readonly maxTimeoutMs?: number;
+    },
   ): ModelDispatch {
     if (caller.kind === 'structured') {
       const structured = this.deps.structured;
       if (structured === undefined) {
         throw new Error('structured decision port is not registered');
       }
-      const cap = budget === undefined ? DECISION_REQUEST_TIMEOUT_MS : validBudgetMs(budget.remainingMs());
-      const signal = cap === 0
-        ? AbortSignal.abort()
-        : AbortSignal.timeout(Math.floor(Math.min(cap, DECISION_REQUEST_TIMEOUT_MS)));
+      const ceiling =
+        budget?.maxTimeoutMs !== undefined
+          ? validBudgetMs(budget.maxTimeoutMs)
+          : DECISION_REQUEST_TIMEOUT_MS;
+      const cap =
+        budget === undefined ? ceiling : validBudgetMs(budget.remainingMs());
+      const timeoutMs = Math.floor(Math.min(cap, ceiling));
+      const signal =
+        timeoutMs <= 0 ? AbortSignal.abort() : AbortSignal.timeout(timeoutMs);
       return {
         kind: 'structured',
         completer: structured,
         providerId: caller.providerId,
         model: caller.model,
-        signal: budget === undefined ? signal : AbortSignal.any([signal, budget.signal]),
+        signal:
+          budget === undefined
+            ? signal
+            : AbortSignal.any([signal, budget.signal]),
+        timeoutMs,
       };
     }
     if (caller.kind !== 'system-one') {
@@ -114,58 +131,95 @@ export class DecisionCaller {
       this.deps.seams?.systemOne ??
       ((next: SystemOneClientOptions) =>
         new SystemOneClient(next, {
-          logger: budget === undefined ? this.deps.logger : {
-            debug: (message, meta) => this.deps.logger.debug(message, meta),
-            info: (message, meta) => this.deps.logger.info(message, meta),
-            warn: (message, meta) => {
-              // The transport only sees its own timer when classifying fetch aborts.
-              if (budget.signal.aborted && meta?.['cause'] === 'unreachable') return;
-              this.deps.logger.warn(message, meta);
-            },
-            error: (message, meta) => this.deps.logger.error(message, meta),
-          },
-          ...(budget === undefined ? {} : {
-            fetch: (url, init) => fetch(url, {
-              ...init,
-              signal: init?.signal == null ? budget.signal : AbortSignal.any([init.signal, budget.signal]),
-            }),
-          }),
+          logger:
+            budget === undefined
+              ? this.deps.logger
+              : {
+                  debug: (message, meta) =>
+                    this.deps.logger.debug(message, meta),
+                  info: (message, meta) => this.deps.logger.info(message, meta),
+                  warn: (message, meta) => {
+                    // The transport only sees its own timer when classifying fetch aborts.
+                    if (
+                      budget.signal.aborted &&
+                      meta?.['cause'] === 'unreachable'
+                    )
+                      return;
+                    this.deps.logger.warn(message, meta);
+                  },
+                  error: (message, meta) =>
+                    this.deps.logger.error(message, meta),
+                },
+          ...(budget === undefined
+            ? {}
+            : {
+                fetch: (url, init) =>
+                  fetch(url, {
+                    ...init,
+                    signal:
+                      init?.signal == null
+                        ? budget.signal
+                        : AbortSignal.any([init.signal, budget.signal]),
+                  }),
+              }),
         }));
+    const maxTimeoutMs =
+      budget?.maxTimeoutMs !== undefined
+        ? validBudgetMs(budget.maxTimeoutMs)
+        : caller.target.timeoutMs;
     return {
       kind: 'system-one',
-      caller: budget === undefined ? factory(defaults) : {
-        decide: (payload, timeoutCapMs) => factory({
-          ...defaults,
-          timeoutMs: Math.min(caller.target.timeoutMs, Math.floor(validBudgetMs(timeoutCapMs ?? budget.remainingMs()))),
-          coldTimeoutMs: undefined,
-        }).decide(payload),
-      },
+      caller:
+        budget === undefined
+          ? factory(defaults)
+          : {
+              decide: (payload, timeoutCapMs) =>
+                factory({
+                  ...defaults,
+                  timeoutMs: Math.min(
+                    maxTimeoutMs,
+                    Math.floor(
+                      validBudgetMs(timeoutCapMs ?? budget.remainingMs()),
+                    ),
+                  ),
+                  coldTimeoutMs: undefined,
+                }).decide(payload),
+            },
       provider: caller.provider,
       model: caller.target.model,
-      ...(defaults.keepAlive !== undefined ? { keepAlive: defaults.keepAlive } : {}),
-      ...(budget === undefined ? {} : {
-        admission: {
-          ...budget,
-          remainingMs: () => validBudgetMs(budget.remainingMs()),
-          maxTimeoutMs: caller.target.timeoutMs,
-          targetKey: keyOf(caller.selection, caller.target.baseUrl),
-          rates: this.rates,
-          configuredRate: this.configuredPrefillRate(),
-          now: this.deps.seams?.monotonicNow ?? (() => performance.now()),
-        },
-      }),
+      ...(defaults.keepAlive !== undefined
+        ? { keepAlive: defaults.keepAlive }
+        : {}),
+      ...(budget === undefined
+        ? {}
+        : {
+            admission: {
+              ...budget,
+              remainingMs: () => validBudgetMs(budget.remainingMs()),
+              maxTimeoutMs,
+              targetKey: keyOf(caller.selection, caller.target.baseUrl),
+              rates: this.rates,
+              configuredRate: this.configuredPrefillRate(),
+              now: this.deps.seams?.monotonicNow ?? (() => performance.now()),
+            },
+          }),
     };
   }
 
   private configuredPrefillRate(): number | undefined {
     try {
       const value = this.deps.readPrefillTokensPerSecond?.();
-      return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+      return typeof value === 'number' && Number.isFinite(value) && value > 0
+        ? value
+        : undefined;
     } catch (error: unknown) {
       // degradation-audit: reported - an unreadable prefill setting is logged; the gate uses the measured rate.
-      this.deps.logger.warn('[lane-routing] decision model prefill setting could not be read', {
-        name: loggableErrorName(error),
-      });
+      this.deps.logger.warn(
+        '[lane-routing] decision model prefill setting could not be read',
+        {
+          name: loggableErrorName(error),
+        },
+      );
       return undefined;
     }
   }

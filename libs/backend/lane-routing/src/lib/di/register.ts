@@ -73,11 +73,19 @@ export function registerLaneRoutingServices(
         c,
         LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
       );
+      const workspace = c.resolve<IWorkspaceProvider>(
+        PLATFORM_TOKENS.WORKSPACE_PROVIDER,
+      );
       return new DecisionCaller({
         config: c.resolve<DecisionModelConfig>(
           LANE_ROUTING_TOKENS.DECISION_MODEL_CONFIG,
         ),
         logger: c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        readPrefillTokensPerSecond: () =>
+          workspace.getConfiguration<unknown>(
+            'ptah',
+            'agentOrchestration.decisionModelPrefillTokensPerSecond',
+          ),
         ...(structured !== undefined ? { structured } : {}),
       });
     }),
@@ -207,22 +215,33 @@ export function registerLaneRoutingServices(
   });
 
   container.register(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE, {
-    useFactory: instanceCachingFactory((c) => new LaneCatalogStore(
-      c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
-      c.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING),
-      c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new LaneCatalogStore(
+          c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
+          c.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING),
+          c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+        ),
+    ),
   });
 
   container.register(LANE_ROUTING_TOKENS.ROUTING_EVIDENCE_SERVICE, {
-    useFactory: instanceCachingFactory((c) => new RoutingEvidenceService({
-      catalog: c.resolve<LaneCatalogStore>(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE),
-      outcomeReader: optional<LaneOutcomeReader>(c, LANE_ROUTING_TOKENS.LANE_OUTCOME_READER),
-      performanceRouting: new PerformanceRoutingSetting(
-        c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
-        c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
-      ),
-    })),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new RoutingEvidenceService({
+          catalog: c.resolve<LaneCatalogStore>(
+            LANE_ROUTING_TOKENS.LANE_CATALOG_STORE,
+          ),
+          outcomeReader: optional<LaneOutcomeReader>(
+            c,
+            LANE_ROUTING_TOKENS.LANE_OUTCOME_READER,
+          ),
+          performanceRouting: new PerformanceRoutingSetting(
+            c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+            c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
+          ),
+        }),
+    ),
   });
 
   container.register(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE, {
@@ -239,12 +258,15 @@ export function registerLaneRoutingServices(
         c,
         LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
       );
-      const workspace = c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
+      const workspace = c.resolve<IWorkspaceProvider>(
+        PLATFORM_TOKENS.WORKSPACE_PROVIDER,
+      );
       return new RouteDecideService({
-        readPrefillTokensPerSecond: () => workspace.getConfiguration<unknown>(
-          'ptah',
-          'agentOrchestration.decisionModelPrefillTokensPerSecond',
-        ),
+        readPrefillTokensPerSecond: () =>
+          workspace.getConfiguration<unknown>(
+            'ptah',
+            'agentOrchestration.decisionModelPrefillTokensPerSecond',
+          ),
         routingRulesSetting: new RoutingRulesSetting(
           workspace,
           c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
@@ -268,10 +290,14 @@ export function registerLaneRoutingServices(
         reuse: c.resolve<PreflightReuseCache>(
           LANE_ROUTING_TOKENS.PREFLIGHT_REUSE_CACHE,
         ),
-        ...(listing !== undefined ? {
-          listing,
-          catalog: c.resolve<LaneCatalogStore>(LANE_ROUTING_TOKENS.LANE_CATALOG_STORE),
-        } : {}),
+        ...(listing !== undefined
+          ? {
+              listing,
+              catalog: c.resolve<LaneCatalogStore>(
+                LANE_ROUTING_TOKENS.LANE_CATALOG_STORE,
+              ),
+            }
+          : {}),
         ...(structured !== undefined ? { structured } : {}),
         ...(phaseDefinitionReader !== undefined
           ? { phaseDefinitionReader }
