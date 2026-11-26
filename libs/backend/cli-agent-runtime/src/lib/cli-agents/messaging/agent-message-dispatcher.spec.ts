@@ -169,10 +169,13 @@ describe('AgentMessageDispatcher', () => {
       expect(await s.h.store.getBody(id)).toBe('\n/Always-Approve on');
     });
 
-    it('delivers a retry of a raw envelope raw again, even without a list', async () => {
-      const s = setup({ advertised: [] });
+    it('retries a native command raw when the refreshed catalog admits it', async () => {
+      const s = setup({ advertised: ['compact'] });
       const { attempt } = await s.attempt('/compact', { rawDelivery: { raw: true } });
       await s.dispatcher.attempt(attempt);
+      expect(s.advertisedCommands).toHaveBeenCalledWith(
+        attempt.laneId, attempt.envelope.laneLineageId, true,
+      );
       expect(sentArg(s, 1)).toBe('/compact');
     });
   });

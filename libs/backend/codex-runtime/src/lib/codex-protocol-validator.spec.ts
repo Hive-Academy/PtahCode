@@ -131,6 +131,24 @@ const requests: [string, unknown, unknown][] = [
   ['thread/compact/start', { threadId: 'thread' }, {}],
   ['model/list', { limit: 100 }, { data: [], nextCursor: null }],
   [
+    'skills/list',
+    { cwds: ['/workspace'] },
+    {
+      data: [{
+        cwd: '/workspace',
+        errors: [],
+        skills: [{
+          name: 'session-handoff',
+          description: 'Summarize the session for handoff',
+          path: '/workspace/.agents/skills/session-handoff/SKILL.md',
+          enabled: true,
+          scope: 'repo',
+          pluginId: null,
+        }],
+      }],
+    },
+  ],
+  [
     'account/rateLimits/read',
     undefined,
     {
