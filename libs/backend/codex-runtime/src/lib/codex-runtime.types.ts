@@ -38,6 +38,11 @@ export interface CodexInstructionSource {
   readonly name: string;
   readonly content: string;
 }
+export interface CodexSkillInput {
+  readonly type: 'skill';
+  readonly name: string;
+  readonly path: string;
+}
 /** References resolve only at the process boundary; never place secret values here. */
 export type CodexMcpServer =
   | {
@@ -117,6 +122,7 @@ export interface CodexThreadIdentity {
 export interface CodexTurnInput {
   readonly text: string;
   readonly attachments?: readonly CodexAttachment[];
+  readonly skill?: CodexSkillInput;
   readonly signal?: AbortSignal;
   /** Keep open asynchronous user-input questions alive when starting an answer-delivery turn. */
   readonly preservePendingUserInput?: boolean;
@@ -436,6 +442,8 @@ export interface CodexContext {
   reportedSettings?(): { model: string | null; effort: string | null };
   listModels(): Promise<readonly CodexModelInfo[]>;
   events(signal: AbortSignal): AsyncIterable<CodexRuntimeEvent>;
+  resolveSkillCommand?(command: string): Promise<CodexSkillInput | undefined>;
+  listSkillCommands?(cwd?: string): Promise<readonly string[]>;
   startTurn(input: CodexTurnInput): Promise<CodexTurnReceipt>;
   /** When supplied, admit steer only while this exact turn is active. */
   steer(input: CodexTurnInput, expectedTurnId?: string): Promise<CodexTurnReceipt>;

@@ -3,11 +3,17 @@ import type { Logger } from '@ptah-extension/vscode-core';
 
 const CATALOG_TIMEOUT_MS = 8_000;
 
+interface CodexLaneCatalog {
+  readonly models: readonly CodexModelInfo[];
+  readonly skills?: readonly string[];
+}
+
 /** Bounds both catalog startup and listing, including a context opened after timeout. */
 export async function readCodexLaneCatalog(
   open: () => Promise<CodexContext>,
   logger: Logger,
-): Promise<readonly CodexModelInfo[]> {
+  workingDirectory?: string,
+): Promise<CodexLaneCatalog> {
   let timedOut = false;
   let context: CodexContext | undefined;
   let closing: Promise<void> | undefined;
@@ -16,7 +22,7 @@ export async function readCodexLaneCatalog(
     closing ??= opened.close();
     return closing;
   };
-  const operation = (async (): Promise<readonly CodexModelInfo[]> => {
+  const operation = (async (): Promise<CodexLaneCatalog> => {
     const opened = await open();
     context = opened;
     if (timedOut) {
@@ -24,7 +30,12 @@ export async function readCodexLaneCatalog(
       throw new Error('Codex model catalog timed out');
     }
     try {
-      return await opened.listModels();
+      const [models, skills] = await Promise.allSettled([
+        opened.listModels(),
+        workingDirectory ? opened.listSkillCommands?.(workingDirectory) ?? [] : [],
+      ]);
+      if (models.status === 'rejected') throw models.reason;
+      return { models: models.value, ...(skills.status === 'fulfilled' ? { skills: skills.value } : {}) };
     } finally {
       await closeOnce(opened);
     }

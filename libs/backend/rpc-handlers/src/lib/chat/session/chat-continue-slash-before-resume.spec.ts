@@ -72,7 +72,7 @@ import type {
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import type { ModelSettings } from '@ptah-extension/settings-core';
-import type { StreamlessFollowUpAdmission } from '@ptah-extension/agent-sdk';
+import { CodexChatAdapterError, SlashCommandInterceptor, type StreamlessFollowUpAdmission } from '@ptah-extension/agent-sdk';
 
 import { createMockModelSettings } from '../../../test-utils/mock-settings';
 import { ChatSessionService } from './chat-session.service';
@@ -131,15 +131,17 @@ function makeHarness(
     metadata: Record<string, unknown>;
     folders?: string[];
     sessionRuntimeRouter?: StreamlessFollowUpAdmission;
+    codexStart?: boolean;
   },
 ): Harness {
   const noop = jest.fn();
-  const logger = createMockLogger();
+  const logger = createMockLogger() as unknown as Logger;
   const provider = createMockWorkspaceProvider({
     folders: session?.folders ?? [OPEN_FOLDER],
   });
   const metadataStore = {
     get: jest.fn().mockResolvedValue(session?.metadata ?? null),
+    withCodexStartLineage: jest.fn((_roots: readonly string[], start: () => Promise<unknown>) => start()),
     getCliSessionsForRestore: jest.fn().mockResolvedValue([]),
     saveResumeState: jest.fn().mockResolvedValue(undefined),
     upgradeLegacyPluginConfigAncestorRoots: jest
@@ -184,7 +186,7 @@ function makeHarness(
     );
 
   const service = new ChatSessionService(
-    logger as unknown as Logger,
+    logger,
     { broadcastMessage: noop } as never,
     {
       get: noop,
@@ -217,7 +219,7 @@ function makeHarness(
       registerFromHistoryEvents: jest.fn().mockReturnValue(0),
       getResumableBySession: jest.fn().mockReturnValue([]),
     } as unknown as SubagentRegistryService,
-    {
+    session?.codexStart ? new SlashCommandInterceptor(logger) : {
       intercept: jest.fn().mockReturnValue({ action: 'passthrough' }),
     } as never,
     metadataStore as never,
@@ -240,7 +242,7 @@ function makeHarness(
     } as never,
     {
       streamEventsToWebview,
-      isStreaming: jest.fn().mockReturnValue(opts.streaming),
+      isStreaming: jest.fn(() => opts.streaming),
     } as never,
     {
       injectInterruptedAgentsContext: jest
@@ -279,7 +281,10 @@ function makeHarness(
     undefined,
     undefined,
     undefined,
-    undefined,
+    session?.codexStart ? {
+      prepare: jest.fn().mockResolvedValue({ runtime: 'codex-app-server', seed: { model: 'luna' } }),
+      publishRuntimeNotices: jest.fn().mockResolvedValue(undefined),
+    } as never : undefined,
     session?.sessionRuntimeRouter,
     undefined,
     undefined,
@@ -525,6 +530,30 @@ describe('chat:continue — active session (unchanged)', () => {
  * down a second time, concurrently.
  */
 describe('chat:continue — dead record (registered, not streaming)', () => {
+  it('preserves a stream attached while slash cleanup awaits metadata', async () => {
+    const state = { ...DEAD_RECORD };
+    const acceptsFollowUpWithoutStream = jest.fn(() => false);
+    const h = makeHarness(state, false, {
+      metadata: {},
+      sessionRuntimeRouter: { acceptsFollowUpWithoutStream },
+    });
+    h.metadataStore.get.mockImplementation(async () => {
+      if (acceptsFollowUpWithoutStream.mock.calls.length > 0) {
+        await Promise.resolve();
+        state.streaming = true;
+      }
+      return null;
+    });
+
+    await expect(h.service.continueSession(params(SLASH_PROMPT))).resolves.toEqual({
+      success: true,
+      sessionId: SESSION_ID,
+    });
+    expect(state.streaming).toBe(true);
+    expect(h.interruptSession).not.toHaveBeenCalled();
+    expect(h.routeFollowUpSlashCommand).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a streamless Codex thread live when routing a slash command', async () => {
     const h = makeHarness(DEAD_RECORD, false, {
       metadata: { codexExecution: { runtime: 'codex-app-server' } },
@@ -661,6 +690,25 @@ it('reports failed interruption as not delivered rather than sending to retired 
     success: false,
     error: expect.stringContaining('Your follow-up was not sent'),
   });
+});
+
+it('forwards a first-message skill through chat:start to the SDK adapter', async () => {
+  const h = makeHarness(NO_RECORD, false, { metadata: {}, codexStart: true });
+  const prompt = '/orchestration plan this task';
+  await expect(h.service.startSession({ tabId: TAB_ID, prompt, workspacePath: OPEN_FOLDER }))
+    .resolves.toMatchObject({ success: true });
+  expect(h.startChatSession).toHaveBeenCalledWith(expect.objectContaining({ prompt, runtime: 'codex-app-server' }));
+});
+
+it('returns the typed Codex refusal for an unsupported first-message command', async () => {
+  const h = makeHarness(NO_RECORD, false, { metadata: {}, codexStart: true });
+  h.startChatSession.mockRejectedValueOnce(new CodexChatAdapterError('unsupported-command', 'open', { command: 'review' }));
+  await expect(h.service.startSession({ tabId: TAB_ID, prompt: '/review', workspacePath: OPEN_FOLDER }))
+    .resolves.toEqual({
+      success: false,
+      errorCode: 'CODEX_UNSUPPORTED_OPTION',
+      error: 'Codex app-server does not support /review in Ptah chat.',
+    });
 });
 
 describe('Apps MCP tool profile threading', () => {

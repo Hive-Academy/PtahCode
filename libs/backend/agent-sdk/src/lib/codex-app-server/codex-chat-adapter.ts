@@ -22,6 +22,7 @@ import {
   type CodexTurnInput,
 } from '@ptah-extension/codex-runtime';
 import {
+  isChatBuiltinCommand,
   SessionId,
   type IAgentAdapter,
   type AgentModelInfo,
@@ -404,6 +405,16 @@ export class CodexChatAdapter implements NativeChatAdapter {
       const id = SessionId.from(context.identity.threadId);
       if (resumeId && id !== resumeId)
         throw new CodexChatAdapterError('identity-mismatch', 'identity');
+      const text = config.prompt ?? '';
+      const command = !resumeId && consumer === 'chat'
+        ? /^\/([a-z][\w:@.-]*)(?=\s|$)/i.exec(text.trimStart())?.[1]
+        : undefined;
+      const skill = command && !isChatBuiltinCommand(command)
+        ? await context.resolveSkillCommand?.(text)
+        : undefined;
+      if (command && !skill) {
+        throw new CodexChatAdapterError('unsupported-command', 'open', { command });
+      }
       this.checkOpening(opening, generation);
       if (this.sessions.has(id))
         throw new CodexChatAdapterError('busy', 'open');
@@ -502,8 +513,9 @@ export class CodexChatAdapter implements NativeChatAdapter {
       return this.turn(
         session,
         {
-          text: config.prompt ?? '',
+          text,
           attachments: prepared.profile.attachments,
+          ...(skill && { skill }),
         },
         clientMessageId,
       );
@@ -989,8 +1001,27 @@ export class CodexChatAdapter implements NativeChatAdapter {
     return [];
   }
 
+  async invokeSkillCommand(
+    id: SessionId,
+    command: string,
+    options?: Parameters<IAgentAdapter['sendMessageToSession']>[2],
+  ): Promise<boolean> {
+    const session = this.session(id);
+    const skill = await this.safe('skillLookup', async () =>
+      session.context.resolveSkillCommand?.(command),
+    );
+    if (!skill) return false;
+    if (this.sessions.get(id) !== session || session.closing)
+      throw new CodexChatAdapterError('unavailable', 'skillLookup');
+    await this.sendMessageToSession(id, command, options, skill);
+    return true;
+  }
+
   async sendMessageToSession(
-    ...[id, text, options]: Parameters<IAgentAdapter['sendMessageToSession']>
+    ...[id, text, options, skill]: [
+      ...Parameters<IAgentAdapter['sendMessageToSession']>,
+      skill?: CodexTurnInput['skill'],
+    ]
   ): Promise<void> {
     let clientMessageId: string | undefined;
     let inboundPeer: { readonly label: string } | undefined;
@@ -1024,6 +1055,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         ...image,
       })),
     ];
+    const input: CodexTurnInput = { text, attachments, ...(skill && { skill }) };
     const requireIdle = options?.admission === 'require-idle';
     if (requireIdle) {
       const current = this.sessions.get(id);
@@ -1062,7 +1094,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
             (admission) =>
               this.publish(
                 session,
-                { text, attachments },
+                input,
                 clientMessageId,
                 admission,
               ),
@@ -1095,7 +1127,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
             (admission) =>
               this.publish(
                 session,
-                { text, attachments },
+                input,
                 clientMessageId,
                 admission,
                 inboundPeer,
@@ -1113,7 +1145,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         (admission) =>
           this.publish(
             session,
-            { text, attachments },
+            input,
             clientMessageId,
             admission,
             inboundPeer,

@@ -75,7 +75,12 @@ function setup(
     [Parameters<NonNullable<CodexContext['setUserInputAnswerHandler']>>[0]]
   >();
   const cancelPendingUserInput = jest.fn<void, []>();
+  const resolveSkillCommand = jest.fn<
+    ReturnType<NonNullable<CodexContext['resolveSkillCommand']>>,
+    Parameters<NonNullable<CodexContext['resolveSkillCommand']>>
+  >().mockResolvedValue(undefined);
   const context: jest.Mocked<CodexContext> = {
+    resolveSkillCommand,
     listModels: jest.fn(async () => [
       { id: 'catalog-gpt', model: 'gpt', displayName: 'GPT', isDefault: true },
     ]),
@@ -198,6 +203,7 @@ function setup(
     ),
     ports,
     context,
+    resolveSkillCommand,
     open,
     dispose,
     callbacks,
@@ -561,6 +567,29 @@ describe('CodexChatAdapter', () => {
       code: 'resume-profile-changed',
       cause,
     });
+  });
+
+  it('sends the first chat message as a native skill input', async () => {
+    const h = setup();
+    const skill = { type: 'skill', name: 'orchestration', path: '/skills/orchestration/SKILL.md' } as const;
+    h.resolveSkillCommand.mockResolvedValueOnce(skill);
+    const prompt = '/orchestration plan this task';
+    const stream = await h.adapter.startChatSession({ tabId, prompt });
+    for await (const event of stream) void event;
+    expect(h.resolveSkillCommand).toHaveBeenCalledWith(prompt);
+    expect(h.context.startTurn).toHaveBeenCalledWith(expect.objectContaining({ text: prompt, skill }));
+    await h.adapter.dispose();
+  });
+
+  it('refuses a first-message built-in even if a skill has the same name', async () => {
+    const h = setup();
+    h.resolveSkillCommand.mockResolvedValue({ type: 'skill', name: 'review', path: '/skills/review/SKILL.md' });
+    await expect(h.adapter.startChatSession({ tabId, prompt: '/REVIEW' })).rejects.toMatchObject({
+      code: 'unsupported-command', command: 'REVIEW',
+    });
+    expect(h.resolveSkillCommand).not.toHaveBeenCalled();
+    expect(h.context.startTurn).not.toHaveBeenCalled();
+    await h.adapter.dispose();
   });
 
   it('passes files and images when resuming an already open thread', async () => {
@@ -1633,6 +1662,9 @@ describe('CodexChatAdapter', () => {
     expect(open).toHaveBeenCalledWith(profile, identity, undefined);
     await adapter.setSessionPermissionLevel(id, 'yolo');
     await adapter.setSessionModel(id, 'next');
+    expect(context.updateNextTurn).toHaveBeenCalledWith({ model: 'next' });
+    await adapter.setSessionModel(id, 'haiku');
+    expect(context.updateNextTurn).toHaveBeenLastCalledWith({ model: 'gpt-6-luna' });
     await adapter.setSessionEffort(id, undefined);
     expect(context.updateNextTurn).toHaveBeenCalledWith({
       permissionLevel: 'yolo',

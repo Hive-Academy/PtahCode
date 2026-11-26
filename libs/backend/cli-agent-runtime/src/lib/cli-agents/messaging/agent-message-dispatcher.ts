@@ -74,7 +74,7 @@ export interface AgentMessageDispatcherDeps {
    * The command and skill names the lane advertises (bounded lookup, cached
    * per lineage), or undefined when no list is known.
    */
-  readonly advertisedCommands?: (laneId: AgentId, lineage: AgentId) => Promise<readonly string[] | undefined>;
+  readonly advertisedCommands?: (laneId: AgentId, lineage: AgentId, refresh: boolean) => Promise<readonly string[] | undefined>;
 }
 
 /** The text a delivery sends and how it is routed. */
@@ -102,8 +102,8 @@ export class AgentMessageDispatcher {
       });
     let dispatching: AgentMessageEnvelope;
     try {
-      // The raw decision is written with the journal record, once, so a retry
-      // or re-offer delivers it raw again; a failed write sends nothing.
+      // Record the delivery form for receipt and ack reconciliation. Every
+      // subsequent attempt still checks the catalog before reusing that form.
       dispatching = await this.deps.store.markDispatching(envelope.id, [envelope.state],
         form.raw && envelope.rawDelivery?.raw !== true ? { rawDelivery: { raw: true } } : {});
     } catch (error: unknown) {
@@ -142,7 +142,11 @@ export class AgentMessageDispatcher {
       ...(stored?.files?.length ? { files: stored.files } : {}),
       ...(images?.length ? { images } : {}),
     } : undefined;
-    return { raw: await this.deliversRaw(attempt), ...(turn ? { turn } : {}) };
+    const raw = await this.deliversRaw(attempt);
+    if (!raw && envelope.rawDelivery?.raw) {
+      return { refusal: 'turn-input-unsupported', lastError: 'This lane command is no longer advertised.' };
+    }
+    return { raw, ...(turn ? { turn } : {}) };
   }
 
   /**
@@ -154,11 +158,10 @@ export class AgentMessageDispatcher {
    */
   private async deliversRaw(attempt: DispatchAttempt): Promise<boolean> {
     const { envelope } = attempt;
-    if (envelope.rawDelivery?.raw === true) return true;
     if (envelope.sender.kind !== 'user' || leadingLaneCommand(attempt.body) === undefined) return false;
     let names: readonly string[] | undefined;
     try {
-      names = await this.deps.advertisedCommands?.(attempt.laneId, envelope.laneLineageId);
+      names = await this.deps.advertisedCommands?.(attempt.laneId, envelope.laneLineageId, envelope.rawDelivery?.raw === true);
     } catch (error: unknown) {
       // degradation-audit: reported - logged; with no list the message keeps its header.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane command list unavailable', {
@@ -291,7 +294,8 @@ export class AgentMessageDispatcher {
         reason, everDispatched: envelope.everDispatched ?? false,
         ...(shownError ? { lastError: shownError } : {}),
       }, ['dispatching']);
-      return this.unsupported(attempt, next ?? dispatching, reason);
+      const outcome = this.unsupported(attempt, next ?? dispatching, reason);
+      return shownError ? { ...outcome, detail: shownError } : outcome;
     }
     if (result.mode === 'queue-next-turn') return this.parked(attempt, dispatching, result);
     const current = this.deps.manager.findAgentInfo(laneId);
@@ -341,7 +345,8 @@ export class AgentMessageDispatcher {
     const next = await this.deps.store.transition(dispatching.id, patch, ['dispatching']);
     const outcome = this.unsupported(attempt, next ?? dispatching, reason);
     // Fixed host text (a policy refusal) reaches the composer as the detail.
-    return patch.lastError && error instanceof LaneResumeError && error.code === 'policy-refused'
+    return patch.lastError && (reason === 'turn-input-unsupported' ||
+      (error instanceof LaneResumeError && error.code === 'policy-refused'))
       ? { ...outcome, detail: patch.lastError } : outcome;
   }
 

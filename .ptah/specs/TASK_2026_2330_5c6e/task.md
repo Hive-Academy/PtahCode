@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2330_5c6e
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix slash commands on Codex app-server lanes
 depends_on: []

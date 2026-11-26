@@ -229,6 +229,12 @@ class FakeChild extends EventEmitter implements SpawnedProcessHandle {
     }
     let result: unknown;
     switch (method) {
+      case 'skills/list':
+        result = { data: [{ skills: [
+          { name: 'orchestration', path: '/skills/orchestration/SKILL.md', enabled: true, pluginId: 'ptah-core@local' },
+          { name: 'disabled', path: '/skills/disabled/SKILL.md', enabled: false },
+        ] }] };
+        break;
       case 'model/list':
         result = this.modelPages.shift();
         break;
@@ -372,6 +378,32 @@ describe('CodexRuntime', () => {
       expect(child.stdout.listenerCount('data')).toBe(0);
       expect(child.stdin.listenerCount('finish')).toBe(0);
     }
+  });
+
+  it('sends a native skill input only for an enabled skill advertised for the thread cwd', async () => {
+    const context = await runtime.open(profile);
+    await expect(context.listSkillCommands?.()).resolves.toEqual([
+      'orchestration', 'ptah-core@local:orchestration', 'ptah-core:orchestration',
+    ]);
+    await expect(context.resolveSkillCommand?.('plain message')).resolves.toBeUndefined();
+    await expect(context.resolveSkillCommand?.('/DISABLED')).resolves.toBeUndefined();
+    await expect(context.resolveSkillCommand?.('/unknown')).resolves.toBeUndefined();
+    const text = '/PTAH-CORE:ORCHESTRATION summarize';
+    const skill = await context.resolveSkillCommand?.(text);
+    await context.startTurn({ text, skill });
+    expect(children[0].frames).toContainEqual(expect.objectContaining({
+      method: 'skills/list',
+      params: { cwds: [profile.cwd] },
+    }));
+    expect(children[0].frames).toContainEqual(expect.objectContaining({
+      method: 'turn/start',
+      params: expect.objectContaining({
+        input: [
+          { type: 'text', text },
+          { type: 'skill', name: 'orchestration', path: '/skills/orchestration/SKILL.md' },
+        ],
+      }),
+    }));
   });
 
   it('switches to the bundled executable once for a missing required catalog method', async () => {

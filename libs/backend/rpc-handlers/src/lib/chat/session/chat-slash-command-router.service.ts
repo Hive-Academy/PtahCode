@@ -44,6 +44,7 @@ import type {
 import {
   MESSAGE_TYPES,
   PROVIDER_ACCOUNT_RESULT_CODES,
+  isChatBuiltinCommand,
   isSafeProviderAccountSummary,
 } from '@ptah-extension/shared';
 import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
@@ -208,7 +209,7 @@ export class ChatSlashCommandRouterService {
    * (native or SDK new-query), or `null` to indicate the caller should
    * proceed with normal LLM streaming.
    *
-   * Extracted from `ChatSessionService.handleFollowUpSlashCommand` — every
+   * Extracted from `ChatSessionService.handleFollowUpSlashCommand` â€” every
    * log message and MESSAGE_TYPES.CHAT_COMPLETE payload is byte-identical.
    */
   async routeFollowUpSlashCommand(
@@ -401,6 +402,21 @@ export class ChatSlashCommandRouterService {
         }
         if (execution.runtime === 'codex-app-server') {
           if (interceptResult.commandName !== 'compact') {
+            if (
+              this.nativeAdapter &&
+              !isChatBuiltinCommand(interceptResult.commandName)
+            ) {
+              if (!this.sdkAdapter.isSessionActive(sessionId)) {
+                await this.sdkAdapter.resumeSession(sessionId, { ...config, prompt: '' });
+              }
+              if (await this.nativeAdapter.invokeSkillCommand(sessionId, command, {
+                clientMessageId: params.clientMessageId,
+                files: params.files,
+                images: params.images,
+              })) {
+                return { success: true, sessionId };
+              }
+            }
             return {
               success: false,
               sessionId,

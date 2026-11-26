@@ -78,6 +78,7 @@ function harness(
   const compact = jest.fn().mockResolvedValue(undefined);
   const interruptSession = jest.fn().mockResolvedValue(undefined);
   const closeSession = jest.fn().mockResolvedValue(undefined);
+  const invokeSkillCommand = jest.fn().mockResolvedValue(false);
   const broadcastMessage = jest.fn().mockResolvedValue(undefined);
   const executeSlashCommand = jest.fn().mockResolvedValue([]);
   const resolveProviderProfileForWorkspace = jest.fn(() => {
@@ -94,7 +95,7 @@ function harness(
       logger: { info: jest.fn(), warn: jest.fn() },
       modelSettings: { selectedModel: { get: () => 'default' } },
       sdkAdapter: { executeSlashCommand, interruptSession, isSessionActive: () => true },
-      nativeAdapter: { owns: () => true, closeSession },
+      nativeAdapter: { owns: () => true, closeSession, invokeSkillCommand },
       webviewManager: { broadcastMessage },
       slashCommandInterceptor: {
         intercept: () => commandName === 'clear'
@@ -133,6 +134,7 @@ function harness(
     compact,
     interruptSession,
     closeSession,
+    invokeSkillCommand,
     broadcastMessage,
     executeSlashCommand,
     resolveProviderProfileForWorkspace,
@@ -263,8 +265,9 @@ describe('native slash runtime routing', () => {
     );
   });
 
-  it.each(['model', 'status', 'example:skill'])('refuses /%s before launching a Codex turn', async (command) => {
+  it.each(['model', 'status', 'clear-style', 'context', 'cost', 'review', 'REVIEW', 'memory', 'deep-research', 'example:skill'])('refuses /%s before launching a Codex turn', async (command) => {
     const h = harness(native, command);
+    h.invokeSkillCommand.mockResolvedValue(command !== 'example:skill');
     await expect(h.route()).resolves.toEqual({
       success: false,
       sessionId,
@@ -274,7 +277,19 @@ describe('native slash runtime routing', () => {
     expect(h.executeSlashCommand).not.toHaveBeenCalled();
     expect(h.compact).not.toHaveBeenCalled();
     expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(command === 'example:skill' ? 1 : 0);
   });
+
+  it.each(['orchestration', 'session-handoff', 'example:skill', 'example:review', 'example@local:review'])(
+    'invokes an advertised /%s as a Codex skill',
+    async (command) => {
+      const h = harness(native, command);
+      h.invokeSkillCommand.mockResolvedValue(true);
+      await expect(h.route()).resolves.toEqual({ success: true, sessionId });
+      expect(h.invokeSkillCommand).toHaveBeenCalledWith(sessionId, '/' + command, expect.any(Object));
+      expect(h.executeSlashCommand).not.toHaveBeenCalled();
+    },
+  );
 
   it('coalesces a claim acquired while preparation is pending', async () => {
     const h = harness();

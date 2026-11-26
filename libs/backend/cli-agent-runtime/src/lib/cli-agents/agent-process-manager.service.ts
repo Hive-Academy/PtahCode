@@ -99,7 +99,7 @@ import {
   blockedLaneCommandReason,
   isRawCommandDelivery,
 } from './cli-adapters/lane-command-filter';
-import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
+import { LaneTurnInputRefusal, LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
   CliCommandOptions,
   SdkHandle,
@@ -3469,17 +3469,24 @@ export class AgentProcessManager {
       throw new AgentContinueError('busy', `Agent ${agentId} is starting another turn.`);
     this.continuationsInFlight.add(tracked);
     let content: LaneTurnContent | undefined;
+    let preparedContinuation: (() => { done: Promise<number> }) | undefined;
     try {
       // Turn input pre-flight, before `turnSeq` or `status` change: a refusal
       // leaves the record exactly as it was.
       content = await this.applyContinuationTurnInput(
         agentId, tracked, sdkHandle, message, turnRequest, rawBody,
       );
+      if (sdkHandle.prepareContinuation)
+        preparedContinuation = await sdkHandle.prepareContinuation(message, content);
       // The await let `stop()`, an idle release or a budget pause run: check
       // admission again before the record turns `running`.
       if (this.agents.get(agentId) !== tracked)
         throw new AgentContinueError('released', 'Lane was replaced while preparing the turn.');
       this.assertLaneAdmitsTurn(agentId, tracked);
+    } catch (error) {
+      if (error instanceof LaneTurnInputRefusal)
+        throw new AgentContinueError('unsupported', error.reason, 'turn-input-unsupported');
+      throw error;
     } finally {
       this.continuationsInFlight.delete(tracked);
     }
@@ -3545,9 +3552,11 @@ export class AgentProcessManager {
       // flush window. Stamp the edge BEFORE the continuation can emit, so the
       // flush-time merge never fuses the two turns (TASK_2026_466 defect 5).
       this.outputBuffer.markTurnBoundary(agentId);
-      outcome = content
-        ? await sdkHandle.continue(message, content)
-        : await sdkHandle.continue(message);
+      outcome = preparedContinuation
+        ? preparedContinuation()
+        : content
+          ? await sdkHandle.continue(message, content)
+          : await sdkHandle.continue(message);
     } catch (error: unknown) {
       if (!this.isCurrentTurn(tracked, turn)) throw error;
       if (accountScoped) {

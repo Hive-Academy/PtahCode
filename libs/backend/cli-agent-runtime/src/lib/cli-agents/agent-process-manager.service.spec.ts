@@ -144,7 +144,7 @@ import type {
   CliAdapter,
   SdkHandle,
 } from './cli-adapters/cli-adapter.interface';
-import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
+import { LaneTurnInputRefusal, LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ICallerWorkspaceResolver,
@@ -5338,11 +5338,14 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   describe('continueConversation()', () => {
     let continuableControls: MockSdkHandleControls;
 
-    const spawnContinuable = async (): Promise<string> => {
+    const spawnContinuable = async (
+      prepareContinuation?: SdkHandle['prepareContinuation'],
+    ): Promise<string> => {
       continuableControls = createMockSdkHandle({ supportsContinuation: true });
-      (sdkAdapter.runSdk as jest.Mock).mockResolvedValue(
-        continuableControls.handle,
-      );
+      if (prepareContinuation) {
+        Object.assign(continuableControls.handle, { prepareContinuation });
+      }
+      (sdkAdapter.runSdk as jest.Mock).mockResolvedValue(continuableControls.handle);
       const result = await manager.spawn({
         task: 'Initial task',
         cli: 'codex',
@@ -5410,6 +5413,19 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(spawnedInfos[0]).toMatchObject({ supportsContinuation: true });
 
       continuableControls.resolve(0);
+    });
+
+    it('keeps the settled turn intact when provider input preflight refuses a raw skill', async () => {
+      const reason = 'This Codex skill is no longer available or enabled.';
+      const prepare = jest.fn(async () => { throw new LaneTurnInputRefusal(reason); });
+      const agentId = await spawnContinuable(prepare);
+      await completeTurn1();
+      const previous = { ...manager.getStatus(agentId) };
+
+      await expect(manager.continueConversation(agentId, '/session-handoff'))
+        .rejects.toMatchObject({ code: 'unsupported', receiptReason: 'turn-input-unsupported', message: reason });
+      expect(manager.getStatus(agentId)).toEqual(previous);
+      expect(continuableControls.continueCallCount()).toBe(0);
     });
 
     it('stores the sdkHandle and reaches the continued turn via the same handle', async () => {

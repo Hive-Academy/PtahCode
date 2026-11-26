@@ -1,3 +1,4 @@
+import { LaneTurnInputRefusal } from '../../cli-adapters/cli-adapter.interface';
 import {
   EFFORT_LEVELS,
   type AgentProcessInfo,
@@ -189,6 +190,8 @@ export class PtahCliLaneResumer implements LaneResumer {
       spawnResult.setAgentId(result.agentId);
       return result;
     } catch (error: unknown) {
+      if (error instanceof LaneTurnInputRefusal)
+        throw new LaneResumeError('turn-input-refused', error.reason);
       if (
         error instanceof LaneResumeError ||
         error instanceof LaneAccountResumeError

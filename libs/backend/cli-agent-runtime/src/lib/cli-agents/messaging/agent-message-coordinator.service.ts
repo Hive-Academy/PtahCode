@@ -129,19 +129,19 @@ const DELIVERABLE = new Set<AgentMessageEnvelope['state']>(['not-started', 'bloc
  */
 function stoppedLaneView(
   current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
-  { models, efforts, unsendableEfforts, commands = [] }: Omit<LaneTurnOptionsCatalog, 'commands'> & Pick<StoppedLaneCatalog, 'commands'>,
+  { models, efforts, unsendableEfforts, unavailableReason, commands = [] }: Omit<LaneTurnOptionsCatalog, 'commands'> & Pick<StoppedLaneCatalog, 'commands'>,
   effortsFixedByModel = false,
 ): LaneTurnOptionsView {
   return {
     ...current, models, efforts: [...efforts], commands,
     ...(unsendableEfforts ? { unsendableEfforts } : {}),
-    unavailableReason: commands.length > 0
+    unavailableReason: unavailableReason ?? (commands.length > 0
       ? 'Additional options may appear when the lane is running.'
       : efforts.length > 0
         ? 'Commands and skills appear when the lane is running.'
         : effortsFixedByModel
           ? 'This model sets its own effort level. Commands and skills appear when the lane is running.'
-          : 'Effort levels, commands and skills appear when the lane is running.',
+          : 'Effort levels, commands and skills appear when the lane is running.'),
   };
 }
 
@@ -182,7 +182,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       manager: deps.manager, store: deps.store, aliases: deps.aliases, resume: deps.resume,
       settleTurn: (info) => this.reconciler.settleTurn(info), logger: deps.logger,
       ...(deps.attachments ? { attachments: deps.attachments } : {}),
-      advertisedCommands: (laneId, lineage) => this.advertisedCommands(laneId, lineage),
+      advertisedCommands: (laneId, lineage, refresh) => this.advertisedCommands(laneId, lineage, refresh),
     });
     this.reconciler.attach();
   }
@@ -536,7 +536,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * says what appears once it runs (`unavailableReason`). A failure returns the cached lists with `error`
    * set; it never throws. Hidden permission-policy commands are always dropped.
    */
-  async turnOptions(agentId: AgentId): Promise<LaneTurnOptionsView> {
+  async turnOptions(agentId: AgentId, refreshCommands = false): Promise<LaneTurnOptionsView> {
     const { agentId: laneId } = await this.deps.aliases.resolve(agentId);
     const lineage = await this.deps.aliases.rootOf(agentId);
     const info = this.deps.manager.findAgentInfo(laneId);
@@ -559,9 +559,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         this.remember(lineage, served);
         return served;
       }
-      if (!cached && adapter?.stoppedLaneCatalog) {
+      if ((!cached || refreshCommands) && adapter?.stoppedLaneCatalog) {
         // One catalog read serves the stopped lane's composer and dispatch.
-        const catalog = await bounded(adapter.stoppedLaneCatalog(), LANE_TURN_OPTIONS_TIMEOUT_MS);
+        const catalog = await bounded(adapter.stoppedLaneCatalog(info.workingDirectory), LANE_TURN_OPTIONS_TIMEOUT_MS);
         return stoppedLaneView(current, {
           ...catalog,
           commands: filterLaneCommands(catalog.commands ?? [], blocked),
@@ -573,6 +573,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       if (cached) {
         return {
           ...current, models, efforts: cached.efforts, commands: cached.commands,
+          ...(cached.unavailableReason ? { unavailableReason: cached.unavailableReason } : {}),
           ...(unsendableEfforts ? { unsendableEfforts } : {}),
         };
       }
@@ -596,17 +597,17 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
   /**
    * The command and skill names a lane advertises, or undefined when no list
    * is known. Runs inside the lineage's send queue, so the list the composer
-   * last loaded is used when there is one; only a lineage with no cached list
-   * asks the live handle or stopped-lane catalog (bounded).
+   * last loaded can admit a new message. Previously admitted raw messages
+   * must check the current live or stopped catalog again before dispatch.
    */
-  private async advertisedCommands(laneId: AgentId, lineage: AgentId): Promise<readonly string[] | undefined> {
+  private async advertisedCommands(laneId: AgentId, lineage: AgentId, refresh: boolean): Promise<readonly string[] | undefined> {
     const cached = this.catalogs.get(lineage);
-    if (cached) return cached.commands.map((command) => command.name);
+    if (cached && !refresh) return cached.commands.map((command) => command.name);
     if (!this.liveHandle(laneId)?.listTurnOptions) {
       const info = this.deps.manager.findAgentInfo(laneId);
       if (!info || !this.deps.detection.getAdapter(info.cli)?.stoppedLaneCatalog) return undefined;
     }
-    const view = await this.turnOptions(laneId);
+    const view = await this.turnOptions(laneId, refresh);
     return view.error ? undefined : view.commands.map((command) => command.name);
   }
 
