@@ -71,6 +71,22 @@ function lastPathSegment(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+function normalizeInstallCount(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+/** Deterministic descending comparator by install count, with lexical tie-breakers. */
+function compareByInstallsDesc(a: SkillShEntry, b: SkillShEntry): number {
+  const diff =
+    normalizeInstallCount(b.installs) - normalizeInstallCount(a.installs);
+  if (diff !== 0) return diff;
+  return (
+    a.skillId.localeCompare(b.skillId) ||
+    a.source.localeCompare(b.source) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 function formatInstallCount(count: number): string {
   if (count >= 1_000_000) return (count / 1_000_000).toFixed(1) + 'M';
   if (count >= 1_000) return (count / 1_000).toFixed(1) + 'K';
@@ -79,8 +95,9 @@ function formatInstallCount(count: number): string {
 
 /** Card meta for one entry; the install count only when skills.sh has one. */
 function skillMeta(skill: SkillShEntry): readonly string[] {
-  return skill.installs > 0
-    ? [skill.source, `${formatInstallCount(skill.installs)} installs`]
+  const installs = normalizeInstallCount(skill.installs);
+  return installs > 0
+    ? [skill.source, `${formatInstallCount(installs)} installs`]
     : [skill.source];
 }
 
@@ -275,7 +292,9 @@ const SCOPE_BADGE_LABELS: Readonly<Record<InstalledSkill['scope'], string>> = {
         <div card-actions>
           @if (installedRecord(skill); as record) {
             <span
-              ptahBadge size="sm" appearance="outline"
+              ptahBadge
+              size="sm"
+              appearance="outline"
               [tone]="record.scope === 'global' ? 'warn' : 'neutral'"
               data-testid="skill-scope-badge"
               >{{ scopeBadgeLabel(record) }}</span
@@ -433,7 +452,7 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
     this.searchQuery() ? 'Search Results' : 'Popular Skills',
   );
 
-  /** Recommended skills, de-duplicated and pre-enriched with card meta */
+  /** Recommended skills, de-duplicated, sorted by installs descending, and pre-enriched with card meta */
   readonly recommendedDisplaySkills = computed<DisplaySkillEntry[]>(() => {
     const recs = this.recommendations()?.recommendedSkills;
     if (!recs) return [];
@@ -445,6 +464,7 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
       seen.add(key);
       entries.push({ ...s, key, meta: skillMeta(s) });
     }
+    entries.sort(compareByInstallsDesc);
     return entries;
   });
 
@@ -623,6 +643,7 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
         meta: skillMeta(s),
       });
     }
+    entries.sort(compareByInstallsDesc);
     return entries;
   }
 
