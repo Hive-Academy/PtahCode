@@ -60,7 +60,22 @@ const MODALS: readonly ModalCase[] = [
 ];
 
 const dialogOf = (page: Page, testid: string): Locator =>
-  page.locator(`dialog:has([data-testid="${testid}"])`);
+  page.locator(`[data-testid="native-modal-dialog"]:has([data-testid="${testid}"])`);
+
+/** The panel holds focus, or a listbox owned by a control inside the panel does. */
+async function dialogHasFocus(dialog: Locator): Promise<boolean> {
+  return dialog.evaluate((node) => {
+    const active = node.ownerDocument.activeElement;
+    if (!(active instanceof Element)) return false;
+    if (node.contains(active)) return true;
+    for (const control of node.querySelectorAll<HTMLElement>('[aria-controls]')) {
+      const id = control.getAttribute('aria-controls');
+      const popup = id ? node.ownerDocument.getElementById(id) : null;
+      if (popup && (popup === active || popup.contains(active))) return true;
+    }
+    return false;
+  });
+}
 const toastMessage = (page: Page): Locator =>
   page.locator('[data-testid="settings-toast-message"]').last();
 const toastUndo = (page: Page): Locator =>
@@ -75,13 +90,9 @@ async function open(page: Page, modal: ModalCase): Promise<Locator> {
       .click();
   } else await opener.click();
   const dialog = dialogOf(page, modal.testid);
-  await expect(dialog).toHaveAttribute('open', '');
-  // showModal() moves focus into the dialog.
-  await expect
-    .poll(() =>
-      dialog.evaluate((node) => node.contains(document.activeElement)),
-    )
-    .toBe(true);
+  await expect(dialog).toBeVisible();
+  // The dialog moves focus onto its first control.
+  await expect.poll(() => dialogHasFocus(dialog)).toBe(true);
   return dialog;
 }
 
@@ -89,7 +100,7 @@ async function expectClosedToOpener(
   page: Page,
   modal: ModalCase,
 ): Promise<void> {
-  await expect(dialogOf(page, modal.testid)).not.toHaveAttribute('open');
+  await expect(dialogOf(page, modal.testid)).toHaveCount(0);
   await expect(modal.opener(page)).toBeFocused();
 }
 
@@ -128,11 +139,7 @@ for (const host of HOSTS) {
         const dialog = await open(page, modal);
         for (let i = 0; i < 14; i += 1) {
           await page.keyboard.press('Tab');
-          expect(
-            await dialog.evaluate((node) =>
-              node.contains(document.activeElement),
-            ),
-          ).toBe(true);
+          expect(await dialogHasFocus(dialog)).toBe(true);
         }
         // A tier field opens its list on focus, and its Esc closes only that list (the shared search field's rule);
         // the dialog stays open and the next Esc closes it.
@@ -143,7 +150,7 @@ for (const host of HOSTS) {
           )
         ) {
           await page.keyboard.press('Escape');
-          await expect(dialog).toHaveAttribute('open', '');
+          await expect(dialog).toBeVisible();
           await expect
             .poll(() =>
               page.evaluate(() =>
@@ -219,7 +226,7 @@ for (const host of HOSTS) {
       );
       await more.click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
-      await expect(dialog).toHaveAttribute('open', '');
+      await expect(dialog).toBeVisible();
       await expect(
         dialog.locator('[data-testid="add-cli-instance-provider-fixed"]'),
       ).toHaveText('Ollama Cloud');
@@ -232,7 +239,7 @@ for (const host of HOSTS) {
         id: GLM_ID,
         name: 'Glm-Main',
       });
-      await expect(dialog).not.toHaveAttribute('open');
+      await expect(dialog).toHaveCount(0);
       await expect(more).toBeFocused();
     });
 
@@ -548,9 +555,7 @@ for (const host of HOSTS) {
       );
       await expect(installedTrigger).toBeVisible();
       await expect(expander).toHaveAttribute('aria-expanded', 'true');
-      await expect(
-        detail.locator('[data-testid="cursor-credential-popover"]'),
-      ).toBeVisible();
+      await expect(popover).toBeVisible();
       await expect
         .poll(() =>
           popover.evaluate((node) => node.contains(document.activeElement)),
@@ -574,9 +579,7 @@ for (const host of HOSTS) {
         .click();
       await expect(toastMessage(page)).toHaveText('Stored key removed.');
       // The row now reports Not installed; the open popover keeps focus inside.
-      await expect(
-        detail.locator('[data-testid="cursor-credential-popover"]'),
-      ).toBeVisible();
+      await expect(popover).toBeVisible();
       await expect
         .poll(() =>
           popover.evaluate((node) => node.contains(document.activeElement)),

@@ -77,6 +77,8 @@ const PANEL_MOVES = new Map<string, ActiveMove>([
     '[attr.data-open]': "open() ? 'true' : null",
     '[attr.data-size]': 'size()',
     '[attr.data-clearable]': "clearable() ? 'true' : null",
+    // Wire id for string and number values. Null drops the attribute; '' stays.
+    '[attr.data-value]': 'dataValue()',
   },
   template: RICH_SELECT_TEMPLATE,
 })
@@ -160,6 +162,13 @@ export class PtahRichSelectComponent<T = unknown>
     const value = this.value();
     if (value === null) return null;
     return this.options().find((o) => this.compareWith()(o.value, value)) ?? null;
+  });
+  /** Host `data-value` for scalar wire ids. Object values stay off the attribute. */
+  readonly dataValue = computed(() => {
+    const value = this.value();
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number') return String(value);
+    return null;
   });
   readonly isDisabled = computed(() => this.disabled() || this.formDisabled());
   readonly ariaInvalid = computed(() => (this.invalid() || this.fieldInvalid() ? 'true' : null));
@@ -344,7 +353,7 @@ export class PtahRichSelectComponent<T = unknown>
   protected onOverlayAttach(): void {
     const ref = this.overlay().overlayRef;
     const anchor = this.overlayOrigin();
-    ref.updateSize({ maxWidth: 'calc(100vw - 16px)' });
+    ref.updateSize({ maxWidth: 'calc(100vw - var(--ptah-space-4))' });
     this.releaseOverlayWatch();
     this.owned = registerOwnedOverlay(anchor);
     this.stopScroll = watchAncestorScroll(anchor, () => ref.updatePosition());

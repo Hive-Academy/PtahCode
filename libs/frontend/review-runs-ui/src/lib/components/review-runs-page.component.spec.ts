@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ClaudeRpcService } from '@ptah-extension/core';
@@ -308,8 +309,9 @@ describe('ReviewRunsPageComponent', () => {
     expect(drawer.lanes()).toEqual(savedLanes);
     expect(drawer.laneListing()).toEqual(listing);
     expect(drawer.laneListState()).toBe('ready');
-    expect(fixture.nativeElement.querySelector('[role="dialog"][aria-label="Review settings"]')).not.toBeNull();
-    expect(fixture.nativeElement.textContent).toContain('Review lanes');
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[role="dialog"][aria-label="Review settings"]')).not.toBeNull();
+    const overlay = TestBed.inject(OverlayContainer).getContainerElement();
+    expect(overlay.textContent).toContain('Review lanes');
 
     const edited = { pool: [], pins: {} };
     drawer.lanesChanged.emit(edited);
@@ -319,7 +321,7 @@ describe('ReviewRunsPageComponent', () => {
     await fixture.whenStable();
     expect(call).toHaveBeenCalledWith('review:listLanes', {}, expect.anything());
 
-    (fixture.nativeElement.querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
+    (overlay.querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(fixture.debugElement.query(By.directive(ReviewSettingsDrawerComponent))).toBeNull();
     expect(document.activeElement).toBe(opener);

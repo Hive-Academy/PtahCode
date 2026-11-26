@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
@@ -261,7 +262,7 @@ describe('McpPortConfigComponent', () => {
       expect(element.textContent).toContain('Read-only (recommended)');
       component.callerInfoOpen.set(true);
       fixture.detectChanges();
-      expect(element.textContent).toContain('execute_code');
+      expect(TestBed.inject(OverlayContainer).getContainerElement().textContent).toContain('execute_code');
 
       fixture.debugElement.query(By.directive(PtahRichSelectComponent)).injector.get(PtahRichSelectComponent).choose({ value: 'full', label: 'Full access' });
       await settle();
@@ -361,7 +362,7 @@ describe('McpPortConfigComponent', () => {
       expect(info).not.toBeNull();
       info?.click();
       await settle();
-      expect(element.querySelector('[role="dialog"]')?.textContent).toContain(
+      expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[role="dialog"]')?.textContent).toContain(
         'Changes apply after the MCP server restarts.',
       );
       info?.click();

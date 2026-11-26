@@ -369,7 +369,7 @@ test.describe('webview > marketplace > workspace switch with a detail open (TASK
       'data-tier',
       'wide',
     );
-    await expect(page.locator('[data-testid="native-drawer-backdrop"]')).toHaveCount(0);
+    await expect(page.locator('.ptah-drawer-backdrop')).toHaveCount(0);
 
     // Switch workspaces through the real sidebar (title = folder path). A
     // real actionability check runs here (code-logic-review Serious #2): no

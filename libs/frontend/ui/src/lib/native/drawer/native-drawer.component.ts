@@ -87,6 +87,7 @@ export type NativeDrawerSide = 'right' | 'left';
     }
 
     .ptah-drawer-panel {
+      min-height: 0;
       animation: ptah-drawer-slide-in-right 180ms ease-out;
     }
 
@@ -160,7 +161,9 @@ export class NativeDrawerComponent implements OnDestroy {
       ariaLabel: this.ariaLabel(),
       height: '100%',
       positionStrategy: this.position,
-      panelClass: this.widthClasses,
+      // `self-stretch` gives the pane the overlay wrapper's height. Without a
+      // definite height the flex body collapses and its tabs cannot be clicked.
+      panelClass: [...this.widthClasses, 'h-full', 'self-stretch'],
       backdropClass: ['cdk-overlay-dark-backdrop', 'ptah-drawer-backdrop'],
     }, () => this.closed.emit(), this.closeOnEscape, this.closeOnBackdrop);
 

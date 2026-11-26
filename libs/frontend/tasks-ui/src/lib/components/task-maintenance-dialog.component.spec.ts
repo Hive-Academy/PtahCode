@@ -1,9 +1,14 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type {
   ExcludedTaskFolder,
   TasksSweepResult,
 } from '@ptah-extension/shared';
 import { TaskMaintenanceDialogComponent } from './task-maintenance-dialog.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function plan(over: Partial<TasksSweepResult> = {}): TasksSweepResult {
   return {
@@ -41,9 +46,8 @@ describe('TaskMaintenanceDialogComponent', () => {
     fixture: ComponentFixture<TaskMaintenanceDialogComponent>,
     id: string,
   ) =>
-    (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
-      `[data-testid="${id}"]`,
-    );
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(`[data-testid="${id}"]`)
+    ?? overlay().querySelector<HTMLElement>(`[data-testid="${id}"]`);
 
   it('renders no sweep dialog without a plan', () => {
     expect(q(render(), 'tasks-sweep-dialog')).toBeNull();
@@ -156,7 +160,7 @@ describe('TaskMaintenanceDialogComponent', () => {
   });
 
   it('lists excluded folders by name with their typed reason', () => {
-    const fixture = render({
+    render({
       exclusionsOpen: true,
       excludedCount: 2,
       excludedFolders: [
@@ -165,7 +169,7 @@ describe('TaskMaintenanceDialogComponent', () => {
       ],
     });
     const rows = Array.from(
-      (fixture.nativeElement as HTMLElement).querySelectorAll(
+      overlay().querySelectorAll(
         '[data-testid="tasks-excluded-row"]',
       ),
     );

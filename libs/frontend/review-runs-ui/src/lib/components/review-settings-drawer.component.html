@@ -210,47 +210,47 @@
       </button>
     </div>
   }
-</ptah-native-drawer>
 
-@if (confirmation() === 'pause-off') {
-  <ptah-review-confirm-dialog
-    dialogId="review-resume-confirm"
-    title="Resume live publication?"
-    description="Turning pause off can allow this repository to publish comments on eligible pull requests. CodeRabbit remains enabled."
-    confirmLabel="Resume publication"
-    [requirePermissions]="true"
-    (cancelled)="confirmation.set(null)"
-    (confirmed)="confirmPauseOff()"
-  />
-}
-@if (confirmation() === 'live-enable') {
-  <ptah-review-confirm-dialog
-    dialogId="review-live-enable-confirm"
-    title="Enable live publication?"
-    description="Confirm the bot token permissions for this repository before saving."
-    confirmLabel="Enable live publication"
-    [requirePermissions]="true"
-    (cancelled)="confirmation.set(null)"
-    (confirmed)="confirmLiveEnable()"
-  />
-}
-@if (confirmation() === 'remove-token') {
-  <ptah-review-confirm-dialog
-    dialogId="review-remove-token-confirm"
-    title="Remove bot connection?"
-    description="Future live publication will stop until another bot token is connected."
-    confirmLabel="Remove connection"
-    (cancelled)="confirmation.set(null)"
-    (confirmed)="confirmRemoveToken()"
-  />
-}
-@if (confirmation() === 'replace-token') {
-  <ptah-review-confirm-dialog
-    dialogId="review-replace-token-confirm"
-    title="Replace bot connection?"
-    description="Future live publication will use the new bot token."
-    confirmLabel="Replace connection"
-    (cancelled)="confirmation.set(null)"
-    (confirmed)="confirmReplaceToken()"
-  />
-}
+  @if (confirmation() === 'pause-off') {
+    <ptah-review-confirm-dialog
+      dialogId="review-resume-confirm"
+      title="Resume live publication?"
+      description="Turning pause off can allow this repository to publish comments on eligible pull requests. CodeRabbit remains enabled."
+      confirmLabel="Resume publication"
+      [requirePermissions]="true"
+      (cancelled)="confirmation.set(null)"
+      (confirmed)="confirmPauseOff()"
+    />
+  }
+  @if (confirmation() === 'live-enable') {
+    <ptah-review-confirm-dialog
+      dialogId="review-live-enable-confirm"
+      title="Enable live publication?"
+      description="Confirm the bot token permissions for this repository before saving."
+      confirmLabel="Enable live publication"
+      [requirePermissions]="true"
+      (cancelled)="confirmation.set(null)"
+      (confirmed)="confirmLiveEnable()"
+    />
+  }
+  @if (confirmation() === 'remove-token') {
+    <ptah-review-confirm-dialog
+      dialogId="review-remove-token-confirm"
+      title="Remove bot connection?"
+      description="Future live publication will stop until another bot token is connected."
+      confirmLabel="Remove connection"
+      (cancelled)="confirmation.set(null)"
+      (confirmed)="confirmRemoveToken()"
+    />
+  }
+  @if (confirmation() === 'replace-token') {
+    <ptah-review-confirm-dialog
+      dialogId="review-replace-token-confirm"
+      title="Replace bot connection?"
+      description="Future live publication will use the new bot token."
+      confirmLabel="Replace connection"
+      (cancelled)="confirmation.set(null)"
+      (confirmed)="confirmReplaceToken()"
+    />
+  }
+</ptah-native-drawer>

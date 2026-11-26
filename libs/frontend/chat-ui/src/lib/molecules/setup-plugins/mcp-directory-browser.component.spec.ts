@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * McpDirectoryBrowserComponent — the MCP Registry discovery view.
  *
@@ -534,8 +535,8 @@ describe('mcp directory browser — registry discovery', () => {
 
     select!.click();
     await settle(fixture);
-    panel
-      ?.querySelector<HTMLElement>('[role="option"]')
+    TestBed.inject(OverlayContainer).getContainerElement()
+      .querySelector<HTMLElement>('[role="option"]')
       ?.click();
     await settle(fixture);
 

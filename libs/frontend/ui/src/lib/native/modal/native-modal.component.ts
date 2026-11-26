@@ -178,6 +178,14 @@ export class NativeModalComponent implements OnDestroy {
       if (!panel) return;
       const trap = this.focusTrapFactory.create(panel);
       this.focusTrap = trap;
+      // Anchors sit inside the dialog container, ahead of the real controls.
+      // Leave them out of the tab order; the keydown handler wraps Tab.
+      for (const anchor of [panel.previousElementSibling, panel.nextElementSibling]) {
+        if (anchor?.classList.contains('cdk-focus-trap-anchor')) {
+          anchor.setAttribute('tabindex', '-1');
+        }
+      }
+      this.focusInitialControl(panel);
       const onKeydown = (event: KeyboardEvent): void => this.onKeydown(event);
       panel.addEventListener('keydown', onKeydown);
       onCleanup(() => {
@@ -195,6 +203,10 @@ export class NativeModalComponent implements OnDestroy {
             viewContainerRef: this.viewContainerRef,
             ariaLabel: this.ariaLabel(),
             ariaLabelledBy: this.ariaLabelledby(),
+            // The panel trap below owns the first Tab stop. The dialog's own
+            // autofocus would land on that trap's start anchor and jump to the
+            // last control.
+            autoFocus: false,
           }, () => this.closed.emit(), () => true, () => true);
         });
       } else {
@@ -232,6 +244,14 @@ export class NativeModalComponent implements OnDestroy {
     if (!this.ref) return;
     this.close();
     this.closed.emit();
+  }
+
+  /** First real control in the panel. The trap anchors are siblings, not descendants. */
+  private focusInitialControl(panel: HTMLElement): void {
+    const first = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).find(
+      (node) => !node.hasAttribute('disabled') && node.tabIndex >= 0,
+    );
+    first?.focus();
   }
 
   /**

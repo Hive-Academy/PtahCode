@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * DecisionModelTimeoutFieldComponent: the decision-model request timeout (`agentOrchestration.decisionModelTimeoutMs`),
  * shown in seconds and stored in milliseconds through `settings:get` / `settings:set`.
@@ -120,7 +121,7 @@ describe('DecisionModelTimeoutFieldComponent', () => {
       )
       ?.click();
     await flush();
-    const help = host.querySelector('[role="dialog"]');
+    const help = TestBed.inject(OverlayContainer).getContainerElement().querySelector('[role="dialog"]');
     expect(help?.textContent).toContain(
       'first request may wait up to 60 s while a local model loads',
     );
@@ -147,7 +148,7 @@ describe('DecisionModelTimeoutFieldComponent', () => {
     trigger?.click();
     await flush();
     expect(trigger?.getAttribute('aria-expanded')).toBe('true');
-    expect(host.querySelector('[role="dialog"]')?.textContent?.trim()).toBe(
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[role="dialog"]')?.textContent?.trim()).toBe(
       expected,
     );
     expect(host.querySelector('.ptah-field__message')).toBeNull();

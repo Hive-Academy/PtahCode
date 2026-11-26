@@ -257,7 +257,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       </span>
                       @let fallback = currentDraft().provider === row.provider ? row.fallbackProvider : null;
                       @if (fallback) {
-                        <p role="status" class="px-2 text-base-content-muted" data-testid="saved-provider-fallback">
+                        <p role="status" class="px-[var(--ptah-space-2)] text-base-content-muted" data-testid="saved-provider-fallback">
                           The saved {{ providerName(row.provider) }} override is unavailable.
                           Memory curation uses {{ fallback.name }} until the override is available.
                         </p>
@@ -282,7 +282,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         [attr.data-testid]="'picker-' + row.id"
                       />
                       @if (row.id !== 'setup' && !currentDraft().provider && state.route().status === 'loading') {
-                        <p role="status" class="px-2 text-base-content-muted">Resolving the active provider…</p>
+                        <p role="status" class="px-[var(--ptah-space-2)] text-base-content-muted">Resolving the active provider…</p>
                       }
                       @if (!fallback && draftProviderReadiness(); as readiness) {
                         <div

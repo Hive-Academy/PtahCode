@@ -122,7 +122,10 @@ export async function drawerTabOf(page: Page, providerName: string, tab: string,
   await providersTab(page);
   await openCardDrawer(page, providerName);
   await expect(page.locator('[data-testid="connection-drawer-title"]')).toContainText(providerName);
-  await page.getByRole('tab', { name: tab, exact: true }).click();
+  await page
+    .locator('[data-testid="native-drawer-panel"]')
+    .getByRole('tab', { name: tab, exact: true })
+    .click();
   const panel = page.locator(`[data-testid="${body}"]`);
   await expect(panel).toBeVisible();
   return panel;

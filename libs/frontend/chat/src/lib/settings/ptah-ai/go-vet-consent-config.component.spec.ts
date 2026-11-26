@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { signal } from '@angular/core';
@@ -593,7 +594,7 @@ describe('GoVetConsentConfigComponent', () => {
     expect(element.textContent).not.toContain('It does not run go:generate');
     button?.click();
     fixture.detectChanges();
-    expect(element.textContent).toContain('It does not run go:generate');
+    expect(TestBed.inject(OverlayContainer).getContainerElement().textContent).toContain('It does not run go:generate');
     expect(element.querySelector('code')).toBeNull();
   });
   it.each([

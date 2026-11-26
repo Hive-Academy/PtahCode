@@ -155,11 +155,11 @@
         [isOpen]="true"
         widthClass="w-full max-w-md"
         [ariaLabel]="drawerLabel()"
-        data-testid="provider-detail-drawer"
         (closed)="closeDetail()"
       >
         <div
           ptahMotionRouteStage
+          data-testid="provider-detail-drawer"
           [motionRouteKey]="detailMotionKey"
           [motionLeaveClone]="motionLeaveClone"
         >

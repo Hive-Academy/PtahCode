@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
@@ -328,7 +329,9 @@ describe('SessionBudgetSettingsComponent', () => {
         expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
         row?.querySelector<HTMLButtonElement>(`button[aria-label="More about ${setting.label}"]`)?.click();
         fixture.detectChanges();
-        expect(row?.querySelector('.ptah-field__info-panel')?.textContent?.trim()).toBe(setting.help);
+        expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('.ptah-field__info-panel')?.textContent?.trim()).toBe(setting.help);
+        row?.querySelector<HTMLButtonElement>(`button[aria-label="More about ${setting.label}"]`)?.click();
+        fixture.detectChanges();
       }
       expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
       const suffix = row?.querySelector('[ptahFieldTrailing]');

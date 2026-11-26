@@ -95,7 +95,7 @@ describe('form control look contract', () => {
 
   it('gives the panel search no own focus box', () => {
     expect(select).toMatch(
-      /^\.ptah-select :is\(\.ptah-select__search, #ptah-select\):focus-visible[^{}]*\{\s*outline: none;\s*box-shadow: none;/m,
+      /^\.ptah-select__panel \.ptah-select__search:focus-visible[^{}]*\{\s*outline: none;\s*box-shadow: none;/m,
     );
   });
 });

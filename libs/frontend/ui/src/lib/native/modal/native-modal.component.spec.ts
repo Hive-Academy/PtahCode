@@ -371,7 +371,7 @@ describe('NativeModalComponent', () => {
       expect(placement).toHaveBeenLastCalledWith(expect.objectContaining({
         connectionPair: expect.objectContaining({ originY }),
       }));
-      expect(overlayRef.getConfig().maxWidth).toBe('calc(100vw - 16px)');
+      expect(overlayRef.getConfig().maxWidth).toBe('calc(100vw - var(--ptah-space-4))');
       expect(document.activeElement).toBe(search);
     } finally {
       width.mockRestore();

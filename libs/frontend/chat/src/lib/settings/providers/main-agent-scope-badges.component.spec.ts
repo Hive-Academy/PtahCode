@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * MainAgentScopeBadgesComponent (TASK_2026_555 Batch 52.6): one badge per overridden scope layer, as in the prototype
  * ("App override", "Workspace override"), the App layer named after the host (Batch 27b). Each badge opens a dialog
@@ -67,17 +68,17 @@ describe('MainAgentScopeBadgesComponent', () => {
     layers()[1].click();
     fixture.detectChanges();
     expect(layers()[1].getAttribute('aria-expanded')).toBe('true');
-    const popover = el().querySelector('[data-testid="main-scope-layer-popover"]');
+    const popover = TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-testid="main-scope-layer-popover"]');
     expect(popover?.getAttribute('role')).toBe('dialog');
     const fieldBadges = Array.from(popover?.querySelectorAll<HTMLButtonElement>('[data-testid="scope-badge"]') ?? []);
     expect(fieldBadges.map((badge) => badge.getAttribute('data-field'))).toEqual(['Main agent authentication', 'Main agent provider']);
     expect(fieldBadges[0].textContent).toContain('Authentication · Workspace');
     fieldBadges[1].click();
     fixture.detectChanges();
-    el().querySelector<HTMLButtonElement>('[data-testid="scope-clear-override"]')?.click();
+    TestBed.inject(OverlayContainer).getContainerElement().querySelector<HTMLButtonElement>('[data-testid="scope-clear-override"]')?.click();
     fixture.detectChanges();
     expect(fixture.componentInstance.cleared).toEqual([{ key: 'anthropicProviderId', target: 'nearest' }]);
-    expect(el().querySelector('[data-testid="main-scope-layer-popover"]')).toBeNull();
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-testid="main-scope-layer-popover"]')).toBeNull();
   });
 
   it('one layer: one badge; nothing overridden: nothing', () => {

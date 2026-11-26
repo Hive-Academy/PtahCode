@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * ProviderConnectionCardComponent specs — TASK_2026_555 Batch 24 (compact card, plan :627-636).
  *
@@ -22,6 +23,10 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ProviderConnectionCardComponent } from './provider-connection-card.component';
 import type { SettingScopeDisplay } from './setting-scope-row.component';
 
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
+
 type CardInputs = {
   [K in keyof ProviderConnectionCardComponent]: unknown;
 };
@@ -41,7 +46,7 @@ function query(
   fixture: ComponentFixture<ProviderConnectionCardComponent>,
   testId: string,
 ): HTMLElement | null {
-  return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+  return (fixture.nativeElement as HTMLElement).querySelector(`[data-testid="${testId}"]`) ?? overlay().querySelector(`[data-testid="${testId}"]`);
 }
 
 /** The card's full-surface native details trigger. */

@@ -93,6 +93,8 @@ export class NativePopoverComponent implements OnDestroy {
   readonly anchor = input<HTMLElement | null>(null);
   readonly offset = input(DEFAULT_OVERLAY_OFFSET);
   readonly hasBackdrop = input(true);
+  /** Disable when the caller manages focus after closing. */
+  readonly restoreFocus = input(true);
   readonly backdropClass = input<'transparent' | 'dark'>('dark');
   /** Allow the panel to shift over its anchor if neither preferred side fits. */
   readonly keepInViewport = input(false);
@@ -200,7 +202,7 @@ export class NativePopoverComponent implements OnDestroy {
     // the portaled panel as inside does not see a gap before the trigger.
     const restore = this.previousFocus;
     this.previousFocus = null;
-    if (restore?.isConnected) restore.focus({ preventScroll: true });
+    if (this.restoreFocus() && restore?.isConnected) restore.focus({ preventScroll: true });
     this.owned?.unregister();
     this.owned = undefined;
   }

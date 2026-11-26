@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import {
   DeferBlockBehavior,
@@ -21,6 +22,10 @@ import { VoiceConfigComponent } from './voice-config.component';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { SearchVoiceSummaryStore } from './search-voice-summary.store';
 import { VoiceDetailsDrawerComponent } from './voice-details-drawer.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function providers(elevenlabsAvailable = false): VoiceProviderCapabilityDto[] {
   return [
@@ -114,11 +119,11 @@ describe('VoiceConfigComponent', () => {
   }
 
   const byTestId = <T extends HTMLElement = HTMLElement>(id: string): T => {
-    const el = element.querySelector<T>(`[data-testid="${id}"]`);
+    const el = element.querySelector<T>(`[data-testid="${id}"]`) ?? overlay().querySelector<T>(`[data-testid="${id}"]`);
     if (!el) throw new Error(`missing [data-testid="${id}"]`);
     return el;
   };
-  const queryTestId = (id: string) => element.querySelector(`[data-testid="${id}"]`);
+  const queryTestId = (id: string) => element.querySelector(`[data-testid="${id}"]`) ?? overlay().querySelector(`[data-testid="${id}"]`);
   const calls = (method: string) => call.mock.calls.filter(([m]) => m === method).map(([, params]) => params);
 
   async function choose(direction: 'stt' | 'tts', id: string): Promise<void> {

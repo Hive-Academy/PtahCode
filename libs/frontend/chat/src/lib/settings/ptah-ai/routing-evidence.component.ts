@@ -332,11 +332,11 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                           Outcome details ({{ model.sampledKeys.length }})
                         </summary>
                         @if (model.sampleTotal === null) {
-                          <p class="mt-2 text-xs text-base-content-muted">
+                          <p class="mt-[var(--ptah-space-2)] text-xs text-base-content-muted">
                             Wildcard and effort-specific samples are not added together.
                           </p>
                         }
-                        <div class="mt-2 space-y-[var(--ptah-gap-field)]">
+                        <div class="mt-[var(--ptah-space-2)] space-y-[var(--ptah-gap-field)]">
                           @for (key of model.sampledKeys; track key.taskKind + '|' + key.effort) {
                             <section
                               class="min-w-0 rounded border border-base-content/10 p-[var(--ptah-gap-controls)]"
@@ -363,7 +363,7 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                                   {{ key.sampleCount === 1 ? 'sample' : 'samples' }}
                                 </span>
                               </div>
-                              <p class="mt-1 text-xs text-base-content-muted">
+                              <p class="mt-[var(--ptah-space-1)] text-xs text-base-content-muted">
                                 Measured {{ age(key.asOf) }}
                                 @if (key.stale) {
                                   · Stale
@@ -402,10 +402,10 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                   >
                     Catalog models without evidence ({{ lane.catalogOnlyModels.length }})
                   </summary>
-                  <ul class="mt-2 space-y-[var(--ptah-gap-controls)]">
+                  <ul class="mt-[var(--ptah-space-2)] space-y-[var(--ptah-gap-controls)]">
                     @for (model of lane.catalogOnlyModels; track model.model) {
                       <li class="min-w-0 rounded border border-base-content/10 p-[var(--ptah-gap-controls)]">
-                        <div class="mb-1 flex flex-wrap items-center gap-2">
+                        <div class="mb-[var(--ptah-space-1)] flex flex-wrap items-center gap-[var(--ptah-space-2)]">
                           <span class="font-medium break-all text-base-content">
                             {{ model.model === '*' ? 'Family default' : model.model }}
                           </span>

@@ -312,6 +312,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
     PtahInputDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [`.wizard-end-aligned { margin-inline-start: auto; }`],
   template: `
     <ptah-native-drawer
       [isOpen]="open()"
@@ -337,8 +338,8 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         </div>
       </div>
 
-      <div class="border-b border-base-300 bg-base-100 px-3 py-2" data-testid="wizard-progress">
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div class="border-b border-base-300 bg-base-100 px-[var(--ptah-space-3)] py-[var(--ptah-space-2)]" data-testid="wizard-progress">
+        <div class="flex flex-wrap items-center gap-x-[var(--ptah-space-3)] gap-y-[var(--ptah-space-1)]">
           <h3
             #stepHeading
             tabindex="-1"
@@ -350,7 +351,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           <span class="text-xs text-base-content-muted">
             Step {{ stepIndex() + 1 }} of {{ STEP_DEFS.length }}
           </span>
-          <details class="ml-auto text-xs" data-testid="wizard-steps">
+          <details class="wizard-end-aligned text-xs" data-testid="wizard-steps">
             <summary
               class="min-h-9 cursor-pointer text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
             >
@@ -1371,7 +1372,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
           <button
             type="button"
             ptahButton variant="primary"
-            class="ml-auto"
+            class="wizard-end-aligned"
             (click)="onDone()"
             data-testid="wizard-done"
           >

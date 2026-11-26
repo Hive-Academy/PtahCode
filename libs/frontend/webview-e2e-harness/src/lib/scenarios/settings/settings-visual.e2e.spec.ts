@@ -1,4 +1,4 @@
-import { choosePtahSelect } from '../../choose-ptah-select';
+import { choosePtahSelect, ptahSelectListbox } from '../../choose-ptah-select';
 /**
  * E2E: Settings smoke captures (TASK_2026_555 Batch 16, Task 16.1 — plan
  * Component 14, §6): both tabs, both hosts, both themes, at 1024x768, so
@@ -89,12 +89,13 @@ const DRAWERS: readonly {
  * fails here instead of passing as a screenshot.
  */
 async function waitForDrawerOpened(page: Page): Promise<void> {
-  const root = page.locator('[data-testid="native-drawer-root"]');
+  const panel = page.locator('[data-testid="native-drawer-panel"]');
+  await expect(panel).toBeVisible();
   // Only the drawer's own entry keyframes (`ptah-drawer-*`). Incidental tab colour transitions and
   // button pops started by the tab click could leave `finished` unsettled when read at once (Batch 22:
   // electron hung here intermittently; with a 5 s grace every animation had finished). The screenshot
   // disables animations anyway, and the box check below still catches a mid-slide panel.
-  await root.evaluate((element) =>
+  await panel.evaluate((element) =>
     Promise.all(
       element
         .getAnimations({ subtree: true })
@@ -106,9 +107,7 @@ async function waitForDrawerOpened(page: Page): Promise<void> {
         .map((animation) => animation.finished),
     ),
   );
-  const box = await page
-    .locator('[data-testid="native-drawer-panel"]')
-    .boundingBox();
+  const box = await panel.boundingBox();
   const viewport = page.viewportSize();
   expect(box).not.toBeNull();
   expect(viewport).not.toBeNull();
@@ -535,8 +534,10 @@ async function captureMatrixPopovers(
         .locator('#lane-detail-glm-instance-1 button:text-is("Edit tiers")')
         .click();
     } else await page.locator(modal.opener).click();
-    const dialog = page.locator(`dialog:has([data-testid="${modal.testid}"])`);
-    await expect(dialog).toHaveAttribute('open', '');
+    const dialog = page.locator(
+      `[data-testid="native-modal-dialog"]:has([data-testid="${modal.testid}"])`,
+    );
+    await expect(dialog).toBeVisible();
     if (modal.testid === 'add-cli-instance-modal') {
       await dialog
         .locator('[data-testid="add-cli-instance-name"]')
@@ -550,12 +551,10 @@ async function captureMatrixPopovers(
         dialog.locator('[data-testid="cli-tier-source-haiku"]'),
       ).not.toContainText('loading');
     }
-    await dialog
-      .locator('.modal-box')
-      .evaluate((box) =>
-        Promise.all(box.getAnimations().map((animation) => animation.finished)),
-      );
-    const panel = await dialog.locator('.modal-box').boundingBox();
+    await dialog.evaluate((box) =>
+      Promise.all(box.getAnimations().map((animation) => animation.finished)),
+    );
+    const panel = await dialog.boundingBox();
     expect(
       panel &&
         viewport &&
@@ -569,7 +568,7 @@ async function captureMatrixPopovers(
     await waitForSettled(page, dialog);
     await capture(page, modal.name, host, theme);
     await page.keyboard.press('Escape');
-    await expect(dialog).not.toHaveAttribute('open');
+    await expect(dialog).toHaveCount(0);
   }
 }
 
@@ -1110,8 +1109,8 @@ for (const host of ['vscode', 'electron'] as const) {
       // re-save confirm that names it ("Saved to: VS Code." / "Saved to: Desktop app."); cancelled after.
       const appLabel = host === 'electron' ? 'Desktop app' : 'VS Code';
       const saveTo = mainPopover.locator('[data-testid="main-agent-save-to"]');
-      await saveTo.getByRole('combobox').click();
-      const saveToOptions = await saveTo.getByRole('option').allTextContents();
+      const saveToList = await ptahSelectListbox(saveTo);
+      const saveToOptions = await saveToList.getByRole('option').allTextContents();
       console.log(
         `B27b save-to ${host}/${theme}: ${saveToOptions.map((text) => text.trim()).join(' | ')}`,
       );

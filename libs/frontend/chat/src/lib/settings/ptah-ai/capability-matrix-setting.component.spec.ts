@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import {
@@ -7,6 +8,10 @@ import {
 import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
 import type { AgentGetCapabilityMatrixResult } from '@ptah-extension/shared';
 import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 const UNKNOWN = { kind: 'unknown' as const };
 const value = (score: number) => ({
@@ -112,10 +117,10 @@ describe('CapabilityMatrixSettingComponent', () => {
       ) as HTMLButtonElement
     ).click();
     fixture.detectChanges();
-    expect(root().querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Details for Implement for Family default');
+    expect(overlay().querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Details for Implement for Family default');
     expect(root().querySelector('[data-testid="matrix-row-sample-*-implement"] button')?.getAttribute('aria-description')).toBe('Score: 55. Stale.');
-    expect(root().textContent).toContain('Samples: 2');
-    expect(root().textContent).toContain('Source: local');
+    expect(overlay().textContent).toContain('Samples: 2');
+    expect(overlay().textContent).toContain('Source: local');
     expect(root().querySelector('#capability-matrix-heading')?.tagName).toBe(
       'H3',
     );
@@ -150,10 +155,10 @@ describe('CapabilityMatrixSettingComponent', () => {
         (button) => button.getAttribute('aria-expanded') === 'true',
       ),
     ).toHaveLength(1);
-    expect(root().querySelectorAll('[id^="detail-"]')).toHaveLength(1);
-    expect(root().querySelector(`[id="${ids[0]}"]`)).not.toBeNull();
+    expect(overlay().querySelectorAll('[id^="detail-"]')).toHaveLength(1);
+    expect(overlay().querySelector(`[id="${ids[0]}"]`)).not.toBeNull();
     // The capped panel clips a shadow on the projected card (decision 32): the panel owns the surface shadow.
-    expect(root().querySelector(`[id="${ids[0]}"]`)?.className).not.toMatch(/shadow/);
+    expect(overlay().querySelector(`[id="${ids[0]}"]`)?.className).not.toMatch(/shadow/);
   });
   it('connects collapsed detail triggers to their content', async () => {
     const original = globalThis.ResizeObserver;
@@ -193,7 +198,7 @@ describe('CapabilityMatrixSettingComponent', () => {
       expect(id).toMatch(/^detail-/);
       trigger.click();
       fixture.detectChanges();
-      expect(root().querySelector(`[id="${id}"]`)?.getAttribute("role")).toBe("dialog");
+      expect(overlay().querySelector(`[id="${id}"]`)?.getAttribute("role")).toBe("dialog");
       resize([{ contentRect: { width: 520 } } as ResizeObserverEntry], {} as ResizeObserver);
       fixture.detectChanges();
       expect(trigger.getAttribute('aria-expanded')).toBe('true');
