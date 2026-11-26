@@ -9,7 +9,8 @@ import { NativePopoverComponent } from './native-popover.component';
   imports: [NativePopoverComponent, PtahRichSelectComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <button type="button" id="external-anchor">External anchor</button>
+    <div id="external-scroller"><button type="button" id="external-anchor">External anchor</button></div>
+    <div id="next-scroller"><button type="button" id="next-anchor">Next anchor</button></div>
     <ptah-native-popover
       [isOpen]="open()"
       [anchor]="anchor()"
@@ -122,6 +123,59 @@ describe('NativePopoverComponent', () => {
     component().reattach();
     await render();
     expect(update).toHaveBeenCalled();
+  });
+
+  it('tracks scrolling on the new anchor while open', async () => {
+    const root: HTMLElement = fixture.nativeElement;
+    const oldAnchor = root.querySelector<HTMLElement>('#external-anchor');
+    const nextAnchor = root.querySelector<HTMLElement>('#next-anchor');
+    host.anchor.set(oldAnchor);
+    await open();
+    const update = jest.spyOn(connected().overlayRef, 'updatePosition');
+    oldAnchor?.parentElement?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).toHaveBeenCalledTimes(1);
+
+    host.anchor.set(nextAnchor);
+    await render();
+    expect(connected().origin).toBe(nextAnchor);
+    update.mockClear();
+    oldAnchor?.parentElement?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).not.toHaveBeenCalled();
+    nextAnchor?.parentElement?.dispatchEvent(new Event('scroll'));
+    await Promise.resolve();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(host.openedCount).toBe(1);
+  });
+
+  it('pushes caller-sized content inside the right edge with the cap disabled', async () => {
+    const viewport = document.documentElement;
+    const width = jest.spyOn(viewport, 'clientWidth', 'get').mockReturnValue(320);
+    const height = jest.spyOn(viewport, 'clientHeight', 'get').mockReturnValue(300);
+    try {
+      host.cap.set(false);
+      await open();
+      const origin = trigger().parentElement as HTMLElement;
+      const originRect = jest.spyOn(origin, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(304, 32, 24, 32));
+      const ref = connected().overlayRef;
+      const paneRect = jest.spyOn(ref.overlayElement, 'getBoundingClientRect')
+        .mockReturnValue(new DOMRect(0, 0, 240, 120));
+      try {
+        ref.updatePosition();
+        const rightInset = Number.parseFloat(ref.overlayElement.style.right);
+        expect(rightInset).toBeGreaterThanOrEqual(connected().viewportMargin);
+        expect(viewport.clientWidth - rightInset - 240).toBeGreaterThanOrEqual(connected().viewportMargin);
+        expect(panel()?.classList).not.toContain('ptah-popover-capped');
+      } finally {
+        paneRect.mockRestore();
+        originRect.mockRestore();
+      }
+    } finally {
+      height.mockRestore();
+      width.mockRestore();
+    }
   });
 
   it('captures the cap policy per open and allows the consumer to own scrolling', async () => {

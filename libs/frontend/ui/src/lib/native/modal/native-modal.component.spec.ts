@@ -19,6 +19,9 @@ import { NativeModalComponent, NativeModalLayout, NativeModalSize } from './nati
       (closed)="requestClose()"
     >
       <h2 id="modal-title" modal-header>Choose a provider</h2>
+      @if (withHiddenControl()) {
+        <button hidden type="button">Unavailable action</button>
+      }
       <ptah-select label="Provider" searchable [options]="options" />
       <button modal-footer type="button" id="modal-footer">Cancel</button>
     </ptah-native-modal>
@@ -30,6 +33,7 @@ class HostComponent {
   readonly labelledBy = signal<string | undefined>(undefined);
   readonly layout = signal<NativeModalLayout>('plain');
   readonly size = signal<NativeModalSize>('md');
+  readonly withHiddenControl = signal(false);
   readonly options = [{ value: 'one', label: 'Provider One' }];
   closeRequests = 0;
 
@@ -85,6 +89,13 @@ describe('NativeModalComponent', () => {
     expect(host.closeRequests).toBe(0);
     await openModal();
     expect(dialog()).not.toBeNull();
+  });
+
+  it('skips a hidden control when choosing initial focus', async () => {
+    host.withHiddenControl.set(true);
+    await openModal();
+    expect(box().querySelector('button[hidden]')).not.toBeNull();
+    expect(document.activeElement).toBe(box().querySelector('.ptah-select__trigger'));
   });
 
   it('names the dialog through the projected heading', async () => {
@@ -227,6 +238,13 @@ describe('NativeModalComponent', () => {
       trigger.dispatchEvent(backward);
       expect(backward.defaultPrevented).toBe(true);
       expect(document.activeElement).toBe(footer);
+
+      for (const [control, shiftKey] of [[footer, false], [trigger, true]] as const) {
+        control.focus();
+        control.addEventListener('keydown', (event) => event.preventDefault(), { once: true });
+        control.dispatchEvent(tab(shiftKey));
+        expect(document.activeElement).toBe(control);
+      }
     } finally {
       rects.mockRestore();
     }

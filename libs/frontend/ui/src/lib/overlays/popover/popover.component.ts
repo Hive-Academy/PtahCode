@@ -172,9 +172,16 @@ export class PopoverComponent implements OnDestroy {
   }
 
   private releaseFocus(): void {
+    const panel = this.popoverContent()?.nativeElement;
     this.focusTrap?.destroy();
     this.focusTrap = null;
-    if (this.previousFocus?.isConnected) this.previousFocus.focus({ preventScroll: true });
+    const previous = this.previousFocus;
     this.previousFocus = null;
+    if (!previous?.isConnected) return;
+    const document = previous.ownerDocument;
+    const active = document.activeElement;
+    if (!active || active === document.body || panel?.contains(active)) {
+      previous.focus({ preventScroll: true });
+    }
   }
 }

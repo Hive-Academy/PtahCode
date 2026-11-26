@@ -113,6 +113,7 @@ export function updatePtahDialogName(ref: DialogRef, label?: string, labelledBy?
       <div #panel cdkScrollable
         class="modal-box ptah-cdk-modal-box"
         data-testid="native-modal-dialog"
+        tabindex="-1"
         [class]="boxClass()"
         [style.--ptah-modal-size]="shellWidth()"
       >
@@ -248,10 +249,13 @@ export class NativeModalComponent implements OnDestroy {
 
   /** First real control in the panel. The trap anchors are siblings, not descendants. */
   private focusInitialControl(panel: HTMLElement): void {
-    const first = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).find(
-      (node) => !node.hasAttribute('disabled') && node.tabIndex >= 0,
-    );
-    first?.focus();
+    for (const node of panel.querySelectorAll<HTMLElement>(FOCUSABLE)) {
+      if (node.matches(':disabled, input[type="hidden"]') || node.tabIndex < 0 ||
+          node.closest('[hidden], [inert]')) continue;
+      node.focus();
+      if (node.contains(panel.ownerDocument.activeElement)) return;
+    }
+    panel.focus();
   }
 
   /**
@@ -259,7 +263,7 @@ export class NativeModalComponent implements OnDestroy {
    * the open dialog. Keys from the projected controls bubble to the panel.
    */
   private onKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Tab') return;
+    if (event.key !== 'Tab' || event.defaultPrevented) return;
     const panel = this.panel()?.nativeElement;
     if (!panel) return;
     const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(

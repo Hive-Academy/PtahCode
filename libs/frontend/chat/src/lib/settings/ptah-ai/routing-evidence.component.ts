@@ -49,12 +49,13 @@ const FUNNEL_FIELDS = [
 
 interface RoutingModelView extends AgentRoutingEvidenceModel {
   readonly sampledKeys: readonly AgentRoutingEvidenceKey[];
+  readonly outcomeKeys: readonly AgentRoutingEvidenceKey[];
   /** Null when wildcard and effort-specific cells for one task kind overlap. */
   readonly sampleTotal: number | null;
 }
 
 interface RoutingLaneView extends AgentRoutingEvidenceLane {
-  readonly measuredModels: readonly RoutingModelView[];
+  readonly modelsWithEvidence: readonly RoutingModelView[];
   readonly catalogOnlyModels: readonly AgentRoutingEvidenceModel[];
   readonly measuredCellCount: number;
 }
@@ -65,7 +66,10 @@ type RoutingEvidenceView = Omit<AgentGetRoutingEvidenceResult, 'lanes'> & {
 
 function modelView(model: AgentRoutingEvidenceModel): RoutingModelView {
   const sampledKeys = model.keys.filter((key) => key.sampleCount > 0);
-  return { ...model, sampledKeys, sampleTotal: sampleTotal(sampledKeys) };
+  const outcomeKeys = model.keys.filter(
+    (key) => key.sampleCount > 0 || FUNNEL_FIELDS.some(([field]) => key.funnel[field] > 0),
+  );
+  return { ...model, sampledKeys, outcomeKeys, sampleTotal: sampleTotal(sampledKeys) };
 }
 
 /**
@@ -91,12 +95,12 @@ function sampleTotal(keys: readonly AgentRoutingEvidenceKey[]): number | null {
 
 function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
   const models = lane.models.map(modelView);
-  const measuredModels = models.filter((model) => model.sampledKeys.length > 0);
+  const modelsWithEvidence = models.filter((model) => model.outcomeKeys.length > 0);
   return {
     ...lane,
-    measuredModels,
-    catalogOnlyModels: models.filter((model) => model.sampledKeys.length === 0),
-    measuredCellCount: measuredModels.reduce(
+    modelsWithEvidence,
+    catalogOnlyModels: models.filter((model) => model.inCatalog && model.outcomeKeys.length === 0),
+    measuredCellCount: modelsWithEvidence.reduce(
       (sum, model) => sum + model.sampledKeys.length,
       0,
     ),
@@ -202,8 +206,8 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                 <div class="min-w-0">
                   <h3 class="font-semibold break-all">{{ lane.laneId }}</h3>
                   <p class="text-xs text-base-content-muted">
-                    {{ lane.measuredModels.length }}
-                    {{ lane.measuredModels.length === 1 ? 'measured model' : 'measured models' }}
+                    {{ lane.modelsWithEvidence.length }}
+                    {{ lane.modelsWithEvidence.length === 1 ? 'model' : 'models' }} with evidence
                     · {{ lane.measuredCellCount }}
                     {{ lane.measuredCellCount === 1 ? 'sampled cell' : 'sampled cells' }}
                   </p>
@@ -226,9 +230,9 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                 }
               </div>
 
-              @if (lane.measuredModels.length > 0) {
+              @if (lane.modelsWithEvidence.length > 0) {
                 <div class="grid min-w-0 gap-[var(--ptah-gap-controls)]">
-                  @for (model of lane.measuredModels; track model.model) {
+                  @for (model of lane.modelsWithEvidence; track model.model) {
                     <article
                       class="min-w-0 space-y-[var(--ptah-gap-controls)] rounded-[var(--ptah-radius-control)] border border-base-content/10 bg-base-200/30 p-[var(--ptah-gap-field)]"
                       [attr.data-model]="model.model"
@@ -257,7 +261,7 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                         >
                           <span ptahBadge appearance="outline" size="xs">
                             {{ model.sampledKeys.length }}
-                            {{ model.sampledKeys.length === 1 ? 'cell' : 'cells' }}
+                            {{ model.sampledKeys.length === 1 ? 'sampled cell' : 'sampled cells' }}
                           </span>
                           <span
                             ptahBadge
@@ -281,7 +285,9 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                       />
 
                       <dl
-                        class="grid grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))] gap-[var(--ptah-gap-inline)]"
+                        [hidden]="model.sampledKeys.length === 0"
+                        [class.grid]="model.sampledKeys.length > 0"
+                        class="grid-cols-[repeat(auto-fit,minmax(min(9rem,100%),1fr))] gap-[var(--ptah-gap-inline)]"
                         [attr.aria-label]="'Sampled task and effort cells for ' + model.model"
                         data-testid="routing-evidence-matrix"
                       >
@@ -329,7 +335,7 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                         <summary
                           class="cursor-pointer rounded text-xs font-medium text-base-content-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
                         >
-                          Outcome details ({{ model.sampledKeys.length }})
+                          Outcome details ({{ model.outcomeKeys.length }})
                         </summary>
                         @if (model.sampleTotal === null) {
                           <p class="mt-[var(--ptah-space-2)] text-xs text-base-content-muted">
@@ -337,7 +343,7 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                           </p>
                         }
                         <div class="mt-[var(--ptah-space-2)] space-y-[var(--ptah-gap-field)]">
-                          @for (key of model.sampledKeys; track key.taskKind + '|' + key.effort) {
+                          @for (key of model.outcomeKeys; track key.taskKind + '|' + key.effort) {
                             <section
                               class="min-w-0 rounded border border-base-content/10 p-[var(--ptah-gap-controls)]"
                               [attr.aria-label]="
@@ -364,11 +370,14 @@ function laneView(lane: AgentRoutingEvidenceLane): RoutingLaneView {
                                 </span>
                               </div>
                               <p class="mt-[var(--ptah-space-1)] text-xs text-base-content-muted">
-                                Measured {{ age(key.asOf) }}
-                                @if (key.stale) {
-                                  · Stale
+                                 @if (key.asOf !== null) {
+                                   Measured {{ age(key.asOf) }}
+                                   @if (key.stale) {
+                                     · Stale
+                                   }
+                                   ·
                                 }
-                                · Effort not sent: {{ key.effortNotSent }}
+                                 Effort not sent: {{ key.effortNotSent }}
                               </p>
                               <ng-container
                                 [ngTemplateOutlet]="funnelDetails"

@@ -41,6 +41,13 @@ const KEY: AgentRoutingEvidenceKey = {
 const EMPTY_KEY: AgentRoutingEvidenceKey = {
   ...KEY,
   effort: '*',
+  funnel: {
+    spawned: 0, completed: 0, delivered: 0, reviewed: 0, approved: 0,
+    capacityDropped: 0, unverified: 0, noDeliverable: 0, failed: 0,
+    rejected: 0, unresolvedRevise: 0, reviseRounds: 0,
+  },
+  effortNotSent: 0,
+  durationMs: { total: 0, count: 0 },
   score: null,
   sampleCount: 0,
   asOf: null,
@@ -124,7 +131,7 @@ describe('RoutingEvidenceComponent', () => {
     await settle();
   }
 
-  it('shows a compact measured-model card and hides zero-sample combinations', async () => {
+  it('shows a compact model card and hides empty catalog combinations', async () => {
     call.mockResolvedValueOnce(rpcSuccess(EVIDENCE));
 
     await create();
@@ -133,7 +140,7 @@ describe('RoutingEvidenceComponent', () => {
     expect(root().textContent).toContain('Catalog: Timed out');
     expect(root().textContent).toContain('Last successful fetch: 2 days ago');
     expect(root().textContent).toContain('Last attempt: 10 min ago');
-    expect(root().textContent).toContain('1 measured model');
+    expect(root().textContent).toContain('1 model with evidence');
     expect(root().textContent).toContain('1 sampled cell');
     expect(cards().map((card) => card.dataset['model'])).toEqual(['native-model']);
 
@@ -163,6 +170,34 @@ describe('RoutingEvidenceComponent', () => {
     expect(catalogOnly?.textContent).toContain('Ptah fallback');
     expect(catalogOnly?.textContent).toContain('unknown-model');
     expect(catalogOnly?.textContent).toContain('not reported');
+  });
+
+  it('shows historical outcomes with zero scoring samples outside the catalog group', async () => {
+    const historical = {
+      ...LANE.models[0],
+      model: 'historical-model',
+      inCatalog: false,
+      keys: [{ ...EMPTY_KEY, funnel: { ...EMPTY_KEY.funnel, spawned: 1, capacityDropped: 1 } }],
+    };
+    call.mockResolvedValueOnce(rpcSuccess({
+      ...EVIDENCE,
+      lanes: [{ ...LANE, models: [historical, ...LANE.models.slice(1)] }],
+    }));
+
+    await create();
+
+    expect(root().querySelector('[data-testid="routing-lane-empty"]')).toBeNull();
+    expect(root().textContent).toContain('0 sampled cells');
+    expect(cards().map((card) => card.dataset['model'])).toEqual(['historical-model']);
+    const card = cards()[0];
+    expect(card.textContent).toContain('Outside current catalog');
+    expect(card.textContent).toContain('0 total samples');
+    const details = card.querySelector('details');
+    details?.setAttribute('open', '');
+    expect(details?.textContent).toContain('Outcome details (1)');
+    expect(details?.textContent).toMatch(/Capacity drop-outs\s*1/);
+    expect(root().querySelector('[data-testid="routing-catalog-models"]')?.textContent)
+      .not.toContain('historical-model');
   });
 
   it('expands model details and keeps separate decision model outcomes', async () => {

@@ -91,7 +91,8 @@ describe('motion preset CSS contract', () => {
       join(__dirname, '../../../../libs/frontend/ui/src/lib/native/drawer/native-drawer.component.ts'),
       'utf8',
     );
-    expect(drawer).toMatch(/\.ptah-drawer-panel\s*\{\s*animation:\s*ptah-drawer-slide-in-right/);
+    const panel = drawer.match(/\.ptah-drawer-panel\s*\{([^{}]*)\}/)?.[1];
+    expect(panel).toMatch(/(?:^|;)\s*animation:\s*ptah-drawer-slide-in-right\b/);
     expect(drawer).toMatch(/\.ptah-drawer-panel-left\s*\{\s*animation-name:\s*ptah-drawer-slide-in-left/);
     expect(drawer).toMatch(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.ptah-drawer-panel\s*\{\s*animation:\s*none/);
     const backdrop = motion.match(/\.cdk-overlay-backdrop\.ptah-drawer-backdrop\s*\{[^}]+\}/)?.[0];

@@ -3,6 +3,7 @@ import { CdkConnectedOverlay } from '@angular/cdk/overlay';
 import { CdkScrollable } from '@angular/cdk/scrolling';
 import {
   afterNextRender,
+  afterRenderEffect,
   ChangeDetectionStrategy,
   Component,
   computed,
@@ -97,7 +98,7 @@ export class NativePopoverComponent implements OnDestroy {
   readonly restoreFocus = input(true);
   readonly backdropClass = input<'transparent' | 'dark'>('dark');
   /** Allow the panel to shift over its anchor if neither preferred side fits. */
-  readonly keepInViewport = input(false);
+  readonly keepInViewport = input(true);
   /** Captured on open so a live change applies on the next open. */
   readonly capToViewport = input(true);
   readonly opened = output<void>();
@@ -115,6 +116,7 @@ export class NativePopoverComponent implements OnDestroy {
   });
 
   private readonly overlay = viewChild(CdkConnectedOverlay);
+  private readonly trigger = viewChild<ElementRef<HTMLElement>>('trigger');
   private readonly injector = inject(Injector);
   private previousFocus: HTMLElement | null = null;
   private attachedPanel?: HTMLElement;
@@ -125,6 +127,19 @@ export class NativePopoverComponent implements OnDestroy {
   constructor() {
     effect(() => {
       if (!this.isOpen()) this.releasePanel();
+    });
+    afterRenderEffect((onCleanup) => {
+      const trigger = this.trigger()?.nativeElement;
+      const overlayRef = this.overlay()?.overlayRef;
+      if (!this.isOpen() || !trigger || !overlayRef?.hasAttached()) return;
+      const stop = watchAncestorScroll(this.connectedAnchor(trigger), () => overlayRef.updatePosition());
+      this.stopScroll = stop;
+      onCleanup(() => {
+        if (this.stopScroll === stop) {
+          stop();
+          this.stopScroll = undefined;
+        }
+      });
     });
   }
 
@@ -139,14 +154,9 @@ export class NativePopoverComponent implements OnDestroy {
     this.previousFocus = active instanceof HTMLElement && active !== anchor.ownerDocument.body
       ? active
       : anchor.querySelector<HTMLElement>('button, a[href], [tabindex]') ?? anchor;
-    // The trigger stays in the owning composer. The positioned anchor may be
-    // an external element; scroll follows that element.
+    // Keep ownership tied to the trigger in the composer.
     this.owned?.unregister();
     this.owned = registerOwnedOverlay(trigger);
-    this.stopScroll?.();
-    this.stopScroll = watchAncestorScroll(anchor, () => {
-      this.overlay()?.overlayRef?.updatePosition();
-    });
     afterNextRender(() => {
       const panel = this.panel()?.nativeElement;
       if (!this.isOpen() || !panel?.isConnected) return;
