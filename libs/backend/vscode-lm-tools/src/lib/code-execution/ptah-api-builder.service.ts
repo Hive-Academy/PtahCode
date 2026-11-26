@@ -185,9 +185,11 @@ import {
 const SDK_SESSION_LIFECYCLE_MANAGER = Symbol.for('SdkSessionLifecycleManager');
 /** Canonical token is SDK_TOKENS.CODEX_CHAT_ADAPTER; kept local to avoid a cycle. */
 const CODEX_CHAT_ADAPTER = Symbol.for('CodexChatAdapter');
+/** Canonical token is SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER; kept local to avoid a cycle. */
+const PROVIDER_SESSION_CHAT_ADAPTER = Symbol.for('ProviderSessionChatAdapter');
 
-/** The part of the native Codex chat adapter this builder reads. */
-interface CodexChatSessionReader {
+/** The read-only session lookup used by native chat adapters. */
+interface NativeChatSessionReader {
   getPermissionLevel(
     sessionId: string,
   ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
@@ -592,7 +594,7 @@ export class PtahAPIBuilder {
      * hosts without it keep SDK-only behavior.
      */
     @inject(CODEX_CHAT_ADAPTER, { isOptional: true })
-    private readonly codexChatSessions?: CodexChatSessionReader | null,
+    private readonly codexChatSessions?: NativeChatSessionReader | null,
 
     @inject(TASK_END_DETECTOR_TOKEN, { isOptional: true })
     private readonly taskEndDetector?: {
@@ -618,6 +620,13 @@ export class PtahAPIBuilder {
     },
     @inject(TASK_END_CLOSE_OUT_SERVICE_TOKEN, { isOptional: true })
     private readonly taskCloseOutService?: TaskCloseOutServiceLike,
+    /**
+     * Native provider-session chat adapter (e.g. Antigravity), read through the
+     * same narrow port as `codexChatSessions`. Optional and last so existing
+     * positional constructor calls keep compiling.
+     */
+    @inject(PROVIDER_SESSION_CHAT_ADAPTER, { isOptional: true })
+    private readonly providerSessionChatSessions?: NativeChatSessionReader | null,
   ) {
     diagnosticsCacheInvalidator.start();
     this.logger.info('PtahAPIBuilder initialized with 23 namespaces');
@@ -787,10 +796,10 @@ export class PtahAPIBuilder {
                 this.sdkSessionLifecycleManager?.find(tabIdOrSessionId);
               return (
                 rec?.realSessionId ??
-                this.resolveCodexCallerId(tabIdOrSessionId)
+                this.resolveNativeCallerId(tabIdOrSessionId)
               );
             } catch {
-              return this.resolveCodexCallerId(tabIdOrSessionId);
+              return this.resolveNativeCallerId(tabIdOrSessionId);
             }
           },
           getParentLevel: (tabIdOrSessionId: string) =>
@@ -798,6 +807,7 @@ export class PtahAPIBuilder {
               tabIdOrSessionId,
               this.sdkSessionLifecycleManager,
               this.codexChatSessions ?? undefined,
+              this.providerSessionChatSessions ?? undefined,
             ),
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
@@ -1245,15 +1255,22 @@ export class PtahAPIBuilder {
    */
   private resolveChildSessionCallerId(): string | undefined {
     const raw = getCallerSessionId();
-    return raw ? this.resolveCodexCallerId(raw) : raw;
+    return raw ? this.resolveNativeCallerId(raw) : raw;
   }
 
-  private resolveCodexCallerId(raw: string): string {
+  private resolveNativeCallerId(raw: string): string {
     try {
-      return this.codexChatSessions?.resolveLiveSessionId?.(raw) ?? raw;
+      return (
+        this.codexChatSessions?.resolveLiveSessionId?.(raw) ??
+        this.providerSessionChatSessions?.resolveLiveSessionId?.(raw) ??
+        raw
+      );
     } catch (error: unknown) {
       // degradation-audit: reported - preserve the transport-bound caller when lookup fails.
-      this.logger.debug('[PtahAPIBuilder] Codex caller lookup failed', error);
+      this.logger.debug(
+        '[PtahAPIBuilder] Native chat caller lookup failed',
+        error,
+      );
       return raw;
     }
   }
@@ -1263,11 +1280,11 @@ export class PtahAPIBuilder {
    * context carries the caller's tab id (or its session id). Only a proved
    * session id is returned, so a tab id never reaches a recorder: the
    * lifecycle manager's SDK `realSessionId` first, else the id of a live
-   * native Codex chat session that owns the caller (Codex sessions are not
-   * in the SDK lifecycle manager). A caller that does not resolve (unknown
-   * tab, SDK id not assigned yet, no lifecycle manager and no Codex adapter,
-   * a lookup that throws) yields `undefined` and is logged. Never throws:
-   * callers treat an unresolved caller as unattributed.
+   * native Codex or provider chat session that owns the caller (native
+   * sessions are not in the SDK lifecycle manager). A caller that does not
+   * resolve (unknown tab, SDK id not assigned yet, no lifecycle manager and no
+   * native adapter, a lookup that throws) yields `undefined` and is logged.
+   * Never throws: callers treat an unresolved caller as unattributed.
    */
   private resolveCallerSdkSessionId(): string | undefined {
     const callerId = getCallerSessionId();
@@ -1279,6 +1296,7 @@ export class PtahAPIBuilder {
       realSessionId =
         this.sdkSessionLifecycleManager?.find(callerId)?.realSessionId ??
         this.codexChatSessions?.resolveLiveSessionId?.(callerId) ??
+        this.providerSessionChatSessions?.resolveLiveSessionId?.(callerId) ??
         undefined;
     } catch (error: unknown) {
       // degradation-audit: reported - the lookup error is debug-logged below,
