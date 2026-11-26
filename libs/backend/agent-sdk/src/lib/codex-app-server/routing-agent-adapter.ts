@@ -2,6 +2,7 @@ import {
   getProviderSessionProfile,
   type AgentModelInfo,
   type IAgentAdapter,
+  type PermissionLevel,
   type RuntimeHostCapabilities,
   type SessionId,
 } from '@ptah-extension/shared';
@@ -39,6 +40,8 @@ export interface NativeChatAdapter extends IAgentAdapter {
   owns(sessionId: SessionId): boolean;
   /** Resolves a live native thread; returns undefined for an opening tab. */
   resolveLiveSessionId?(callerId: string): SessionId | undefined;
+  /** Reads the effective level for a resolved session ID. */
+  getPermissionLevel?(sessionId: string): PermissionLevel | undefined;
   listSessionModels(sessionId: SessionId): Promise<readonly AgentModelInfo[]>;
 }
 
@@ -236,6 +239,13 @@ export class RoutingAgentAdapter implements IAgentAdapter {
       if (resolved === callerId) return resolved;
     }
     return undefined;
+  }
+  /** Reads the effective level for a resolved session ID. */
+  getPermissionLevel(sessionId: string): PermissionLevel | undefined {
+    return (
+      this.native?.getPermissionLevel?.(sessionId) ??
+      this.providerSessions?.getPermissionLevel?.(sessionId)
+    );
   }
   getSessionToken(
     ...args: Parameters<IAgentAdapter['getSessionToken']>

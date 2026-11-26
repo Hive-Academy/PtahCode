@@ -59,6 +59,7 @@ import {
   normalizeAuthMethod,
   isDirectAnthropic,
   type AuthEnv,
+  type PermissionLevel,
   type SessionId,
   type SessionRuntimeControls,
 } from '@ptah-extension/shared';
@@ -132,6 +133,10 @@ export class ConfigRpcHandlers {
     private readonly scopeResolver: WorkspaceScopeResolver | null = null,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV, { isOptional: true })
     private readonly authEnv: AuthEnv | null = null,
+    @inject(SDK_TOKENS.ROUTING_AGENT_ADAPTER, { isOptional: true })
+    private readonly nativePermissions: {
+      getPermissionLevel(id: string): PermissionLevel | undefined;
+    } | null = null,
   ) {}
 
   /**
@@ -238,11 +243,21 @@ export class ConfigRpcHandlers {
         if (sessionId && this.runtimeControls) {
           await this.runtimeControls.setModel(sessionId, model, { applyTo });
         } else {
-          const previous = sessionId ? this.lifecycle?.find(sessionId)?.currentModel : undefined;
+          const previous = sessionId
+            ? this.lifecycle?.find(sessionId)?.currentModel
+            : undefined;
           await this.saveFallback(
-            () => sessionId ? configRuntimeControls(null, this.sdkAdapter).setModel(sessionId, model) : Promise.resolve(false),
+            () =>
+              sessionId
+                ? configRuntimeControls(null, this.sdkAdapter).setModel(
+                    sessionId,
+                    model,
+                  )
+                : Promise.resolve(false),
             () => this.modelSettings.selectedModel.set(model, applyTo),
-            sessionId && previous !== undefined ? () => this.sdkAdapter.setSessionModel(sessionId, previous) : undefined,
+            sessionId && previous !== undefined
+              ? () => this.sdkAdapter.setSessionModel(sessionId, previous)
+              : undefined,
           );
         }
 
@@ -381,33 +396,68 @@ export class ConfigRpcHandlers {
         const effectiveLevel = enabled ? permissionLevel : 'ask';
         const targetSessionId = this.autopilotTargetSession(sessionId);
         if (targetSessionId && this.runtimeControls) {
-          await this.runtimeControls.setPermission(targetSessionId, effectiveLevel, {
-            applyTo: 'global',
-            autopilot: { enabled, permissionLevel },
-          });
+          await this.runtimeControls.setPermission(
+            targetSessionId,
+            effectiveLevel,
+            {
+              applyTo: 'global',
+              autopilot: { enabled, permissionLevel },
+            },
+          );
         } else {
-          const previousLive = targetSessionId ? this.lifecycle?.find(targetSessionId)?.permissionLevel : undefined;
-          const previousEnabled = this.configManager.getWithDefault<boolean>('autopilot.enabled', false);
-          const previousLevel = this.configManager.getWithDefault<string>('autopilot.permissionLevel', 'ask');
+          const previousLive = targetSessionId
+            ? this.lifecycle?.find(targetSessionId)?.permissionLevel
+            : undefined;
+          const previousEnabled = this.configManager.getWithDefault<boolean>(
+            'autopilot.enabled',
+            false,
+          );
+          const previousLevel = this.configManager.getWithDefault<string>(
+            'autopilot.permissionLevel',
+            'ask',
+          );
           await this.saveFallback(
-            () => targetSessionId ? configRuntimeControls(null, this.sdkAdapter).setPermission(targetSessionId, effectiveLevel) : Promise.resolve(false),
+            () =>
+              targetSessionId
+                ? configRuntimeControls(null, this.sdkAdapter).setPermission(
+                    targetSessionId,
+                    effectiveLevel,
+                  )
+                : Promise.resolve(false),
             async () => {
               try {
                 await this.configManager.set('autopilot.enabled', enabled);
-                await this.configManager.set('autopilot.permissionLevel', permissionLevel);
+                await this.configManager.set(
+                  'autopilot.permissionLevel',
+                  permissionLevel,
+                );
               } catch (error) {
                 const restores = await Promise.allSettled([
                   this.configManager.set('autopilot.enabled', previousEnabled),
-                  this.configManager.set('autopilot.permissionLevel', previousLevel),
+                  this.configManager.set(
+                    'autopilot.permissionLevel',
+                    previousLevel,
+                  ),
                 ]);
                 for (const restore of restores) {
                   if (restore.status === 'rejected')
-                    this.logger.error('Permission settings restore failed', restore.reason instanceof Error ? restore.reason : new Error(String(restore.reason)));
+                    this.logger.error(
+                      'Permission settings restore failed',
+                      restore.reason instanceof Error
+                        ? restore.reason
+                        : new Error(String(restore.reason)),
+                    );
                 }
                 throw error;
               }
             },
-            targetSessionId && previousLive !== undefined ? () => this.sdkAdapter.setSessionPermissionLevel(targetSessionId, previousLive) : undefined,
+            targetSessionId && previousLive !== undefined
+              ? () =>
+                  this.sdkAdapter.setSessionPermissionLevel(
+                    targetSessionId,
+                    previousLive,
+                  )
+              : undefined,
           );
         }
         this.permissionHandler.setPermissionLevel(effectiveLevel);
@@ -480,10 +530,11 @@ export class ConfigRpcHandlers {
 
         const sessionId = params?.sessionId;
         if (!sessionId) return { enabled, permissionLevel };
-        // No record → the session is not live; it starts at the saved
-        // default when it resumes.
+        // Native sessions are tracked by their adapters outside the SDK lifecycle.
         const sessionPermissionLevel =
-          this.lifecycle?.find(sessionId)?.permissionLevel ?? null;
+          this.lifecycle?.find(sessionId)?.permissionLevel ??
+          this.nativePermissions?.getPermissionLevel(sessionId) ??
+          null;
         return { enabled, permissionLevel, sessionPermissionLevel };
       } catch (error) {
         this.logger.error(
@@ -721,10 +772,7 @@ export class ConfigRpcHandlers {
       workspacePath,
       providerId: pinned.providerId,
       savedModel,
-      resolvedSavedModel: this.modelResolver.resolve(
-        savedModel,
-        resolutionEnv,
-      ),
+      resolvedSavedModel: this.modelResolver.resolve(savedModel, resolutionEnv),
       cachedModelIds: cached ? cached.slice() : null,
       tierOverrides,
       subscriptionCovered:
@@ -772,8 +820,7 @@ export class ConfigRpcHandlers {
       workspacePath,
       true,
     );
-    const savedModel =
-      savedRaw && savedRaw.length > 0 ? savedRaw : 'default';
+    const savedModel = savedRaw && savedRaw.length > 0 ? savedRaw : 'default';
     return { providerId, savedModel };
   }
 
@@ -880,10 +927,17 @@ export class ConfigRpcHandlers {
           try {
             await rollback();
           } catch (restoreError) {
-            this.logger.error('Live setting restore failed', restoreError instanceof Error ? restoreError : new Error(String(restoreError)));
+            this.logger.error(
+              'Live setting restore failed',
+              restoreError instanceof Error
+                ? restoreError
+                : new Error(String(restoreError)),
+            );
           }
         } else {
-          this.logger.warn('Cannot restore live setting: previous session value unavailable');
+          this.logger.warn(
+            'Cannot restore live setting: previous session value unavailable',
+          );
         }
       }
       throw error;
@@ -909,7 +963,13 @@ export class ConfigRpcHandlers {
         } else {
           // SessionControl does not track live effort; config.effort is only the launch value.
           await this.saveFallback(
-            () => sessionId ? configRuntimeControls(null, this.sdkAdapter).setEffort(sessionId, effort) : Promise.resolve(false),
+            () =>
+              sessionId
+                ? configRuntimeControls(null, this.sdkAdapter).setEffort(
+                    sessionId,
+                    effort,
+                  )
+                : Promise.resolve(false),
             () => this.reasoningSettings.effort.set(effort || '', applyTo),
           );
         }

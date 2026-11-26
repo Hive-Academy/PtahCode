@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { ProviderSession } from '@ptah-extension/provider-session-contracts';
-import type {
-  AgentSessionResumeConfig,
-  AgentSessionStartConfig,
-  SessionId,
+import {
+  isPermissionLevel,
+  type AgentSessionResumeConfig,
+  type AgentSessionStartConfig,
+  type SessionId,
 } from '@ptah-extension/shared';
 import type { SessionApprovalRouter } from '../codex-app-server/session-approval-router';
 import { ProviderSessionApprovalSink } from './provider-session-approval-sink';
@@ -47,6 +48,9 @@ export function createProviderSessionChatSession(
     approvals.router,
     approvals.presentation,
   );
+  const permission = isPermissionLevel(config.permissionLevel)
+    ? config.permissionLevel
+    : undefined;
   const session: ProviderSessionChatSession = {
     id,
     token: randomUUID(),
@@ -58,7 +62,7 @@ export function createProviderSessionChatSession(
     ...(title ? { title } : {}),
     nativeSessionId: prepared.resume?.nativeSessionId ?? '',
     contextId: '',
-    settings: {},
+    settings: permission ? { permission } : {},
     busy: false,
     pendingInterrupt: false,
     stopRequested: false,
