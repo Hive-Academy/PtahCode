@@ -3707,6 +3707,9 @@ export class ChatSessionService {
   ): Promise<void> {
     if (!this.sdkAdapter.isSessionActive(sessionId)) return;
     if (this.hasLiveSessionStream(sessionId, tabId)) return;
+    const metadata = await this.sessionMetadataStore.get(sessionId);
+    // Codex opens a stream per turn. Between turns the thread stays live.
+    if (metadata?.codexExecution?.runtime === 'codex-app-server') return;
 
     this.logger.warn(
       '[RPC] Session is registered but has no attached stream — ending the dead record before the slash command',

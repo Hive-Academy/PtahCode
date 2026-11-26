@@ -263,35 +263,17 @@ describe('native slash runtime routing', () => {
     );
   });
 
-  it('prepares slash relaunch before calling the routing adapter', async () => {
-    const h = harness(native, 'review');
-    h.executeSlashCommand.mockImplementation(async () => {
-      expect(h.prepare).toHaveBeenCalledTimes(1);
-      expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
-      return [];
-    });
-    await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-    expect(h.executeSlashCommand).toHaveBeenCalledWith(
+  it.each(['model', 'status', 'example:skill'])('refuses /%s before launching a Codex turn', async (command) => {
+    const h = harness(native, command);
+    await expect(h.route()).resolves.toEqual({
+      success: false,
       sessionId,
-      '/review',
-      expect.objectContaining({
-        sessionConfig: expect.objectContaining({ model: 'gpt-5.4' }),
-      }),
-    );
-    expect(h.resolveProviderProfileForWorkspace).not.toHaveBeenCalled();
-    expect(h.publishRuntimeNotices).toHaveBeenCalledTimes(1);
-  });
-
-  it('attaches the slash stream and succeeds when the model notice rejects', async () => {
-    const h = harness(native, 'review');
-    h.publishRuntimeNotices.mockRejectedValue(new Error('private broadcast detail'));
-    await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-    expect(h.service['streamBroadcaster'].streamEventsToWebview).toHaveBeenCalledWith(
-      sessionId, await h.executeSlashCommand.mock.results[0].value, 'tab',
-    );
-    expect(h.service['logger'].warn).toHaveBeenCalledWith(
-      '[RPC] Model substitution notice failed; continuing session stream',
-    );
+      errorCode: 'CODEX_UNSUPPORTED_OPTION',
+      error: `Codex app-server does not support /${command} in Ptah chat.`,
+    });
+    expect(h.executeSlashCommand).not.toHaveBeenCalled();
+    expect(h.compact).not.toHaveBeenCalled();
+    expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
   });
 
   it('coalesces a claim acquired while preparation is pending', async () => {
@@ -352,13 +334,6 @@ describe('native slash runtime routing', () => {
     await expect(h.route()).rejects.toBe(refusal);
     expect(h.admitManualCompact).toHaveBeenCalledTimes(1);
     expect(h.releaseManualReservation).toHaveBeenCalledWith(sessionId, 'reservation');
-  });
-
-  it('does not publish when a slash relaunch is rejected as busy', async () => {
-    const h = harness(native, 'review');
-    h.executeSlashCommand.mockRejectedValue(new Error('busy'));
-    await expect(h.route()).resolves.toMatchObject({ success: false, error: 'busy' });
-    expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
   });
 
   it('uses an explicit Claude identity when the metadata service is absent', async () => {

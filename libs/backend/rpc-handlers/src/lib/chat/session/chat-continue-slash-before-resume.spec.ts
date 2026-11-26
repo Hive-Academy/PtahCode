@@ -72,6 +72,7 @@ import type {
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import type { ModelSettings } from '@ptah-extension/settings-core';
+import type { StreamlessFollowUpAdmission } from '@ptah-extension/agent-sdk';
 
 import { createMockModelSettings } from '../../../test-utils/mock-settings';
 import { ChatSessionService } from './chat-session.service';
@@ -126,7 +127,11 @@ const DEAD_RECORD: SessionState = { registered: true, streaming: false };
 function makeHarness(
   opts: SessionState,
   autopilot = false,
-  session?: { metadata: Record<string, unknown>; folders?: string[] },
+  session?: {
+    metadata: Record<string, unknown>;
+    folders?: string[];
+    sessionRuntimeRouter?: StreamlessFollowUpAdmission;
+  },
 ): Harness {
   const noop = jest.fn();
   const logger = createMockLogger();
@@ -275,7 +280,7 @@ function makeHarness(
     undefined,
     undefined,
     undefined,
-    undefined,
+    session?.sessionRuntimeRouter,
     undefined,
     undefined,
     createFakeDriverLockCoordinator(),
@@ -520,6 +525,39 @@ describe('chat:continue — active session (unchanged)', () => {
  * down a second time, concurrently.
  */
 describe('chat:continue — dead record (registered, not streaming)', () => {
+  it('keeps a streamless Codex thread live when routing a slash command', async () => {
+    const h = makeHarness(DEAD_RECORD, false, {
+      metadata: { codexExecution: { runtime: 'codex-app-server' } },
+    });
+
+    await expect(h.service.continueSession(params('/compact'))).resolves.toEqual({
+      success: true,
+      sessionId: SESSION_ID,
+    });
+    expect(h.routeFollowUpSlashCommand).toHaveBeenCalledTimes(1);
+    expect(h.interruptSession).not.toHaveBeenCalled();
+    expect(h.resumeSession).not.toHaveBeenCalled();
+  });
+
+  it('routes /compact without tearing down a busy native thread that refuses streamless admission', async () => {
+    const acceptsFollowUpWithoutStream = jest.fn(() => false);
+    const h = makeHarness(DEAD_RECORD, false, {
+      metadata: { codexExecution: { runtime: 'codex-app-server' } },
+      sessionRuntimeRouter: { acceptsFollowUpWithoutStream },
+    });
+    const refusal = { success: false, sessionId: SESSION_ID, errorCode: 'CODEX_BUSY' };
+    h.routeFollowUpSlashCommand.mockImplementation(async () => {
+      expect(h.interruptSession).not.toHaveBeenCalled();
+      return refusal;
+    });
+
+    await expect(h.service.continueSession(params('/compact'))).resolves.toEqual(refusal);
+    expect(acceptsFollowUpWithoutStream).toHaveBeenCalledWith(SESSION_ID);
+    expect(h.routeFollowUpSlashCommand).toHaveBeenCalledTimes(1);
+    expect(h.endSession).not.toHaveBeenCalled();
+    expect(h.resumeSession).not.toHaveBeenCalled();
+  });
+
   it('slash command: ends the corpse via the AWAITED teardown, then routes — no resume', async () => {
     const h = makeHarness(DEAD_RECORD);
 

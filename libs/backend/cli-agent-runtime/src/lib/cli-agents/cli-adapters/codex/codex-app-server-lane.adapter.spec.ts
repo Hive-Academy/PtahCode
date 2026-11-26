@@ -691,6 +691,21 @@ describe('CodexAppServerLaneAdapter', () => {
     resumed.abort.abort();
   });
 
+  it('compacts a resumed thread without starting an assistant turn', async () => {
+    const h = harness();
+    const first = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await first.done;
+
+    const resumed = await h.createAdapter().runSdk(
+      options({ resumeSessionId: 'thread-1', task: '/compact' }),
+    );
+    await expect(resumed.done).resolves.toBe(0);
+    expect(h.context.inputs).toHaveLength(0);
+    expect(resumed.supportsContinuation?.()).toBe(true);
+    resumed.abort.abort();
+  });
+
   it('closes a completed writer once before another adapter opens its thread', async () => {
     const h = harness();
     const first = await h.adapter.runSdk(options());
@@ -1788,6 +1803,7 @@ describe('CodexAppServerLaneAdapter', () => {
       ],
       efforts: ['low', 'high', 'xhigh', 'bogus'],
       unsendableEfforts: ['bogus'],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(opened + 1);
   });
@@ -1802,6 +1818,7 @@ describe('CodexAppServerLaneAdapter', () => {
     await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
       models: [{ id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)', isDefault: true }],
       efforts: [],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     jest.mocked(h.runtime.openCatalog).mockRejectedValueOnce(new Error('catalog failed'));
     await expect(h.adapter.stoppedLaneCatalog()).rejects.toThrow('catalog failed');
@@ -1827,7 +1844,7 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
       effort: { state: 'supported', appliesAt: 'next-turn' },
       images: { state: 'supported', onSteer: true },
       files: { state: 'supported', delivery: 'reference' },
-      commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
+      commands: { state: 'supported' },
       skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
     });
     expect(manifest.usage).toEqual({ timing: 'live' });
@@ -1855,6 +1872,33 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     expect(h.context.inputs.at(-1)?.text).toContain('after interrupt');
     await terminal(h.context, 'turn-2');
     expect(await next?.done).toBe(0);
+    handle.abort.abort();
+  });
+
+  it('compacts an idle thread without sending a turn and keeps it available for follow-ups', async () => {
+    const h = harness();
+    const handle = await started(h);
+    const compact = jest.spyOn(h.context, 'compact');
+    await expect(handle.continue?.('/compact')).rejects.toThrow(
+      'Codex lane turn is already active',
+    );
+    expect(compact).not.toHaveBeenCalled();
+    await terminal(h.context);
+    await handle.done;
+
+    compact.mockRejectedValueOnce(new Error('Compaction unavailable'));
+    const failed = await handle.continue?.('/compact');
+    await expect(failed?.done).rejects.toThrow('Compaction unavailable');
+    const completed = await handle.continue?.(' /COMPACT');
+    await expect(completed?.done).resolves.toBe(0);
+    expect(compact).toHaveBeenCalledTimes(2);
+    expect(h.context.inputs).toHaveLength(1);
+    expect(h.context.close).not.toHaveBeenCalled();
+
+    const next = await handle.continue?.('/example:skill');
+    expect(h.context.inputs.at(-1)?.text).toContain('/example:skill');
+    await terminal(h.context, 'turn-2');
+    await expect(next?.done).resolves.toBe(0);
     handle.abort.abort();
   });
 
@@ -1925,7 +1969,7 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
       models: [{ id: 'gpt-x', name: 'GPT X (Codex default)' }],
       efforts: ['low', 'high', 'none'],
       unsendableEfforts: ['none'],
-      commands: [],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     h.context.models = [{ id: 'k2', model: 'gpt-y', displayName: 'GPT Y', isDefault: false }];
     await expect(handle.listTurnOptions?.()).resolves.toMatchObject({

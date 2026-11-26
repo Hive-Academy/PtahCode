@@ -46,6 +46,7 @@ import {
   renderRoleBlock,
   stripAnsiCodes,
 } from '../cli-adapter.utils';
+import { leadingLaneCommand } from '../lane-command-filter';
 import {
   buildCodexLaneProfileSettings,
   CODEX_LANE_PTAH_AUTH_REFERENCE,
@@ -163,6 +164,10 @@ export class CodexLaneWriterCloseError extends Error {
   }
 }
 
+const CODEX_LANE_COMMANDS: LaneTurnOptionsCatalog['commands'] = [
+  { name: 'compact', group: 'command', description: 'Compact the conversation' },
+];
+
 /** Native lane consumer. The legacy SDK adapter remains a separate selectable adapter. */
 export class CodexAppServerLaneAdapter implements CliAdapter {
   readonly name = 'codex' as const;
@@ -220,7 +225,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         // `turn/steer` carries the same input items as `turn/start` (A6).
         images: { state: 'supported', onSteer: true },
         files: { state: 'supported', delivery: 'reference' },
-        commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
+        commands: { state: 'supported' },
         skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
       },
       usage: { timing: 'live' },
@@ -301,6 +306,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       return {
         models: codexLaneModels(catalog),
         efforts,
+        commands: CODEX_LANE_COMMANDS,
         ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
       };
     } catch (error: unknown) {
@@ -423,6 +429,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     let active: ActiveTurn | undefined;
     // True from runTurn until startTurn settles, so a second turn cannot race the first.
     let starting = false;
+    let compacting = false;
     let initialTurnPending = false;
     let closed = false;
     let closePromise: Promise<boolean> | undefined;
@@ -515,7 +522,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       return closePromise;
     };
     const writer: LiveLaneWriter = {
-      isBusy: () => initialTurnPending || starting || active !== undefined,
+      isBusy: () => initialTurnPending || starting || compacting || active !== undefined,
       close,
     };
     abort.signal.addEventListener(
@@ -724,7 +731,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       )
         return;
       if (!active) {
-        pending.push(event);
+        if (!compacting) pending.push(event);
         return;
       }
       const modelMessage =
@@ -887,6 +894,17 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         void start();
       });
     };
+    const isCompactCommand = (message: string): boolean =>
+      leadingLaneCommand(message)?.toLowerCase() === 'compact';
+    const runCompact = async (): Promise<number> => {
+      compacting = true;
+      try {
+        await opened.compact();
+        return 0;
+      } finally {
+        compacting = false;
+      }
+    };
     const prompt = buildTaskPrompt(
       {
         ...options,
@@ -897,7 +915,10 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       this.name,
     );
     initialTurnPending = false;
-    const done = runTurn(prompt).then(async (code) => {
+    const initial = resume && isCompactCommand(options.task)
+      ? runCompact()
+      : runTurn(prompt);
+    const done = initial.then(async (code) => {
       // Model listing shares the live context's command queue. Read after the
       // first turn so catalog discovery cannot delay an in-flight steer or interrupt.
       const source = context;
@@ -966,7 +987,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
-        commands: [],
+      commands: CODEX_LANE_COMMANDS,
       };
     };
     return {
@@ -1034,8 +1055,10 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       },
       continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> => {
         if (closed) return Promise.reject(new Error('Codex lane is closed'));
-        if (active || starting)
+        if (active || starting || compacting)
           return Promise.reject(new Error('Codex lane turn is already active'));
+        if (isCompactCommand(message))
+          return Promise.resolve({ done: runCompact() });
         const role =
           CODEX_RESUME_RESENDS_ROLE && options.role
             ? `${renderRoleBlock(options.role, this.name)}\n\n`

@@ -10,7 +10,7 @@ import { LaneMessagePolicy, type VerifiedLaneSender } from './lane-message.polic
 import { harness, idOf, manifest } from './__fixtures__/agent-message-harness';
 import { AgentMessageAttachmentCapacityError, AgentMessageAttachmentStore } from './agent-message-attachment.store';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
-import type { SdkHandle } from '../cli-adapters/cli-adapter.interface';
+import type { CliAdapter, SdkHandle } from '../cli-adapters/cli-adapter.interface';
 
 const WS = 'ws-key-1';
 
@@ -413,6 +413,28 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
       efforts: [], unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
     });
+  });
+
+  it('sends /compact raw on a cold Codex resume without a cached catalog', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'codex', displayName: 'Codex', status: 'stopped' });
+    const stoppedLaneCatalog: NonNullable<CliAdapter['stoppedLaneCatalog']> = async () => ({
+      models: [],
+      efforts: [],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
+    });
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog });
+
+    await coordinator.send({ agentId: h.agentId, message: '/compact' }, user);
+
+    expect(h.resume.resume).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: h.agentId }),
+      '/compact',
+      expect.objectContaining({ rawBody: '/compact' }),
+      undefined,
+    );
+    expect(h.sendToAgent).not.toHaveBeenCalled();
   });
 
   it('reports an error, not an empty catalog, when a stopped Codex catalog read fails (S1)', async () => {

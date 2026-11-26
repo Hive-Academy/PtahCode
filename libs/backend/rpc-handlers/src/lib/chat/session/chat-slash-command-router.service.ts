@@ -400,23 +400,26 @@ export class ChatSlashCommandRouterService {
           }
         }
         if (execution.runtime === 'codex-app-server') {
-          if (interceptResult.commandName === 'compact') {
-            if (!this.runtimeControls) {
-              throw new Error(
-                'Native session runtime controls are unavailable.',
-              );
-            }
-            if (!this.sdkAdapter.isSessionActive(sessionId)) {
-              // A failed Stop closes the context. Reopen the stored thread
-              // without starting an assistant turn before native compaction.
-              await this.sdkAdapter.resumeSession(sessionId, {
-                ...config,
-                prompt: '',
-              });
-            }
-            await this.runtimeControls.compact(sessionId);
-            return { success: true, sessionId, settled: true };
+          if (interceptResult.commandName !== 'compact') {
+            return {
+              success: false,
+              sessionId,
+              errorCode: 'CODEX_UNSUPPORTED_OPTION',
+              error: `Codex app-server does not support /${interceptResult.commandName} in Ptah chat.`,
+            };
           }
+          if (!this.runtimeControls) {
+            throw new Error('Native session runtime controls are unavailable.');
+          }
+          if (!this.sdkAdapter.isSessionActive(sessionId)) {
+            // Reopen a closed thread without starting an assistant turn.
+            await this.sdkAdapter.resumeSession(sessionId, {
+              ...config,
+              prompt: '',
+            });
+          }
+          await this.runtimeControls.compact(sessionId);
+          return { success: true, sessionId, settled: true };
         }
         const stream = await this.sdkAdapter.executeSlashCommand(
           sessionId,
@@ -457,16 +460,6 @@ export class ChatSlashCommandRouterService {
               : {}),
           },
         );
-        if (execution.runtime === 'codex-app-server') {
-          try {
-            await this.runtimeProfile?.publishRuntimeNotices(execution, {
-              tabId,
-              sessionId,
-            });
-          } catch {
-            this.logger.warn('[RPC] Model substitution notice failed; continuing session stream');
-          }
-        }
         this.streamBroadcaster.streamEventsToWebview(sessionId, stream, tabId);
 
         return { success: true, sessionId };

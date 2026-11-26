@@ -14,7 +14,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessManager } from '../agent-process-manager.service';
 import { AgentMessageError } from '../agent-message-router.service';
 import type { CliDetectionService } from '../cli-detection.service';
-import type { LaneTurnOptionsCatalog, SdkHandle } from '../cli-adapters/cli-adapter.interface';
+import type { LaneTurnOptionsCatalog, SdkHandle, StoppedLaneCatalog } from '../cli-adapters/cli-adapter.interface';
 import { filterLaneCommands } from '../cli-adapters/lane-command-filter';
 import { turnInputRefusal, type TurnInputRefusal } from './agent-delivery-planner';
 import {
@@ -129,17 +129,19 @@ const DELIVERABLE = new Set<AgentMessageEnvelope['state']>(['not-started', 'bloc
  */
 function stoppedLaneView(
   current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
-  { models, efforts, unsendableEfforts }: Pick<LaneTurnOptionsCatalog, 'models' | 'efforts' | 'unsendableEfforts'>,
+  { models, efforts, unsendableEfforts, commands = [] }: Omit<LaneTurnOptionsCatalog, 'commands'> & Pick<StoppedLaneCatalog, 'commands'>,
   effortsFixedByModel = false,
 ): LaneTurnOptionsView {
   return {
-    ...current, models, efforts: [...efforts], commands: [],
+    ...current, models, efforts: [...efforts], commands,
     ...(unsendableEfforts ? { unsendableEfforts } : {}),
-    unavailableReason: efforts.length > 0
-      ? 'Commands and skills appear when the lane is running.'
-      : effortsFixedByModel
-        ? 'This model sets its own effort level. Commands and skills appear when the lane is running.'
-        : 'Effort levels, commands and skills appear when the lane is running.',
+    unavailableReason: commands.length > 0
+      ? 'Additional options may appear when the lane is running.'
+      : efforts.length > 0
+        ? 'Commands and skills appear when the lane is running.'
+        : effortsFixedByModel
+          ? 'This model sets its own effort level. Commands and skills appear when the lane is running.'
+          : 'Effort levels, commands and skills appear when the lane is running.',
   };
 }
 
@@ -558,9 +560,12 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         return served;
       }
       if (!cached && adapter?.stoppedLaneCatalog) {
-        // One live catalog read serves the models and the efforts (D4).
+        // One catalog read serves the stopped lane's composer and dispatch.
         const catalog = await bounded(adapter.stoppedLaneCatalog(), LANE_TURN_OPTIONS_TIMEOUT_MS);
-        return stoppedLaneView(current, catalog);
+        return stoppedLaneView(current, {
+          ...catalog,
+          commands: filterLaneCommands(catalog.commands ?? [], blocked),
+        });
       }
       const models = adapter?.listModels
         ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
@@ -592,12 +597,15 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * The command and skill names a lane advertises, or undefined when no list
    * is known. Runs inside the lineage's send queue, so the list the composer
    * last loaded is used when there is one; only a lineage with no cached list
-   * asks the live handle (bounded).
+   * asks the live handle or stopped-lane catalog (bounded).
    */
   private async advertisedCommands(laneId: AgentId, lineage: AgentId): Promise<readonly string[] | undefined> {
     const cached = this.catalogs.get(lineage);
     if (cached) return cached.commands.map((command) => command.name);
-    if (!this.liveHandle(laneId)?.listTurnOptions) return undefined;
+    if (!this.liveHandle(laneId)?.listTurnOptions) {
+      const info = this.deps.manager.findAgentInfo(laneId);
+      if (!info || !this.deps.detection.getAdapter(info.cli)?.stoppedLaneCatalog) return undefined;
+    }
     const view = await this.turnOptions(laneId);
     return view.error ? undefined : view.commands.map((command) => command.name);
   }

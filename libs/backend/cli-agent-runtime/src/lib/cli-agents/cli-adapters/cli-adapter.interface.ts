@@ -428,6 +428,7 @@ export interface StoppedLaneCatalog {
   readonly models: CliModelInfo[];
   readonly efforts: readonly string[];
   readonly unsendableEfforts?: readonly string[];
+  readonly commands?: LaneTurnOptionsCatalog['commands'];
 }
 
 export interface CliAdapter {
