@@ -71,10 +71,36 @@ function hasSkillDeprecationNotice(description: string): boolean {
   return !DEPRECATED_OTHER_NOUN.test(description);
 }
 
+function normalizeInstalls(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+function hasRealDescription(skill: SkillJudgeCandidate['skill']): boolean {
+  const trimmed = skill.description.trim();
+  return (
+    trimmed.length > 0 &&
+    trimmed !== `${skill.source} - ${skill.installs} installs`
+  );
+}
+
+export function compareJudgeCandidatesByInstallsDesc(
+  a: SkillJudgeCandidate,
+  b: SkillJudgeCandidate,
+): number {
+  return (
+    normalizeInstalls(b.skill.installs) - normalizeInstalls(a.skill.installs) ||
+    Number(hasRealDescription(b.skill)) - Number(hasRealDescription(a.skill)) ||
+    a.skill.skillId.localeCompare(b.skill.skillId) ||
+    a.skill.source.localeCompare(b.skill.source) ||
+    a.skill.name.localeCompare(b.skill.name) ||
+    a.candidateId.localeCompare(b.candidateId)
+  );
+}
+
 export function prepareItems(request: {
   items: readonly SkillJudgeInputItem[];
 }) {
-  const candidates = new Map<string, SkillJudgeCandidate>();
+  const rawCandidates = new Map<string, SkillJudgeCandidate>();
   const ambiguous = new Set<string>();
 
   for (const { candidates: skills } of request.items) {
@@ -82,12 +108,12 @@ export function prepareItems(request: {
       const selectionKey = `${skill.source}/${skill.skillId}`;
       const candidateId = selectionKey.toLowerCase();
       const deprecated = hasSkillDeprecationNotice(skill.description);
-      const existing = candidates.get(candidateId);
+      const existing = rawCandidates.get(candidateId);
       if (existing && existing.selectionKey !== selectionKey) {
         ambiguous.add(candidateId);
       }
       if (!existing || (deprecated && !existing.deprecated)) {
-        candidates.set(candidateId, {
+        rawCandidates.set(candidateId, {
           candidateId,
           selectionKey,
           skill,
@@ -97,6 +123,12 @@ export function prepareItems(request: {
     }
   }
 
+  const candidates = new Map<string, SkillJudgeCandidate>(
+    [...rawCandidates.values()]
+      .sort(compareJudgeCandidatesByInstallsDesc)
+      .map((candidate) => [candidate.candidateId, candidate]),
+  );
+
   const items: SkillJudgeItem[] = request.items.map(
     ({ candidates: skills, ...item }) => {
       const candidateIds = [
@@ -105,7 +137,12 @@ export function prepareItems(request: {
             `${skill.source}/${skill.skillId}`.toLowerCase(),
           ),
         ),
-      ];
+      ].sort((aId, bId) => {
+        const a = candidates.get(aId);
+        const b = candidates.get(bId);
+        if (!a || !b) return aId.localeCompare(bId);
+        return compareJudgeCandidatesByInstallsDesc(a, b);
+      });
       return {
         ...item,
         candidateIds,
@@ -426,7 +463,9 @@ export class SkillJudgeService {
       method,
       counts,
       items,
-      candidates: [...candidates.values()],
+      candidates: [...candidates.values()].sort(
+        compareJudgeCandidatesByInstallsDesc,
+      ),
       proposals,
       stages: [decision, normal],
     };
@@ -463,13 +502,9 @@ export class SkillJudgeService {
         .map(({ itemId }) => itemId),
     );
     if (result.status !== 'used') {
-      return stageRecord(
-        'decision',
-        result.status,
-        result.category,
-        result,
-        [...invalidIds],
-      );
+      return stageRecord('decision', result.status, result.category, result, [
+        ...invalidIds,
+      ]);
     }
 
     let itemsJudged = 0;

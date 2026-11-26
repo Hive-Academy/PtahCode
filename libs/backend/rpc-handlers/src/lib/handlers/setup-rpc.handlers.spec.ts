@@ -496,6 +496,40 @@ describe('SetupRpcHandlers', () => {
       );
     });
 
+    it('passes excludeRunId and excludeSlug to freshness when an analysis run is active', async () => {
+      const h = makeHarness();
+      const status = {
+        state: 'fresh',
+        reason: 'ok',
+        analysisDir: '/fake/workspace/.ptah/analysis/prev',
+        checkedAt: '2026-10-14T00:00:00.000Z',
+        analyzedAt: '2026-10-13T00:00:00.000Z',
+      };
+      const getStatus = jest.fn().mockResolvedValue(status);
+      const getActiveRun = jest.fn().mockReturnValue({
+        workspacePath: WORKSPACE,
+        runId: 'run-active-1',
+        slug: 'active-slug',
+        startedAt: '2026-10-14T00:05:00.000Z',
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
+        { getStatus },
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      expect(await call(h, 'wizard:analysis-status')).toBe(status);
+      expect(getActiveRun).toHaveBeenCalledWith(WORKSPACE);
+      expect(getStatus).toHaveBeenCalledWith(WORKSPACE, {
+        excludeRunId: 'run-active-1',
+        excludeSlug: 'active-slug',
+      });
+    });
+
     it('rejects non-object params before resolving the service', async () => {
       const h = makeHarness();
       h.handlers.register();
@@ -633,11 +667,16 @@ describe('SetupRpcHandlers', () => {
       const h = makeHarness({ workspaceFolders: [] });
       h.handlers.register();
 
-      const result = await call<{ analysis: unknown; generation: unknown }>(
-        h,
-        'wizard:get-resumable-run',
-      );
-      expect(result).toEqual({ analysis: null, generation: null });
+      const result = await call<{
+        analysis: unknown;
+        generation: unknown;
+        analysisActive?: boolean;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
       expect(h.container.resolve).not.toHaveBeenCalled();
     });
 
@@ -649,11 +688,16 @@ describe('SetupRpcHandlers', () => {
       );
       h.handlers.register();
 
-      const result = await call<{ analysis: unknown; generation: unknown }>(
-        h,
-        'wizard:get-resumable-run',
-      );
-      expect(result).toEqual({ analysis: null, generation: null });
+      const result = await call<{
+        analysis: unknown;
+        generation: unknown;
+        analysisActive?: boolean;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
     });
 
     it('does not offer a legacy v3 run for resume', async () => {
@@ -668,6 +712,7 @@ describe('SetupRpcHandlers', () => {
       expect(await call(h, 'wizard:get-resumable-run')).toEqual({
         analysis: null,
         generation: null,
+        analysisActive: false,
       });
       expect(storage.findLatestResumableRun).toHaveBeenCalledWith(WORKSPACE);
       expect(storage.readPhaseFile).not.toHaveBeenCalled();
@@ -760,6 +805,196 @@ describe('SetupRpcHandlers', () => {
 
       expect(result.analysis).toBeNull();
       expect(result.generation?.analysisDirectory).toBeNull();
+    });
+
+    it('reports analysisActive even when no manifest exists on disk yet', async () => {
+      const h = makeHarness();
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageWith(null),
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        {
+          getActiveRun: jest.fn().mockReturnValue({
+            workspacePath: WORKSPACE,
+            runId: 'run-live',
+            slug: null,
+            startedAt: '2026-10-14T01:00:00.000Z',
+          }),
+        },
+      );
+      h.handlers.register();
+
+      const result = await call(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: '2026-10-14T01:00:00.000Z',
+      });
+    });
+
+    it('reports analysisActive accurately alongside a discovered resumable run', async () => {
+      const h = makeHarness();
+      const getActiveRun = jest.fn().mockReturnValue({
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T02:00:00.000Z',
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageWith({
+          slugDir: '/fake/workspace/.ptah/analysis/acme',
+          manifest: V4_MANIFEST,
+          generation: null,
+        }),
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      const activeResult = await call<{
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(activeResult.analysisActive).toBe(true);
+      expect(activeResult.activeAnalysisStartedAt).toBe(
+        '2026-10-14T02:00:00.000Z',
+      );
+
+      getActiveRun.mockReturnValue(null);
+      const inactiveResult = await call<{
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(inactiveResult.analysisActive).toBe(false);
+      expect(inactiveResult.activeAnalysisStartedAt).toBeUndefined();
+    });
+
+    it('reports analysisActive: true when a run starts during the disk read (Race 1)', async () => {
+      const h = makeHarness();
+      let activeRun: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = null;
+      const getActiveRun = jest.fn(() => activeRun);
+      const runningManifest = { ...V4_MANIFEST, lifecycle: 'running' as const };
+      const storage = storageWith(null);
+      storage.findLatestResumableRun.mockImplementation(async () => {
+        activeRun = {
+          workspacePath: WORKSPACE,
+          runId: runningManifest.runId,
+          slug: runningManifest.slug,
+          startedAt: '2026-10-14T03:00:00.000Z',
+        };
+        return {
+          slugDir: '/fake/workspace/.ptah/analysis/acme',
+          manifest: runningManifest,
+          generation: null,
+        };
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storage,
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      const result = await call<{
+        analysis: { manifest: { lifecycle: string } } | null;
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result.analysis?.manifest.lifecycle).toBe('running');
+      expect(result.analysisActive).toBe(true);
+      expect(result.activeAnalysisStartedAt).toBe('2026-10-14T03:00:00.000Z');
+    });
+
+    it('reports analysisActive: false and re-queries when a run finishes during the disk read (Race 2)', async () => {
+      // Subcase A: run completes and disk already returns null.
+      const hNull = makeHarness();
+      let activeA: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = {
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T04:00:00.000Z',
+      };
+      const storageA = storageWith(null);
+      storageA.findLatestResumableRun.mockImplementation(async () => {
+        activeA = null;
+        return null;
+      });
+      hNull.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageA,
+      );
+      hNull.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun: jest.fn(() => activeA) },
+      );
+      hNull.handlers.register();
+
+      expect(await call(hNull, 'wizard:get-resumable-run')).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
+
+      // Subcase B: disk read saw stale `running` manifest just as run completed -> re-queries and returns inactive null.
+      const hStale = makeHarness();
+      let activeB: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = {
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T04:00:00.000Z',
+      };
+      const runningManifest = { ...V4_MANIFEST, lifecycle: 'running' as const };
+      const storageB = storageWith(null);
+      storageB.findLatestResumableRun
+        .mockImplementationOnce(async () => {
+          activeB = null;
+          return {
+            slugDir: '/fake/workspace/.ptah/analysis/acme',
+            manifest: runningManifest,
+            generation: null,
+          };
+        })
+        .mockResolvedValueOnce(null);
+      hStale.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageB,
+      );
+      hStale.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun: jest.fn(() => activeB) },
+      );
+      hStale.handlers.register();
+
+      expect(await call(hStale, 'wizard:get-resumable-run')).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
+      expect(storageB.findLatestResumableRun).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -993,6 +1228,42 @@ describe('SetupRpcHandlers', () => {
       );
       expect(result.analyses).toEqual(analyses);
     });
+
+    it('marks the active in-process analysis entry with isActive: true', async () => {
+      const h = makeHarness();
+      const analyses = [
+        { filename: 'prev-slug', analyzedAt: 1, lifecycle: 'completed' },
+        { filename: 'live-slug', analyzedAt: 2, lifecycle: 'running' },
+      ];
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        list: jest.fn().mockResolvedValue(analyses),
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        {
+          getActiveRun: jest.fn().mockReturnValue({
+            workspacePath: WORKSPACE,
+            runId: 'run-live',
+            slug: 'live-slug',
+            startedAt: '2026-10-14T03:00:00.000Z',
+          }),
+        },
+      );
+      h.handlers.register();
+
+      const result = await call<{
+        analyses: Array<{ filename: string; isActive?: boolean }>;
+      }>(h, 'wizard:list-analyses');
+      expect(result.analyses).toEqual([
+        { filename: 'prev-slug', analyzedAt: 1, lifecycle: 'completed' },
+        {
+          filename: 'live-slug',
+          analyzedAt: 2,
+          lifecycle: 'running',
+          isActive: true,
+        },
+      ]);
+    });
   });
 
   describe('wizard Setup model', () => {
@@ -1140,7 +1411,9 @@ describe('SetupRpcHandlers', () => {
         success: false,
         errorCode: 'SETUP_MODEL_INVALID',
       });
-      expect(setupNamed.error).toContain('Setup provider anthropic: model-stale');
+      expect(setupNamed.error).toContain(
+        'Setup provider anthropic: model-stale',
+      );
 
       const providerMissing = await callRaw(h, 'wizard:set-setup-model', {
         provider: 'anthropic',

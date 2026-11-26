@@ -37,7 +37,10 @@ import {
   AnalysisClaudeMdLinker,
 } from '@ptah-extension/agent-generation';
 import { SDK_TOKENS, PluginLoaderService } from '@ptah-extension/agent-sdk';
-import type { IWorkspaceLlmResolver, SetupResolution } from '@ptah-extension/agent-sdk';
+import type {
+  IWorkspaceLlmResolver,
+  SetupResolution,
+} from '@ptah-extension/agent-sdk';
 import {
   SETTINGS_TOKENS,
   type WorkspaceScopeResolver,
@@ -174,9 +177,7 @@ async function beforeDeadline<T>(
 function sanitizeProviderId(
   provider: string | null | undefined,
 ): string | null {
-  const cleaned = provider
-    ?.replace(/[\p{Cc}\p{Bidi_Control}]/gu, ' ')
-    .trim();
+  const cleaned = provider?.replace(/[\p{Cc}\p{Bidi_Control}]/gu, ' ').trim();
   return cleaned ? cleaned.slice(0, 64) : null;
 }
 
@@ -303,6 +304,29 @@ export class SetupRpcHandlers {
       throw new Error(
         `${serviceName} not available. Ensure the agent-generation module is properly initialized. Details: ${message}`,
       );
+    }
+  }
+
+  /**
+   * Safely read the active in-process analysis run for a workspace without
+   * failing in test or minimal DI containers where MultiPhaseAnalysisService
+   * is not registered.
+   */
+  private getActiveAnalysisRun(
+    workspaceRoot: string,
+  ): ReturnType<MultiPhaseAnalysisService['getActiveRun']> {
+    try {
+      const multiPhaseService =
+        this.container.resolve<MultiPhaseAnalysisService>(
+          AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        );
+      return multiPhaseService &&
+        typeof multiPhaseService.getActiveRun === 'function'
+        ? multiPhaseService.getActiveRun(workspaceRoot)
+        : null;
+    } catch {
+      // degradation-audit: optional-capability - tests or minimal containers may not register MultiPhaseAnalysisService
+      return null;
     }
   }
 
@@ -652,17 +676,38 @@ export class SetupRpcHandlers {
       const none: WizardGetResumableRunResponse = {
         analysis: null,
         generation: null,
+        analysisActive: false,
       };
 
       const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
       if (!workspaceRoot) return none;
 
+      const activeBefore = this.getActiveAnalysisRun(workspaceRoot);
       const storageService = this.resolveService<AnalysisStorageService>(
         AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
         'AnalysisStorageService',
       );
-      const run = await storageService.findLatestResumableRun(workspaceRoot);
-      if (!run) return none;
+      let run = await storageService.findLatestResumableRun(workspaceRoot);
+      let activeAfter = this.getActiveAnalysisRun(workspaceRoot);
+      if (
+        activeBefore !== null &&
+        activeAfter === null &&
+        run?.manifest?.lifecycle === 'running'
+      ) {
+        run = await storageService.findLatestResumableRun(workspaceRoot);
+        activeAfter = this.getActiveAnalysisRun(workspaceRoot);
+      }
+
+      if (!run) {
+        return activeAfter
+          ? {
+              analysis: null,
+              generation: null,
+              analysisActive: true,
+              activeAnalysisStartedAt: activeAfter.startedAt,
+            }
+          : none;
+      }
 
       let analysis: MultiPhaseAnalysisResponse | null = null;
       if (run.manifest && run.slugDir) {
@@ -677,6 +722,44 @@ export class SetupRpcHandlers {
           phaseContents,
         );
       }
+
+      const wasActiveBeforePhases = activeAfter !== null;
+      activeAfter = this.getActiveAnalysisRun(workspaceRoot);
+      if (
+        wasActiveBeforePhases &&
+        activeAfter === null &&
+        run.manifest?.lifecycle === 'running'
+      ) {
+        const refreshed =
+          await storageService.findLatestResumableRun(workspaceRoot);
+        activeAfter = this.getActiveAnalysisRun(workspaceRoot);
+        if (!refreshed) {
+          return activeAfter
+            ? {
+                analysis: null,
+                generation: null,
+                analysisActive: true,
+                activeAnalysisStartedAt: activeAfter.startedAt,
+              }
+            : none;
+        }
+        run = refreshed;
+        if (run.manifest && run.slugDir) {
+          const phaseContents = await this.readCompletedPhases(
+            storageService,
+            run.slugDir,
+            run.manifest,
+          );
+          analysis = storageService.toResponse(
+            run.slugDir,
+            run.manifest,
+            phaseContents,
+          );
+        } else {
+          analysis = null;
+        }
+      }
+
       const generation = run.generation
         ? toResumableGenerationRun(run.generation)
         : null;
@@ -684,8 +767,18 @@ export class SetupRpcHandlers {
       this.logger.info('Resumable wizard run discovered', {
         analysisLifecycle: run.manifest?.lifecycle ?? null,
         generationLifecycle: generation?.lifecycle ?? null,
+        analysisActive: activeAfter !== null,
       });
-      return { analysis, generation };
+      return {
+        analysis,
+        generation,
+        ...(activeAfter
+          ? {
+              analysisActive: true,
+              activeAnalysisStartedAt: activeAfter.startedAt,
+            }
+          : { analysisActive: false }),
+      };
     });
   }
 
@@ -700,9 +793,16 @@ export class SetupRpcHandlers {
         AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
         'AnalysisFreshnessService',
       );
-      return freshnessService.getStatus(
-        this.workspaceProvider.getWorkspaceRoot() ?? null,
-      );
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot() ?? null;
+      const activeRun = workspaceRoot
+        ? this.getActiveAnalysisRun(workspaceRoot)
+        : null;
+      return activeRun
+        ? freshnessService.getStatus(workspaceRoot, {
+            excludeRunId: activeRun.runId,
+            excludeSlug: activeRun.slug,
+          })
+        : freshnessService.getStatus(workspaceRoot);
     });
   }
 
@@ -812,7 +912,15 @@ export class SetupRpcHandlers {
       );
 
       const analyses = await storageService.list(workspaceRoot);
-      return { analyses };
+      const activeRun = this.getActiveAnalysisRun(workspaceRoot);
+      if (!activeRun || activeRun.slug === null) {
+        return { analyses };
+      }
+      return {
+        analyses: analyses.map((item) =>
+          item.filename === activeRun.slug ? { ...item, isActive: true } : item,
+        ),
+      };
     });
   }
 
