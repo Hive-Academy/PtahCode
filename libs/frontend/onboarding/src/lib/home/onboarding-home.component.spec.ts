@@ -16,7 +16,10 @@ import {
 } from '../ready/provider-readiness.derive';
 import { OnboardingHomeComponent } from './onboarding-home.component';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
-import { WizardRpcService } from '@ptah-extension/setup-wizard';
+import {
+  WizardAnalysisRunner,
+  WizardRpcService,
+} from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from '../analyze/analysis-step.store';
 import {
   OnboardingResumeStore,
@@ -156,6 +159,14 @@ describe('OnboardingHomeComponent', () => {
               .mockResolvedValue({ state: 'missing' }),
           },
         },
+        {
+          provide: WizardAnalysisRunner,
+          useValue: {
+            isRunning: signal(false),
+            isCanceling: signal(false),
+            isRunningForWorkspace: () => false,
+          },
+        },
         { provide: AnalysisStepStore, useValue: { useAnalysis: jest.fn() } },
       ],
     });
@@ -194,6 +205,7 @@ describe('OnboardingHomeComponent', () => {
     resume.items.set([
       {
         id: 'generation:tab-1',
+        state: 'resumable',
         title: 'Continue agent generation',
         detail: null,
         target: {
@@ -222,6 +234,23 @@ describe('OnboardingHomeComponent', () => {
         queryParams: { tab: 'tab-1' },
       },
     );
+  });
+
+  it('passes active banner state through to the resume banner', () => {
+    resume.items.set([
+      {
+        id: 'analysis',
+        state: 'running',
+        title: 'Workspace analysis in progress',
+        detail: null,
+        target: { subPath: ['analyze'], queryParams: {} },
+      },
+    ]);
+    render();
+    const banners = byTestId('onboarding-resume-banners');
+    expect(banners?.textContent).toContain('Workspace analysis in progress');
+    expect(banners?.textContent).toContain('Running');
+    expect(banners?.querySelector('button')?.textContent?.trim()).toBe('View');
   });
 
   it('shows the three paths in order, Analyze first, each named by its h2 link', () => {
@@ -258,9 +287,17 @@ describe('OnboardingHomeComponent', () => {
         'href',
       ),
     ).toBe('/onboarding/analyze');
-    expect(byTestId<HTMLAnchorElement>('onboarding-link-skills')?.textContent).toContain('Analyze and review skills');
-    expect(byTestId<HTMLAnchorElement>('onboarding-link-agents-only')).toBeNull();
-    expect([...el().querySelectorAll('a')].some((link) => link.getAttribute('href')?.includes('/analyze/agents'))).toBe(false);
+    expect(
+      byTestId<HTMLAnchorElement>('onboarding-link-skills')?.textContent,
+    ).toContain('Analyze and review skills');
+    expect(
+      byTestId<HTMLAnchorElement>('onboarding-link-agents-only'),
+    ).toBeNull();
+    expect(
+      [...el().querySelectorAll('a')].some((link) =>
+        link.getAttribute('href')?.includes('/analyze/agents'),
+      ),
+    ).toBe(false);
 
     expect(
       byTestId<HTMLAnchorElement>(

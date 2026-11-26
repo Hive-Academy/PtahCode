@@ -12,6 +12,7 @@ import {
   inject,
   input,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
@@ -53,6 +54,7 @@ import {
 } from '../shared/onboarding-stepper.component';
 import { RunPanelComponent } from '../shared/run-panel.component';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
+import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import { AnalysisStepStore } from './analysis-step.store';
 import { PhaseListComponent } from './phase-list.component';
 
@@ -75,6 +77,17 @@ function resolveOptionalAppState(injector: Injector): AppStateManager | null {
     return injector.get(AppStateManager, null);
   } catch {
     // degradation-audit: optional-capability - Analysis works without host Settings navigation.
+    return null;
+  }
+}
+
+function resolveOptionalWorkspaceStore(
+  injector: Injector,
+): OnboardingWorkspaceStore | null {
+  try {
+    return injector.get(OnboardingWorkspaceStore, null);
+  } catch {
+    // degradation-audit: optional-capability - Analysis works without workspace store in isolated harnesses.
     return null;
   }
 }
@@ -295,25 +308,27 @@ function describeSetupIssue(
           (retry)="retry()"
           (startOver)="startFresh()"
         />
-      } @else if (runner.isRunning() || runner.isCanceling()) {
+      } @else if (isAnalysisActive()) {
         <ptah-live-run-layout [hasLog]="true">
           <ptah-details-log
             runLog
             variant="pane"
             data-transcript-variant="pane"
             mode="analysis"
-            [liveState]="runner.isCanceling() ? 'stopped' : 'live'"
+            [liveState]="isAnalysisCanceling() ? 'stopped' : 'live'"
             [streamCounts]="store.streamCounts()"
             footerNote="Streaming analysis output. Read-only."
           />
           <ptah-run-panel
-            [state]="runner.isCanceling() ? 'cancelling' : 'running'"
+            [state]="isAnalysisCanceling() ? 'cancelling' : 'running'"
             [viewState]="viewState()"
             [title]="
-              runner.isCanceling() ? 'Stopping analysis' : 'Analyzing workspace'
+              isAnalysisCanceling()
+                ? 'Stopping analysis'
+                : 'Analyzing workspace'
             "
             [message]="
-              runner.isCanceling()
+              isAnalysisCanceling()
                 ? 'Waiting for the run to stop.'
                 : runner.statusText()
             "
@@ -327,7 +342,7 @@ function describeSetupIssue(
             <ptah-phase-list [phases]="store.phaseRows()" />
             @if (elapsedSeconds() !== null) {
               <p class="mt-3 text-xs text-base-content-muted">
-                {{ elapsedSeconds() }}s since you opened this page
+                {{ elapsedSeconds() }}s elapsed
               </p>
             }
           </ptah-run-panel>
@@ -335,7 +350,7 @@ function describeSetupIssue(
             You can leave this page. The analysis keeps running.
           </p>
         </ptah-live-run-layout>
-      } @else if (runner.errorMessage(); as rawError) {
+      } @else if (analysisError(); as rawError) {
         <ptah-run-panel
           state="failed"
           [viewState]="viewState()"
@@ -483,6 +498,7 @@ function describeSetupIssue(
                 <button
                   type="button"
                   [ptahSetupAction]="'primaryCompact'"
+                  [disabled]="isAnalysisActive()"
                   (click)="useSaved(item.filename)"
                 >
                   Use
@@ -522,7 +538,9 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   protected readonly runner = inject(WizardAnalysisRunner);
   private readonly rpc = inject(WizardRpcService);
   private readonly claudeRpc = inject(ClaudeRpcService);
-  private readonly appState = resolveOptionalAppState(inject(Injector));
+  private readonly injector = inject(Injector);
+  private readonly appState = resolveOptionalAppState(this.injector);
+  private readonly workspace = resolveOptionalWorkspaceStore(this.injector);
   private readonly ngZone = inject(NgZone);
   private readonly doc = inject(DOCUMENT);
   private readonly wizardState = inject(SetupWizardStateService);
@@ -609,27 +627,61 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       ? 'Configured Setup model cannot be used until fixed or cleared.'
       : 'Workspace model cannot be used for setup until fixed.';
   });
+  protected readonly workspacePath = computed(
+    () => this.workspace?.activePath() ?? null,
+  );
+  protected readonly isAnalysisActive = computed(() => {
+    if (typeof this.runner.isRunningForWorkspace === 'function') {
+      return this.runner.isRunningForWorkspace(this.workspacePath());
+    }
+    return this.runner.isRunning() || this.runner.isCanceling();
+  });
+  protected readonly isAnalysisCanceling = computed(
+    () => this.isAnalysisActive() && this.runner.isCanceling(),
+  );
+  protected readonly isAnalysisRunning = computed(
+    () => this.isAnalysisActive() && this.runner.isRunning(),
+  );
+  protected readonly analysisError = computed<string | null>(() => {
+    if (
+      typeof this.runner.isResultForWorkspace === 'function' &&
+      !this.runner.isResultForWorkspace(this.workspacePath())
+    ) {
+      return null;
+    }
+    const runnerError = this.runner.errorMessage();
+    if (runnerError) return runnerError;
+    if (this.store.selected()) return null;
+    const liveResult = this.wizardState.multiPhaseResult?.();
+    if (liveResult?.manifest.lifecycle === 'failed') {
+      return 'Analysis could not finish. Try again.';
+    }
+    return null;
+  });
   protected readonly visibleSaved = computed(() =>
     this.store
       .saved()
-      .filter((item) => !this.store.hidden().has(item.filename)),
+      .filter(
+        (item) =>
+          !this.store.hidden().has(item.filename) &&
+          item.isActive !== true &&
+          (item.lifecycle === undefined || item.lifecycle === 'completed'),
+      ),
   );
   protected readonly selectError = signal<string | null>(null);
   protected readonly stopRecovery = signal(false);
   protected readonly showSetupSection = computed(
-    () =>
-      (!this.runner.isRunning() && !this.runner.isCanceling()) ||
-      this.stopRecovery(),
+    () => !this.isAnalysisActive() || this.stopRecovery(),
   );
   // Analysis has no workflow view state; map its runner status for RunPanel recovery.
   protected readonly viewState = computed<GenerationViewState>(() =>
     this.stopRecovery()
       ? 'stop-unconfirmed'
-      : this.runner.isCanceling()
+      : this.isAnalysisCanceling()
         ? 'cancelling'
-        : this.runner.isRunning()
+        : this.isAnalysisRunning()
           ? 'running'
-          : this.runner.errorMessage()
+          : this.analysisError()
             ? 'failed'
             : this.store.loaded()
               ? 'completed'
@@ -663,7 +715,9 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         if (!this.destroyed) void this.refreshSetupModel();
       };
       win.addEventListener('focus', onFocus);
-      this.destroyRef.onDestroy(() => win.removeEventListener('focus', onFocus));
+      this.destroyRef.onDestroy(() =>
+        win.removeEventListener('focus', onFocus),
+      );
     }
     if (this.appState) {
       const appState = this.appState;
@@ -677,17 +731,53 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       });
     }
     effect(() => {
-      if (
-        this.openedAt() !== null &&
-        !this.runner.isRunning() &&
-        !this.runner.isCanceling()
-      )
+      const path = this.workspacePath();
+      untracked(() => {
+        this.store.setWorkspacePath?.(path);
+        this.runner.setCurrentWorkspacePath?.(path);
+      });
+    });
+    effect(() => {
+      if (this.openedAt() !== null && !this.isAnalysisActive()) {
         this.stopClock();
+      }
+    });
+    let wasRunning = false;
+    effect(() => {
+      const running = this.isAnalysisRunning();
+      if (wasRunning && !running) {
+        untracked(() => {
+          if (this.store.loaded()) {
+            this.interrupted.set(false);
+          }
+          if (!this.destroyed) {
+            void this.loadSaved();
+          }
+        });
+      }
+      wasRunning = running;
     });
   }
 
   public async ngOnInit(): Promise<void> {
+    this.runner.setCurrentWorkspacePath?.(this.workspacePath());
     this.pendingRerun = this.rerun() === '1';
+    const hadLocalRun = this.isAnalysisActive();
+    const initialRunGeneration = this.runner.runGeneration?.() ?? 0;
+    const hadResult = this.runner.hasResult?.() ?? false;
+    const hadLoaded = this.store.loaded() !== null;
+    if (hadLocalRun) {
+      this.pendingRerun = false;
+      this.interrupted.set(false);
+      this.startClock(this.runner.startedAt?.() ?? undefined);
+      if (this.rerun() === '1') {
+        void this.router.navigate([], {
+          queryParams: { rerun: null },
+          queryParamsHandling: 'merge',
+          replaceUrl: true,
+        });
+      }
+    }
     const setup = this.refreshSetupModel();
     if (this.pendingRerun) {
       await Promise.all([setup, this.loadSaved()]);
@@ -698,10 +788,43 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (this.destroyed) return;
     const resumable = await this.rpc.getResumableRun();
     if (this.destroyed) return;
-    this.interrupted.set(
-      resumable.analysis !== null &&
-        resumable.analysis?.manifest.lifecycle !== 'completed',
-    );
+    const localRunSettled =
+      (this.runner.runGeneration?.() ?? 0) !== initialRunGeneration ||
+      (!hadResult && (this.runner.hasResult?.() ?? false)) ||
+      (!hadLoaded && this.store.loaded() !== null);
+    if (resumable.analysisActive === true) {
+      if (!hadLocalRun && !localRunSettled && !this.runner.isRunning()) {
+        this.runner.syncBackendActive?.(true, {
+          startedAt: resumable.activeAnalysisStartedAt,
+          workspacePath: this.workspacePath(),
+        });
+        const startedAtMs =
+          this.runner.startedAt?.() ??
+          (resumable.activeAnalysisStartedAt
+            ? Date.parse(resumable.activeAnalysisStartedAt)
+            : undefined);
+        this.startClock(
+          typeof startedAtMs === 'number' && Number.isFinite(startedAtMs)
+            ? startedAtMs
+            : undefined,
+        );
+        this.interrupted.set(false);
+      }
+    } else {
+      if (
+        resumable.analysisActive === false &&
+        this.isAnalysisActive() &&
+        (this.runner.backendActive?.() === true ||
+          this.runner.backendActive === undefined)
+      ) {
+        this.runner.syncBackendActive?.(false);
+      }
+      this.interrupted.set(
+        !this.isAnalysisActive() &&
+          resumable.analysis !== null &&
+          resumable.analysis?.manifest.lifecycle !== 'completed',
+      );
+    }
   }
 
   public ngOnDestroy(): void {
@@ -843,11 +966,13 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.pendingAnalysis = null;
     if (
       filename &&
+      !this.isAnalysisActive() &&
       this.store.saved().some((item) => item.filename === filename)
     )
       await this.useSaved(filename);
   }
   protected async useSaved(filename: string): Promise<void> {
+    if (this.isAnalysisActive()) return;
     try {
       const [, result] = await Promise.all([
         this.consumePendingRerun(),
@@ -873,7 +998,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     }
   }
   private async startPendingRerun(): Promise<void> {
-    if (!this.pendingRerun || !this.setupReady() || this.destroyed) return;
+    if (!this.pendingRerun || this.destroyed) return;
+    if (this.isAnalysisActive()) {
+      await this.consumePendingRerun();
+      return;
+    }
+    if (!this.setupReady()) return;
     await this.startFresh();
   }
   private async consumePendingRerun(): Promise<void> {
@@ -895,7 +1025,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.store.clearSelection();
     this.interrupted.set(false);
     this.startClock();
-    await Promise.all([this.runner.startFreshAnalysis(), rerunNavigation]);
+    await Promise.all([
+      this.runner.startFreshAnalysis(this.workspacePath()),
+      rerunNavigation,
+    ]);
     if (this.destroyed) return;
     await this.loadSaved();
   }
@@ -903,11 +1036,19 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (!this.setupReady()) return;
     const rerunNavigation = this.consumePendingRerun();
     this.pendingAnalysis = null;
+    const existingResult = this.wizardState.multiPhaseResult?.();
+    if (existingResult && existingResult.manifest.lifecycle !== 'completed') {
+      this.wizardState.reset();
+    }
     this.store.clearSelection();
     this.interrupted.set(false);
     this.stopRecovery.set(false);
     this.startClock();
-    await Promise.all([this.runner.resumeAnalysis(), rerunNavigation]);
+    await Promise.all([
+      this.runner.resumeAnalysis(this.workspacePath()),
+      rerunNavigation,
+    ]);
+    if (this.destroyed) return;
     await this.loadSaved();
   }
   protected async retry(): Promise<void> {
@@ -927,12 +1068,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       this.stopClock();
     }
   }
-  private startClock(): void {
-    this.stopClock();
-    this.releaseClock = this.clock.acquire();
-    const startedAt = this.now();
+  private startClock(startedAt?: number): void {
+    if (!this.releaseClock) {
+      this.releaseClock = this.clock.acquire();
+    }
     this.store.attachStream();
-    this.openedAt.set(startedAt);
+    this.openedAt.set(startedAt ?? this.now());
   }
   private stopClock(): void {
     this.releaseClock?.();

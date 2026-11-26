@@ -122,6 +122,7 @@ interface StatusChip {
         <div class="mt-5 grid gap-3" data-testid="onboarding-resume-banners">
           @for (item of resume.items(); track item.id) {
             <ptah-resume-banner
+              [state]="item.state"
               [title]="item.title"
               [detail]="item.detail"
               (resumeRequested)="resumeItem(item)"
@@ -164,7 +165,6 @@ interface StatusChip {
           testId="analyze"
           title="Analyze current project"
           description="Best when you already have code. Ptah reads your workspace, recommends project skills and prepares project guidance."
-
           callToAction="Start analysis"
           [icon]="icons.scanSearch"
           [link]="analyzeLink"
@@ -199,7 +199,6 @@ interface StatusChip {
             </li>
             <li class="flex items-center gap-2">
               <lucide-angular
-
                 [img]="icons.bookOpen"
                 class="size-4 text-base-content"
                 aria-hidden="true"
@@ -271,7 +270,6 @@ interface StatusChip {
               >
               <a
                 class="link link-hover"
-
                 [routerLink]="guidanceOnlyLink.commands"
                 [queryParams]="guidanceOnlyLink.queryParams"
                 data-testid="onboarding-link-guidance-only"
@@ -473,4 +471,3 @@ export class OnboardingHomeComponent {
     this.appState.setCurrentView('chat');
   }
 }
-
