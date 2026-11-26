@@ -1216,6 +1216,11 @@ describe('LanesTableComponent', () => {
           ?.textContent?.trim(),
       ).toBe('gpt-5');
       expect(model?.getAttribute('title')).toBe('gpt-5 (GPT 5)');
+      expect(
+        model
+          ?.querySelector('[data-popover-kind="model"]')
+          ?.getAttribute('title'),
+      ).toBe('gpt-5 (GPT 5)');
     });
 
     it('shows CLI default for an empty model', async () => {

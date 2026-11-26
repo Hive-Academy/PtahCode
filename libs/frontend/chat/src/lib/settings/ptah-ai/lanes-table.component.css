@@ -3,6 +3,7 @@
 ptah-lanes-table {
   display: block;
   min-width: 0;
+  container: lanes-table / inline-size;
 }
 ptah-lanes-table .ptah-table-grid {
   width: 100%;
@@ -364,19 +365,58 @@ ptah-lanes-table .lane-model-part:is(span, #lane-model-part) {
   white-space: nowrap;
 }
 
+/* Give the model the whole track when a single line would mostly show effort. */
+@container lanes-table (max-width: 75rem) {
+  ptah-lanes-table td[data-testid='cli-matrix-model'] .lane-model-value {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-value
+    > ptah-native-popover:has([data-popover-kind='model']) {
+    flex-basis: 100%;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-value
+    > span[aria-hidden] {
+    display: none;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-part:is(span, #lane-model-part) {
+    white-space: normal;
+  }
+
+  ptah-lanes-table .ptah-table [data-lane-status] .lane-row-actions > button {
+    display: block;
+    margin-inline-start: 0;
+  }
+}
+
 /* The Status cell owns the menu anchor in every tier. The action wrapper has
    no box (and no transform), so recovery labels cannot move the menu. */
 ptah-lanes-table [data-lane-status] {
   position: relative;
   padding-inline-end: 2.5rem;
-  white-space: nowrap;
 }
 ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
   display: inline-flex;
+  max-width: 100%;
   vertical-align: middle;
   white-space: nowrap;
 }
 ptah-lanes-table [data-lane-status] .ptah-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;
@@ -422,7 +462,7 @@ ptah-lanes-table
   width: 1.5rem;
   min-width: 1.5rem;
 }
-/* Only compact stacks recovery under status; the menu stays at row center. */
+/* Keep status on its own line in the smallest tier. */
 ptah-lanes-table
   .ptah-table[data-collapsed='true']:not([data-model-column='true'])
   [data-lane-status]
@@ -616,9 +656,12 @@ ptah-lanes-table tr[data-lane-kind='instance']:not([data-drop]) > :first-child {
 }
 ptah-lanes-table .lanes-inherited {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--ptah-gap-inline);
+  row-gap: 0;
   min-width: 0;
+  max-width: 100%;
   font-size: var(--ptah-text-caption-size);
   color: var(--ptah-section-description-color);
 }
