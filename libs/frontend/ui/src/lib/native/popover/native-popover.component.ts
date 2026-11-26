@@ -31,6 +31,7 @@ import {
   detachConnectedChildren,
   registerConnectedChild,
 } from '../../overlays/shared/overlay-positions';
+import { restorePopoverFocus } from '../../overlays/shared/restore-popover-focus';
 
 /** Controlled popover with projected trigger and content slots. */
 @Component({
@@ -206,13 +207,14 @@ export class NativePopoverComponent implements OnDestroy {
     this.stopScroll = undefined;
     this.unregisterChild?.();
     this.unregisterChild = undefined;
-    if (this.attachedPanel) detachConnectedChildren(this.attachedPanel);
+    const panel = this.attachedPanel;
+    if (panel) detachConnectedChildren(panel);
     this.attachedPanel = undefined;
     // Restore focus while the panel is still owned, so a composer that treats
     // the portaled panel as inside does not see a gap before the trigger.
     const restore = this.previousFocus;
     this.previousFocus = null;
-    if (this.restoreFocus() && restore?.isConnected) restore.focus({ preventScroll: true });
+    if (this.restoreFocus()) restorePopoverFocus(restore, panel);
     this.owned?.unregister();
     this.owned = undefined;
   }

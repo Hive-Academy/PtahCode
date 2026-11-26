@@ -11,6 +11,7 @@ import { NativePopoverComponent } from './native-popover.component';
   template: `
     <div id="external-scroller"><button type="button" id="external-anchor">External anchor</button></div>
     <div id="next-scroller"><button type="button" id="next-anchor">Next anchor</button></div>
+    <input aria-label="External input" />
     <ptah-native-popover
       [isOpen]="open()"
       [anchor]="anchor()"
@@ -25,6 +26,7 @@ import { NativePopoverComponent } from './native-popover.component';
     >
       <button trigger type="button" id="popover-trigger" (click)="open.set(true)">Open</button>
       <div content>
+        <input aria-label="Panel input" />
         <ptah-select label="Model" searchable [options]="options" />
       </div>
     </ptah-native-popover>
@@ -188,6 +190,47 @@ describe('NativePopoverComponent', () => {
     await render();
     await open();
     expect(panel()?.classList).not.toContain('ptah-popover-capped');
+  });
+
+  it('preserves external input focus when a backdrop-free popover closes programmatically', async () => {
+    host.hasBackdrop.set(false);
+    await open();
+    const root: HTMLElement = fixture.nativeElement;
+    const externalInput = root.querySelector<HTMLInputElement>('input');
+    externalInput?.focus();
+    expect(document.activeElement).toBe(externalInput);
+
+    host.open.set(false);
+    await render();
+
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(externalInput);
+  });
+
+  it('restores trigger focus when a backdrop-free popover closes with focus inside', async () => {
+    host.hasBackdrop.set(false);
+    await open();
+    const panelInput = panel()?.querySelector<HTMLInputElement>('input');
+    panelInput?.focus();
+    expect(document.activeElement).toBe(panelInput);
+
+    host.open.set(false);
+    await render();
+
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it('restores trigger focus on Escape from inside the popover', async () => {
+    await open();
+    expect(document.activeElement).toBe(panel());
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) escape(active);
+    await render();
+
+    expect(host.closedCount).toBe(1);
+    expect(panel()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
   });
 
   it('requests closure on Escape even if focus stays on the trigger', async () => {

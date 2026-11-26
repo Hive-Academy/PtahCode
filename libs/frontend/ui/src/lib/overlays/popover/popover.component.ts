@@ -17,6 +17,7 @@ import {
   CONNECTED_OVERLAY_POLICY,
   POPOVER_POSITION_MAP,
 } from '../shared/overlay-positions';
+import { restorePopoverFocus } from '../shared/restore-popover-focus';
 
 /**
  * PopoverComponent - Modal-like Popover with Focus Trap
@@ -177,11 +178,6 @@ export class PopoverComponent implements OnDestroy {
     this.focusTrap = null;
     const previous = this.previousFocus;
     this.previousFocus = null;
-    if (!previous?.isConnected) return;
-    const document = previous.ownerDocument;
-    const active = document.activeElement;
-    if (!active || active === document.body || panel?.contains(active)) {
-      previous.focus({ preventScroll: true });
-    }
+    restorePopoverFocus(previous, panel);
   }
 }
