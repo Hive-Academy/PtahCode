@@ -20,7 +20,11 @@ export interface InitializedSessionRuntimeIdentityLookup extends SessionRuntimeI
 export async function initializeSessionRuntimeIdentityLookup(
   store: Pick<
     SessionMetadataStore,
-    'getAll' | 'get' | 'onMetadataChanged' | 'updateCodexExecution' | 'incrementCodexMessageCount'
+    | 'getAll'
+    | 'get'
+    | 'onMetadataChanged'
+    | 'updateCodexExecution'
+    | 'incrementCodexMessageCount'
   >,
   logger: Logger,
 ): Promise<InitializedSessionRuntimeIdentityLookup> {
@@ -47,7 +51,13 @@ export async function initializeSessionRuntimeIdentityLookup(
       workspacePaths.delete(id);
       return;
     }
-    const workspacePath = metadata.codexThread?.workspaceId;
+    // A provider session has no thread record with a raw path; its metadata
+    // workspace is that raw path, so its live controls can read settings.
+    const workspacePath =
+      metadata.codexThread?.workspaceId ??
+      (metadata.providerSessionExecution && !metadata.codexExecution
+        ? metadata.workspaceId
+        : undefined);
     if (workspacePath === undefined) workspacePaths.delete(id);
     else workspacePaths.set(id, workspacePath);
     entries.set(
