@@ -124,6 +124,23 @@ describe('readClaudeTranscript', () => {
     });
   });
 
+  it('exposes tool names and only explicit error outcomes', () => {
+    const file = writeTranscript('p/calls.jsonl', [
+      { type: 'user', timestamp: '2026-10-03T10:00:00Z', message: { content: 'prompt' } },
+      { type: 'assistant', timestamp: '2026-10-03T10:00:01Z', message: { id: 'r1', content: [
+        { type: 'tool_use', id: 't1', name: 'Read', input: { file_path: '/synthetic/file' } },
+        { type: 'tool_use', id: 't2', name: 'Glob' },
+      ], usage } },
+      { type: 'user', timestamp: '2026-10-03T10:00:02Z', message: { content: [
+        { type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'synthetic error' },
+      ] } },
+    ]);
+    expect(readClaudeTranscript(file).toolCalls).toEqual([
+      { id: 't1', name: 'Read', input: { file_path: '/synthetic/file' }, outcome: 'error', atMs: Date.parse('2026-10-03T10:00:01Z') },
+      { id: 't2', name: 'Glob', outcome: 'unknown', atMs: Date.parse('2026-10-03T10:00:01Z') },
+    ]);
+  });
+
   it('keeps an earlier field a later line omits', () => {
     const file = writeTranscript('p/partial.jsonl', [
       { type: 'assistant', message: { id: 'r1', usage } },
