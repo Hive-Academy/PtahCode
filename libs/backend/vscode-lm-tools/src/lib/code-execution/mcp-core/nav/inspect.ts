@@ -1,9 +1,12 @@
 import { execFile as execFileCallback } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
+import picomatch from 'picomatch';
 import { z } from 'zod';
 import { collectBounded, walkGlobMatches } from '@ptah-extension/platform-core';
 import { DEFAULT_WORKSPACE_EXCLUDES } from '@ptah-extension/workspace-intelligence';
+import { canonicalPathInsideRoot } from '../../namespace-builders/browser-file-url';
 import { describeZodIssues } from '../route-tool-handlers';
 import { handleGrep, type GrepDeps } from './grep';
 import { validateWorkspaceGlob } from '../glob-pattern-validation';
@@ -23,10 +26,10 @@ import {
 } from './inspect.limits';
 
 const execFile = promisify(execFileCallback);
-const readSchema = z.object({ op: z.literal('read'), file: z.string().min(1).optional(), name: z.string().optional(), startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional(), maxLines: z.number().int().positive().max(INSPECT_MAX_READ_LINES).optional() }).passthrough();
-const grepSchema = z.object({ op: z.literal('grep'), pattern: z.string().min(1), path: z.string().optional(), glob: z.string().optional(), maxMatches: z.number().int().positive().max(INSPECT_MAX_GREP_MATCHES).optional(), includeIgnored: z.boolean().optional(), regex: z.boolean().optional(), caseSensitive: z.boolean().optional(), context: z.number().int().min(0).max(5).optional() }).passthrough();
-const listSchema = z.object({ op: z.literal('list'), pattern: z.string().min(1), limit: z.number().int().positive().max(INSPECT_MAX_LIST_LIMIT).optional() }).strict();
-const gitSchema = z.object({ op: z.literal('git'), action: z.enum(['status', 'diff_stat', 'log', 'branch']), base: z.string().regex(/^(?!-)[A-Za-z0-9._/-]{1,200}$/).optional(), limit: z.number().int().positive().max(200).optional() }).strict();
+const readSchema = z.object({ op: z.literal('read'), file: z.string().min(1).optional(), name: z.string().optional(), startLine: z.number().int().positive().optional(), endLine: z.number().int().positive().optional(), maxLines: z.number().int().positive().optional() }).passthrough();
+const grepSchema = z.object({ op: z.literal('grep'), pattern: z.string().min(1), path: z.string().optional(), glob: z.string().optional(), maxMatches: z.number().int().positive().optional(), includeIgnored: z.boolean().optional(), regex: z.boolean().optional(), caseSensitive: z.boolean().optional(), context: z.number().int().min(0).max(5).optional() }).passthrough();
+const listSchema = z.object({ op: z.literal('list'), pattern: z.string().min(1), limit: z.number().int().positive().optional() }).strict();
+const gitSchema = z.object({ op: z.literal('git'), action: z.enum(['status', 'diff_stat', 'log', 'branch']), base: z.string().regex(/^(?!-)[A-Za-z0-9._/-]{1,200}$/).optional(), limit: z.number().int().positive().optional() }).strict();
 const opsSchema = z.array(z.unknown()).min(1).max(INSPECT_MAX_OPS);
 
 export interface InspectDeps extends GrepDeps, ReadSymbolDeps {
@@ -42,23 +45,68 @@ async function runGit(args: readonly string[], cwd: string): Promise<string> {
   return result.stdout.trimEnd();
 }
 
-async function findWorkspaceFiles(root: string, pattern: string, limit: number): Promise<readonly string[]> {
+async function resolveListRoot(root: string, pattern: string): Promise<string> {
+  const realRoot = await realpath(root);
+  const staticBase = picomatch.scan(pattern).base.replace(/\\(.)/g, '$1');
+  let basePath = path.resolve(root, staticBase);
+  while (true) {
+    let realBase: string;
+    try {
+      realBase = await realpath(basePath);
+    } catch (error: unknown) {
+      if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') {
+        throw error;
+      }
+      const parent = path.dirname(basePath);
+      if (parent === basePath) return realRoot;
+      if (!canonicalPathInsideRoot(parent, realRoot)) {
+        throw new Error('pattern walk base resolves outside the workspace root.', { cause: error });
+      }
+      basePath = parent;
+      continue;
+    }
+    if (!canonicalPathInsideRoot(realBase, realRoot)) {
+      throw new Error('pattern walk base resolves outside the workspace root.');
+    }
+    return realRoot;
+  }
+}
+
+async function findWorkspaceFiles(root: string, pattern: string, limit: number): Promise<{ readonly matches: readonly string[]; readonly failures: number }> {
+  let failures = 0;
   const matches = await collectBounded(walkGlobMatches(pattern, {
     cwd: root,
     exclude: [...DEFAULT_WORKSPACE_EXCLUDES],
     dot: false,
     // A validated root is already open; an unreadable child should leave a
     // partial list instead of turning the entire inspect operation into an error.
-    onFailure: () => undefined,
+    onFailure: () => { failures += 1; },
   }), limit);
-  return matches.map((match) => path.relative(root, match).split(path.sep).join('/'));
+  return { matches, failures };
+}
+
+async function filterContainedFiles(root: string, matches: readonly string[]): Promise<readonly string[]> {
+  const realRoot = await realpath(root);
+  const contained: string[] = [];
+  for (const match of matches) {
+    try {
+      const targetReal = await realpath(path.resolve(root, match));
+      if (canonicalPathInsideRoot(targetReal, realRoot)) {
+        contained.push(path.relative(realRoot, targetReal).split(path.sep).join('/'));
+      }
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+  }
+  return contained;
 }
 
 function gitArgs(op: z.infer<typeof gitSchema>): string[] {
   switch (op.action) {
-    case 'status': return ['status', '--short', '--branch'];
-    case 'diff_stat': return op.base ? ['diff', '--stat', `${op.base}...HEAD`] : ['diff', '--stat'];
-    case 'log': return ['log', '--oneline', '-n', String(Math.min(op.limit ?? 10, 20))];
+    case 'status': return ['-c', 'status.relativePaths=true', 'status', '--short', '--branch', '--', '.'];
+    case 'diff_stat': return op.base ? ['diff', '--stat', '--relative', `${op.base}...HEAD`, '--', '.'] : ['diff', '--stat', '--relative', '--', '.'];
+    case 'log': return ['log', '--oneline', '-n', String(Math.min(op.limit ?? 10, 20)), '--', '.'];
     case 'branch': return ['branch', '--show-current'];
   }
 }
@@ -112,13 +160,21 @@ async function runOp(raw: unknown, index: number, root: string, deps: InspectDep
       const op = parsed.data as z.infer<typeof listSchema>;
       const validatedPattern = validateWorkspaceGlob(op.pattern, root);
       if (validatedPattern.error) throw new Error(validatedPattern.error);
-      const listLimit = (op.limit ?? INSPECT_DEFAULT_LIST_LIMIT) + 1;
-      const matches = deps.listFiles
-        ? await deps.listFiles(op.pattern, listLimit, root)
-        : await findWorkspaceFiles(root, op.pattern, listLimit);
-      const limit = op.limit ?? INSPECT_DEFAULT_LIST_LIMIT;
-      const body = [...matches.slice(0, limit), ...(matches.length > limit ? [`… more files; continue with a narrower pattern or higher limit (max ${INSPECT_MAX_LIST_LIMIT})`] : [])].join('\n') || 'No files matched.';
-      return { ok: true, header: `## ${index} list ${op.pattern}`, body };
+      const limit = Math.min(op.limit ?? INSPECT_DEFAULT_LIST_LIMIT, INSPECT_MAX_LIST_LIMIT);
+      const listLimit = limit + 1;
+      const realRoot = await resolveListRoot(root, op.pattern);
+      const walked = deps.listFiles
+        ? { matches: await deps.listFiles(op.pattern, listLimit, realRoot), failures: 0 }
+        : await findWorkspaceFiles(realRoot, op.pattern, listLimit);
+      const matches = deps.listFiles ? walked.matches : await filterContainedFiles(realRoot, walked.matches);
+      const partial = matches.length > 0;
+      const incomplete = walked.failures > 0 ? `incomplete: ${walked.failures} director${walked.failures === 1 ? 'y' : 'ies'} could not be read` : undefined;
+      const body = [
+        ...matches.slice(0, limit),
+        ...(matches.length > limit ? [`… more files; continue with a narrower pattern or higher limit (max ${INSPECT_MAX_LIST_LIMIT})`] : []),
+        ...(incomplete ? [incomplete] : []),
+      ].join('\n') || 'No files matched.';
+      return { ok: walked.failures === 0 || partial, header: `## ${index} list ${op.pattern}`, body: !partial && incomplete ? `ERROR op #${index}: No files matched.\n${incomplete}` : body };
     }
     const op = parsed.data as z.infer<typeof gitSchema>;
     if (op.action !== 'diff_stat' && op.base !== undefined) throw new Error('base is only valid for diff_stat');

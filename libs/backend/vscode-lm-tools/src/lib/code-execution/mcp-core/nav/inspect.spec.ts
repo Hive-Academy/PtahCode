@@ -1,4 +1,5 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { handleInspect, type InspectDeps } from './inspect';
@@ -66,8 +67,8 @@ describe('handleInspect', () => {
   it('runs git with a fixed argument array and reports timeout errors as partial failures', async () => {
     const spy = jest.fn(async (args: readonly string[]) => args.join(' '));
     const reply = await handleInspect({ ops: [{ op: 'git', action: 'diff_stat', base: 'main' }] }, { ...deps, runGit: spy });
-    expect(spy).toHaveBeenCalledWith(['diff', '--stat', 'main...HEAD'], expect.any(String));
-    expect(reply.text).toContain('diff --stat main...HEAD');
+    expect(spy).toHaveBeenCalledWith(['diff', '--stat', '--relative', 'main...HEAD', '--', '.'], expect.any(String));
+    expect(reply.text).toContain('diff --stat --relative main...HEAD -- .');
     const timeout = await handleInspect({ ops: [{ op: 'git', action: 'status' }] }, { ...deps, runGit: async () => { throw new Error('timed out'); } });
     expect(timeout.text).toContain('timed out');
   });
@@ -138,7 +139,7 @@ describe('handleInspect', () => {
       { op: 'list', pattern: '*' },
       { op: 'git', action: 'log', limit: 200 },
     ] }, delayed);
-    expect(runGit).toHaveBeenCalledWith(['log', '--oneline', '-n', '20'], expect.any(String));
+    expect(runGit).toHaveBeenCalledWith(['log', '--oneline', '-n', '20', '--', '.'], expect.any(String));
     expect(reply.text.indexOf('## 1 list')).toBeLessThan(reply.text.indexOf('## 2 git log'));
   });
 
@@ -190,6 +191,69 @@ describe('handleInspect', () => {
     }
     const reply = await handleInspect({ ops: [{ op: 'list', pattern: '**/*.ts' }] }, deps);
     expect(reply.text).not.toMatch(/(?:\.git|node_modules|dist|build|\.nx)\/hidden\.ts/);
+  });
+
+  (process.platform === 'win32' ? it.skip : it)('rejects a static list base symlink that resolves outside the workspace', async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'ptah-inspect-outside-'));
+    try {
+      await writeFile(path.join(outside, 'secret.ts'), 'secret');
+      await symlink(outside, path.join(root, 'external'));
+      const reply = await handleInspect({ ops: [{ op: 'list', pattern: 'external/*.ts' }] }, deps);
+      expect(reply.isError).toBe(true);
+      expect(reply.text).toContain('outside the workspace root');
+      const walked = await handleInspect({ ops: [{ op: 'list', pattern: '**/*.ts' }] }, deps);
+      expect(walked.text).not.toContain('secret.ts');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0) ? it.skip : it)('reports partial and empty list results when directories cannot be read', async () => {
+    const privateDir = path.join(root, 'private');
+    await mkdir(privateDir);
+    await writeFile(path.join(privateDir, 'hidden.ts'), 'hidden');
+    await writeFile(path.join(root, 'src', 'visible.ts'), 'visible');
+    await chmod(privateDir, 0);
+    try {
+      const partial = await handleInspect({ ops: [{ op: 'list', pattern: '**/*.ts' }] }, deps);
+      expect(partial.text).toContain('src/visible.ts');
+      expect(partial.text).toContain('incomplete: 1 directory could not be read');
+      const empty = await handleInspect({ ops: [{ op: 'list', pattern: 'private/*.ts' }] }, deps);
+      expect(empty.isError).toBe(true);
+      expect(empty.text).toContain('incomplete: 1 directory could not be read');
+    } finally {
+      await chmod(privateDir, 0o700);
+    }
+  });
+
+  it('keeps git status, diff stat, and log within a nested workspace root', async () => {
+    const repository = path.join(root, 'repository');
+    const workspace = path.join(repository, 'project');
+    await mkdir(workspace, { recursive: true });
+    await writeFile(path.join(repository, 'outside.txt'), 'initial');
+    await writeFile(path.join(workspace, 'inside.txt'), 'initial');
+    execFileSync('git', ['init', '-q'], { cwd: repository });
+    execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: repository });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repository });
+    execFileSync('git', ['add', '.'], { cwd: repository });
+    execFileSync('git', ['commit', '-qm', 'initial'], { cwd: repository });
+    await writeFile(path.join(repository, 'outside.txt'), 'outside change');
+    execFileSync('git', ['add', 'outside.txt'], { cwd: repository });
+    execFileSync('git', ['commit', '-qm', 'outside only'], { cwd: repository });
+
+    const runGit = async (args: readonly string[], cwd: string): Promise<string> =>
+      execFileSync('git', [...args], { cwd, encoding: 'utf8' });
+    const reply = await handleInspect({
+      workspaceRoot: workspace,
+      ops: [
+        { op: 'git', action: 'status' },
+        { op: 'git', action: 'diff_stat' },
+        { op: 'git', action: 'log' },
+      ],
+    }, { ...deps, runGit });
+    expect(reply.text).not.toContain('outside.txt');
+    expect(reply.text).not.toContain('outside only');
+    expect(reply.text).toContain('initial');
   });
 
   it.each([

@@ -176,7 +176,7 @@ export function renderAgentToolingRules(
     AGENT_TOOLING_HEADING,
     '',
     '- `ptah_*` tools first; `ptah_get_diagnostics` after edits. A deferred ptah tool counts as listed: if your client defers tool schemas, load it with its tool-search tool (Claude Code: `ToolSearch` `select:<name>`), otherwise call it directly. A tool that is not listed at all: use the native one, do not probe.',
-    '- Use native Bash, Grep or Glob only for writes, build and test commands, a ptah error, or one Grep after zero hits; then name the tool that returned nothing.',
+    '- Prefer `ptah_run_check` for one-project Nx targets it supports; use native commands for other targets. Use native Bash, Grep or Glob for writes, a ptah error, or one Grep after zero hits; then name the tool that returned nothing.',
     `- ${freeTextLine()}`,
     `- ${worktreeRootRule(options)}`,
     '',
@@ -184,7 +184,7 @@ export function renderAgentToolingRules(
     '| --- | --- |',
     ...rows,
     '',
-    'Writes, build and test commands stay native.',
+    'Writes and targets unsupported by `ptah_run_check` stay native.',
   ].join('\n');
 }
 

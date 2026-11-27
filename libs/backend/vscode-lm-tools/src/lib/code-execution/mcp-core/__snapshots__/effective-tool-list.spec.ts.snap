@@ -17,9 +17,9 @@ exports[`effective tool list characterization cron write tools (issue #1400) lis
 exports[`effective tool list characterization denied ptah tool hides execute_code keeps the ordered names and schema hashes 1`] = `
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
-  "ptah_read_symbol 0947e5bb0ba62b7e",
+  "ptah_read_symbol a0bae52ac3d47ee5",
   "ptah_grep 876755f06e59758c",
-  "ptah_inspect 2389f0ab4452875b",
+  "ptah_inspect 054863779b3aa33a",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",
@@ -99,9 +99,9 @@ exports[`effective tool list characterization no phase keeps the ordered names a
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
   "ptah_search_files 21b875a2b9a00a8e",
-  "ptah_read_symbol 0947e5bb0ba62b7e",
+  "ptah_read_symbol a0bae52ac3d47ee5",
   "ptah_grep 876755f06e59758c",
-  "ptah_inspect 2389f0ab4452875b",
+  "ptah_inspect 054863779b3aa33a",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",
@@ -182,9 +182,9 @@ exports[`effective tool list characterization phase with denials keeps the order
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
   "ptah_search_files 21b875a2b9a00a8e",
-  "ptah_read_symbol 0947e5bb0ba62b7e",
+  "ptah_read_symbol a0bae52ac3d47ee5",
   "ptah_grep 876755f06e59758c",
-  "ptah_inspect 2389f0ab4452875b",
+  "ptah_inspect 054863779b3aa33a",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",

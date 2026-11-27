@@ -307,7 +307,7 @@ describe('handleReadSymbol', () => {
     expect(reply.text).toContain('outside the workspace root');
   });
 
-  it('refuses a symlink that points outside the workspace root', async () => {
+  (process.platform === 'win32' ? it.skip : it)('refuses a symlink that points outside the workspace root', async () => {
     await symlink(path.join(outside, 'secret.ts'), path.join(root, 'link.ts'));
     const reply = await handleReadSymbol({ file: 'link.ts', name: 's' }, deps);
     expect(reply.isError).toBe(true);

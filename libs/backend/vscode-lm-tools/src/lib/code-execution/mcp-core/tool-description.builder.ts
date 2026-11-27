@@ -538,7 +538,6 @@ export function buildReadSymbolTool(): MCPToolDefinition {
         maxLines: {
           type: 'integer',
           minimum: 1,
-          maximum: READ_SYMBOL_HARD_MAX_LINES,
           default: READ_SYMBOL_DEFAULT_MAX_LINES,
           description: 'Most lines to return.',
         },
@@ -641,8 +640,8 @@ export function buildInspectTool(): MCPToolDefinition {
             type: 'object',
             properties: {
               op: { type: 'string', enum: ['read', 'grep', 'list', 'git'] },
-              file: { type: 'string' }, name: { type: 'string' }, startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 }, maxLines: { type: 'integer', minimum: 1, maximum: 400 },
-              pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, maxMatches: { type: 'integer', minimum: 1, maximum: 100 }, includeIgnored: { type: 'boolean' }, regex: { type: 'boolean' }, caseSensitive: { type: 'boolean' }, context: { type: 'integer', minimum: 0, maximum: 5 }, limit: { type: 'integer', minimum: 1, maximum: 200 },
+              file: { type: 'string' }, name: { type: 'string' }, startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 }, maxLines: { type: 'integer', minimum: 1 },
+              pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, maxMatches: { type: 'integer', minimum: 1 }, includeIgnored: { type: 'boolean' }, regex: { type: 'boolean' }, caseSensitive: { type: 'boolean' }, context: { type: 'integer', minimum: 0, maximum: 5 }, limit: { type: 'integer', minimum: 1 },
               action: { type: 'string', enum: ['status', 'diff_stat', 'log', 'branch'] }, base: { type: 'string', pattern: '^(?!-)[A-Za-z0-9._/-]{1,200}$' },
             }, required: ['op'], additionalProperties: true,
           },
@@ -1049,7 +1048,12 @@ export function buildAgentStatusTool(): MCPToolDefinition {
   return {
     name: 'ptah_agent_status',
     description:
-      'Check one or all agents. Returns id, status (starting/running/completed/failed/timeout/stopped), CLI, task, start time, and available duration, exit code and CLI session id. Resume a timed-out agent with that session id as ptah_agent_spawn.resume_session_id; do not respawn and lose its context.',
+      'Check the status of a specific agent or all agents. ' +
+      'Returns agentId, status (starting/running/completed/failed/timeout/stopped), ' +
+      'cli, task, startedAt, and when available duration, exitCode, and — when the adapter reports ' +
+      'one — the CLI Session ID. That session id is what ptah_agent_spawn takes ' +
+      'as resume_session_id, so its presence here is the signal to resume a ' +
+      'timed-out agent rather than respawn it and lose its context.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1071,7 +1075,14 @@ export function buildAgentReadTool(): MCPToolDefinition {
   return {
     name: 'ptah_agent_read',
     description:
-      'Read captured stdout/stderr, including output so far (or none yet) for running agents. Defaults to the newest 200 lines per stream, reduced to fit the result budget; oversized windows are saved to the named file, with shown and omitted line counts. Use tail to change the window and offset to read forward.',
+      'Read the stdout/stderr output from an agent. ' +
+      'For starting or running agents, returns output captured so far, or no output yet. ' +
+      'By default returns the last 200 lines of each stream, fewer when they ' +
+      'would exceed the result size limit (the newest lines are kept; a line ' +
+      'too long to fit is shown in part, and the full window is then saved to ' +
+      'a file the result names). Each ' +
+      'stream states the exact lines shown and how many were left out. Pass tail ' +
+      'for a different window size, and offset to read forward starting at a given line.',
     inputSchema: {
       type: 'object',
       properties: {

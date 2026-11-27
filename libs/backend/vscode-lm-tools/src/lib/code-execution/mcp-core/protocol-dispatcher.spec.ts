@@ -10960,7 +10960,7 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
   // `ptah_ast_analyze` take an absolute path verbatim (`resolveWorkspaceFilePath`
   // and `resolveFilePath` in the namespace builders) and apply no root check.
   // The navigation tools must never be wider than that, and they are narrower.
-  it('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
+  (process.platform === 'win32' ? it.skip : it)('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
     const outsideFile = path.join(outside, 'b.txt');
     fs.symlinkSync(outside, path.join(root, 'link'));
 

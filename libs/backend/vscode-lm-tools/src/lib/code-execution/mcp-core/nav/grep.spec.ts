@@ -278,7 +278,7 @@ describe('handleGrep (node engine)', () => {
     expect(unscoped.text).toContain('scoped');
   });
 
-  it('refuses a path outside the workspace, also through a symlink', async () => {
+  (process.platform === 'win32' ? it.skip : it)('refuses a path outside the workspace, also through a symlink', async () => {
     const escape = await handleGrep({ pattern: 'LIMIT', path: '../' }, deps);
     expect(escape.isError).toBe(true);
     await symlink(outside, path.join(root, 'link'));

@@ -1,7 +1,7 @@
 ﻿## Sources
 
-- Codex / gpt-6-luna: `C:\Users\abdal\.ptah\state\sessions\55e623e6-6b9e-4d7e-a028-0439eed723c3\agent-output.03a54af7-44c4-4a39-b589-ecbfb749b6b6.json`. The journal has 23 `tool-call` segments; it has no `streamEvents` array. The matching Codex rollout is `C:\Users\abdal\.codex\sessions\2026\11\26\rollout-2026-11-26T23-22-50-01a219bd-5bf8-7570-bf09-57146176fada.jsonl`; counts use the journal segments.
-- Antigravity / gemini-4-hydrogen-high: `C:\Users\abdal\.ptah\state\sessions\55e623e6-6b9e-4d7e-a028-0439eed723c3\agent-output.25281fb8-3d47-4462-882a-d5f691868e92.json`; counts use its 49 `tool-call` segments.
+- Codex / gpt-6-luna: `C:\Users\<user>\.ptah\state\sessions\55e623e6-6b9e-4d7e-a028-0439eed723c3\agent-output.03a54af7-44c4-4a39-b589-ecbfb749b6b6.json`. The journal has 23 `tool-call` segments; it has no `streamEvents` array. The matching Codex rollout is `C:\Users\<user>\.codex\sessions\2026\11\26\rollout-2026-11-26T23-22-50-01a219bd-5bf8-7570-bf09-57146176fada.jsonl`; counts use the journal segments.
+- Antigravity / gemini-4-hydrogen-high: `C:\Users\<user>\.ptah\state\sessions\55e623e6-6b9e-4d7e-a028-0439eed723c3\agent-output.25281fb8-3d47-4462-882a-d5f691868e92.json`; counts use its 49 `tool-call` segments.
 - Count gaps: Codex 0 (23 counted vs 23 reported); Antigravity 0 (49 vs 49). Counts use one saved tool-call segment per call. Tool results are not counted as calls.
 
 ## Results
@@ -48,7 +48,7 @@ Q attribution is `unknown` unless the tool target identifies a probe question di
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/grep-inline.spec.ts` | file-read | `ptah_read_symbol` | Q2 |
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/nav-symbols.spec.ts` | file-read | `ptah_read_symbol` | unknown |
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/tool-description.builder.ts` | file-read | `ptah_read_symbol` | Q1 |
-| `C:/Users/abdal/.gemini/antigravity-cli/brain/a7f481d6-1b10-4fc5-9218-5810884ef68f/.system_generated/tasks/task-47.log` | file-read | `ptah_read_symbol` | unknown |
+| `C:/Users/<user>/.gemini/antigravity-cli/brain/a7f481d6-1b10-4fc5-9218-5810884ef68f/.system_generated/tasks/task-47.log` | file-read | `ptah_read_symbol` | unknown |
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/protocol-dispatcher.ts` | file-read | `ptah_read_symbol` | Q1 |
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/effective-tool-list.ts` | file-read | `ptah_read_symbol` | Q1 |
 | `libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/tool-result-budget.ts` | file-read | `ptah_read_symbol` | unknown |
