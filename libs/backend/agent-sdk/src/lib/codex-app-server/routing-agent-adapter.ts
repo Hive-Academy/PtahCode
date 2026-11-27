@@ -240,12 +240,20 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     }
     return undefined;
   }
-  /** Reads the effective level for a resolved session ID. */
+  /**
+   * Reads the effective level for a session ID, or for the chat tab ID that a
+   * Ptah MCP caller carries before (or instead of) its published session ID.
+   */
   getPermissionLevel(sessionId: string): PermissionLevel | undefined {
-    return (
-      this.native?.getPermissionLevel?.(sessionId) ??
-      this.providerSessions?.getPermissionLevel?.(sessionId)
-    );
+    for (const native of [this.native, this.providerSessions]) {
+      if (!native?.getPermissionLevel) continue;
+      const direct = native.getPermissionLevel(sessionId);
+      if (direct) return direct;
+      const live = native.resolveLiveSessionId?.(sessionId);
+      const level = live ? native.getPermissionLevel(live) : undefined;
+      if (level) return level;
+    }
+    return undefined;
   }
   getSessionToken(
     ...args: Parameters<IAgentAdapter['getSessionToken']>
