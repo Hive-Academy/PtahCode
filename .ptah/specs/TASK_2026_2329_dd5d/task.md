@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2329_dd5d
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Fix setup wizard navigation, active analysis state, skill review decision model, and download ordering
 description: >-
