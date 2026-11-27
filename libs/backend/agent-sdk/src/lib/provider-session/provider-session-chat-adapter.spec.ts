@@ -407,6 +407,39 @@ describe('ProviderSessionChatAdapter', () => {
     expect(h.lives[0].setModel).toHaveBeenCalledWith('gemini-4-hydrogen-low');
   });
 
+  it('applies the prepared saved permission to the process a history read adopted on resume', async () => {
+    // Live test: the history read opened agy in Full Auto; the user then
+    // turned Full Auto off, and the follow-up kept auto-approving tools.
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed,
+      resume: { nativeSessionId: 'native-stored' },
+      permission: 'ask',
+    }));
+    const id = SessionId.create();
+    await collect(await h.adapter.resumeSession(id, { tabId: 'tab-r' }));
+    expect(h.lives[0].setPermission).toHaveBeenCalledWith('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+  });
+
+  it('prefers an explicit permissionLevel over the prepared saved permission', async () => {
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed,
+      resume: { nativeSessionId: 'native-stored' },
+      permission: 'ask',
+    }));
+    const id = SessionId.create();
+    await collect(
+      await h.adapter.resumeSession(id, {
+        tabId: 'tab-r',
+        permissionLevel: 'yolo',
+      }),
+    );
+    expect(h.lives[0].setPermission).toHaveBeenCalledTimes(1);
+    expect(h.lives[0].setPermission).toHaveBeenCalledWith('yolo');
+  });
+
   it('resumes the stored native session and fails a mismatched attach as resume-failed', async () => {
     const h = setup();
     const id = SessionId.create();

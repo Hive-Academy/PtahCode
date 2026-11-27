@@ -50,7 +50,7 @@ export function createProviderSessionChatSession(
   );
   const permission = isPermissionLevel(config.permissionLevel)
     ? config.permissionLevel
-    : undefined;
+    : prepared.permission;
   const session: ProviderSessionChatSession = {
     id,
     token: randomUUID(),

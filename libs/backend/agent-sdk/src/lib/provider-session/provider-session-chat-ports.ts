@@ -21,6 +21,7 @@ import type {
   AgentSessionStartConfig,
   FlatStreamEventUnion,
   McpToolProfile,
+  PermissionLevel,
   PermissionPromptCancelledPayload,
   ProviderInfo,
   ProviderSessionSeed,
@@ -72,6 +73,11 @@ export interface ProviderSessionChatPrepared {
   readonly resume?: { readonly nativeSessionId: string };
   /** Absent: the host opens with its defaults (Ptah MCP only, no instructions). */
   readonly open?: ProviderSessionOpenOptions;
+  /**
+   * The saved permission level when the caller sent none. A reused process
+   * may have opened at an older level, so the session applies this one.
+   */
+  readonly permission?: PermissionLevel;
 }
 
 export interface ProviderSessionAcquireRequest {
