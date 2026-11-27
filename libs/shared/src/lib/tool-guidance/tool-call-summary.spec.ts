@@ -210,4 +210,32 @@ describe('tool-call-summary (shared core)', () => {
     expect(Object.keys(summary.byTool)).toHaveLength(MAX_TOOL_CALL_SUMMARY_TOOLS);
     expect(summary.byToolOverflow).toBe(3);
   });
+
+  it('maintains totalCalls === ptahCalls + nativeCalls + otherMcpCalls across mixed discovery and mutating calls', () => {
+    const summary = summarizeToolCallSegments([
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'ptah_grep' },
+      { type: 'tool-result', toolCallId: 'c1' },
+      { type: 'tool-call', toolCallId: 'c2', toolName: 'ToolSearch' },
+      { type: 'tool-result', toolCallId: 'c2' },
+      { type: 'tool-call', toolCallId: 'c3', toolName: 'mcp__docs__list_tools' },
+      { type: 'tool-result', toolCallId: 'c3' },
+      { type: 'tool-call', toolCallId: 'c4', toolName: 'mcp__my_server__do_thing' },
+      { type: 'tool-result', toolCallId: 'c4' },
+      { type: 'tool-call', toolCallId: 'c5', toolName: 'Bash', toolInput: { command: "sed -i 's/a/b/' f.txt" } },
+      { type: 'tool-result', toolCallId: 'c5' },
+      { type: 'tool-call', toolCallId: 'c6', toolName: 'Bash', toolInput: { command: 'git show HEAD' } },
+      { type: 'tool-result', toolCallId: 'c6' },
+    ]);
+
+    expect(summary.totalCalls).toBe(6);
+    expect(summary.ptahCalls).toBe(1);
+    expect(summary.nativeCalls).toBe(3);
+    expect(summary.otherMcpCalls).toBe(2);
+    expect(summary.discoveryCalls).toBe(2);
+    expect(summary.substitutableNative.gitRead).toBe(1);
+    expect(summary.substitutableNative.fileRead).toBe(0);
+    expect(summary.ptahCalls + summary.nativeCalls + summary.otherMcpCalls).toBe(
+      summary.totalCalls,
+    );
+  });
 });

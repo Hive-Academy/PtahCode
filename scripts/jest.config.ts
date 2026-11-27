@@ -34,15 +34,13 @@ const config: Config = {
   moduleNameMapper: {
     '^@ptah-extension/shared$': '<rootDir>/../libs/shared/src/index.ts',
   },
+  // Single ts-jest transform using scripts/tsconfig.json (which resolves
+  // @ptah-extension/shared via paths). Multiple ts-jest transform entries with
+  // different tsconfigs in one maxWorkers: 1 project share
+  // TsJestTransformer._cachedConfigSets keyed only by Jest config, so the first
+  // spec's tsconfig would overwrite later entries (any path regex would also
+  // need [/\\] for Windows and Linux).
   transform: {
-    '^.+[/\\\\]libs[/\\\\]shared[/\\\\].+\\.tsx?$': [
-      'ts-jest',
-      { tsconfig: '<rootDir>/../libs/shared/tsconfig.spec.json' },
-    ],
-    '^.+[/\\\\]scripts[/\\\\]agent-usage[/\\\\].+\\.tsx?$': [
-      'ts-jest',
-      { tsconfig: '<rootDir>/agent-usage/tsconfig.json' },
-    ],
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },
   moduleFileExtensions: ['ts', 'js', 'mjs', 'cjs', 'json'],

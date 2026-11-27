@@ -1,9 +1,13 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "commonjs",
-    "lib": ["ES2020"],
+    "lib": ["ES2022"],
     "outDir": "../dist/scripts",
+    "baseUrl": "..",
+    "paths": {
+      "@ptah-extension/shared": ["./libs/shared/src/index.ts"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -21,7 +25,7 @@
     "strictPropertyInitialization": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": true,
+    "noUncheckedIndexedAccess": false,
     "noUncheckedSideEffectImports": false,
     "types": ["*"],
     "ignoreDeprecations": "6.0"

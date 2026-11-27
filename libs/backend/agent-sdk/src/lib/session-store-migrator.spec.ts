@@ -166,6 +166,61 @@ describe('LegacySessionStoreMigrator', () => {
     },
   );
 
+  it('copies async agent output header metadata including summary-only outputs', async () => {
+    const { storage } = asyncLegacy();
+    const legacy = new SessionMetadataStore(storage, logger);
+    await legacy.create(SESS_A, WS_A, 'Alpha');
+    const summaryOnlyAgent = '44444444-4444-4444-8444-444444444444' as AgentId;
+    const summary = {
+      totalCalls: 2,
+      ptahCalls: 1,
+      nativeCalls: 1,
+      otherMcpCalls: 0,
+      discoveryCalls: 0,
+      ptahErrors: 0,
+      nativeErrors: 0,
+      unknownOutcomes: 0,
+      callsBeforeFirstPtahSuccess: 0,
+      substitutableNative: {
+        textSearch: 0,
+        fileRead: 1,
+        pathListing: 0,
+        gitRead: 0,
+      },
+      byTool: {
+        ptah_grep: { calls: 1, errors: 0 },
+        Read: { calls: 1, errors: 0 },
+      },
+      byToolOverflow: 0,
+    };
+    await legacy.saveAgentOutput(summaryOnlyAgent, {
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      startedAt: '2026-11-27T01:00:00.000Z',
+      segmentsTruncated: true,
+      toolCallSummary: summary,
+    });
+    await legacy.addCliSession(SESS_A, ref(summaryOnlyAgent));
+    await legacy.flush();
+
+    const t = target();
+    const result = await t.migrator.migrate([
+      { sourcePath: '/legacy/alpha', storage },
+    ]);
+
+    expect(result).toMatchObject({ copied: 1, failed: 0 });
+    await expect(
+      t.store().getAgentOutputHeader(summaryOnlyAgent, SESS_A),
+    ).resolves.toMatchObject({
+      agentId: summaryOnlyAgent,
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      startedAt: '2026-11-27T01:00:00.000Z',
+      segmentsTruncated: true,
+      toolCallSummary: summary,
+    });
+  });
+
   it('leaves the legacy store exactly as it was', async () => {
     const { storage, inner } = asyncLegacy();
     await writeLegacy(storage, SESS_A, WS_A, 'Alpha');

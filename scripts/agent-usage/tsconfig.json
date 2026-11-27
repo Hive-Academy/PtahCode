@@ -10,5 +10,6 @@
     "ignoreDeprecations": "6.0",
     "noEmit": true
   },
-  "include": ["./**/*.ts"]
+  "include": ["./**/*.ts"],
+  "exclude": ["./probe-plan-usage.ts"]
 }

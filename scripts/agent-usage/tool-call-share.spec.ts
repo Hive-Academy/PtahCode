@@ -16,6 +16,7 @@ import {
   formatShareReport,
   parseInstant,
   rowFromLane,
+  selectClaudeSessionRows,
   summarizeCalls,
   type ShareRow,
 } from './tool-call-share';
@@ -194,5 +195,120 @@ describe('tool-call-share', () => {
       expect(fallbackRow.hasSummary).toBe(false);
       expect(fallbackRow.total).toEqual(summaryRow.total);
     } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it('preserves total = ptah + native + sum(otherMcp) across discovery, underscore MCP servers, summary, and fallback paths', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tool-share-invariant-'));
+    const calls = [
+      { name: 'ptah_grep', error: false },
+      { name: 'ToolSearch', error: false },
+      { name: 'mcp__docs__list_tools', error: false },
+      { name: 'mcp__my_server__do_thing', error: false },
+      { name: 'Bash', input: { command: "sed -i 's/a/b/' file.txt" }, error: false },
+      { name: 'Bash', input: { command: 'git show HEAD' }, error: false },
+    ] as const;
+
+    const summarized = summarizeCalls(calls);
+    const otherMcpTotal = Object.values(summarized.otherMcp).reduce((sum, count) => sum + count, 0);
+    expect(summarized.total).toBe(6);
+    expect(summarized.discovery).toBe(2);
+    expect(summarized.otherMcp).toEqual({ docs: 1, my_server: 1 });
+    expect(summarized.ptah + summarized.native + otherMcpTotal).toBe(summarized.total);
+
+    const segments: ToolCallSummarySegment[] = calls.flatMap((call, index) => [
+      { type: 'tool-call', toolCallId: `c-${index}`, toolName: call.name, ...('input' in call ? { toolInput: call.input } : {}) },
+      { type: 'tool-result', toolCallId: `c-${index}` },
+    ]);
+    const runtimeSummary = createToolCallSummary();
+    for (const seg of segments) {
+      if (seg.type === 'tool-call') recordToolCall(runtimeSummary, seg);
+      else recordToolResult(runtimeSummary, seg);
+    }
+    releaseToolCallSummary(runtimeSummary);
+
+    const summaryFile = join(directory, 'agent-output.inv-summary.json');
+    const fallbackFile = join(directory, 'agent-output.inv-fallback.json');
+    try {
+      writeFileSync(summaryFile, JSON.stringify({
+        agentId: 'inv-summary',
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        segmentsTruncated: false,
+        toolCallSummary: runtimeSummary,
+        savedAt: 1000,
+        segments,
+      }));
+      writeFileSync(fallbackFile, JSON.stringify({
+        agentId: 'inv-fallback',
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        savedAt: 1000,
+        segments,
+      }));
+      const summaryRow = rowFromLane(summaryFile);
+      const fallbackRow = rowFromLane(fallbackFile);
+      expect(fallbackRow.total).toEqual(summaryRow.total);
+      for (const total of [summaryRow.total, fallbackRow.total]) {
+        const mcpSum = Object.values(total.otherMcp).reduce((sum, count) => sum + count, 0);
+        expect(total.ptah + total.native + mcpSum).toBe(total.total);
+        expect(total.discovery).toBe(2);
+        expect(mcpSum).toBe(2);
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it('matches --session against the full Claude transcript UUID before display truncation', () => {
+    const fullUuid = '12345678-1234-4123-8123-123456789abc';
+    const otherUuid = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const transcripts = [
+      {
+        file: `/tmp/projects/proj/${fullUuid}.jsonl`,
+        id: fullUuid.slice(0, 24),
+        kind: 'session' as const,
+        agentType: null,
+        cwd: 'proj',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        model: 'claude-sonnet',
+        requestInputs: [100],
+        requests: [],
+        missingUsage: 0,
+        cached: 0,
+        output: 0,
+        compactions: 0,
+        largestToolOutput: null,
+        hasLaneMarker: false,
+        badLines: 0,
+        toolCalls: [{ id: 't1', name: 'ptah_grep', outcome: 'success' as const, atMs: 1 }],
+      },
+      {
+        file: `/tmp/projects/proj/${otherUuid}.jsonl`,
+        id: otherUuid.slice(0, 24),
+        kind: 'session' as const,
+        agentType: null,
+        cwd: 'proj',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        model: 'claude-sonnet',
+        requestInputs: [100],
+        requests: [],
+        missingUsage: 0,
+        cached: 0,
+        output: 0,
+        compactions: 0,
+        largestToolOutput: null,
+        hasLaneMarker: false,
+        badLines: 0,
+        toolCalls: [],
+      },
+    ];
+    const window = { since: Date.parse('2026-11-27T00:00:00.000Z'), until: Date.parse('2026-11-27T02:00:00.000Z'), session: fullUuid };
+    const matched = selectClaudeSessionRows(transcripts, window);
+    expect(matched).toHaveLength(1);
+    expect(matched[0]?.id).toBe(fullUuid.slice(0, 24));
+    expect(matched[0]?.sessionId).toBe(fullUuid.slice(0, 24));
+
+    const all = selectClaudeSessionRows(transcripts, { since: window.since, until: window.until });
+    expect(all).toHaveLength(2);
   });
 });

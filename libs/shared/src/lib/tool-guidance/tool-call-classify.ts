@@ -17,10 +17,54 @@ export interface ToolCallClassification {
 
 const extras: Readonly<Record<NativeClass, readonly string[]>> = {
   'text-search': ['Select-String', 'findstr', 'git grep', 'grep', 'rg'],
-  'file-read': ['Get-Content', 'type', 'sed', 'sed -n', 'cat', 'head', 'tail'],
-  'path-listing': ['Get-ChildItem', 'find', 'git ls-files'],
+  'file-read': ['Get-Content', 'type', 'sed', 'cat', 'head', 'tail'],
+  'path-listing': ['Get-ChildItem', 'find', 'ls', 'dir', 'git ls-files'],
   'git-read': ['git status', 'git diff', 'git log', 'git show', 'git branch'],
 };
+
+const MUTATING_PIPELINE_COMMANDS = new Set([
+  'tee',
+  'out-file',
+  'set-content',
+  'add-content',
+]);
+
+const MUTATING_FIND_ARGS = new Set([
+  '-delete',
+  '-exec',
+  '-execdir',
+  '-ok',
+  '-okdir',
+  '-fprint',
+  '-fprint0',
+  '-fprintf',
+  '-fls',
+]);
+
+const MUTATING_GIT_BRANCH_LONG_FLAGS = new Set([
+  '--delete',
+  '--move',
+  '--copy',
+  '--force',
+  '--set-upstream-to',
+  '--unset-upstream',
+  '--edit-description',
+  '--track',
+  '--no-track',
+]);
+
+const GIT_BRANCH_VALUE_FLAGS = new Set([
+  '--contains',
+  '--no-contains',
+  '--merged',
+  '--no-merged',
+  '--points-at',
+  '--sort',
+  '--format',
+  '--abbrev',
+  '--color',
+  '--column',
+]);
 
 function shellCommand(input: unknown): string {
   if (typeof input === 'string') return input.trim();
@@ -33,6 +77,111 @@ function shellCommand(input: unknown): string {
   return '';
 }
 
+function stripQuotedStrings(command: string): string {
+  return command
+    .replace(/'[^']*'/g, ' ')
+    .replace(/"(?:\\.|[^"\\])*"/g, ' ');
+}
+
+function tokenizeArgs(command: string): string[] {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] ?? '';
+    if (quote !== null) {
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        current += command[i + 1] ?? '';
+        i++;
+      } else if (ch === quote) {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/[\s;&|]/.test(ch)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (current.length > 0) tokens.push(current);
+  return tokens;
+}
+
+function hasOutputRedirection(unquotedCommand: string): boolean {
+  if (/(?:^|[^<])>{1,2}(?!&\d)/.test(unquotedCommand)) return true;
+  const stages = unquotedCommand.split(/(?:\|\||&&|[|;&])+/);
+  for (const stage of stages) {
+    const tokens = stage.trim().split(/\s+/).filter(Boolean);
+    let idx = 0;
+    while (idx < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(tokens[idx] ?? '')) idx++;
+    const cmd = (tokens[idx] ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
+    if (MUTATING_PIPELINE_COMMANDS.has(cmd)) return true;
+  }
+  return false;
+}
+
+function isMutatingSed(args: readonly string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--') break;
+    if (arg === '--in-place' || arg.startsWith('--in-place=')) return true;
+    if (/^-[a-zA-Z]*i/.test(arg)) return true;
+  }
+  return false;
+}
+
+function isMutatingFind(args: readonly string[]): boolean {
+  return args.some((arg) => MUTATING_FIND_ARGS.has(arg.toLowerCase()));
+}
+
+function isMutatingGitBranch(args: readonly string[]): boolean {
+  let listMode = false;
+  let expectingValue = false;
+  for (const arg of args) {
+    if (expectingValue) {
+      expectingValue = false;
+      continue;
+    }
+    if (arg === '--') break;
+    if (arg === '-l' || arg === '--list') {
+      listMode = true;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      const [flag] = arg.split('=');
+      const lower = (flag ?? arg).toLowerCase();
+      if (MUTATING_GIT_BRANCH_LONG_FLAGS.has(lower)) return true;
+      if (!arg.includes('=') && GIT_BRANCH_VALUE_FLAGS.has(lower)) {
+        expectingValue = true;
+      }
+      continue;
+    }
+    if (arg.startsWith('-') && arg.length > 1) {
+      if (/^-[^-]*[dDmMcCf]/.test(arg)) return true;
+      continue;
+    }
+    if (!listMode) return true;
+  }
+  return false;
+}
+
+function parseMcpServer(name: string): string | undefined {
+  if (/^mcp__/i.test(name)) {
+    const rest = name.slice('mcp__'.length);
+    const sep = rest.indexOf('__');
+    const server = sep >= 0 ? rest.slice(0, sep) : rest;
+    return server.length > 0 ? server : undefined;
+  }
+  return name.match(/^MCP\(([^_)]+)/i)?.[1];
+}
+
 function nativeClass(call: ToolCallInput): NativeClass | null {
   const name = call.name.toLowerCase().replace(/_/g, '-');
   if (/^(grep|rg|search|select-string|findstr)\b/.test(name)) return 'text-search';
@@ -43,19 +192,20 @@ function nativeClass(call: ToolCallInput): NativeClass | null {
   const command = shellCommand(call.input)
     .replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*cd\s+[^;&|]+&&\s*/i, '')
     .replace(/^\s*(?:["'])(.*?)(?:["'])/, '$1');
-  const words = command.split(/[\s;&|]+/).filter(Boolean);
+  if (hasOutputRedirection(stripQuotedStrings(command))) return null;
+  const words = tokenizeArgs(command);
   let offset = 0;
   while (offset < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(words[offset] ?? '') || words[offset] === '&')) offset++;
   const first = (words[offset] ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
   const second = first === 'git' ? (words[offset + 1] ?? '').toLowerCase() : '';
   const normalized = first === 'git' ? `git ${second}` : first;
+  const args = first === 'git' ? words.slice(offset + 2) : words.slice(offset + 1);
+  if (first === 'sed' && isMutatingSed(args)) return null;
+  if (first === 'find' && isMutatingFind(args)) return null;
+  if (normalized === 'git branch' && isMutatingGitBranch(args)) return null;
   for (const [category, commands] of Object.entries(extras) as [NativeClass, readonly string[]][]) {
     if (commands.some((word) => word.toLowerCase() === normalized || word.toLowerCase() === first)) return category;
   }
-  if (['grep', 'rg'].includes(first)) return 'text-search';
-  if (['cat', 'sed', 'head', 'tail'].includes(first)) return 'file-read';
-  if (['ls', 'dir', 'find'].includes(first)) return 'path-listing';
-  if (first === 'git' && ['status', 'diff', 'log', 'show', 'branch'].includes(second)) return 'git-read';
   return null;
 }
 
@@ -79,7 +229,7 @@ export function classifyToolCall(call: ToolCallInput): ToolCallClassification {
   const lowerName = name.toLowerCase();
   const normalizedServer = serverInput?.toLowerCase();
   const explicitPtah = lowerName.startsWith('ptah_') || lowerName.startsWith('mcp__ptah__') || lowerName.startsWith('ptah__') || lowerName.startsWith('mcp_ptah_lane_ptah_') || normalizedServer === 'ptah';
-  const mcp = name.match(/^(?:mcp__|MCP\()([^_)]+)/i)?.[1] ?? normalizedServer;
+  const mcp = parseMcpServer(name) ?? normalizedServer;
   const server: CallServer = explicitPtah ? 'ptah' : mcp ? `mcp:${mcp}` : 'native';
   if (server === 'ptah') return { server, operation: 'ptah', nativeClass: null };
   if (/tool.?search|search_tool|toolsearch|list_tools|tool.?discovery/i.test(name)) {

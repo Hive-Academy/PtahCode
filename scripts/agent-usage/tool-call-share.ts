@@ -1,9 +1,9 @@
 import { readFileSync, readdirSync } from 'fs';
 import { homedir, platform } from 'os';
 import { basename, dirname, join } from 'path';
-import { claudeProjectsDir, readClaudeStore, type ClaudeToolCall } from './claude-transcript.reader';
+import { claudeProjectsDir, readClaudeStore, type ClaudeToolCall, type ClaudeTranscriptSummary } from './claude-transcript.reader';
 import { findAgentOutputBlobs, readAgentOutputBlob } from './agent-output-blob.reader';
-import { classifyToolCall, normalizeToolSummaryKey, type NativeClass, type ToolCallInput, type ToolCallSummary } from '@ptah-extension/shared';
+import { classifyToolCall, normalizeToolSummaryKey, type CallServer, type NativeClass, type ToolCallInput, type ToolCallSummary } from '@ptah-extension/shared';
 import { isoInstant } from './lane-metrics';
 
 export interface ShareTotals {
@@ -68,6 +68,13 @@ function addTotals(target: ShareTotals, value: ShareTotals): void {
   for (const [key, count] of Object.entries(value.otherMcp)) target.otherMcp[key] = (target.otherMcp[key] ?? 0) + count;
 }
 
+function addOtherMcpCount(totals: ShareTotals, server: CallServer): void {
+  const rawServer = server.slice('mcp:'.length);
+  const normalized = normalizeToolSummaryKey(rawServer, server);
+  const key = normalized === 'mcp:other' ? 'other' : normalized;
+  totals.otherMcp[key] = (totals.otherMcp[key] ?? 0) + 1;
+}
+
 export function summarizeCalls(calls: readonly (ToolCallInput & { readonly error?: boolean })[]): ShareTotals {
   const totals = freshTotals();
   let sawPtahSuccess = false;
@@ -83,11 +90,9 @@ export function summarizeCalls(calls: readonly (ToolCallInput & { readonly error
     } else if (classification.operation === 'discovery') {
       totals.discovery++;
       if (classification.server === 'native') totals.native++;
+      else addOtherMcpCount(totals, classification.server);
     } else if (classification.server !== 'native') {
-      const rawServer = classification.server.slice('mcp:'.length);
-      const normalized = normalizeToolSummaryKey(rawServer, classification.server);
-      const server = normalized === 'mcp:other' ? 'other' : normalized;
-      totals.otherMcp[server] = (totals.otherMcp[server] ?? 0) + 1;
+      addOtherMcpCount(totals, classification.server);
     } else {
       totals.native++;
       if (classification.nativeClass) totals.nativeSubstitutable[classification.nativeClass]++;
@@ -255,6 +260,25 @@ export function filterRowsByWindow(rows: readonly ShareRow[], window: WindowOpti
 export function emptyWindowExitCode(rows: readonly ShareRow[]): 0 | 1 { return rows.length === 0 ? 1 : 0; }
 export const EMPTY_WINDOW_MESSAGE = 'No tool-call data in the requested window.';
 
+export function claudeTranscriptFullId(summary: Pick<ClaudeTranscriptSummary, 'file' | 'id'>): string {
+  const leaf = summary.file.split(/[\\/]/).pop() ?? '';
+  const full = leaf.replace(/\.jsonl$/, '');
+  return full.length > 0 ? full : summary.id;
+}
+
+export function selectClaudeSessionRows(transcripts: readonly ClaudeTranscriptSummary[], window: WindowOptions): ShareRow[] {
+  if (window.agent) return [];
+  return transcripts
+    .filter((summary) => summary.kind === 'session' && !summary.hasLaneMarker && inWindow(summary.startedAt, window))
+    .filter((summary) => !window.session || claudeTranscriptFullId(summary) === window.session)
+    .map((summary): ShareRow => {
+      const total = summarizeCalls(claudeCalls(summary.toolCalls ?? []));
+      const id = outputLabel(summary.id);
+      const startedAt = summary.startedAt === null ? null : isoInstant(Date.parse(summary.startedAt));
+      return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, hasSummary: false, storedTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId: id };
+    });
+}
+
 function main(): void {
   const args = process.argv.slice(2);
   const json = args.includes('--json');
@@ -272,11 +296,7 @@ function main(): void {
     catch { unreadable++; }
   }
   const lanes = laneRows.filter((row) => (!window.agent || row.id === window.agent) && (!window.session || row.sessionId === window.session) && row.windowAt !== null && row.windowAt >= window.since && row.windowAt <= window.until);
-  const claude = readClaudeStore(claudeProjectsDir(), since).transcripts
-    .filter((summary) => summary.kind === 'session' && !summary.hasLaneMarker && inWindow(summary.startedAt, window))
-    .filter((summary) => !window.session || summary.id === window.session)
-    .filter(() => !window.agent)
-    .map((summary): ShareRow => { const total = summarizeCalls(claudeCalls(summary.toolCalls ?? [])); const id = outputLabel(summary.id); const startedAt = summary.startedAt === null ? null : isoInstant(Date.parse(summary.startedAt)); return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, hasSummary: false, storedTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId: id }; });
+  const claude = selectClaudeSessionRows(readClaudeStore(claudeProjectsDir(), since).transcripts, window);
   const report = buildShareReport(filterRowsByWindow([...lanes, ...claude], window), paths.length, unreadable, laneRows);
   if (emptyWindowExitCode(report.rows) === 1) { process.stderr.write(`${EMPTY_WINDOW_MESSAGE}\n`); process.exitCode = 1; return; }
   process.stdout.write(formatShareReport(report, json));
