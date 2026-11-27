@@ -12,6 +12,10 @@ jest.mock('../route-tool-handlers', () => ({
 
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   EXTENSION_LANGUAGE_MAP: { '.ts': 'typescript' },
+  isCodeIndexExcluded: (relativePath: string) =>
+    /(^|\/)(node_modules|dist|build|out|target|tmp|coverage)(\/|$)/.test(
+      relativePath,
+    ),
   DEFAULT_WORKSPACE_EXCLUDES: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.git/**', '**/.ptah/specs/**', '**/.svn/**', '**/.hg/**', '**/out/**', '**/.nx/**'],
 }));
 
@@ -300,6 +304,16 @@ describe('handleInspect', () => {
     expect(reply.isError).toBe(false);
     expect(reply.text).toContain(`ERROR op #1: ${message} must be a finite integer`);
     expect(reply.text).toContain('## 2 git branch');
+  });
+
+  it('clamps a canonical grep maxMatches above the inspect cap instead of failing the operation', async () => {
+    const reply = await handleInspect({ ops: [
+      { op: 'grep', pattern: 'beta', path: 'src', type: 'txt', maxMatches: 5000 },
+    ] }, deps);
+    expect(reply.text).not.toContain('ERROR op #1');
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('ok=1 failed=0');
+    expect(reply.text).toContain('beta');
   });
 
   it('keeps the inspect continuation footer through the result budget near the total cap', async () => {

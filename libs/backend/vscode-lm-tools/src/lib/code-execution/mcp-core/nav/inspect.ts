@@ -153,7 +153,14 @@ async function runOp(raw: unknown, index: number, root: string, deps: InspectDep
     if (opName === 'grep') {
       const op = parsed.data as z.infer<typeof grepSchema>;
       if (value['head_limit'] !== undefined && (typeof value['head_limit'] !== 'number' || !Number.isFinite(value['head_limit']) || !Number.isInteger(value['head_limit']))) throw new Error('alias "head_limit" must be a finite integer');
-      const reply = await handleGrep({ ...inner, maxMatches: op.maxMatches ?? (typeof value['head_limit'] === 'number' && Number.isFinite(value['head_limit']) ? Math.min(value['head_limit'], INSPECT_MAX_GREP_MATCHES) : INSPECT_DEFAULT_GREP_MATCHES), inlineBody: false, workspaceRoot: root }, deps);
+      const requestedMatches =
+        op.maxMatches ??
+        (typeof value['head_limit'] === 'number' ? value['head_limit'] : undefined);
+      const maxMatches =
+        requestedMatches === undefined
+          ? INSPECT_DEFAULT_GREP_MATCHES
+          : Math.min(requestedMatches, INSPECT_MAX_GREP_MATCHES);
+      const reply = await handleGrep({ ...inner, maxMatches, inlineBody: false, workspaceRoot: root }, deps);
       return { ok: !reply.isError, header: `## ${index} grep ${op.pattern}`, body: reply.isError ? `ERROR op #${index}: ${reply.text}` : reply.text };
     }
     if (opName === 'list') {
