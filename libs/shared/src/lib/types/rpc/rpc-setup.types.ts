@@ -246,6 +246,14 @@ export interface WizardRecommendAnalysisSkillsResult {
   summarySource: 'structured' | 'legacy' | 'none';
   warning?: string;
 }
+export interface WizardGetSkillReviewParams {
+  runId: string;
+}
+/** Persisted judged skill review for one analysis run; both fields null when none is stored. */
+export interface WizardGetSkillReviewResult {
+  review: WizardRecommendAnalysisSkillsResult | null;
+  reviewedAt: string | null;
+}
 
 /**
  * Multi-phase analysis response from wizard:deep-analyze RPC method.

@@ -5,6 +5,7 @@
  * - `<slug>/manifest.json` — the version-3 or version-4 analysis checkpoint
  * - `<slug>/NN-phase.md` — phase output files
  * - `<slug>/generation-manifest.json` — the generation checkpoint
+ * - `<slug>/skill-review.json` — the judged skill review of the analysis run
  *   (`<root>/generation-manifest.json` when a run has no analysis slug)
  * - `enhanced-prompt.md` + `enhanced-prompt.json` — the enhanced-prompt trace
  *
@@ -17,6 +18,7 @@
 import { inject, injectable } from 'tsyringe';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path';
 import { ulid } from 'ulid';
+import { z } from 'zod';
 import {
   PLATFORM_TOKENS,
   FileType,
@@ -26,6 +28,7 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type {
   SavedAnalysisMetadata,
   MultiPhaseAnalysisResponse,
+  WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import {
   MultiPhaseManifestV3Schema,
@@ -46,6 +49,7 @@ const MANIFEST_FILE = 'manifest.json';
 const GENERATION_MANIFEST_FILE = 'generation-manifest.json';
 const ENHANCED_PROMPT_MARKDOWN_FILE = 'enhanced-prompt.md';
 const ENHANCED_PROMPT_METADATA_FILE = 'enhanced-prompt.json';
+const SKILL_REVIEW_FILE = 'skill-review.json';
 export const LEGACY_FALLBACK_SUFFIX = '--v4';
 export const LEGACY_ARCHIVE_MARKER = '-v3-archive-';
 export type RunDirVariant = 'primary' | 'legacy-fallback';
@@ -63,6 +67,66 @@ export interface ResumableRun {
   /** Validated generation checkpoint stored beside the analysis, if any. */
   generation: GenerationCheckpointManifest | null;
 }
+
+/** A slug directory holding a valid version-3 or version-4 manifest. */
+interface ValidRun {
+  entry: string;
+  slugDir: string;
+  manifest: MultiPhaseManifest;
+}
+
+/** A judged skill review read back from `<slug>/skill-review.json`. */
+export interface StoredSkillReview {
+  review: WizardRecommendAnalysisSkillsResult;
+  reviewedAt: string;
+}
+
+const StackSummaryItemSchema = z.looseObject({
+  kind: z.enum(['language', 'framework', 'library', 'test-tool', 'pattern']),
+  name: z.string(),
+  evidence: z.string(),
+  sourcePhase: z.string(),
+});
+
+/**
+ * Shape check for `skill-review.json`. Nested objects are loose so fields a
+ * newer host adds survive a read; the judge's item lists are carried as-is.
+ */
+const SkillReviewFileSchema = z.object({
+  version: z.literal(1),
+  reviewedAt: z.iso.datetime(),
+  analysisRunId: z.string().min(1),
+  review: z.looseObject({
+    skills: z.array(
+      z.looseObject({
+        skill: z.looseObject({}),
+        evidence: z.string(),
+        score: z.number(),
+      }),
+    ),
+    judge: z.looseObject({
+      method: z.enum(['decision', 'normal', 'mixed', 'none']),
+      counts: z.looseObject({
+        decision: z.number(),
+        normal: z.number(),
+        notJudged: z.number(),
+      }),
+      items: z.array(z.unknown()),
+      candidates: z.array(z.unknown()),
+      proposals: z.array(z.unknown()),
+      stages: z.array(z.unknown()),
+    }),
+    analysisPair: z
+      .looseObject({ provider: z.string(), model: z.string() })
+      .nullable(),
+    detectedItems: z.array(StackSummaryItemSchema),
+    unmatchedItems: z.array(StackSummaryItemSchema),
+    searchFailures: z.array(
+      z.looseObject({ item: z.string(), reason: z.string() }),
+    ),
+    summarySource: z.enum(['structured', 'legacy', 'none']),
+  }),
+});
 
 export type ManifestReadResult =
   | { kind: 'current'; manifest: MultiPhaseManifestV4 }
@@ -657,6 +721,79 @@ export class AnalysisStorageService {
   }
 
   // ---------------------------------------------------------------------------
+  // Skill review
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Persist the judged skill review of an analysis run as
+   * `<slug>/skill-review.json`. The slug directory is resolved only from the
+   * valid run manifests, so `runId` never becomes part of a path. Returns the
+   * written path, or null when no valid run has that ID. Throws on a write
+   * failure so the caller decides how to report it.
+   */
+  async writeSkillReview(
+    workspacePath: string,
+    runId: string,
+    review: WizardRecommendAnalysisSkillsResult,
+  ): Promise<string | null> {
+    const match = await this.findRunById(workspacePath, runId);
+    if (!match) return null;
+    const filePath = join(match.slugDir, SKILL_REVIEW_FILE);
+    await this.fs.createDirectory(match.slugDir);
+    await this.fs.writeFile(
+      filePath,
+      JSON.stringify(
+        {
+          version: 1,
+          reviewedAt: new Date().toISOString(),
+          analysisRunId: runId,
+          review,
+        },
+        null,
+        2,
+      ),
+    );
+    return filePath;
+  }
+
+  /**
+   * Read the stored skill review of an analysis run. Returns null when the
+   * run is unknown, or the file is missing, is not valid JSON, fails its
+   * schema, or belongs to another run ID. The file is never modified.
+   */
+  async readSkillReview(
+    workspacePath: string,
+    runId: string,
+  ): Promise<StoredSkillReview | null> {
+    const match = await this.findRunById(workspacePath, runId);
+    if (!match) return null;
+    const filePath = join(match.slugDir, SKILL_REVIEW_FILE);
+    const parsed = await this.readJson(filePath);
+    if (parsed === undefined) return null;
+    const result = SkillReviewFileSchema.safeParse(parsed);
+    if (!result.success) {
+      this.logger.debug(`${SERVICE_TAG} Skill review rejected by schema`, {
+        filePath,
+        issues: result.error.issues.slice(0, 3).map((i) => i.message),
+      });
+      return null;
+    }
+    if (result.data.analysisRunId !== runId) {
+      this.logger.debug(`${SERVICE_TAG} Skill review belongs to another run`, {
+        filePath,
+      });
+      return null;
+    }
+    return {
+      // The schema checks the fields consumers read; the loose nested shapes
+      // are the persisted `WizardRecommendAnalysisSkillsResult` written above.
+      review: result.data
+        .review as unknown as WizardRecommendAnalysisSkillsResult,
+      reviewedAt: result.data.reviewedAt,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Listing / loading for the UI
   // ---------------------------------------------------------------------------
 
@@ -693,8 +830,7 @@ export class AnalysisStorageService {
     workspacePath: string,
     runId: string,
   ): Promise<MultiPhaseAnalysisResponse | null> {
-    const runs = await this.listValidRuns(workspacePath);
-    const match = runs.find(({ manifest }) => manifest.runId === runId);
+    const match = await this.findRunById(workspacePath, runId);
     if (!match) return null;
     const loaded = await this.loadMultiPhase(workspacePath, match.entry);
     return loaded?.manifest.runId === runId ? loaded : null;
@@ -770,13 +906,7 @@ export class AnalysisStorageService {
   // ---------------------------------------------------------------------------
 
   /** Every slug directory holding a valid version-3 or version-4 manifest. */
-  private async listValidRuns(workspacePath: string): Promise<
-    Array<{
-      entry: string;
-      slugDir: string;
-      manifest: MultiPhaseManifest;
-    }>
-  > {
+  private async listValidRuns(workspacePath: string): Promise<ValidRun[]> {
     const analysisDir = this.getAnalysisDir(workspacePath);
     let entries: Array<{ name: string; type: FileType }>;
     try {
@@ -788,11 +918,7 @@ export class AnalysisStorageService {
       return [];
     }
 
-    const runs: Array<{
-      entry: string;
-      slugDir: string;
-      manifest: MultiPhaseManifest;
-    }> = [];
+    const runs: ValidRun[] = [];
     for (const entry of entries) {
       if (entry.type !== FileType.Directory) continue;
       const slugDir = join(analysisDir, entry.name);
@@ -801,6 +927,15 @@ export class AnalysisStorageService {
       runs.push({ entry: entry.name, slugDir, manifest });
     }
     return runs;
+  }
+
+  /** The valid run whose manifest has the requested run ID, if any. */
+  private async findRunById(
+    workspacePath: string,
+    runId: string,
+  ): Promise<ValidRun | undefined> {
+    const runs = await this.listValidRuns(workspacePath);
+    return runs.find(({ manifest }) => manifest.runId === runId);
   }
 
   /**

@@ -463,6 +463,8 @@ import type {
   MultiPhaseAnalysisResponse,
   WizardRecommendAnalysisSkillsParams,
   WizardRecommendAnalysisSkillsResult,
+  WizardGetSkillReviewParams,
+  WizardGetSkillReviewResult,
   EnhancedPromptsGetStatusParams,
   EnhancedPromptsGetStatusResponse,
   EnhancedPromptsRunWizardParams,
@@ -1602,6 +1604,10 @@ export interface RpcMethodRegistry
   'wizard:recommend-analysis-skills': {
     params: WizardRecommendAnalysisSkillsParams;
     result: WizardRecommendAnalysisSkillsResult;
+  };
+  'wizard:get-skill-review': {
+    params: WizardGetSkillReviewParams;
+    result: WizardGetSkillReviewResult;
   };
   'wizard:get-setup-model': {
     params: WizardGetSetupModelParams;
@@ -3891,6 +3897,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:analysis-status': true,
   'wizard:recommend-skills': true,
   'wizard:recommend-analysis-skills': true,
+  'wizard:get-skill-review': true,
   'wizard:get-setup-model': true,
   'wizard:set-setup-model': true,
   'wizard:generate-skill-draft': true,

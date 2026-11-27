@@ -10,6 +10,7 @@
  * - generation checkpoint create / load / update, including the root fallback
  * - resumable-run discovery
  * - enhanced-prompt trace writes with a slug and with the fallback root
+ * - skill-review round-trip, schema rejection and unknown run IDs
  */
 
 import 'reflect-metadata';
@@ -38,6 +39,7 @@ import {
   type MultiPhaseManifestV4,
 } from '../types/multi-phase.types';
 import type { GenerationCheckpointManifest } from '../types/generation-checkpoint.types';
+import type { WizardRecommendAnalysisSkillsResult } from '@ptah-extension/shared';
 
 const WORKSPACE = resolve('/ws/demo');
 const ANALYSIS_ROOT = join(WORKSPACE, '.ptah', 'analysis');
@@ -140,6 +142,48 @@ function generationManifest(
       },
     },
     ...overrides,
+  };
+}
+
+function skillReview(): WizardRecommendAnalysisSkillsResult {
+  return {
+    skills: [
+      {
+        skill: {
+          source: 'acme/skills',
+          skillId: 'nestjs',
+          name: 'NestJS',
+          description: 'NestJS patterns',
+          installs: 10,
+          isInstalled: false,
+        },
+        evidence: 'package.json lists @nestjs/core',
+        score: 0.9,
+        rankedBy: 'decision-model',
+        rank: 1,
+      },
+    ],
+    judge: {
+      method: 'decision',
+      counts: { decision: 1, normal: 0, notJudged: 0 },
+      items: [],
+      candidates: [],
+      proposals: [],
+      stages: [],
+    },
+    analysisPair: { provider: 'anthropic', model: 'test-model' },
+    rankedBy: 'decision-model',
+    detectedItems: [
+      {
+        kind: 'framework',
+        name: 'NestJS',
+        evidence: 'package.json',
+        sourcePhase: 'project-profile',
+      },
+    ],
+    unmatchedItems: [],
+    searchFailures: [],
+    summarySource: 'structured',
   };
 }
 
@@ -993,6 +1037,110 @@ describe('AnalysisStorageService', () => {
       await expect(
         service.writeEnhancedPromptTrace(WORKSPACE, null, 'p', metadata),
       ).rejects.toThrow('EACCES');
+    });
+  });
+
+  describe('skill review', () => {
+    const reviewPath = join(ANALYSIS_ROOT, 'target', 'skill-review.json');
+
+    beforeEach(async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'other'),
+        manifestV3({ slug: 'other', runId: 'RUN-OTHER' }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'target'),
+        manifestV3({ slug: 'target' }),
+      );
+    });
+
+    it('writes the review into the run slug directory and reads it back', async () => {
+      const review = skillReview();
+
+      const written = await service.writeSkillReview(
+        WORKSPACE,
+        'RUN-1',
+        review,
+      );
+
+      expect(written).toBe(reviewPath);
+      const file = JSON.parse(await fs.readFile(reviewPath)) as {
+        version: number;
+        analysisRunId: string;
+        reviewedAt: string;
+      };
+      expect(file.version).toBe(1);
+      expect(file.analysisRunId).toBe('RUN-1');
+      const stored = await service.readSkillReview(WORKSPACE, 'RUN-1');
+      expect(stored?.review).toEqual(review);
+      expect(stored?.reviewedAt).toBe(file.reviewedAt);
+      expect(Number.isNaN(Date.parse(stored?.reviewedAt ?? ''))).toBe(false);
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-OTHER')).toBeNull();
+    });
+
+    it('returns null for an unknown run ID and writes nothing', async () => {
+      expect(
+        await service.writeSkillReview(WORKSPACE, 'RUN-MISSING', skillReview()),
+      ).toBeNull();
+      expect(
+        await service.readSkillReview(WORKSPACE, 'RUN-MISSING'),
+      ).toBeNull();
+      expect(
+        await service.writeSkillReview(WORKSPACE, '../target', skillReview()),
+      ).toBeNull();
+      expect(fs.writeFile).not.toHaveBeenCalledWith(
+        expect.stringContaining('skill-review.json'),
+        expect.anything(),
+      );
+    });
+
+    it('returns null when no review has been stored for the run', async () => {
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+    });
+
+    it('returns null and keeps the file for invalid JSON', async () => {
+      await fs.writeFile(reviewPath, '{not json');
+
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+      expect(await fs.readFile(reviewPath)).toBe('{not json');
+    });
+
+    it('returns null for a file that fails the schema', async () => {
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 2,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-1',
+          review: skillReview(),
+        }),
+      );
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 1,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-1',
+          review: { ...skillReview(), skills: 'none' },
+        }),
+      );
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+    });
+
+    it('returns null for a review recorded under another run ID', async () => {
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 1,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-OTHER',
+          review: skillReview(),
+        }),
+      );
+
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
     });
   });
 
