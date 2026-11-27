@@ -447,14 +447,14 @@ describe('SkillsShApiClient', () => {
       });
     }
 
-    it('requests one row past the window so hasMore is observed, not guessed', async () => {
+    it('slices every window from one fixed pool so hasMore is observed, not guessed', async () => {
       const { client } = makeClient();
       const fetchMock = rankedApi(100);
       globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
       const page = await client.searchPage('react', 10, 20);
 
-      expect(apiCalls(fetchMock)[0][0]).toContain('limit=31');
+      expect(apiCalls(fetchMock)[0][0]).toContain('limit=200');
       expect(page.skills.map((s) => s.skillId)).toEqual([
         'skill-20',
         'skill-21',
@@ -468,7 +468,40 @@ describe('SkillsShApiClient', () => {
         'skill-29',
       ]);
       expect(page).toMatchObject({ offset: 20, limit: 10, hasMore: true });
-      expect(page.total).toBeUndefined();
+      // The 200-row pool came back with 100 rows, so the total is known.
+      expect(page.total).toBe(100);
+    });
+
+    it('pages a prefix-stable but unsorted upstream without duplicates or gaps', async () => {
+      const { client } = makeClient();
+      const upstream = [
+        { skillId: 'A', installs: 100 },
+        { skillId: 'B', installs: 10 },
+        { skillId: 'C', installs: 1000 },
+        { skillId: 'D', installs: 5 },
+        { skillId: 'E', installs: 500 },
+      ];
+      globalThis.fetch = jest.fn(async (url: unknown) => {
+        if (isEnrichmentCall(url)) {
+          return { ok: false, status: 404, text: async () => '' };
+        }
+        const limit = Number(/limit=(\d+)/.exec(String(url))?.[1] ?? '0');
+        const skills = upstream.slice(0, limit).map((row) => ({
+          ...apiSkill,
+          id: `o/r/${row.skillId}`,
+          skillId: row.skillId,
+          installs: row.installs,
+        }));
+        return { ok: true, status: 200, json: async () => ({ skills }) };
+      }) as unknown as typeof globalThis.fetch;
+
+      const seen: string[] = [];
+      for (const offset of [0, 2, 4]) {
+        const page = await client.searchPage('react', 2, offset);
+        seen.push(...page.skills.map((s) => s.skillId));
+      }
+
+      expect(seen).toEqual(['C', 'E', 'A', 'B', 'D']);
     });
 
     it('reports a total only once the upstream ran out', async () => {

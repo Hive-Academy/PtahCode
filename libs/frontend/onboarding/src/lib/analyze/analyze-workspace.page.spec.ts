@@ -207,6 +207,47 @@ describe('AnalyzeWorkspacePage', () => {
       fixture.destroy();
     });
 
+    it('[CR3] reconnects an active backend run even when ?analysis= selects an older saved analysis', async () => {
+      store.selectAnalysis.mockImplementation(async (filename: string) => {
+        selected.set(filename);
+        loaded.set({
+          manifest: { slug: filename, totalDurationMs: 1000 },
+          phaseContents: {},
+        });
+        return 'loaded';
+      });
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: { manifest: { lifecycle: 'running' } },
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: new Date(190_000).toISOString(),
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('analysis', 'saved');
+      fixture.detectChanges();
+      await fixture.componentInstance.ngOnInit();
+
+      expect(store.selectAnalysis).toHaveBeenCalledWith('saved');
+      expect(runner.syncBackendActive).toHaveBeenCalledWith(
+        true,
+        expect.objectContaining({ workspacePath: '/workspace' }),
+      );
+      fixture.destroy();
+    });
+
+    it('[CR6] retry re-checks a lost backend run instead of resuming it', async () => {
+      const retry = jest.fn().mockResolvedValue(undefined);
+      TestBed.overrideProvider(WizardAnalysisRunner, {
+        useValue: { ...runner, backendStatusUnknown: signal(true), retry },
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      await fixture.componentInstance['retry']();
+
+      expect(retry).toHaveBeenCalledWith('/workspace');
+      expect(runner.resumeAnalysis).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
     it('carries the selected analysis and clears explicitBack on forward navigation', async () => {
       selected.set('saved');
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
@@ -1437,7 +1478,8 @@ describe('AnalyzeWorkspacePage', () => {
       await fixture.whenStable();
       fixture.detectChanges();
 
-      expect(syncSpy).toHaveBeenCalledWith(false);
+      // The reply's analysis goes to the runner, which adopts a finished run.
+      expect(syncSpy).toHaveBeenCalledWith(false, { analysis: null });
       expect(runner.isRunning()).toBe(false);
       expect(fixture.componentInstance['isAnalysisActive']()).toBe(false);
       fixture.destroy();
@@ -1473,7 +1515,7 @@ describe('AnalyzeWorkspacePage', () => {
       fixture.detectChanges();
 
       expect(setCurrentWorkspacePath).toHaveBeenCalledWith('/workspace');
-      expect(syncSpy).not.toHaveBeenCalledWith(false);
+      expect(syncSpy).not.toHaveBeenCalledWith(false, expect.anything());
       expect(runner.isRunning()).toBe(true);
       expect(fixture.componentInstance['isAnalysisActive']()).toBe(true);
       fixture.destroy();

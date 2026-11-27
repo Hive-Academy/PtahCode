@@ -765,7 +765,6 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     const hadLocalRun = this.isAnalysisActive();
     const initialRunGeneration = this.runner.runGeneration?.() ?? 0;
     const hadResult = this.runner.hasResult?.() ?? false;
-    const hadLoaded = this.store.loaded() !== null;
     if (hadLocalRun) {
       this.pendingRerun = false;
       this.interrupted.set(false);
@@ -788,10 +787,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (this.destroyed) return;
     const resumable = await this.rpc.getResumableRun();
     if (this.destroyed) return;
+    // Only a run generation change or a new live result proves a local run
+    // settled. A saved analysis selected by `loadSaved()` (`?analysis=`) also
+    // fills `store.loaded()`, so it must not hide an active backend run.
     const localRunSettled =
       (this.runner.runGeneration?.() ?? 0) !== initialRunGeneration ||
-      (!hadResult && (this.runner.hasResult?.() ?? false)) ||
-      (!hadLoaded && this.store.loaded() !== null);
+      (!hadResult && (this.runner.hasResult?.() ?? false));
     if (resumable.analysisActive === true) {
       if (!hadLocalRun && !localRunSettled && !this.runner.isRunning()) {
         this.runner.syncBackendActive?.(true, {
@@ -817,7 +818,9 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         (this.runner.backendActive?.() === true ||
           this.runner.backendActive === undefined)
       ) {
-        this.runner.syncBackendActive?.(false);
+        this.runner.syncBackendActive?.(false, {
+          analysis: resumable.analysis,
+        });
       }
       this.interrupted.set(
         !this.isAnalysisActive() &&
@@ -1052,6 +1055,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     await this.loadSaved();
   }
   protected async retry(): Promise<void> {
+    if (this.runner.backendStatusUnknown?.() === true) {
+      // The watcher lost a backend run: re-check it, never restart it.
+      this.stopRecovery.set(false);
+      await this.runner.retry(this.workspacePath());
+      return;
+    }
     await this.continuePrevious();
   }
   protected confirmStop(): void {

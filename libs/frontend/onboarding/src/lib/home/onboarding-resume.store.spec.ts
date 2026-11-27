@@ -239,7 +239,10 @@ describe('OnboardingResumeStore', () => {
       analysisActive: false,
     });
     await store.refresh();
-    expect(syncBackendActive).not.toHaveBeenCalledWith(false);
+    expect(syncBackendActive).not.toHaveBeenCalledWith(
+      false,
+      expect.anything(),
+    );
     expect(runnerBackendActive()).toBe(true);
 
     // Returning to /work when backend reports analysisActive: false clears it
@@ -250,7 +253,9 @@ describe('OnboardingResumeStore', () => {
       analysisActive: false,
     });
     await store.refresh();
-    expect(syncBackendActive).toHaveBeenCalledWith(false);
+    // The reply's analysis is handed over so the runner can adopt a
+    // finished run before it stops tracking.
+    expect(syncBackendActive).toHaveBeenCalledWith(false, { analysis: null });
     expect(runnerBackendActive()).toBe(false);
     expect(store.items()).toEqual([]);
   });
@@ -273,7 +278,10 @@ describe('OnboardingResumeStore', () => {
     });
     await store.refresh();
 
-    expect(syncBackendActive).not.toHaveBeenCalledWith(false);
+    expect(syncBackendActive).not.toHaveBeenCalledWith(
+      false,
+      expect.anything(),
+    );
     expect(runnerBackendActive()).toBe(true);
     expect(store.items()).toMatchObject([
       {

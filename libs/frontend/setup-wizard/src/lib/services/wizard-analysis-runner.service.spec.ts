@@ -817,7 +817,7 @@ describe('WizardAnalysisRunner', () => {
           wsACompleted,
         );
 
-        // 5 consecutive undefined responses stop the watcher cleanly without clearing backendActive
+        // 5 consecutive undefined responses stop the watcher and publish a recoverable error
         (mockRpcService.getResumableRun as jest.Mock).mockClear();
         (mockRpcService.getResumableRun as jest.Mock).mockResolvedValue({
           analysis: null,
@@ -829,10 +829,122 @@ describe('WizardAnalysisRunner', () => {
           await jest.advanceTimersByTimeAsync(2500);
         }
         expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(5);
-        expect(runner.backendActive()).toBe(true);
+        expect(runner.backendActive()).toBe(false);
+        expect(runner.backendStatusUnknown()).toBe(true);
+        expect(runner.errorMessage()).toMatch(/Lost contact/);
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    it('[CR5] loads the newest saved completed analysis when backend activity ends with analysis: null', async () => {
+      jest.useFakeTimers();
+      try {
+        const saved = {
+          ...completedAnalysis,
+          analysisDir: '/repo/a/.ptah/analysis/new',
+        } as unknown as MultiPhaseAnalysisResponse;
+        (mockRpcService.getResumableRun as jest.Mock).mockResolvedValueOnce({
+          analysis: null,
+          generation: null,
+          analysisActive: false,
+        });
+        mockRpcService.listAnalyses = jest.fn().mockResolvedValue([
+          { filename: 'new', lifecycle: 'completed' },
+          { filename: 'old', lifecycle: 'completed' },
+        ]);
+        mockRpcService.loadAnalysis = jest.fn().mockResolvedValue(saved);
+
+        runner.setCurrentWorkspacePath('/repo/a');
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+        await jest.advanceTimersByTimeAsync(2500);
+
+        expect(runner.backendActive()).toBe(false);
+        expect(mockRpcService.loadAnalysis).toHaveBeenCalledWith('new');
+        expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+          saved,
+        );
+        expect(runner.resultWorkspacePath()).toBe('/repo/a');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[CR4] adopts the finished analysis passed to syncBackendActive(false) while tracking', () => {
+      const finished = {
+        ...completedAnalysis,
+        analysisDir: '/repo/a/.ptah/analysis/demo',
+      } as unknown as MultiPhaseAnalysisResponse;
+      runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+
+      runner.syncBackendActive(false, { analysis: finished });
+
+      expect(runner.backendActive()).toBe(false);
+      expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+        finished,
+      );
+      expect(runner.resultWorkspacePath()).toBe('/repo/a');
+    });
+
+    it('[CR6] retry after lost polling re-checks the backend and restarts the bounded watcher without new work', async () => {
+      jest.useFakeTimers();
+      try {
+        (mockRpcService.getResumableRun as jest.Mock).mockResolvedValue({
+          analysis: null,
+          generation: null,
+        });
+        runner.setCurrentWorkspacePath('/repo/a');
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+        for (let i = 0; i < 6; i++) {
+          await jest.advanceTimersByTimeAsync(2500);
+        }
+        expect(runner.backendStatusUnknown()).toBe(true);
+        expect(runner.isRunning()).toBe(false);
+
+        // Still unknown: the error stays and nothing new starts.
+        await runner.retry('/repo/a');
+        expect(runner.backendStatusUnknown()).toBe(true);
+        expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
+
+        // Connection back, run still active: the watcher restarts.
+        (mockRpcService.getResumableRun as jest.Mock).mockResolvedValue({
+          analysis: pausedAnalysis,
+          generation: null,
+          analysisActive: true,
+        });
+        await runner.retry('/repo/a');
+        expect(runner.backendStatusUnknown()).toBe(false);
+        expect(runner.errorMessage()).toBeNull();
+        expect(runner.isRunningForWorkspace('/repo/a')).toBe(true);
+        (mockRpcService.getResumableRun as jest.Mock).mockClear();
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(1);
+        expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
+      } finally {
+        runner.reset();
+        jest.useRealTimers();
+      }
+    });
+
+    it('[CR7] does not reuse a cached result that belongs to another workspace', async () => {
+      const resultA = {
+        ...completedAnalysis,
+        analysisDir: '/repo/a/.ptah/analysis/demo',
+      } as unknown as MultiPhaseAnalysisResponse;
+      (mockRpcService.deepAnalyze as jest.Mock).mockResolvedValueOnce(resultA);
+      await runner.startFreshAnalysis('/repo/a');
+      expect(runner.resultWorkspacePath()).toBe('/repo/a');
+
+      await runner.ensureStarted('/repo/b');
+
+      expect(mockRpcService.deepAnalyze).toHaveBeenCalledTimes(2);
+      expect(runner.resultWorkspacePath()).toBe('/repo/b');
+    });
+
+    it('[CR7] reuses a cached result for the same workspace', async () => {
+      await runner.startFreshAnalysis('/repo/a');
+      await runner.ensureStarted('/repo/a');
+      expect(mockRpcService.deepAnalyze).toHaveBeenCalledTimes(1);
     });
 
     it('[S1] scopes stored results and errors to the workspace that ran them and clears on reset', async () => {

@@ -138,11 +138,12 @@ export class SkillsShApiClient {
    * accepted and IGNORED, which is worse than rejecting them. What it does
    * accept is an arbitrary `limit`, and its ranking is prefix-stable (the first
    * N of `limit=60` are byte-identical to `limit=5`'s five followed by the
-   * next 55). So the window is taken client-side over an over-fetch, which is
-   * real pagination rather than a cursor we would have to invent.
+   * next 55). So every window is taken client-side from one fixed pool of the
+   * upstream maximum, sorted by installs once, which keeps consecutive pages
+   * free of duplicates and gaps.
    *
    * `total` is only reported when it is KNOWN — when the upstream returned
-   * fewer rows than we asked for, which is the one condition that proves the
+   * fewer rows than the pool size, which is the one condition that proves the
    * result set is exhausted. Otherwise it is absent rather than guessed.
    */
   async searchPage(
@@ -165,15 +166,14 @@ export class SkillsShApiClient {
       };
     }
 
-    // One row past the window, so `hasMore` is observed rather than inferred.
-    const requested = Math.min(
-      safeOffset + safeLimit + 1,
-      UPSTREAM_MAX_RESULTS,
-    );
-    const rows = await this.fetchRanked(trimmed, requested);
+    // Every page slices the SAME pool. `fetchRanked` re-orders its pool by
+    // installs, so pools of different sizes (one per window) would overlap or
+    // skip rows between pages whenever the upstream order differs.
+    const rows = await this.fetchRanked(trimmed, UPSTREAM_MAX_RESULTS);
 
-    const exhausted = rows.length < requested;
-    const atUpstreamCeiling = !exhausted && requested === UPSTREAM_MAX_RESULTS;
+    const exhausted = rows.length < UPSTREAM_MAX_RESULTS;
+    const atUpstreamCeiling =
+      !exhausted && safeOffset + safeLimit >= UPSTREAM_MAX_RESULTS;
     const skills = rows.slice(safeOffset, safeOffset + safeLimit);
 
     return {

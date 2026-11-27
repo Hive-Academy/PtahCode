@@ -270,6 +270,11 @@ function providerLabel(providerId: string): string {
   return providerId.slice(0, 64);
 }
 
+/** Character visits the balanced-object fallback may spend, per input char. */
+const FALLBACK_SCAN_BUDGET_FACTOR = 8;
+/** Floor for the fallback budget so short replies scan fully. */
+const FALLBACK_SCAN_MIN_BUDGET = 65_536;
+
 /**
  * Fallback JSON object extractor when an SDK success result omits
  * `structured_output` and places JSON in `msg.result`. Handles raw JSON,
@@ -289,6 +294,12 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
     if (fenced !== null) return fenced;
   }
 
+  // Each restart rescans the rest of the text, so adversarial input (many
+  // unclosed `{`) is quadratic. Bound the total work and give up past it.
+  let budget = Math.max(
+    FALLBACK_SCAN_MIN_BUDGET,
+    trimmed.length * FALLBACK_SCAN_BUDGET_FACTOR,
+  );
   let start = trimmed.indexOf('{');
   while (start !== -1) {
     if (trimmed.indexOf('}', start + 1) === -1) return null;
@@ -296,6 +307,7 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
     let inString = false;
     let escaped = false;
     for (let index = start; index < trimmed.length; index++) {
+      if (--budget < 0) return null;
       const char = trimmed[index];
       if (inString) {
         if (escaped) escaped = false;
@@ -308,6 +320,8 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
       } else if (char === '}') {
         depth--;
         if (depth === 0) {
+          budget -= index + 1 - start;
+          if (budget < 0) return null;
           const candidate = parseJsonObject(trimmed.slice(start, index + 1));
           if (candidate !== null) return candidate;
           break;

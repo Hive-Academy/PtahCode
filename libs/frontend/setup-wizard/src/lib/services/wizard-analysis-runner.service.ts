@@ -125,6 +125,8 @@ function parseStartedAtMs(
 
 const BACKEND_POLL_INTERVAL_MS = 2500;
 const MAX_BACKEND_POLL_ERRORS = 5;
+const BACKEND_STATUS_UNKNOWN_MESSAGE =
+  'Lost contact with the running analysis. Retry to check it again.';
 
 @Injectable({
   providedIn: 'root',
@@ -158,6 +160,8 @@ export class WizardAnalysisRunner {
 
   private readonly _isRunning = signal(false);
   private readonly _backendActive = signal(false);
+  /** The backend watcher gave up after repeated poll errors. */
+  private readonly _backendStatusUnknown = signal(false);
   private readonly _isCanceling = signal(false);
   private readonly _startedAt = signal<number | null>(null);
   private readonly _activeWorkspacePath = signal<string | null>(null);
@@ -172,6 +176,9 @@ export class WizardAnalysisRunner {
   );
 
   public readonly backendActive = this._backendActive.asReadonly();
+  /** True after the watcher lost a backend run; `retry()` re-checks it. */
+  public readonly backendStatusUnknown =
+    this._backendStatusUnknown.asReadonly();
   public readonly isRunning = computed(
     () => this._isRunning() || this._backendActive(),
   );
@@ -271,14 +278,30 @@ export class WizardAnalysisRunner {
     options?: {
       startedAt?: string | number | null;
       workspacePath?: string | null;
+      /**
+       * With `active: false`: the `analysis` of the same
+       * `wizard:get-resumable-run` reply. When the runner was tracking a
+       * backend run, a finished analysis is adopted before tracking stops
+       * (and the latest saved one is loaded when the reply carries none).
+       */
+      analysis?: MultiPhaseAnalysisResponse | null;
     },
   ): void {
     if (!active) {
+      const wasTracking = this._backendActive() && !this._isRunning();
+      const watchedWorkspace = this._activeWorkspacePath();
       this.stopBackendWatcher();
       this._backendActive.set(false);
+      this._backendStatusUnknown.set(false);
       if (!this._isRunning()) {
         this._startedAt.set(null);
         this._activeWorkspacePath.set(null);
+      }
+      if (wasTracking && options && 'analysis' in options) {
+        this.adoptFinishedBackendAnalysis(
+          options.analysis ?? null,
+          watchedWorkspace,
+        );
       }
       return;
     }
@@ -290,6 +313,10 @@ export class WizardAnalysisRunner {
 
     this._backendActive.set(true);
     this._resumableAnalysis.set(null);
+    if (this._backendStatusUnknown()) {
+      this._backendStatusUnknown.set(false);
+      this._errorMessage.set(null);
+    }
 
     if (this._startedAt() === null) {
       const parsedStartedAt = parseStartedAtMs(options?.startedAt);
@@ -395,22 +422,7 @@ export class WizardAnalysisRunner {
 
       if (resumable.analysisActive === false) {
         this.backendWatcherErrors = 0;
-        const analysis = resumable.analysis;
-        const analysisMatchesWorkspace =
-          watchedWorkspace === null ||
-          !analysis?.analysisDir ||
-          isPathWithinWorkspace(analysis.analysisDir, watchedWorkspace);
-        if (
-          analysis &&
-          analysisMatchesWorkspace &&
-          (analysis.manifest.lifecycle === 'completed' ||
-            analysis.manifest.lifecycle === 'failed') &&
-          !this.wizardState.multiPhaseResult()
-        ) {
-          this._resultWorkspacePath.set(watchedWorkspace);
-          this.wizardState.setMultiPhaseResult(analysis);
-        }
-        this.syncBackendActive(false);
+        this.syncBackendActive(false, { analysis: resumable.analysis });
         return;
       }
 
@@ -435,9 +447,120 @@ export class WizardAnalysisRunner {
     this.backendWatcherErrors++;
     if (this.backendWatcherErrors >= MAX_BACKEND_POLL_ERRORS) {
       this.stopBackendWatcher();
+      // Publish a recoverable error instead of a run that never ends. The
+      // backend run may still be going, so `retry()` re-checks its status
+      // and never starts fresh backend work while it is unknown.
+      // `_activeWorkspacePath` is kept as the run to re-check.
+      this._backendStatusUnknown.set(true);
+      this._backendActive.set(false);
+      this._resultWorkspacePath.set(this._activeWorkspacePath());
+      this._errorMessage.set(BACKEND_STATUS_UNKNOWN_MESSAGE);
+      this._statusText.set(BACKEND_STATUS_UNKNOWN_MESSAGE);
       return;
     }
     this.scheduleBackendWatcherTick(watcherToken);
+  }
+
+  /**
+   * Adopt the finished analysis of a backend run the runner was tracking.
+   * Uses the reply's `analysis` when it is completed or failed; otherwise
+   * (a completed run with no unfinished generation checkpoint comes back as
+   * `analysis: null`) loads the newest saved completed analysis.
+   */
+  private adoptFinishedBackendAnalysis(
+    analysis: MultiPhaseAnalysisResponse | null,
+    watchedWorkspace: string | null,
+  ): void {
+    if (analysis) {
+      this.adoptIfFinished(analysis, watchedWorkspace);
+      return;
+    }
+    void this.loadLatestFinishedAnalysis(watchedWorkspace);
+  }
+
+  private adoptIfFinished(
+    analysis: MultiPhaseAnalysisResponse,
+    watchedWorkspace: string | null,
+  ): void {
+    const analysisMatchesWorkspace =
+      watchedWorkspace === null ||
+      !analysis.analysisDir ||
+      isPathWithinWorkspace(analysis.analysisDir, watchedWorkspace);
+    if (
+      analysisMatchesWorkspace &&
+      (analysis.manifest?.lifecycle === 'completed' ||
+        analysis.manifest?.lifecycle === 'failed') &&
+      !this.wizardState.multiPhaseResult()
+    ) {
+      this._resultWorkspacePath.set(watchedWorkspace);
+      this.wizardState.setMultiPhaseResult(analysis);
+    }
+  }
+
+  private async loadLatestFinishedAnalysis(
+    watchedWorkspace: string | null,
+  ): Promise<void> {
+    const token = this.runToken;
+    const stillApplies = (): boolean =>
+      token === this.runToken &&
+      !this._isRunning() &&
+      !this._backendActive() &&
+      !this.wizardState.multiPhaseResult() &&
+      this.isWatcherAllowedForCurrentWorkspace(watchedWorkspace);
+    if (!stillApplies()) return;
+    try {
+      // Newest first. The backend reads the current workspace, which
+      // `stillApplies` keeps equal to the watched one.
+      const saved = await this.wizardRpc.listAnalyses();
+      if (!stillApplies()) return;
+      const latest = saved.find((item) => item.isActive !== true);
+      if (
+        !latest ||
+        (latest.lifecycle !== undefined && latest.lifecycle !== 'completed')
+      ) {
+        return;
+      }
+      const loaded = await this.wizardRpc.loadAnalysis(latest.filename);
+      if (!stillApplies()) return;
+      this.adoptIfFinished(loaded, watchedWorkspace);
+    } catch {
+      // degradation-audit: optional-capability - the saved-analysis list still exposes the run when this best-effort load fails.
+    }
+  }
+
+  /** Re-check a backend run whose watcher gave up after repeated poll errors. */
+  private async recheckLostBackendRun(
+    workspacePath?: string | null,
+  ): Promise<void> {
+    const token = this.runToken;
+    const watchedWorkspace =
+      this._activeWorkspacePath() ?? normalizeWorkspacePath(workspacePath);
+    this._statusText.set('Checking the running analysis...');
+    let resumable: Awaited<ReturnType<WizardRpcService['getResumableRun']>>;
+    try {
+      resumable = await this.wizardRpc.getResumableRun();
+    } catch {
+      resumable = { analysis: null, generation: null };
+    }
+    if (token !== this.runToken || !this._backendStatusUnknown()) return;
+    if (resumable.analysisActive === true) {
+      // Restarts the bounded watcher and clears the error.
+      this.syncBackendActive(true, {
+        startedAt: resumable.activeAnalysisStartedAt,
+        workspacePath: watchedWorkspace,
+      });
+      this._statusText.set('Analyzing project structure...');
+      return;
+    }
+    if (resumable.analysisActive === false) {
+      this._errorMessage.set(null);
+      this._statusText.set(this.INITIAL_STATUS);
+      this.syncBackendActive(false);
+      this.adoptFinishedBackendAnalysis(resumable.analysis, watchedWorkspace);
+      return;
+    }
+    // Still unknown: keep the recoverable error and start nothing.
+    this._statusText.set(BACKEND_STATUS_UNKNOWN_MESSAGE);
   }
 
   private stopBackendWatcher(): void {
@@ -465,6 +588,10 @@ export class WizardAnalysisRunner {
 
   /** Re-run after a failure. Identical to `ensureStarted()` by design. */
   public retry(workspacePath?: string | null): Promise<void> {
+    if (this._backendStatusUnknown()) {
+      // A lost backend run is re-checked, never restarted.
+      return this.launch(() => this.recheckLostBackendRun(workspacePath));
+    }
     return this.ensureStarted(workspacePath);
   }
 
@@ -618,6 +745,7 @@ export class WizardAnalysisRunner {
     this.inFlight = null;
     this._isRunning.set(false);
     this._backendActive.set(false);
+    this._backendStatusUnknown.set(false);
     this._isCanceling.set(false);
     this._startedAt.set(null);
     this._activeWorkspacePath.set(null);
@@ -637,6 +765,7 @@ export class WizardAnalysisRunner {
     const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
     this._isRunning.set(true);
     this._backendActive.set(false);
+    this._backendStatusUnknown.set(false);
     this._startedAt.set(Date.now());
     this._activeWorkspacePath.set(normalizedWorkspace);
     this._errorMessage.set(null);
@@ -644,10 +773,22 @@ export class WizardAnalysisRunner {
     try {
       const existingMultiPhase = this.wizardState.multiPhaseResult();
       const existingLifecycle = existingMultiPhase?.manifest?.lifecycle;
+      const resultWorkspace = this._resultWorkspacePath();
+      // A result another workspace produced must never stand in for this one.
+      const existingMatchesWorkspace =
+        normalizedWorkspace === null ||
+        (resultWorkspace === null
+          ? !existingMultiPhase?.analysisDir ||
+            isPathWithinWorkspace(
+              existingMultiPhase.analysisDir,
+              normalizedWorkspace,
+            )
+          : resultWorkspace === normalizedWorkspace);
       if (
         allowCachedResult &&
         !resume &&
         existingMultiPhase &&
+        existingMatchesWorkspace &&
         (existingLifecycle === undefined || existingLifecycle === 'completed')
       ) {
         this.wizardState.setCurrentStep('analysis');

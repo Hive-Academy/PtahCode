@@ -143,7 +143,7 @@ export class OnboardingResumeStore {
       (this.runner.backendActive?.() === true ||
         this.runner.backendActive === undefined)
     ) {
-      this.runner.syncBackendActive?.(false);
+      this.runner.syncBackendActive?.(false, { analysis: latest.analysis });
     }
 
     const runnerActive = this.isRunnerActiveFor(root);

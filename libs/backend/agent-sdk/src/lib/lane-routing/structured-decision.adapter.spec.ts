@@ -335,6 +335,28 @@ describe('StructuredDecisionAdapter', () => {
     });
   });
 
+  it('bounds the balanced-object fallback and rejects adversarial brace runs as bad-output', async () => {
+    // 32,768 unclosed `{` then one `}`: an unbounded rescan visits more than
+    // 500 million characters before it accepts the trailing `{}`.
+    const query = new FakeQuery();
+    query.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        result: `${'{'.repeat(32_768)}}`,
+      }),
+    );
+    const adapter = adapterFor(query, new FakeResolver(async () => AUTH));
+
+    const startedAt = Date.now();
+    const error = await settle(adapter.complete(request()));
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(error).toBeInstanceOf(StructuredDecisionError);
+    if (!(error instanceof StructuredDecisionError)) return;
+    expect(error.kind).toBe('bad-output');
+  });
+
   it('prefers structured_output over result text and rejects non-object or invalid text as bad-output', async () => {
     const primaryQuery = new FakeQuery();
     primaryQuery.stream = messages(
