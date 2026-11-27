@@ -304,7 +304,7 @@ export class AnalysisStorageService {
     const files = [
       [
         '.gitignore',
-        '*/generation-manifest.json\n*/enhanced-prompt.*\ngeneration-manifest.json\nenhanced-prompt.*\n',
+        '*/generation-manifest.json\n*/skill-review.json\n*/enhanced-prompt.*\ngeneration-manifest.json\nenhanced-prompt.*\n',
       ],
       ['.gitattributes', 'manifest.json text eol=lf\n*.md text eol=lf\n'],
     ] as const;

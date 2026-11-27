@@ -141,6 +141,7 @@ import type {
   ModelPair,
   WizardGetSetupModelResult,
   WizardRecommendAnalysisSkillsResult,
+  WizardGetSkillReviewResult,
   WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import type {
@@ -429,6 +430,7 @@ describe('SetupRpcHandlers', () => {
           'wizard:load-analysis',
           'wizard:recommend-skills',
           'wizard:recommend-analysis-skills',
+          'wizard:get-skill-review',
           'wizard:search-skills',
         ].sort(),
       );
@@ -437,6 +439,7 @@ describe('SetupRpcHandlers', () => {
     it('exposes wizard:get-resumable-run in the static METHODS manifest', () => {
       expect(SetupRpcHandlers.METHODS).toContain('wizard:get-resumable-run');
       expect(SetupRpcHandlers.METHODS).toContain('wizard:analysis-status');
+      expect(SetupRpcHandlers.METHODS).toContain('wizard:get-skill-review');
     });
   });
 
@@ -1704,12 +1707,18 @@ describe('SetupRpcHandlers', () => {
         searchFailures: [],
         summarySource: 'structured',
       });
+      const writeSkillReview = jest
+        .fn()
+        .mockResolvedValue(
+          '/fake/workspace/.ptah/analysis/demo/skill-review.json',
+        );
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadByRunId: jest.fn().mockResolvedValue({
           manifest: { runId: 'run-1' },
           analysisPair,
           stackSummary: { source: 'structured', items: [item] },
         }),
+        writeSkillReview,
       });
       h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
         recommendAnalysis,
@@ -1739,12 +1748,48 @@ describe('SetupRpcHandlers', () => {
       expect(h.resolveSetup.mock.invocationCallOrder[0]).toBeLessThan(
         recommendAnalysis.mock.invocationCallOrder[0],
       );
+      expect(writeSkillReview).toHaveBeenCalledWith(WORKSPACE, 'run-1', result);
+    });
+
+    it('still returns the review when storing it fails', async () => {
+      const h = makeHarness();
+      const review = {
+        analysisPair: null,
+        judge: { method: 'none', counts: {}, items: [] },
+        skills: [],
+        detectedItems: [],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'structured',
+      };
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest.fn().mockResolvedValue({
+          stackSummary: { source: 'structured', items: [{ name: 'Angular' }] },
+        }),
+        writeSkillReview: jest.fn().mockRejectedValue(new Error('EACCES')),
+      });
+      h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
+        recommendAnalysis: jest.fn().mockResolvedValue(review),
+      });
+      h.handlers.register();
+      const result = await call<WizardRecommendAnalysisSkillsResult>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-1' },
+      );
+      expect(result).toEqual(review);
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        'Could not store the skill review.',
+        expect.any(Error),
+      );
     });
 
     it('returns an empty explanation when the run is missing', async () => {
       const h = makeHarness();
+      const writeSkillReview = jest.fn();
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadByRunId: jest.fn().mockResolvedValue(null),
+        writeSkillReview,
       });
       h.handlers.register();
       const result = await call<{ skills: unknown[]; warning: string }>(
@@ -1758,6 +1803,7 @@ describe('SetupRpcHandlers', () => {
         analysisPair: null,
         judge: { method: 'none', items: [] },
       });
+      expect(writeSkillReview).not.toHaveBeenCalled();
     });
 
     it('returns an empty result when the saved run has no stack summary', async () => {
@@ -1923,6 +1969,67 @@ describe('SetupRpcHandlers', () => {
       expect(result.success).toBe(false);
       expect(h.container.resolve).not.toHaveBeenCalled();
     });
+  });
+
+  describe('wizard:get-skill-review', () => {
+    it('returns the stored review of the run in the active workspace', async () => {
+      const h = makeHarness();
+      const review = { skills: [], judge: { method: 'none' } };
+      const readSkillReview = jest.fn().mockResolvedValue({
+        review,
+        reviewedAt: '2026-11-27T10:00:00.000Z',
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        readSkillReview,
+      });
+      h.handlers.register();
+      const result = await call<WizardGetSkillReviewResult>(
+        h,
+        'wizard:get-skill-review',
+        { runId: 'run-1' },
+      );
+      expect(result).toEqual({
+        review,
+        reviewedAt: '2026-11-27T10:00:00.000Z',
+      });
+      expect(readSkillReview).toHaveBeenCalledWith(WORKSPACE, 'run-1');
+    });
+
+    it('returns null fields for an unknown run', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        readSkillReview: jest.fn().mockResolvedValue(null),
+      });
+      h.handlers.register();
+      expect(
+        await call<WizardGetSkillReviewResult>(h, 'wizard:get-skill-review', {
+          runId: 'unknown',
+        }),
+      ).toEqual({ review: null, reviewedAt: null });
+    });
+
+    it('returns null fields without reading when no workspace is open', async () => {
+      const h = makeHarness({ workspaceFolders: [] });
+      h.handlers.register();
+      expect(
+        await call<WizardGetSkillReviewResult>(h, 'wizard:get-skill-review', {
+          runId: 'run-1',
+        }),
+      ).toEqual({ review: null, reviewedAt: null });
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+
+    it.each([{ runId: '' }, { runId: 'run-1', workspacePath: '/other' }, {}])(
+      'rejects invalid params %j before reading storage',
+      async (params) => {
+        const h = makeHarness();
+        h.handlers.register();
+        expect(
+          await callRaw(h, 'wizard:get-skill-review', params),
+        ).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+        expect(h.container.resolve).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('wizard:load-analysis', () => {

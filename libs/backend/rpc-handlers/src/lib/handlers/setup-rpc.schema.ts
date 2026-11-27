@@ -32,6 +32,9 @@ export const WizardRecommendSkillsParamsSchema = z.object({
 export const WizardRecommendAnalysisSkillsParamsSchema = z.strictObject({
   runId: z.string().trim().min(1).max(200),
 });
+export const WizardGetSkillReviewParamsSchema = z.strictObject({
+  runId: z.string().trim().min(1).max(200),
+});
 export const WizardSearchSkillsParamsSchema = z.object({
   query: z.string().trim().min(1).max(200),
 });

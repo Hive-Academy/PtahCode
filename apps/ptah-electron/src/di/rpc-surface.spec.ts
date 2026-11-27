@@ -55,6 +55,7 @@ describe('Electron RPC surface', () => {
         'wizard:generate-skill-draft',
         'wizard:recommend-skills',
         'wizard:recommend-analysis-skills',
+        'wizard:get-skill-review',
         'wizard:search-skills',
         'wizard:get-project-guidance',
         'wizard:preview-skills-for-consent',

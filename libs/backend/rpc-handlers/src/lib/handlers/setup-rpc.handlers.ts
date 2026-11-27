@@ -65,6 +65,8 @@ import type {
   WizardRecommendSkillsResponse,
   WizardRecommendAnalysisSkillsParams,
   WizardRecommendAnalysisSkillsResult,
+  WizardGetSkillReviewParams,
+  WizardGetSkillReviewResult,
   WizardSearchSkillsParams,
   WizardSearchSkillsResponse,
   WizardGetProjectGuidanceParams,
@@ -89,6 +91,7 @@ import {
   WizardLoadAnalysisParamsSchema,
   WizardRecommendSkillsParamsSchema,
   WizardRecommendAnalysisSkillsParamsSchema,
+  WizardGetSkillReviewParamsSchema,
   WizardSearchSkillsParamsSchema,
   WizardGetProjectGuidanceParamsSchema,
   WizardPreviewSkillsForConsentParamsSchema,
@@ -262,6 +265,7 @@ export class SetupRpcHandlers {
     'wizard:analysis-status',
     'wizard:recommend-skills',
     'wizard:recommend-analysis-skills',
+    'wizard:get-skill-review',
     'wizard:search-skills',
     'wizard:get-project-guidance',
     'wizard:preview-skills-for-consent',
@@ -365,6 +369,7 @@ export class SetupRpcHandlers {
     this.registerAnalysisStatus();
     this.registerRecommendSkills();
     this.registerRecommendAnalysisSkills();
+    this.registerGetSkillReview();
     this.registerSearchSkills();
     this.registerGetProjectGuidance();
     this.registerPreviewSkillsForConsent();
@@ -1054,12 +1059,13 @@ export class SetupRpcHandlers {
           analysisPair,
         );
 
+      let review: WizardRecommendAnalysisSkillsResult;
       try {
         const recommendation =
           this.container.resolve<SkillRecommendationService>(
             SKILL_RECOMMENDATION_SERVICE,
           );
-        return await recommendation.recommendAnalysis({
+        review = await recommendation.recommendAnalysis({
           workspaceRoot,
           items: summary.items,
           summarySource: summary.source,
@@ -1076,6 +1082,68 @@ export class SetupRpcHandlers {
           'SKILLS_RECOMMEND_FAILED',
         );
       }
+      await this.persistSkillReview(workspaceRoot, runId, review);
+      return review;
+    });
+  }
+
+  /**
+   * Store a completed skill review next to its analysis run so a revisit
+   * reads it instead of repeating the judged call.
+   */
+  private async persistSkillReview(
+    workspaceRoot: string,
+    runId: string,
+    review: WizardRecommendAnalysisSkillsResult,
+  ): Promise<void> {
+    try {
+      const storage = this.container.resolve<AnalysisStorageService>(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+      );
+      const written = await storage.writeSkillReview(
+        workspaceRoot,
+        runId,
+        review,
+      );
+      if (!written)
+        this.logger.warn('Skill review not stored: analysis run not found.', {
+          runId,
+        });
+    } catch (error: unknown) {
+      // degradation-audit: reported — the review is still returned to the
+      // caller; only the cached copy for later visits is missing.
+      this.logger.warn(
+        'Could not store the skill review.',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  }
+
+  /**
+   * wizard:get-skill-review - Read the stored skill review of an analysis
+   * run. The workspace is always the active root, never a caller path.
+   */
+  private registerGetSkillReview(): void {
+    this.rpcHandler.registerMethod<
+      WizardGetSkillReviewParams,
+      WizardGetSkillReviewResult
+    >('wizard:get-skill-review', async (rawParams) => {
+      const { runId } = this.parse(WizardGetSkillReviewParamsSchema, rawParams);
+      const none: WizardGetSkillReviewResult = {
+        review: null,
+        reviewedAt: null,
+      };
+      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      if (!workspaceRoot) return none;
+
+      const storage = this.resolveService<AnalysisStorageService>(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        'AnalysisStorageService',
+      );
+      const stored = await storage.readSkillReview(workspaceRoot, runId);
+      return stored
+        ? { review: stored.review, reviewedAt: stored.reviewedAt }
+        : none;
     });
   }
 

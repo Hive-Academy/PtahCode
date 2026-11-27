@@ -217,6 +217,9 @@ describe('AnalysisStorageService', () => {
     expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain(
       '*/generation-manifest.json',
     );
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain(
+      '*/skill-review.json\n',
+    );
     expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe(
       'manifest.json text eol=lf\n*.md text eol=lf\n',
     );
