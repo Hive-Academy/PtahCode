@@ -5,6 +5,27 @@ export { GenerationPreviewStore } from './lib/services/generation-preview.store'
 export type { PreviewConfirmation } from './lib/services/generation-preview.store';
 export { WizardAnalysisRunner } from './lib/services/wizard-analysis-runner.service';
 export { findBoundGenerationTab } from './lib/services/bound-generation-tab';
+export {
+  SetupRunStore,
+  SETUP_RUN_POLL_INTERVAL_MS,
+} from './lib/services/setup-run.store';
+export type {
+  SetupRunStartOptions,
+  SetupRunReport,
+} from './lib/services/setup-run.store';
+export {
+  SETUP_RUN_STEPS,
+  TERMINAL_SETUP_RUN_STATUSES,
+  isTerminalSetupRunStatus,
+} from './lib/services/setup-run.types';
+export type {
+  SetupRunRecord,
+  SetupRunStatus,
+  SetupRunStep,
+  SetupRunStepOf,
+  SetupRunWorkflow,
+} from './lib/services/setup-run.types';
+export { stepTarget, nextStep } from './lib/services/setup-run-steps';
 export { ToolOutputFormatterService } from './lib/services/tool-output-formatter.service';
 
 export {

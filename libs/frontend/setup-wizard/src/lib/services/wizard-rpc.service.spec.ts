@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { WizardRpcService } from './wizard-rpc.service';
+import { WizardRpcError, WizardRpcService } from './wizard-rpc.service';
 import { ClaudeRpcService, ModelStateService } from '@ptah-extension/core';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentSelection } from './setup-wizard-state.service';
@@ -448,6 +448,85 @@ describe('WizardRpcService', () => {
       });
 
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('getSkillReview', () => {
+    it('reads the stored review for a run with the list timeout', async () => {
+      const stored = { review: null, reviewedAt: null };
+      rpcCall.mockResolvedValue(okResult(stored));
+
+      await expect(service.getSkillReview('run-7')).resolves.toEqual(stored);
+      expect(rpcCall).toHaveBeenCalledWith(
+        'wizard:get-skill-review',
+        { runId: 'run-7' },
+        { timeout: 10_000 },
+      );
+    });
+
+    it('throws a WizardRpcError that keeps the RPC error code', async () => {
+      rpcCall.mockResolvedValue(
+        errResult('private host detail', 'ANALYSIS_LOAD_FAILED'),
+      );
+
+      const error = await service.getSkillReview('run-7').catch((e) => e);
+      expect(error).toBeInstanceOf(WizardRpcError);
+      expect(error.code).toBe('ANALYSIS_LOAD_FAILED');
+      expect(error.message).toBe('The saved skill review could not be read.');
+      expect(error.message).not.toContain('private host detail');
+    });
+
+    it('throws without a code when the RPC returns no code', async () => {
+      rpcCall.mockResolvedValue(errResult('offline'));
+
+      const error = await service.getSkillReview('run-7').catch((e) => e);
+      expect(error).toBeInstanceOf(WizardRpcError);
+      expect(error.code).toBeUndefined();
+    });
+  });
+
+  describe('recommendAnalysisSkills', () => {
+    it('runs the skill review for a run with the review timeout', async () => {
+      const review = {
+        skills: [],
+        judge: { status: 'skipped' },
+        analysisPair: null,
+        detectedItems: [],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'none',
+      };
+      rpcCall.mockResolvedValue(okResult(review));
+
+      await expect(service.recommendAnalysisSkills('run-7')).resolves.toEqual(
+        review,
+      );
+      expect(rpcCall).toHaveBeenCalledWith(
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-7' },
+        { timeout: 75_000 },
+      );
+    });
+
+    it('throws a WizardRpcError that keeps the RPC error code', async () => {
+      rpcCall.mockResolvedValue(
+        errResult('private host detail', 'SETUP_MODEL_INVALID'),
+      );
+
+      const error = await service
+        .recommendAnalysisSkills('run-7')
+        .catch((e) => e);
+      expect(error).toBeInstanceOf(WizardRpcError);
+      expect(error.code).toBe('SETUP_MODEL_INVALID');
+      expect(error.message).toBe('Could not load skill recommendations.');
+    });
+
+    it('treats a success without data as a failure', async () => {
+      rpcCall.mockResolvedValue(okResult(undefined));
+
+      await expect(service.recommendAnalysisSkills('run-7')).rejects.toThrow(
+        WizardRpcError,
+      );
     });
   });
 

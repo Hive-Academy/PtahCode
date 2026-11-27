@@ -18,6 +18,8 @@ import type {
   WizardSubmitSelectionResponse,
   WizardCancelResponse,
   EnhancedPromptsCancelResponse,
+  WizardGetSkillReviewResult,
+  WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { AgentSelection } from './setup-wizard-state.service';
 
@@ -34,6 +36,7 @@ import { AgentSelection } from './setup-wizard-state.service';
 const WIZARD_RPC_TIMEOUTS = {
   LIST_MS: 10_000,
   SHORT_LLM_MS: 60_000,
+  SKILL_REVIEW_MS: 75_000,
   GENERATION_MS: 300_000,
   DEEP_ANALYSIS_MS: 3_660_000,
 } as const;
@@ -592,6 +595,52 @@ export class WizardRpcService {
       success: false,
       error: result.error || 'Failed to download enhanced prompt',
     };
+  }
+
+  /**
+   * Read the skill review stored with an analysis run
+   * (`wizard:get-skill-review`). Both fields are `null` when none is stored.
+   *
+   * Throws when the lookup fails, so a caller can tell "no review" from
+   * "could not check".
+   */
+  public async getSkillReview(
+    runId: string,
+  ): Promise<WizardGetSkillReviewResult> {
+    const result = await this.rpcService.call(
+      'wizard:get-skill-review',
+      { runId },
+      { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
+    );
+    if (result.isSuccess() && result.data) return result.data;
+    throw new WizardRpcError(
+      'The saved skill review could not be read.',
+      result.errorCode,
+    );
+  }
+
+  /**
+   * Run the judged skill review for an analysis run
+   * (`wizard:recommend-analysis-skills`). The backend stores a successful
+   * review with the analysis.
+   *
+   * Throws a {@link WizardRpcError} carrying the RPC error code
+   * (`SETUP_MODEL_INVALID`, `ANALYSIS_LOAD_FAILED`, ...) so the view can pick
+   * its fixed copy.
+   */
+  public async recommendAnalysisSkills(
+    runId: string,
+  ): Promise<WizardRecommendAnalysisSkillsResult> {
+    const result = await this.rpcService.call(
+      'wizard:recommend-analysis-skills',
+      { runId },
+      { timeout: WIZARD_RPC_TIMEOUTS.SKILL_REVIEW_MS },
+    );
+    if (result.isSuccess() && result.data) return result.data;
+    throw new WizardRpcError(
+      'Could not load skill recommendations.',
+      result.errorCode,
+    );
   }
 
   /**
