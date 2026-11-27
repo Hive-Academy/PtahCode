@@ -31,7 +31,18 @@ const config: Config = {
   // Relative, not `<rootDir>/...`: on Windows the expanded `<rootDir>` comes
   // back with mixed `/` and `\` separators and the glob then matches nothing.
   testMatch: ['**/*.spec.ts'],
+  moduleNameMapper: {
+    '^@ptah-extension/shared$': '<rootDir>/../libs/shared/src/index.ts',
+  },
   transform: {
+    '^.+[/\\\\]libs[/\\\\]shared[/\\\\].+\\.tsx?$': [
+      'ts-jest',
+      { tsconfig: '<rootDir>/../libs/shared/tsconfig.spec.json' },
+    ],
+    '^.+[/\\\\]scripts[/\\\\]agent-usage[/\\\\].+\\.tsx?$': [
+      'ts-jest',
+      { tsconfig: '<rootDir>/agent-usage/tsconfig.json' },
+    ],
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },
   moduleFileExtensions: ['ts', 'js', 'mjs', 'cjs', 'json'],

@@ -27,7 +27,8 @@ function shellCommand(input: unknown): string {
   if (input === null || typeof input !== 'object') return '';
   const object = input as Record<string, unknown>;
   for (const key of ['command', 'cmd', 'script', 'command_line']) {
-    if (typeof object[key] === 'string') return (object[key] as string).trim();
+    const value = object[key];
+    if (typeof value === 'string') return value.trim();
   }
   return '';
 }
@@ -58,6 +59,11 @@ function nativeClass(call: ToolCallInput): NativeClass | null {
   return null;
 }
 
+/**
+ * Classify a tool call into its server (`ptah`, `mcp:<server>`, `native`),
+ * operation class, and substitutable native category without retaining any
+ * arguments, paths, or command text.
+ */
 export function classifyToolCall(call: ToolCallInput): ToolCallClassification {
   let name = call.name;
   let serverInput = call.server;

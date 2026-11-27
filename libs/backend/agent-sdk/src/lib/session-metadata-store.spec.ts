@@ -1433,6 +1433,66 @@ describe('SessionMetadataStore', () => {
       ]);
     });
 
+    it('stores and pages optional blob header metadata while still loading legacy blobs without it', async () => {
+      const summary = {
+        totalCalls: 3,
+        ptahCalls: 2,
+        nativeCalls: 1,
+        otherMcpCalls: 0,
+        discoveryCalls: 0,
+        ptahErrors: 0,
+        nativeErrors: 0,
+        unknownOutcomes: 0,
+        callsBeforeFirstPtahSuccess: 1,
+        substitutableNative: {
+          textSearch: 0,
+          fileRead: 1,
+          pathListing: 0,
+          gitRead: 0,
+        },
+        byTool: {
+          Read: { calls: 1, errors: 0 },
+          ptah_grep: { calls: 2, errors: 0 },
+        },
+        byToolOverflow: 0,
+      };
+      await store.saveAgentOutput(FAT_AGENT, {
+        segments: segments(2),
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T00:00:00.000Z',
+        segmentsTruncated: true,
+        toolCallSummary: summary,
+      });
+
+      const stored = storage.__state.entries.get(
+        `ptah.agentOutput:${FAT_AGENT}`,
+      ) as PersistedAgentOutput;
+      expect(stored.cli).toBe('codex');
+      expect(stored.model).toBe('gpt-5-codex');
+      expect(stored.startedAt).toBe('2026-11-27T00:00:00.000Z');
+      expect(stored.segmentsTruncated).toBe(true);
+      expect(stored.toolCallSummary).toEqual(summary);
+
+      const paged = await store.getAgentOutputPage(FAT_AGENT, undefined, 4096);
+      expect(paged.done).toBe(true);
+      expect(paged.items).toHaveLength(2);
+
+      // Legacy blob shape without optional header fields still pages cleanly.
+      await storage.update(`ptah.agentOutput:${FAT_AGENT}`, {
+        agentId: FAT_AGENT,
+        savedAt: 1700000000000,
+        segments: segments(1),
+      });
+      const legacyPage = await store.getAgentOutputPage(
+        FAT_AGENT,
+        undefined,
+        4096,
+      );
+      expect(legacyPage.done).toBe(true);
+      expect(legacyPage.items).toHaveLength(1);
+    });
+
     it('writes nothing when there is no output to store', async () => {
       await store.saveAgentOutput(FAT_AGENT, {
         stdout: '',

@@ -85,10 +85,12 @@ import {
 import type {
   CliOutputSegment,
   CliSessionReference,
+  CliType,
   FlatStreamEventUnion,
   SessionMetadataChangedNotification,
   SessionMetadataChangeKind,
   SubagentRecord,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import {
   EFFECTIVE_LANE_POLICY_SCHEMA,
@@ -687,6 +689,16 @@ export interface PersistedAgentOutput {
   readonly agentId: string;
   /** When the snapshot was taken (ms epoch). */
   readonly savedAt: number;
+  /** CLI adapter that ran this lane (`codex`, `claude`, `ptah-cli`, etc.). */
+  readonly cli?: CliType;
+  /** Model selected or observed for this lane, when known. */
+  readonly model?: string;
+  /** ISO timestamp when the lane started. */
+  readonly startedAt?: string;
+  /** True when structured segments exceeded the persistence cap and were dropped. */
+  readonly segmentsTruncated?: boolean;
+  /** Metadata-only tool-call summary across the run, including past the cap. */
+  readonly toolCallSummary?: ToolCallSummary;
   /** Full structured segments (already capped upstream at 500). */
   readonly segments?: readonly CliOutputSegment[];
   /** Rich stream events for the execution-tree renderer (Ptah CLI only). */
@@ -2514,6 +2526,11 @@ export class SessionMetadataStore {
       stdout?: string;
       segments?: readonly CliOutputSegment[];
       streamEvents?: readonly FlatStreamEventUnion[];
+      cli?: CliType;
+      model?: string;
+      startedAt?: string;
+      segmentsTruncated?: boolean;
+      toolCallSummary?: ToolCallSummary;
     },
     sessionId?: string,
   ): Promise<void> {
@@ -2528,12 +2545,33 @@ export class SessionMetadataStore {
     const segments: readonly CliOutputSegment[] = stdoutFallback
       ? [{ type: 'text', content: stdout }]
       : (output.segments ?? []);
-    if (segments.length === 0 && streamEvents.length === 0) return;
+    if (
+      segments.length === 0 &&
+      streamEvents.length === 0 &&
+      output.toolCallSummary === undefined
+    )
+      return;
+
+    const headerMeta: Pick<
+      PersistedAgentOutput,
+      'cli' | 'model' | 'startedAt' | 'segmentsTruncated' | 'toolCallSummary'
+    > = {
+      ...(output.cli !== undefined ? { cli: output.cli } : {}),
+      ...(output.model !== undefined ? { model: output.model } : {}),
+      ...(output.startedAt !== undefined ? { startedAt: output.startedAt } : {}),
+      ...(output.segmentsTruncated !== undefined
+        ? { segmentsTruncated: output.segmentsTruncated }
+        : {}),
+      ...(output.toolCallSummary !== undefined
+        ? { toolCallSummary: output.toolCallSummary }
+        : {}),
+    };
 
     if (target) {
       const record: PersistedAgentOutput = {
         agentId,
         savedAt: Date.now(),
+        ...headerMeta,
         ...(segments.length > 0 ? { segments } : {}),
         ...(streamEvents.length > 0 ? { streamEvents } : {}),
       };
@@ -2560,6 +2598,7 @@ export class SessionMetadataStore {
       const record: PersistedAgentOutput = {
         agentId,
         savedAt: Date.now(),
+        ...headerMeta,
         ...(segments.length > 0 ? { segments } : {}),
         ...(streamEvents.length > 0 ? { streamEvents } : {}),
       };

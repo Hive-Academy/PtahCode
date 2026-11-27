@@ -14,6 +14,7 @@ import {
   STREAM_EVENTS_CAP_SLACK,
   countNewlines,
 } from './agent-process-manager-helpers';
+import { pendingToolCallCount } from './tool-call-summary';
 import type { TrackedAgent } from './tracked-agent';
 
 const AGENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
@@ -146,8 +147,113 @@ describe('AgentOutputBuffer', () => {
       expect(tracked.accumulatedSegments).toHaveLength(
         MAX_ACCUMULATED_SEGMENTS,
       );
+      expect(tracked.segmentsTruncated).toBe(true);
       const delta = buffer.takeDelta(AGENT_ID, tracked);
       expect(delta?.segments).toHaveLength(MAX_ACCUMULATED_SEGMENTS + 3);
+    });
+
+    it('continues updating toolCallSummary past the 500-segment cap and keeps segmentsTruncated false at the cap', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      for (let i = 0; i < MAX_ACCUMULATED_SEGMENTS; i++) {
+        buffer.appendSegment(
+          AGENT_ID,
+          tracked,
+          { type: 'text', content: `line-${i}` },
+          onFlushDue,
+        );
+      }
+      expect(tracked.segmentsTruncated).toBeUndefined();
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'after-cap-1',
+          toolName: 'ptah_grep',
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-result',
+          content: 'ok',
+          toolCallId: 'after-cap-1',
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'after-cap-2',
+          toolName: 'Read',
+        },
+        onFlushDue,
+      );
+
+      expect(tracked.segmentsTruncated).toBe(true);
+      expect(tracked.accumulatedSegments).toHaveLength(
+        MAX_ACCUMULATED_SEGMENTS,
+      );
+      expect(tracked.toolCallSummary).toMatchObject({
+        totalCalls: 2,
+        ptahCalls: 1,
+        nativeCalls: 1,
+        unknownOutcomes: 1,
+        callsBeforeFirstPtahSuccess: 0,
+        substitutableNative: { fileRead: 1 },
+      });
+    });
+
+    it('logs once and keeps buffering if the classifier throws', () => {
+      const { buffer, logger } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+      const throwingInput: Record<string, unknown> = {};
+      Object.defineProperty(throwingInput, 'command', {
+        enumerable: true,
+        get() {
+          throw new Error('classifier boom');
+        },
+      });
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'err-1',
+          toolName: 'bash',
+          toolInput: throwingInput,
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'err-2',
+          toolName: 'bash',
+          toolInput: throwingInput,
+        },
+        onFlushDue,
+      );
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(tracked.accumulatedSegments).toHaveLength(2);
+      expect(buffer.takeDelta(AGENT_ID, tracked)?.segments).toHaveLength(2);
     });
   });
 
@@ -411,6 +517,29 @@ describe('AgentOutputBuffer', () => {
       jest.advanceTimersByTime(OUTPUT_FLUSH_INTERVAL * 2);
       expect(onFlushDue).not.toHaveBeenCalled();
       expect(buffer.takeDelta(AGENT_ID, tracked)).toBeUndefined();
+    });
+
+    it('releases transient pending tool-call state while keeping tracked.toolCallSummary intact', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'p1', toolName: 'Read' },
+        onFlushDue,
+      );
+      const summary = tracked.toolCallSummary;
+      expect(summary).toBeDefined();
+      if (!summary) return;
+      expect(pendingToolCallCount(summary)).toBe(1);
+
+      buffer.discard(AGENT_ID);
+
+      expect(pendingToolCallCount(summary)).toBe(0);
+      expect(summary.totalCalls).toBe(1);
+      expect(summary.unknownOutcomes).toBe(1);
     });
   });
 });

@@ -1011,6 +1011,51 @@ export interface LaneCompletionSignal {
   readonly repeatedCalls?: number;
 }
 
+/** Per-tool call and error counters stored inside {@link ToolCallSummary}. */
+export interface ToolCallSummaryToolStats {
+  calls: number;
+  errors: number;
+}
+
+/** Substitutable native call breakdown stored inside {@link ToolCallSummary}. */
+export interface ToolCallSummarySubstitutableNative {
+  textSearch: number;
+  fileRead: number;
+  pathListing: number;
+  gitRead: number;
+}
+
+/**
+ * Metadata-only summary of tool calls observed for a CLI lane, updated across
+ * every tool-call/result segment even past the 500-segment persistence cap.
+ * Keys in `byTool` are normalized safe tool identifiers only (at most 100);
+ * unsafe vendor names map to a fixed per-server bucket (`native:other`,
+ * `mcp:other`, `ptah:other`). No arguments, results, commands, or paths are
+ * stored.
+ */
+export interface ToolCallSummary {
+  totalCalls: number;
+  ptahCalls: number;
+  nativeCalls: number;
+  otherMcpCalls: number;
+  discoveryCalls: number;
+  ptahErrors: number;
+  nativeErrors: number;
+  unknownOutcomes: number;
+  /**
+   * Number of tool calls that started strictly before the first Ptah tool call
+   * (in call-issuance order) that later succeeded (`tool-result`), or `null` if
+   * no Ptah call succeeded. Result arrival order does not change this count: an
+   * earlier Ptah call that errors or never receives a result does not satisfy
+   * this boundary, whereas a later-arriving success for an earlier Ptah call
+   * lowers the count to that call's issuance ordinal.
+   */
+  callsBeforeFirstPtahSuccess: number | null;
+  substitutableNative: ToolCallSummarySubstitutableNative;
+  byTool: Record<string, ToolCallSummaryToolStats>;
+  byToolOverflow: number;
+}
+
 /** Why a completion signal was not delivered. */
 export type LaneCompletionRefusalReason =
   /** The lane was spawned with no parent session recorded. */

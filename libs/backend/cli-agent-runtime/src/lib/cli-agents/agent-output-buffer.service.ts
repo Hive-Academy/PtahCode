@@ -5,6 +5,7 @@ import type {
   AgentOutputDelta,
   CliOutputSegment,
   FlatStreamEventUnion,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import {
   MAX_BUFFER_SIZE,
@@ -20,6 +21,12 @@ import {
   mergeConsecutiveTextSegments,
 } from './agent-process-manager-helpers';
 import type { TrackedAgent } from './tracked-agent';
+import {
+  createToolCallSummary,
+  recordToolCall,
+  recordToolResult,
+  releaseToolCallSummary,
+} from './tool-call-summary';
 
 @injectable()
 export class AgentOutputBuffer {
@@ -27,6 +34,10 @@ export class AgentOutputBuffer {
   private readonly pendingDeltas = new Map<string, PendingDelta>();
   /** Flush timers per agent */
   private readonly flushTimers = new Map<string, NodeJS.Timeout>();
+  /** Agents for which a tool-call summary update failure has already been logged. */
+  private readonly summaryErrorLogged = new Set<string>();
+  /** Active summary references per agent so `discard` can release transient pairing state. */
+  private readonly activeSummaries = new Map<string, ToolCallSummary>();
 
   constructor(@inject(TOKENS.LOGGER) private readonly logger: Logger) {}
 
@@ -98,13 +109,15 @@ export class AgentOutputBuffer {
       );
     }
     currentTurn.push(segment);
-    if (
-      tracked &&
-      tracked.accumulatedSegments.length < MAX_ACCUMULATED_SEGMENTS
-    ) {
-      // Echo images ride the live delta only; persisted output keeps no image bytes.
-      const { images: _images, ...persisted } = segment;
-      tracked.accumulatedSegments.push(segment.images ? persisted : segment);
+    if (tracked) {
+      this.updateToolCallSummary(agentId, tracked, segment);
+      if (tracked.accumulatedSegments.length < MAX_ACCUMULATED_SEGMENTS) {
+        // Echo images ride the live delta only; persisted output keeps no image bytes.
+        const { images: _images, ...persisted } = segment;
+        tracked.accumulatedSegments.push(segment.images ? persisted : segment);
+      } else {
+        tracked.segmentsTruncated = true;
+      }
     }
     this.scheduleFlush(agentId, onFlushDue);
   }
@@ -244,6 +257,42 @@ export class AgentOutputBuffer {
       this.flushTimers.delete(agentId);
     }
     this.pendingDeltas.delete(agentId);
+    this.summaryErrorLogged.delete(agentId);
+    const summary = this.activeSummaries.get(agentId);
+    if (summary) {
+      releaseToolCallSummary(summary);
+      this.activeSummaries.delete(agentId);
+    }
+  }
+
+  private updateToolCallSummary(
+    agentId: string,
+    tracked: TrackedAgent,
+    segment: CliOutputSegment,
+  ): void {
+    try {
+      const summary = (tracked.toolCallSummary ??= createToolCallSummary());
+      this.activeSummaries.set(agentId, summary);
+      if (segment.type === 'tool-call') {
+        recordToolCall(summary, segment);
+      } else if (
+        segment.type === 'tool-result' ||
+        segment.type === 'tool-result-error'
+      ) {
+        recordToolResult(summary, segment);
+      }
+    } catch (error: unknown) {
+      if (!this.summaryErrorLogged.has(agentId)) {
+        this.summaryErrorLogged.add(agentId);
+        this.logger.warn(
+          '[AgentOutputBuffer] Failed to update tool-call summary',
+          {
+            agentId,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
+    }
   }
 
   private pendingFor(agentId: string): PendingDelta {

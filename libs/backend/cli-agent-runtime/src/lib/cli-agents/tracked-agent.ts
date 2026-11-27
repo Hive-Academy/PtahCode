@@ -5,6 +5,7 @@ import type {
   ExternalOwnerKey,
   CliOutputSegment,
   FlatStreamEventUnion,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 import type { PendingAgentMessage } from './agent-message-router.service';
@@ -86,6 +87,10 @@ export interface TrackedAgent {
   subprocessReleased: boolean;
   /** Accumulated structured segments for persistence (capped at MAX_ACCUMULATED_SEGMENTS) */
   accumulatedSegments: CliOutputSegment[];
+  /** True once a structured segment was dropped after hitting MAX_ACCUMULATED_SEGMENTS. */
+  segmentsTruncated?: boolean;
+  /** Metadata-only tool-call summary updated across all segments, including past the cap. */
+  toolCallSummary?: ToolCallSummary;
   /** Usage reported for the current turn, retained even if output is capped. */
   outcomeUsage?: CliOutputSegment['usage'];
   /**

@@ -3,7 +3,7 @@ import { homedir, platform } from 'os';
 import { basename, dirname, join } from 'path';
 import { claudeProjectsDir, readClaudeStore, type ClaudeToolCall } from './claude-transcript.reader';
 import { findAgentOutputBlobs, readAgentOutputBlob } from './agent-output-blob.reader';
-import { classifyToolCall, type NativeClass, type ToolCallInput } from './tool-call-classify';
+import { classifyToolCall, normalizeToolSummaryKey, type NativeClass, type ToolCallInput, type ToolCallSummary } from '@ptah-extension/shared';
 import { isoInstant } from './lane-metrics';
 
 export interface ShareTotals {
@@ -26,6 +26,7 @@ export interface ShareRow {
   readonly startedAt: string | null;
   readonly total: ShareTotals;
   readonly truncated: boolean;
+  readonly hasSummary: boolean;
   readonly storedTotal: number | null;
   readonly windowAt: number | null;
   readonly sessionId: string | null;
@@ -38,6 +39,7 @@ export interface ShareReport {
   readonly totals: ShareTotals;
   readonly coverage: {
     readonly lanesFound: number;
+    readonly lanesWithSummary: number;
     readonly lanesTruncatedOrEmpty: number;
     readonly lanesUnreadable: number;
     readonly laneTotalMismatches: number;
@@ -82,7 +84,9 @@ export function summarizeCalls(calls: readonly (ToolCallInput & { readonly error
       totals.discovery++;
       if (classification.server === 'native') totals.native++;
     } else if (classification.server !== 'native') {
-      const server = outputLabel(classification.server.slice('mcp:'.length)) || 'unknown';
+      const rawServer = classification.server.slice('mcp:'.length);
+      const normalized = normalizeToolSummaryKey(rawServer, classification.server);
+      const server = normalized === 'mcp:other' ? 'other' : normalized;
       totals.otherMcp[server] = (totals.otherMcp[server] ?? 0) + 1;
     } else {
       totals.native++;
@@ -163,19 +167,45 @@ function readLaneMetadata(file: string, agentId: string): Record<string, unknown
   return null;
 }
 
+function totalsFromSummary(summary: ToolCallSummary): ShareTotals {
+  return {
+    total: summary.totalCalls,
+    ptah: summary.ptahCalls,
+    native: summary.nativeCalls,
+    ptahErrors: summary.ptahErrors,
+    unknown: summary.unknownOutcomes,
+    discovery: summary.discoveryCalls,
+    beforeFirstPtahSuccess: summary.callsBeforeFirstPtahSuccess ?? summary.totalCalls,
+    nativeSubstitutable: {
+      'text-search': summary.substitutableNative.textSearch,
+      'file-read': summary.substitutableNative.fileRead,
+      'path-listing': summary.substitutableNative.pathListing,
+      'git-read': summary.substitutableNative.gitRead,
+    },
+    otherMcp: summary.otherMcpCalls > 0 ? { other: summary.otherMcpCalls } : {},
+  };
+}
+
 export function rowFromLane(file: string): ShareRow {
   const blob = readAgentOutputBlob(file);
-  const metadata = readLaneMetadata(file, blob.agentId);
-  const calls = blob.calls.map((call) => ({ name: call.name, input: call.input, error: call.outcome === 'unknown' ? undefined : call.outcome === 'error' }));
-  const startedAt = typeof metadata?.['startedAt'] === 'string' ? isoInstant(Date.parse(metadata['startedAt'])) : null;
-  const rawVendor = typeof metadata?.['cli'] === 'string' ? metadata['cli'] : 'unknown';
+  const metadata = blob.cli !== null && blob.model !== null && blob.startedAt !== null
+    ? null
+    : readLaneMetadata(file, blob.agentId);
+  const rawStartedAt = blob.startedAt ?? (typeof metadata?.['startedAt'] === 'string' ? metadata['startedAt'] : null);
+  const startedMs = rawStartedAt === null ? NaN : Date.parse(rawStartedAt);
+  const startedAt = Number.isFinite(startedMs) ? isoInstant(startedMs) : null;
+  const rawVendor = blob.cli ?? (typeof metadata?.['cli'] === 'string' ? metadata['cli'] : 'unknown');
   const vendor = (knownVendors as readonly string[]).includes(rawVendor) ? rawVendor : 'unknown';
-  const model = typeof metadata?.['model'] === 'string' ? outputLabel(metadata['model']) : null;
-  const storedTotal = null;
-  const windowAt = startedAt === null ? blob.savedAt : Date.parse(startedAt);
+  const rawModel = blob.model ?? (typeof metadata?.['model'] === 'string' ? metadata['model'] : null);
+  const model = rawModel ? outputLabel(rawModel) : null;
+  const summary = blob.toolCallSummary;
+  const hasSummary = summary !== null;
+  const storedTotal = summary ? summary.totalCalls : null;
+  const windowAt = Number.isFinite(startedMs) ? startedMs : blob.savedAt;
   const sessionId = basename(dirname(file));
-  const total = summarizeCalls(calls);
-  return { id: outputLabel(blob.agentId), kind: 'lane', vendor, model, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: blob.truncated || blob.empty || (storedTotal !== null && storedTotal !== calls.length), storedTotal, windowAt, sessionId: outputLabel(sessionId) };
+  const total = totalsFromSummary(summary ?? blob.fallbackSummary);
+  const truncated = !hasSummary && (blob.truncated || blob.empty);
+  return { id: outputLabel(blob.agentId), kind: 'lane', vendor, model, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated, hasSummary, storedTotal, windowAt, sessionId: outputLabel(sessionId) };
 }
 
 function claudeCalls(calls: readonly ClaudeToolCall[]): (ToolCallInput & { error?: boolean })[] {
@@ -185,7 +215,8 @@ function claudeCalls(calls: readonly ClaudeToolCall[]): (ToolCallInput & { error
 export function buildShareReport(rows: readonly ShareRow[], lanesFound: number, lanesUnreadable = 0, laneCoverageRows: readonly ShareRow[] = rows): ShareReport {
   const totals = freshTotals();
   const vendorTotals: Record<string, ShareTotals> = {};
-  const sparse = laneCoverageRows.filter((row) => row.truncated).length;
+  const lanesWithSummary = laneCoverageRows.filter((row) => row.hasSummary).length;
+  const sparse = laneCoverageRows.filter((row) => !row.hasSummary && row.truncated).length;
   const mismatches = laneCoverageRows.filter((row) => row.storedTotal !== null && row.storedTotal !== row.total.total).length;
   for (const row of rows) {
     addTotals(totals, row.total);
@@ -196,7 +227,7 @@ export function buildShareReport(rows: readonly ShareRow[], lanesFound: number, 
     rows: rows.map((row) => ({ ...row, ptahShare: Math.round((100 * row.total.ptah) / Math.max(1, row.total.total)) })),
     vendorTotals,
     totals,
-    coverage: { lanesFound, lanesTruncatedOrEmpty: sparse, lanesUnreadable, laneTotalMismatches: mismatches, vendorsWithNoData: knownVendors.filter((vendor) => vendorTotals[vendor] === undefined) },
+    coverage: { lanesFound, lanesWithSummary, lanesTruncatedOrEmpty: sparse, lanesUnreadable, laneTotalMismatches: mismatches, vendorsWithNoData: knownVendors.filter((vendor) => vendorTotals[vendor] === undefined) },
   };
 }
 
@@ -213,7 +244,7 @@ export function formatShareReport(report: ShareReport, json: boolean): string {
   for (const [vendor, totals] of Object.entries(report.vendorTotals)) {
     lines.push(`VENDOR ${vendor} ${totalsText(totals)}`);
   }
-  lines.push(`COVERAGE lanes=${report.coverage.lanesFound} truncated_or_empty=${report.coverage.lanesTruncatedOrEmpty} unreadable=${report.coverage.lanesUnreadable} total_mismatches=${report.coverage.laneTotalMismatches} vendors_without_data=${report.coverage.vendorsWithNoData.join(',')}`);
+  lines.push(`COVERAGE lanes=${report.coverage.lanesFound} with_summary=${report.coverage.lanesWithSummary} truncated_or_empty=${report.coverage.lanesTruncatedOrEmpty} unreadable=${report.coverage.lanesUnreadable} total_mismatches=${report.coverage.laneTotalMismatches} vendors_without_data=${report.coverage.vendorsWithNoData.join(',')}`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -245,7 +276,7 @@ function main(): void {
     .filter((summary) => summary.kind === 'session' && !summary.hasLaneMarker && inWindow(summary.startedAt, window))
     .filter((summary) => !window.session || summary.id === window.session)
     .filter(() => !window.agent)
-    .map((summary): ShareRow => { const total = summarizeCalls(claudeCalls(summary.toolCalls ?? [])); const id = outputLabel(summary.id); const startedAt = summary.startedAt === null ? null : isoInstant(Date.parse(summary.startedAt)); return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, storedTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId: id }; });
+    .map((summary): ShareRow => { const total = summarizeCalls(claudeCalls(summary.toolCalls ?? [])); const id = outputLabel(summary.id); const startedAt = summary.startedAt === null ? null : isoInstant(Date.parse(summary.startedAt)); return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, hasSummary: false, storedTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId: id }; });
   const report = buildShareReport(filterRowsByWindow([...lanes, ...claude], window), paths.length, unreadable, laneRows);
   if (emptyWindowExitCode(report.rows) === 1) { process.stderr.write(`${EMPTY_WINDOW_MESSAGE}\n`); process.exitCode = 1; return; }
   process.stdout.write(formatShareReport(report, json));

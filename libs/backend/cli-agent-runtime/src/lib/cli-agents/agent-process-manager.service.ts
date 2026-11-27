@@ -41,6 +41,7 @@ import {
   formatBudgetPauseNotice,
   formatAgentActionNotice,
   formatLaneToolGateUnavailable,
+  isLiveAgentStatus,
   type AgentActionNotice,
 } from '@ptah-extension/shared';
 import type {
@@ -60,6 +61,7 @@ import type {
   ExternalOwnerKey,
   LaneTurnContent,
   LaneTurnRequest,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import {
   killProcessTree,
@@ -126,6 +128,7 @@ import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-
 import { recordLaneUsageOutcome } from './lane-completion-outcome';
 import { LaneUsageNormalizer } from './lane-usage-normalizer';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
+import { cloneToolCallSummary } from './tool-call-summary';
 import {
   buildLaneHandoffTask,
   collectHandoffCarryOver,
@@ -839,6 +842,7 @@ export class AgentProcessManager {
     clearTimeout(tracked.admissionTimer);
     tracked.info.waitingForMemory = false;
     this.mcpCredentials?.revokeSubject(ticket.agentId);
+    this.outputBuffer.discard(ticket.agentId);
     if (!tracked.spawnReplied) {
       const completedAt = new Date().toISOString();
       tracked.info = { ...tracked.info, status: 'failed', completedAt, lastActivityAt: completedAt };
@@ -1898,6 +1902,13 @@ export class AgentProcessManager {
     usageWorkspaceRoot?: string,
   ): SpawnAgentResult {
     const agentId = info.agentId;
+    const resumedFromId = info.resumedFromAgentId;
+    if (resumedFromId && resumedFromId !== agentId) {
+      const previousTracked = this.agents.get(resumedFromId);
+      if (!previousTracked || !isLiveAgentStatus(previousTracked.info.status)) {
+        this.outputBuffer.discard(resumedFromId);
+      }
+    }
     const handleReference = snapshotLaneAccountReference(
       laneAccountFields(sdkHandle),
     );
@@ -3091,6 +3102,11 @@ export class AgentProcessManager {
         stdout: string;
         segments: CliOutputSegment[];
         streamEvents: FlatStreamEventUnion[];
+        cli: CliType;
+        model?: string;
+        startedAt: string;
+        segmentsTruncated: boolean;
+        toolCallSummary?: ToolCallSummary;
       }
     | undefined {
     const tracked = this.agents.get(agentId);
@@ -3101,6 +3117,7 @@ export class AgentProcessManager {
       stdout = stdout.slice(-MAX_STDOUT_PERSISTENCE_SIZE);
     }
 
+    const model = tracked.info.observedModel ?? tracked.info.model;
     return {
       stdout,
       segments: [...tracked.accumulatedSegments],
@@ -3110,6 +3127,13 @@ export class AgentProcessManager {
           AgentProcessManager.MAX_PERSISTED_STREAM_EVENTS,
         ),
       ],
+      cli: tracked.info.cli,
+      ...(model ? { model } : {}),
+      startedAt: tracked.info.startedAt,
+      segmentsTruncated: tracked.segmentsTruncated === true,
+      ...(tracked.toolCallSummary
+        ? { toolCallSummary: cloneToolCallSummary(tracked.toolCallSummary) }
+        : {}),
     };
   }
 
@@ -3629,6 +3653,7 @@ export class AgentProcessManager {
     if (tracked.info.status === 'starting') {
       clearTimeout(tracked.admissionTimer);
       this.mcpCredentials?.revokeSubject(agentId);
+      this.outputBuffer.discard(agentId);
       const completedAt = new Date().toISOString();
       tracked.info = { ...tracked.info, status: 'stopped', completedAt, lastActivityAt: completedAt };
       this.memoryGate.wake();
@@ -4107,6 +4132,7 @@ export class AgentProcessManager {
     tracked: TrackedAgent,
     reason: AgentReleaseReason,
   ): Promise<void> {
+    this.outputBuffer.discard(agentId);
     if (tracked.subprocessReleased) {
       this.mcpCredentials?.revokeSubject(agentId);
       await this.removeInstructionFiles(agentId);

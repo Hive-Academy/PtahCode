@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2334_ff7f
-status: backlog
+status: in_review
 type: FEATURE
 title: Add a metadata-only tool-call ledger for chat agents and CLI lanes
 depends_on: []
