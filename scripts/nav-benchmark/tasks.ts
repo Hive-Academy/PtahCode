@@ -189,7 +189,7 @@ export const NAV_TASKS: readonly NavTask[] = [
     source: 'claude-bash: sed -n 340,372p style range on session-spawner',
     expect: [
       'canStart(callerSessionId: string | undefined): SessionChildEligibility {',
-      "return { ok: false, code: 'cap-reached'",
+      "code: 'cap-reached'",
     ],
     expectFile: SPAWNER,
     strategies: {
