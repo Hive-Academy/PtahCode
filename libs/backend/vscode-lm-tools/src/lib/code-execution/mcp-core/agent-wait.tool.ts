@@ -79,14 +79,7 @@ export function buildAgentWaitTool(
   return {
     name: AGENT_WAIT_TOOL_NAME,
     description:
-      'Block until spawned agent lanes end; do not poll ptah_agent_status. ' +
-      'mode "all" (default) waits for every lane; "any" for the first. ' +
-      `timeoutSec (0-${MAX_WAIT_TIMEOUT_SEC}, default ${DEFAULT_AGENT_WAIT_TIMEOUT_SEC}) bounds the wait; ` +
-      'a timeout returns a PARTIAL result (not an error); repeat is safe.' +
-      httpCap +
-      ' Exclusive external owners may get queued Completion ID blocks on later results; wait blocks. ' +
-      `Per lane: status (or starting), exit code, duration, stop reason, deliverables on disk, last output (max ${WAIT_SUMMARY_MAX_CHARS} chars). ` +
-      `Full output: ${transport === 'stdio' ? 'agent_read' : 'ptah_agent_read'}.`,
+      `Wait for spawned lanes (avoid status polling): mode all (default) or any; timeoutSec 0-${MAX_WAIT_TIMEOUT_SEC} (default ${DEFAULT_AGENT_WAIT_TIMEOUT_SEC}). Timeout is partial, safe to repeat.${httpCap} External owners may receive queued Completion ID blocks. Each lane returns status, exit code, duration, stop reason, checked deliverables and last output (max ${WAIT_SUMMARY_MAX_CHARS} chars). Full output: ${transport === 'stdio' ? 'agent_read' : 'ptah_agent_read'}.`,
     inputSchema: {
       type: 'object',
       properties: {

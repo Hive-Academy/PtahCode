@@ -29,6 +29,7 @@ import {
   GREP_MAX_FILES,
   GREP_TOOL_NAME,
 } from './nav/grep.limits';
+import { INSPECT_TOOL_NAME } from './nav/inspect.limits';
 import {
   TASK_CHECK_ENTRY_CAP,
   TASK_LIST_DEFAULT_LIMIT,
@@ -503,7 +504,7 @@ export function buildSearchFilesTool(): MCPToolDefinition {
 export function buildReadSymbolTool(): MCPToolDefinition {
   return {
     name: READ_SYMBOL_TOOL_NAME,
-    description: withToolCue(READ_SYMBOL_TOOL_NAME, `Read code without reading the whole file. Two forms: \`name\` returns that declaration (function, method, class; \`Class.method\` works) with its doc comment and 1-based line numbers, or lists the matches when the name is ambiguous; \`startLine\`/\`endLine\` returns that range (any text file). At most \`maxLines\` lines (default ${READ_SYMBOL_DEFAULT_MAX_LINES}, max ${READ_SYMBOL_HARD_MAX_LINES}) and about ${READ_SYMBOL_MAX_CHARS} chars; a cut result says where to continue.`),
+    description: withToolCue(READ_SYMBOL_TOOL_NAME, `Read code without reading the whole file. Two forms: \`name\` returns that declaration (function, method, class; \`Class.method\` works) with its doc comment and 1-based line numbers, or lists the matches when the name is ambiguous; \`startLine\`/\`endLine\` returns that range (any text file). At most \`maxLines\` lines (default ${READ_SYMBOL_DEFAULT_MAX_LINES}, max ${READ_SYMBOL_HARD_MAX_LINES}) and about ${READ_SYMBOL_MAX_CHARS} chars; values above 400 are clamped to 400. A cut result says where to continue. Native Read keys are accepted.`),
     inputSchema: {
       type: 'object',
       properties: {
@@ -548,7 +549,7 @@ export function buildReadSymbolTool(): MCPToolDefinition {
         },
       },
       required: ['file'],
-      additionalProperties: false,
+      additionalProperties: true,
     },
     annotations: { readOnlyHint: true },
   };
@@ -561,7 +562,7 @@ export function buildReadSymbolTool(): MCPToolDefinition {
 export function buildGrepTool(): MCPToolDefinition {
   return {
     name: GREP_TOOL_NAME,
-    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal unless the pattern has clear regex syntax (see \`regex\`); smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name.`),
+    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal unless the pattern has clear regex syntax (see \`regex\`); smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name. Native Grep keys are accepted.`),
     inputSchema: {
       type: 'object',
       properties: {
@@ -618,7 +619,35 @@ export function buildGrepTool(): MCPToolDefinition {
         },
       },
       required: ['pattern'],
-      additionalProperties: false,
+      additionalProperties: true,
+    },
+    annotations: { readOnlyHint: true },
+  };
+}
+
+/** Build the bounded multi-operation read-only workspace inspection tool. */
+export function buildInspectTool(): MCPToolDefinition {
+  return {
+    name: INSPECT_TOOL_NAME,
+    description: 'Batch up to 8 read-only read/grep/list/git inspections against one root; use instead of chained shell reads or read-only git.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workspaceRoot: { type: 'string', description: 'Optional absolute workspace root.' },
+        ops: {
+          type: 'array', minItems: 1, maxItems: 8,
+          description: 'Ordered read, grep, list, or fixed read-only git operations.',
+          items: {
+            type: 'object',
+            properties: {
+              op: { type: 'string', enum: ['read', 'grep', 'list', 'git'] },
+              file: { type: 'string' }, name: { type: 'string' }, startLine: { type: 'integer', minimum: 1 }, endLine: { type: 'integer', minimum: 1 }, maxLines: { type: 'integer', minimum: 1, maximum: 400 },
+              pattern: { type: 'string' }, path: { type: 'string' }, glob: { type: 'string' }, maxMatches: { type: 'integer', minimum: 1, maximum: 100 }, includeIgnored: { type: 'boolean' }, regex: { type: 'boolean' }, caseSensitive: { type: 'boolean' }, context: { type: 'integer', minimum: 0, maximum: 5 }, limit: { type: 'integer', minimum: 1, maximum: 200 },
+              action: { type: 'string', enum: ['status', 'diff_stat', 'log', 'branch'] }, base: { type: 'string', pattern: '^(?!-)[A-Za-z0-9._/-]{1,200}$' },
+            }, required: ['op'], additionalProperties: true,
+          },
+        },
+      }, required: ['ops'], additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
   };
@@ -1020,12 +1049,7 @@ export function buildAgentStatusTool(): MCPToolDefinition {
   return {
     name: 'ptah_agent_status',
     description:
-      'Check the status of a specific agent or all agents. ' +
-      'Returns agentId, status (starting/running/completed/failed/timeout/stopped), ' +
-      'cli, task, startedAt, and when available duration, exitCode, and — when the adapter reports ' +
-      'one — the CLI Session ID. That session id is what ptah_agent_spawn takes ' +
-      'as resume_session_id, so its presence here is the signal to resume a ' +
-      'timed-out agent rather than respawn it and lose its context.',
+      'Check one or all agents. Returns id, status (starting/running/completed/failed/timeout/stopped), CLI, task, start time, and available duration, exit code and CLI session id. Resume a timed-out agent with that session id as ptah_agent_spawn.resume_session_id; do not respawn and lose its context.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1047,14 +1071,7 @@ export function buildAgentReadTool(): MCPToolDefinition {
   return {
     name: 'ptah_agent_read',
     description:
-      'Read the stdout/stderr output from an agent. ' +
-      'For starting or running agents, returns output captured so far, or no output yet. ' +
-      'By default returns the last 200 lines of each stream, fewer when they ' +
-      'would exceed the result size limit (the newest lines are kept; a line ' +
-      'too long to fit is shown in part, and the full window is then saved to ' +
-      'a file the result names). Each ' +
-      'stream states the exact lines shown and how many were left out. Pass tail ' +
-      'for a different window size, and offset to read forward starting at a given line.',
+      'Read captured stdout/stderr, including output so far (or none yet) for running agents. Defaults to the newest 200 lines per stream, reduced to fit the result budget; oversized windows are saved to the named file, with shown and omitted line counts. Use tail to change the window and offset to read forward.',
     inputSchema: {
       type: 'object',
       properties: {

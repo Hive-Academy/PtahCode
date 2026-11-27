@@ -122,6 +122,14 @@ const MANDATE_MAP: Readonly<Record<string, Mapping>> = {
     'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/grep.spec.ts',
     'groups matches by file with the enclosing symbol and relative paths',
   ),
+  ptah_inspect: guard(
+    'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/inspect.spec.ts',
+    'runs read, grep, list and fixed git ops in input order',
+  ),
+  ptah_run_check: guard(
+    'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/run-check.tool.spec.ts',
+    'advertises the name, the targets and the 900 s ceiling',
+  ),
   ptah_read_symbol: guard(
     'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/read-symbol.spec.ts',
     'returns a named declaration with its doc comment and a relative header',
@@ -229,6 +237,9 @@ type ClaimSuite =
   { readonly suites: readonly string[] } | { readonly noSuite: string };
 
 const CLAIM_SUITE: Readonly<Record<string, ClaimSuite>> = {
+  ptah_run_check: {
+    noSuite: 'a workspace process runner; benchmark retrieval suites do not model command execution',
+  },
   ptah_search_files: { suites: ['file-tools'] },
   ptah_code_search_symbols: { suites: ['symbols-exact', 'symbols-concept'] },
   ptah_lsp_references: { suites: ['references'] },
@@ -250,6 +261,10 @@ const CLAIM_SUITE: Readonly<Record<string, ClaimSuite>> = {
   ptah_grep: {
     noSuite:
       'a free-text search: the benchmark has no retrieval ground truth for it; measured by scripts/nav-benchmark',
+  },
+  ptah_inspect: {
+    noSuite:
+      'a batched read-only inspection: the benchmark has no retrieval ground truth for it; covered by nav/inspect.spec.ts',
   },
   ptah_read_symbol: {
     noSuite:

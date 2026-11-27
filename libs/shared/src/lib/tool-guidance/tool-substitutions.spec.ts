@@ -46,6 +46,10 @@ describe('TOOL_SUBSTITUTIONS (the rows)', () => {
     (tool, row) => {
       if (row.core) expect(row.core.call.split(/[\s{]/)[0]).toBe(tool);
       if (row.lane) expect(row.lane.prefer.startsWith(tool)).toBe(true);
+      for (const extra of row.also ?? []) {
+        if (extra.core) expect(extra.core.call.split(/[\s{]/)[0]).toBe(tool);
+        if (extra.lane) expect(extra.lane.prefer.startsWith(tool)).toBe(true);
+      }
     },
   );
 
@@ -58,9 +62,10 @@ describe('TOOL_SUBSTITUTIONS (the rows)', () => {
   });
 
   it('gives each lane row a unique position', () => {
-    const orders = TOOL_SUBSTITUTIONS.flatMap((row) =>
-      row.lane ? [row.lane.order] : [],
-    );
+    const orders = TOOL_SUBSTITUTIONS.flatMap((row) => [
+      ...(row.lane ? [row.lane.order] : []),
+      ...(row.also ?? []).flatMap((extra) => (extra.lane ? [extra.lane.order] : [])),
+    ]);
     expect(new Set(orders).size).toBe(orders.length);
   });
 
@@ -78,10 +83,15 @@ describe('renderCoreSubstitutionBlock', () => {
     const tableRows = block
       .split('\n')
       .filter((line) => line.startsWith('| ') && !line.startsWith('| Instead'));
-    const expected = TOOL_SUBSTITUTIONS.filter((row) => row.core);
+    const expected = [
+      ...TOOL_SUBSTITUTIONS.flatMap((row) => (row.core ? [row.core] : [])),
+      ...TOOL_SUBSTITUTIONS.flatMap((row) =>
+        (row.also ?? []).flatMap((extra) => (extra.core ? [extra.core] : [])),
+      ),
+    ];
     expect(tableRows).toHaveLength(expected.length);
-    for (const row of expected) {
-      expect(block).toContain(`| ${row.core?.call} |`);
+    for (const core of expected) {
+      expect(block).toContain(`| ${core.call} |`);
     }
     expect(block.split('| Instead of... | CALL THIS TOOL | Why |')).toHaveLength(
       2,
@@ -96,11 +106,28 @@ describe('renderCoreSubstitutionBlock', () => {
       '| `sed -n` / `cat` | ptah_read_symbol { file, name } | One declaration, or a line range (startLine/endLine); numbered, bounded |',
     );
     expect(block).toContain(
-      'Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.',
+      'Fall back to native tools only after a targeted Ptah attempt fails or finds nothing.',
     );
     expect(block).toContain(
       '> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.**',
     );
+  });
+
+  it('includes worktree root, tsc --noEmit, log, and ptah_run_check guidance', () => {
+    expect(block).toContain('workspaceRoot: <absolute root>');
+    expect(block).toContain('tsc --noEmit');
+    expect(block).toContain('ptah_get_diagnostics { files }');
+    expect(block).toContain('ptah_grep { includeIgnored: true, path }');
+    expect(block).toContain('ptah_read_symbol { startLine, endLine }');
+    expect(block).toContain('ptah_run_check { project, targets }');
+    expect(block).toContain('not arbitrary commands');
+  });
+
+  it('omits ptah_run_check when the agent namespace is disabled', () => {
+    const withoutAgent = renderCoreSubstitutionBlock({
+      disabledNamespaces: ['agent'],
+    });
+    expect(withoutAgent).not.toContain('ptah_run_check');
   });
 
   it('derives the free-text line from the shell commands of its rows', () => {
@@ -140,8 +167,10 @@ describe('renderLaneToolTable', () => {
 
   it('has a header and one line per row that carries a lane wording, in order', () => {
     const lines = table.split('\n');
-    const rows = TOOL_SUBSTITUTIONS.flatMap((row) => (row.lane ? [row.lane] : []))
-      .sort((a, b) => a.order - b.order);
+    const rows = TOOL_SUBSTITUTIONS.flatMap((row) => [
+      ...(row.lane ? [row.lane] : []),
+      ...(row.also ?? []).flatMap((extra) => (extra.lane ? [extra.lane] : [])),
+    ]).sort((a, b) => a.order - b.order);
     expect(lines).toHaveLength(rows.length + 1);
     expect(lines[0]).toMatch(/^Need\s+\| Prefer$/);
     rows.forEach((row, index) => {
@@ -151,9 +180,28 @@ describe('renderLaneToolTable', () => {
     });
   });
 
+  it('teaches includeIgnored for node_modules, tsc --noEmit, logs, and ptah_run_check', () => {
+    expect(table).toContain('includeIgnored + scoped path for node_modules');
+    expect(table).toContain('tsc --noEmit');
+    expect(table).toContain('ptah_get_diagnostics { files }');
+    expect(table).toContain('ptah_grep { includeIgnored: true, path }');
+    expect(table).toContain('ptah_read_symbol { startLine, endLine }');
+    expect(table).toContain('ptah_run_check (Nx targets only, not arbitrary commands)');
+    expect(renderLaneToolTable({ disabledNamespaces: ['agent'] })).not.toContain(
+      'ptah_run_check',
+    );
+  });
+
   it('aligns the separator of every line', () => {
     const columns = new Set(table.split('\n').map((line) => line.indexOf('|')));
     expect(columns.size).toBe(1);
+  });
+
+  it('names native file tools alongside shell equivalents', () => {
+    expect(table).toContain('native list/glob; shell find');
+    expect(table).toContain('Find text/constant/usage');
+    expect(table).toContain('Read function or line range');
+    expect(table).toContain('ptah_inspect { workspaceRoot?, ops }');
   });
 
   it('fits well inside the lane policy byte budget', () => {
@@ -192,8 +240,14 @@ describe('renderAgentToolingRules', () => {
   const rules = renderAgentToolingRules();
 
   it('lists every row that has a core wording, once, and stays inside its budget', () => {
-    for (const row of TOOL_SUBSTITUTIONS.filter((r) => r.core)) {
-      expect(rules.split(`| ${row.core?.call} |`)).toHaveLength(2);
+    const expected = [
+      ...TOOL_SUBSTITUTIONS.flatMap((row) => (row.core ? [row.core] : [])),
+      ...TOOL_SUBSTITUTIONS.flatMap((row) =>
+        (row.also ?? []).flatMap((extra) => (extra.core ? [extra.core] : [])),
+      ),
+    ];
+    for (const core of expected) {
+      expect(rules.split(`| ${core.call} |`)).toHaveLength(2);
     }
     expect(Buffer.byteLength(rules, 'utf8')).toBeLessThanOrEqual(
       AGENT_TOOLING_RULES_MAX_BYTES,
@@ -204,6 +258,11 @@ describe('renderAgentToolingRules', () => {
     expect(rules).toContain(
       'Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat.',
     );
+    expect(rules).toContain('workspaceRoot: <absolute root>');
+    for (const tool of ['ptah_read_symbol', 'ptah_grep', 'ptah_inspect', 'ptah_ast_analyze']) {
+      expect(rules).toContain(tool);
+    }
+    expect(rules).toContain('ptah_run_check { project, targets }');
     expect(rules).not.toMatch(/Native read\/search only for free-text/);
   });
 });

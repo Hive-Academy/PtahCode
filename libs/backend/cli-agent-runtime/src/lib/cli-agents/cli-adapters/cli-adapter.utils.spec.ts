@@ -52,7 +52,7 @@ import type {
 } from '@ptah-extension/platform-core';
 
 import type { AgentRoleDefinition } from '@ptah-extension/shared';
-import { LANE_POLICY_MAX_BYTES, SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
+import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 
 import {
@@ -122,9 +122,16 @@ describe('buildTaskPrompt', () => {
     expect(PTAH_LANE_POLICY).toContain('ui-ux-designer');
     expect(PTAH_LANE_POLICY).toContain('angular-frontend-patterns');
     expect(PTAH_LANE_POLICY).not.toContain('impeccable');
-    for (const key of ['ptah_code_search_symbols', 'ptah_ast_analyze', 'ptah_lsp_references', 'ptah_get_diagnostics', 'ptah_memory_search', 'ptah_search_files', 'ptah_context_enrich_file', 'ptah_get_dependents', 'ptah_web_search', 'ptah_browser_navigate', 'ptah_browser_screenshot']) {
+    for (const key of ['ptah_code_search_symbols', 'ptah_ast_analyze', 'ptah_lsp_references', 'ptah_get_diagnostics', 'ptah_memory_search', 'ptah_search_files', 'ptah_context_enrich_file', 'ptah_get_dependents', 'ptah_web_search', 'ptah_browser_navigate', 'ptah_browser_screenshot', 'ptah_run_check']) {
       expect(PTAH_LANE_POLICY).toContain(key);
     }
+    expect(PTAH_LANE_POLICY).toContain('workspaceRoot: <absolute root>');
+    for (const tool of ['ptah_inspect', 'ptah_grep', 'ptah_read_symbol', 'ptah_ast_analyze']) expect(PTAH_LANE_POLICY).toContain(tool);
+    expect(PTAH_LANE_POLICY).not.toContain('Ptah read/search tools');
+    expect(PTAH_LANE_POLICY).toContain('ptah_inspect for read-only git status, diff --stat and log');
+    expect(PTAH_LANE_POLICY).toContain('native git for state-changing commands');
+    expect(PTAH_LANE_POLICY).toContain('includeIgnored + scoped path for node_modules');
+    expect(PTAH_LANE_POLICY).toContain('tsc --noEmit');
   });
 
   it('does not name a CLI or model vendor', () => {
@@ -132,6 +139,13 @@ describe('buildTaskPrompt', () => {
     for (const name of roster) {
       expect(PTAH_LANE_POLICY).not.toMatch(new RegExp(`\\b${name}\\b`, 'i'));
     }
+  });
+
+  it('requires Ptah before native workspace file tools and limits fallback to a failed attempt', () => {
+    expect(PTAH_LANE_POLICY).toContain('call the matching Ptah tool first');
+    expect(PTAH_LANE_POLICY).toContain('read/view-file, search/grep and list/glob');
+    expect(PTAH_LANE_POLICY).toContain('only after that Ptah tool errors or returns zero hits');
+    expect(PTAH_LANE_POLICY).toContain('name the Ptah tool that failed');
   });
 
   it('omits task-text policy for a stronger channel', () => {
@@ -142,7 +156,7 @@ describe('buildTaskPrompt', () => {
   it('stays within the argv budget it shares with the task text', () => {
     // argv on the task-prompt adapters; the Windows `.cmd` fallback limit is
     // 8,191 bytes for the WHOLE command line.
-    expect(Buffer.byteLength(toolPolicy, 'utf8')).toBeLessThanOrEqual(LANE_POLICY_MAX_BYTES);
+    expect(Buffer.byteLength(toolPolicy, 'utf8')).toBeLessThanOrEqual(3_400);
   });
 
   it('includes the shared native-agent policy without enhanced guidance', () => {

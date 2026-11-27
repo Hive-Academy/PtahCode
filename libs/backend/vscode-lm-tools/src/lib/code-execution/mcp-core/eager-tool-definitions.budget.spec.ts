@@ -18,9 +18,8 @@ import {
  * makes an eager tool longer, or makes another tool eager, must raise it with
  * a measured reason in the same change.
  */
-const EAGER_TOOL_COUNT = 15;
-// Measured 21,029 chars on main (20,325 at r6 75cfd492b; ptah_grep grew), plus five percent.
-const EAGER_TOOL_CHAR_BUDGET = 22_080;
+const EAGER_TOOL_COUNT = 20;
+const EAGER_TOOL_CHAR_BUDGET = 26_792;
 
 const deps: ProtocolHandlerDependencies = {
   ptahAPI: {} as PtahAPI,
@@ -71,6 +70,13 @@ function definitionChars(tool: ListedTool): number {
 }
 
 describe('eager tool definitions budget', () => {
+  it('advertises the aliases accepted by ptah_inspect', async () => {
+    const inspect = (await eagerTools()).find((tool) => tool.name === 'ptah_inspect');
+    expect(inspect?.inputSchema).toMatchObject({
+      properties: { ops: { items: { additionalProperties: true } } },
+    });
+  });
+
   it('keeps the eager set at its measured size', async () => {
     const tools = await eagerTools();
     expect(tools).toHaveLength(EAGER_TOOL_COUNT);

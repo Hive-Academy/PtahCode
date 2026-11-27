@@ -1,0 +1,19 @@
+# Decisions — TASK_2026_2332_5b4f
+
+| # | Decision | Source | Evidence / reason | Reversible |
+|---|---|---|---|---|
+| 1 | Type FEATURE, depth Full | orchestrator rules | 8 scope items, more than 5 files, one new tool | yes |
+| 2 | Executors pinned: codex `gpt-6-luna`, antigravity `gemini-4-hydrogen-high` | user pin | User named "codex luna or agy hydrogen". IDs taken from repository fixtures; codex accepted `gpt-6-luna` at spawn. `ptah_route_decide` skipped because every phase is pinned. | yes |
+| 3 | Two pull requests | user (AskUserQuestion, 2026-11-26) | PR 1: aliases, guidance rows, eager lifecycle tools, `ptah_inspect`. PR 2: tool-call ledger, role-file regeneration. | yes |
+| 4 | Build, test, verify and PR authority | user (AskUserQuestion, 2026-11-26) | "i authorize you for everything you need and take full ownership to build test verify and make prs". Covers the Electron build needed for the live measurement. Does not cover merge, force push or worktree removal. | n/a |
+| 5 | Plan gate 2: APPROVED with changes | cross-side review by orchestrator (in-process) of codex plan | Changes: alias conflicts resolve to the canonical key (no error); `maxLines` above 400 clamps; scope error already names the canonical root (`nav-workspace-path.ts:87`), so no handler change in B3; eager budget may rise by the measured size of the lifecycle tools (see 6). | yes |
+| 6 | Eager budget may be raised for lifecycle tools | orchestrator | Headroom is 1,051 chars and four definitions do not fit. Audit: 21 of 23 ToolSearch calls loaded deferred Ptah tools, 1 to 2 turns per handoff successor. A fixed per-turn definition cost is lower than a full extra turn. Trim descriptions first. | yes |
+| 7 | New tool `ptah_inspect` (batch of bounded read-only operations), deferred at first | codex plan, accepted | Replaces chained `cd <worktree> && cat; sed; grep; git status` (24 of 35 substitutable main-chat calls). | yes |
+| 8 | Live measurement: same fixed probe prompt (`probe-prompt.md`) before and after, one lane per model | orchestrator | One prompt with five questions keeps the lane count at two per phase. Numbers come from vendor transcripts by CLI session ID until the ledger exists. | yes |
+| 10 | `ptah_inspect` is eager; eager cap 22,080 -> 26,792 chars (20 tools, measured 25,516 + 5%) | orchestrator | A deferred tool costs a discovery turn, the friction this task removes. Cost: about 1,100 tokens per main-chat request. | yes |
+| 11 | `ptah_read_symbol` clamps `maxLines` above 400 with a note (on `main` it fails) | orchestrator | Audit: this error sent an agent back to native `Read`. Reviewer flagged the behaviour change; kept as intended. | yes |
+| 12 | `ptah_inspect` result budget 24,000 chars / 9,000 tokens | codex lane, accepted after re-review | Same chars-per-token ratio as `ptah_read_symbol` and `ptah_grep`; below `ptah_browser_content` and `ptah_session_read`. | yes |
+| 13 | Antigravity baseline 14.3% Ptah share -> lane policy rule "Ptah tool first" that names native tool kinds (batch B9) | orchestrator | `measure/baseline.md`: 24 native file reads, 6 shell searches. No stronger ACP channel exists without changing Grok. | yes |
+| 14 | Review rounds: REVISE (7), REVISE (4 new), bounded correction, REVISE (3). Narrow fix approved by the user (AskUserQuestion, 2026-11-27) | user | `ptah_search_files` returns to its behaviour on `main`; `list` gets a reject-only pattern check; one short review; then PR. | n/a |
+| 15 | Symlinked-base gap in `walkGlobMatches` (`libs/backend/platform-core`) is out of scope | user (same answer) | The gap exists on `main` for `ptah_search_files`. It becomes a separate security task. | n/a |
+| 9 | Audit reports were outside the plan lane's workspace | lane report | The plan lane could not read `D:\projects\PtahCode\.ptah\tmp\*.md` from the worktree root. Evidence was restated in each implementation brief. | n/a |

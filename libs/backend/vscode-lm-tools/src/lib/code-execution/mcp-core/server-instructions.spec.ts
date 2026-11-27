@@ -125,8 +125,9 @@ describe('buildServerInstructions (shipped mandate)', () => {
   });
 
   it('carries the fallback line from the section, without Markdown emphasis', () => {
+    expect(instructions).toContain('Fall back to native tools only after a targeted Ptah attempt');
     expect(instructions).toContain(
-      'Fall back to Bash, Grep or Glob only for writes, build/test/git, a ptah error, or one Grep after zero hits.',
+      'If not listed, use the built-in; deferred counts as listed.',
     );
     expect(instructions).not.toContain('**');
   });
@@ -243,14 +244,14 @@ describe('buildServerInstructionsFrom (derivation)', () => {
 
   it('reflects a reworded fallback line', () => {
     const modified = PTAH_MCP_SUBSTITUTION_SECTION.replace(
-      /^Fall back to .*$/m,
-      'Fall back to shell tools for writes.',
+      /^Fall back .*$/m,
+      'Fall back to shell tools only after a targeted Ptah tool fails.',
     );
 
     const instructions = buildServerInstructionsFrom(modified);
 
-    expect(instructions).toContain('Fall back to shell tools for writes.');
-    expect(instructions).not.toContain('Grep or Glob only to write');
+    expect(instructions).toContain('Fall back to shell tools only after a targeted Ptah tool fails.');
+    expect(instructions).toContain(UNLISTED_FALLBACK);
   });
 
   it('keeps every row, in order, when the table fits', () => {

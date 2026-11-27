@@ -70,8 +70,9 @@ export const GrepArgsSchema = z
     /** `false` turns off the enclosing-body inlining of a small result. */
     inlineBody: z.boolean().optional(),
     workspaceRoot: z.string().trim().min(1).optional(),
+    output_mode: z.enum(['content', 'files_with_matches', 'count']).optional(),
   })
-  .strict();
+  .passthrough();
 
 export type GrepArgs = z.infer<typeof GrepArgsSchema>;
 
@@ -383,6 +384,7 @@ export async function renderGrepResult(
     context: number;
     regexInferred?: boolean;
     inlineBody?: boolean;
+    output_mode?: 'content' | 'files_with_matches' | 'count';
   },
   deps: GrepDeps,
   rootReal: string,
@@ -392,6 +394,19 @@ export async function renderGrepResult(
   const atLeast =
     result.incomplete || result.totalMatches > result.matches.length;
   const header = `${atLeast ? 'at least ' : ''}${plural(result.totalMatches, 'match')} in ${atLeast ? 'at least ' : ''}${plural(fileCount, 'file')} (engine: ${result.engine})${args.regexInferred ? ` ${REGEX_INFERRED_NOTE}` : ''}`;
+  if (args.output_mode === 'files_with_matches' || args.output_mode === 'count') {
+    const body = [...shown].map(([file, matches]) => args.output_mode === 'files_with_matches'
+      ? `${file} (${plural(matches.length, 'match')})`
+      : `${file}: ${matches.length}`).join('\n');
+    const footer: string[] = [];
+    const shownCount = [...shown.values()].reduce((count, matches) => count + matches.length, 0);
+    const notShown = Math.max(result.totalMatches - shownCount, 0);
+    if (notShown > 0) footer.push(`+ ${notShown} more matches not shown; narrow with path/glob or a longer pattern`);
+    if (result.incomplete && !result.error) footer.push('The search stopped early (output, time or file limit); narrow with path/glob.');
+    if (result.skippedNote) footer.push(`Note: ${result.skippedNote}.`);
+    if (result.error) footer.push(`Engine note: ${result.error}`);
+    return [header, body, ...footer].filter(Boolean).join('\n');
+  }
 
   // Bodies are inlined only when every match is shown and the result is small.
   const inline =
@@ -474,7 +489,50 @@ export async function handleGrep(
   rawArgs: unknown,
   deps: GrepDeps,
 ): Promise<GrepReply> {
-  const parsed = GrepArgsSchema.safeParse(rawArgs ?? {});
+  const input: Record<string, unknown> = typeof rawArgs === 'object' && rawArgs !== null && !Array.isArray(rawArgs)
+    ? { ...(rawArgs as Record<string, unknown>) }
+    : {};
+  const used: string[] = [];
+  const hasHeadLimit = Object.hasOwn(input, 'head_limit');
+  if (hasHeadLimit && (typeof input['head_limit'] !== 'number' || !Number.isFinite(input['head_limit']) || !Number.isInteger(input['head_limit']))) return fail('Error: alias "head_limit" must be a finite integer.');
+  const alias = (from: string, to: string): void => {
+    if (Object.hasOwn(input, from)) {
+      used.push(`${from}->${to}`);
+      if (input[to] === undefined) input[to] = input[from];
+      delete input[from];
+    }
+  };
+  alias('head_limit', 'maxMatches');
+  if (Object.hasOwn(input, 'type')) {
+    if (input['type'] !== undefined && typeof input['type'] !== 'string') return fail('Error: alias "type" must be a comma-separated string of file extensions.');
+    used.push(input['glob'] !== undefined ? 'type->glob (glob wins)' : 'type->glob');
+    if (input['glob'] === undefined && typeof input['type'] === 'string') {
+      const patterns = input['type'].split(',').map((item) => item.trim()).filter(Boolean);
+      if (patterns.length === 0 || patterns.some((item) => !/^(?:\*\.|\.)?[A-Za-z0-9]+$/.test(item))) return fail('Error: each "type" entry must be a plain file extension (letters and digits, optionally prefixed by . or *.).');
+      const extensions = patterns.map((item) => item.replace(/^(?:\*\.|\.)/, ''));
+      input['glob'] = extensions.length > 1 ? `*.{${extensions.join(',')}}` : `*.${extensions[0] ?? ''}`;
+    }
+    delete input['type'];
+  }
+  if (Object.hasOwn(input, 'output_mode')) used.push('output_mode->output_mode');
+  if (Object.hasOwn(input, '-i')) { if (typeof input['-i'] !== 'boolean') return fail('Error: alias "-i" must be a boolean.'); used.push('-i->caseSensitive'); if (input['caseSensitive'] === undefined) input['caseSensitive'] = input['-i'] === true ? false : true; delete input['-i']; }
+  if (Object.hasOwn(input, '-n')) { used.push('-n ignored'); delete input['-n']; }
+  const contextAliases = ['-C', '-A', '-B'].filter((key) => Object.hasOwn(input, key));
+  if (contextAliases.length) {
+    if (contextAliases.some((key) => typeof input[key] !== 'number' || !Number.isFinite(input[key]) || !Number.isInteger(input[key]))) return fail('Error: aliases "-A", "-B" and "-C" must be finite integers.');
+    used.push(...contextAliases.map((key) => `${key}->context`));
+    if (input['context'] === undefined) input['context'] = Math.min(GREP_MAX_CONTEXT, Math.max(...contextAliases.map((key) => input[key] as number)));
+    for (const key of contextAliases) delete input[key];
+  }
+  if (hasHeadLimit && typeof input['maxMatches'] === 'number') input['maxMatches'] = Math.min(input['maxMatches'], GREP_HARD_MAX_MATCHES);
+  const parsed = GrepArgsSchema.safeParse(input);
+  const validKeys = 'pattern, path, glob, regex, caseSensitive, context, maxMatches, includeIgnored, inlineBody, workspaceRoot, output_mode';
+  const acceptedAliases = 'head_limit, type, output_mode, -i, -n, -C, -A, -B';
+  const unknownKeys = Object.keys(input).filter((key) => !validKeys.split(', ').includes(key));
+  if (unknownKeys.length) return fail(`Error: invalid ${GREP_TOOL_NAME} arguments — valid keys: ${validKeys}; accepted aliases: ${acceptedAliases}; unknown: ${unknownKeys.join(', ')}`);
+  if (input['output_mode'] !== undefined && !['content', 'files_with_matches', 'count'].includes(String(input['output_mode']))) {
+    return fail(`Error: invalid ${GREP_TOOL_NAME} output_mode; expected one of: content, files_with_matches, count`);
+  }
   if (!parsed.success) {
     return fail(
       `Error: invalid ${GREP_TOOL_NAME} arguments — ${describeZodIssues(parsed.error)}`,
@@ -564,16 +622,16 @@ export async function handleGrep(
         ? 'Try regex:false for a literal search,'
         : 'Try regex:true for a pattern,';
     return ok(
-      `0 matches (engine: ${result.engine}).${stopped}${result.skippedNote ? ` Note: ${result.skippedNote}.` : ''} ${modeHint} includeIgnored:true with a scoped path for node_modules, or a different glob.` +
+      `${used.length ? `note: accepted native keys ${used.join(', ')}\n` : ''}0 matches (engine: ${result.engine}).${stopped}${result.skippedNote ? ` Note: ${result.skippedNote}.` : ''} ${modeHint} includeIgnored:true with a scoped path for node_modules, or a different glob.` +
         (result.error ? `\nEngine note: ${result.error}` : ''),
     );
   }
   return ok(
-    await renderGrepResult(
+    `${used.length ? `note: accepted native keys ${used.join(', ')}\n` : ''}${await renderGrepResult(
       result,
-      { maxMatches, context, regexInferred, inlineBody: args.inlineBody },
+      { maxMatches, context, regexInferred, inlineBody: args.inlineBody, output_mode: args.output_mode },
       deps,
       target.rootReal,
-    ),
+    )}`,
   );
 }

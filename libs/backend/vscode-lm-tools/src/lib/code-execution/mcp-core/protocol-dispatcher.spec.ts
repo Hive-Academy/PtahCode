@@ -1724,16 +1724,21 @@ describe('protocol-handlers › tools/list eager _meta marking', () => {
   it('keeps other agent and routing tools deferred', async () => {
     const tools = await listTools();
     for (const name of [
-      'ptah_agent_read',
-      'ptah_agent_status',
       'ptah_agent_stop',
       'ptah_agent_message',
       'ptah_agent_message_status',
-      'ptah_agent_wait',
       'ptah_route_decide',
       'ptah_outcome_report',
     ]) {
       expect(isEager(tools.find((tool) => tool.name === name))).toBe(false);
+    }
+    for (const name of [
+      'ptah_agent_read',
+      'ptah_agent_status',
+      'ptah_agent_wait',
+      'ptah_session_handoff_ack',
+    ]) {
+      expect(isEager(tools.find((tool) => tool.name === name))).toBe(true);
     }
   });
 
@@ -2009,6 +2014,13 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
         expect(findFiles).not.toHaveBeenCalled();
       },
     );
+
+    it('passes escaped glob patterns byte-for-byte to the provider', async () => {
+      const pattern = 'app/\\[id\\]/*.tsx';
+      const findFiles = jest.fn().mockResolvedValue([]);
+      await searchFiles({ pattern }, findFiles);
+      expect(findFiles).toHaveBeenCalledWith(pattern, 51);
+    });
 
     it.each([
       ['zero', 0],
@@ -9436,7 +9448,7 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // read tools (issue #1400); +2 in TASK_2026_2299 (ptah_read_symbol and
       // ptah_grep); the five write tools are hidden from a
       // caller whose credential has no `cronWriteApproval`.
-      expect(coding).toHaveLength(hasIDECapabilities ? 80 : 77);
+      expect(coding).toHaveLength(hasIDECapabilities ? 81 : 78);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );

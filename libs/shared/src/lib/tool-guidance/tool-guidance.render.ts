@@ -7,6 +7,7 @@
  */
 import {
   TOOL_SUBSTITUTIONS,
+  type CoreSubstitutionWording,
   type ToolGuidanceNamespace,
   type ToolSubstitution,
 } from './tool-substitutions';
@@ -40,11 +41,9 @@ function enabledRows(
 
 /** The "Why" cell, without its reference to a tool of a disabled namespace. */
 function coreWhy(
-  row: ToolSubstitution,
+  core: CoreSubstitutionWording,
   disabled: ReadonlySet<ToolGuidanceNamespace>,
 ): string {
-  const core = row.core;
-  if (!core) return '';
   const fallback = core.whyIfDisabled;
   return fallback && disabled.has(fallback.namespace) ? fallback.why : core.why;
 }
@@ -61,7 +60,25 @@ function shellCommandsOf(...tools: string[]): string[] {
 }
 
 const FALLBACK_LINE =
-  'Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.';
+  'Fall back to native tools only after a targeted Ptah attempt fails or finds nothing.';
+
+function worktreeRootRule(options?: ToolGuidanceRenderOptions): string {
+  const enabled = new Set(enabledRows(options).map((row) => row.tool));
+  const tools = ['ptah_read_symbol', 'ptah_grep', 'ptah_inspect', 'ptah_ast_analyze']
+    .filter((tool) => enabled.has(tool));
+  return `Worktree root: pass \`workspaceRoot: <absolute root>\` to ${joinOr(tools.map((tool) => `\`${tool}\``))}; do not \`cd\` + \`cat\`/\`grep\`.`;
+}
+
+/** Collect primary and extra (`also`) core rows, keeping primary rows first in table order. */
+function coreRows(rows: readonly ToolSubstitution[]): Array<{
+  readonly core: NonNullable<ToolSubstitution['core']>;
+}> {
+  const primary = rows.flatMap((row) => (row.core ? [{ core: row.core }] : []));
+  const extra = rows.flatMap((row) =>
+    (row.also ?? []).flatMap((item) => (item.core ? [{ core: item.core }] : [])),
+  );
+  return [...primary, ...extra];
+}
 
 /** "Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat." */
 function freeTextLine(): string {
@@ -80,10 +97,9 @@ export function renderCoreSubstitutionBlock(
   options?: ToolGuidanceRenderOptions,
 ): string {
   const disabled = disabledSet(options);
-  const rows = enabledRows(options).flatMap((row) =>
-    row.core
-      ? [`| ${row.core.insteadOf} | ${row.core.call} | ${coreWhy(row, disabled)} |`]
-      : [],
+  const rows = coreRows(enabledRows(options)).map(
+    (entry) =>
+      `| ${entry.core.insteadOf} | ${entry.core.call} | ${coreWhy(entry.core, disabled)} |`,
   );
   // The callout sends symbol lookups to the code tools; without them it
   // would mandate a tool the host does not list.
@@ -103,6 +119,7 @@ export function renderCoreSubstitutionBlock(
     '',
     FALLBACK_LINE,
     freeTextLine(),
+    worktreeRootRule(options),
     ...callout,
   ].join('\n');
 }
@@ -112,7 +129,10 @@ export function renderLaneToolTable(
   options?: ToolGuidanceRenderOptions,
 ): string {
   const rows = enabledRows(options)
-    .flatMap((row) => (row.lane ? [row.lane] : []))
+    .flatMap((row) => [
+      ...(row.lane ? [row.lane] : []),
+      ...(row.also ?? []).flatMap((item) => (item.lane ? [item.lane] : [])),
+    ])
     .sort((a, b) => a.order - b.order);
   const width = Math.max(...rows.map((row) => row.need.length)) + 1;
   return [
@@ -148,10 +168,9 @@ export const AGENT_TOOLING_HEADING = '## Working rules';
 export function renderAgentToolingRules(
   options?: ToolGuidanceRenderOptions,
 ): string {
-  const rows = enabledRows(options).flatMap((row) =>
-    row.core
-      ? [`| ${row.core.insteadOf.replace(/\*\*/g, '')} | ${row.core.call} |`]
-      : [],
+  const rows = coreRows(enabledRows(options)).map(
+    (entry) =>
+      `| ${entry.core.insteadOf.replace(/\*\*/g, '')} | ${entry.core.call} |`,
   );
   return [
     AGENT_TOOLING_HEADING,
@@ -159,6 +178,7 @@ export function renderAgentToolingRules(
     '- `ptah_*` tools first; `ptah_get_diagnostics` after edits. A deferred ptah tool counts as listed: if your client defers tool schemas, load it with its tool-search tool (Claude Code: `ToolSearch` `select:<name>`), otherwise call it directly. A tool that is not listed at all: use the native one, do not probe.',
     '- Use native Bash, Grep or Glob only for writes, build and test commands, a ptah error, or one Grep after zero hits; then name the tool that returned nothing.',
     `- ${freeTextLine()}`,
+    `- ${worktreeRootRule(options)}`,
     '',
     '| Native step | Ptah tool |',
     '| --- | --- |',
