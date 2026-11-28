@@ -5,7 +5,9 @@
 Wide test runs exhaust the developer machine's RAM. These rules are mandatory for the main
 agent, every subagent and every CLI lane. Repeat them in any task prompt you hand to a lane.
 
-- Verify with `npm run verify` (CLI lanes: see "Two-level check"). It runs `nx affected -t lint test typecheck --base=main`.
+- Pull-request CI is the full verification gate (see "Two-level check"). Locally, verify only the
+  changed files with `npm run verify` and its filters (CLI lanes: focused checks only). Without
+  filters it runs `nx affected -t lint test typecheck --base=main`.
   - In a worktree, `npm run verify` and the pre-push hook use `NX_DAEMON=false` so no daemon
     stays alive there;
     set `NX_DAEMON=true` to override.
@@ -48,12 +50,21 @@ runs every suite, so do not run the full test target after each edit.
   tests related to the files changed since `main` (Jest `--changedSince`).
   `--related` accepts no other target. Run lint and typecheck as a second, separate command:
   `npm run verify -- -t lint,typecheck -p A,B`.
-- Full gate: `npm run verify -- -p A,B`, one time before the first push and one time before each
-  later push that changes code. Add `typecheck-templates` after a template change.
+- Full gate: pull-request CI (`.github/workflows/ci.yml`). On every push it runs `nx affected`
+  for `lint`, `test`, `typecheck`, `build` and `validate-deps`. The renderer `build` compiles
+  the Angular templates. Do not run a local full gate (`npm run verify -- -p A,B` or
+  wider) before a push. Push, then read the PR checks with `gh pr checks <n>` and `gh run view
+  --log-failed`, and fix the failures that CI reports. Run a local full gate only when the
+  user asks for it or when CI cannot run.
+- Before a push, run only the inner loop above, or the focused checks below, for the files that
+  changed.
 - CLI lanes do not run `npm run verify` or `nx`. A lane runs only focused checks:
   `npx jest --config <project>/jest.config.ts --runInBand --coverage=false --runTestsByPath <specs>`,
   `npx tsc --noEmit --project <tsconfig>` and `npx eslint <changed files>`. The coordinating
-  agent runs the inner loop and the gate. Write this rule in each lane brief.
+  agent runs the inner loop, pushes, and reads the CI results. Write this rule in each lane
+  brief.
+- A pull request is ready for review only when its CI checks pass. Report a failed, pending or
+  unavailable CI check. Do not report it as a pass.
 - Do not start a check of a project while a lane edits files of that project.
 
 ## Product focus: Electron first
