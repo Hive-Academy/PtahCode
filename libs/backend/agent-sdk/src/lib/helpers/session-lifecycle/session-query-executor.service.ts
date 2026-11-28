@@ -1830,7 +1830,7 @@ export class SessionQueryExecutor {
         ? {
             sdkQuery: await named.launch(
               namedQueryFn ?? queryFn,
-              userMessageStream,
+              queryOptions.prompt,
               sdkOptions,
               registerKey,
               {
@@ -1853,7 +1853,7 @@ export class SessionQueryExecutor {
       const initialModel = queryOptions.options.model ?? '';
       rec.currentModel = initialModel;
       if (isResume && !named) {
-        sdkQuery.streamInput(userMessageStream).catch((err: unknown) => {
+        sdkQuery.streamInput(queryOptions.prompt).catch((err: unknown) => {
           if (abortController.signal.aborted) return;
           const error = new ProviderTurnEndError('provider-input-closed');
           if (!this.registry.recordProviderTurnEnd(rec, error)) return;

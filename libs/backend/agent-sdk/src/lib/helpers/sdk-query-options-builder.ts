@@ -13,10 +13,9 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { release, tmpdir, type as osType } from 'node:os';
+import { tmpdir } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   normalizeOutputStyleSelection,
@@ -507,13 +506,41 @@ export function buildFlagSettings(
   };
 }
 
-/** Put query/session-specific prompt blocks after the invariant static prefix. */
-export function appendQueryDependentPromptBlocks(
-  staticContent: string | undefined,
-  blocks: readonly string[],
-): string | undefined {
-  const parts = [staticContent ?? '', ...blocks].filter((part) => part.length > 0);
-  return parts.length > 0 ? parts.join('\n\n') : undefined;
+/** Attach query-derived context once, at the SDK input boundary. */
+async function* withInitialQueryContext(
+  source: AsyncIterable<SDKUserMessage>,
+  context: string,
+): AsyncIterable<SDKUserMessage> {
+  let pendingContext = true;
+  for await (const turn of source) {
+    if (!pendingContext || turn.isSynthetic || turn.parent_tool_use_id !== null) {
+      yield turn;
+      continue;
+    }
+    pendingContext = false;
+    const { message } = turn;
+    const content = typeof message.content === 'string'
+      ? [{ type: 'text' as const, text: message.content }]
+      : message.content;
+    const firstText = content.find((block) => block.type === 'text');
+    if (firstText?.text.trimStart().startsWith('/')) {
+      // Preserve native slash-command dispatch, as for stop context in the stream pump.
+      yield {
+        type: 'user',
+        parent_tool_use_id: null,
+        session_id: turn.session_id,
+        isSynthetic: true,
+        shouldQuery: false,
+        message: { role: 'user', content: context },
+      };
+      yield turn;
+    } else {
+      yield {
+        ...turn,
+        message: { ...message, content: [{ type: 'text', text: context }, ...content] },
+      };
+    }
+  }
 }
 
 /** Tools that spawn a subagent; the SDK has shipped it under both names. */
@@ -966,9 +993,8 @@ export interface QueryOptionsInput {
   mcpServersOverride?: Record<string, McpHttpServerOverride>;
   /**
    * The user's initial message text for this turn.
-   * Used to drive a memory recall search so the top-K hits can be prepended to
-   * the system prompt. Only used when the string is non-empty. Multi-turn
-   * sessions should pass the most recent user message.
+   * Drives memory recall and workspace symbol lookup for the first user turn
+   * sent on this query's input stream.
    */
   initialUserQuery?: string;
   /**
@@ -1113,37 +1139,6 @@ function namedRunPolicy(
  *    messages carrying `parent_tool_use_id` = the spawning Task tool_use id.
  */
 export type SdkQueryOptions = Options;
-
-async function buildPromptEnvironment(
-  cwd: string,
-  model: string,
-  signal: AbortSignal,
-): Promise<string> {
-  const gitRepository = await new Promise<string>((resolve) => {
-    try {
-      execFile(
-        'git',
-        ['rev-parse', '--git-dir'],
-        { cwd, signal, timeout: 2_000, windowsHide: true },
-        (error) => resolve(!error ? 'yes' : error.code === 128 ? 'no' : 'unknown'),
-      );
-    } catch {
-      resolve('unknown');
-    }
-  });
-  const date = new Date().toLocaleDateString('sv-SE');
-  const shell = process.env['SHELL']?.trim() || process.env['ComSpec']?.trim() || 'unknown';
-  return [
-    '# Environment',
-    `Working directory: ${cwd}`,
-    `Platform: ${process.platform}`,
-    `OS: ${osType()} ${release()}`,
-    `Shell: ${shell}`,
-    `Git repository: ${gitRepository}`,
-    `Today's date: ${date}`,
-    `Model: ${model}`,
-  ].join('\n');
-}
 
 /** Apply the same host-resolved phase and skills to the SDK prompt. */
 export function withPhaseDelivery(
@@ -1482,19 +1477,14 @@ export class SdkQueryOptionsBuilder {
       sessionConfig,
       enhancedPromptsContent,
       mcpServerRunning,
-      initialUserQuery,
       cwd,
       effectiveAuthEnv,
       model,
       fullPrompt
-        ? {
-            cwd,
-            model,
-            outputStyleBody: fullPromptStyleBody,
-            signal: abortController.signal,
-          }
+        ? { outputStyleBody: fullPromptStyleBody }
         : undefined,
     );
+    const queryContext = await this.buildInitialQueryContext(initialUserQuery, cwd);
     const routingId = sessionConfig?.tabId ?? sessionId;
     const routingSessionId = SessionId.safeParse(routingId);
     const routingTabId = sessionConfig?.tabId
@@ -1910,7 +1900,9 @@ export class SdkQueryOptionsBuilder {
     }
 
     return {
-      prompt: userMessageStream,
+      prompt: queryContext
+        ? withInitialQueryContext(userMessageStream, queryContext)
+        : userMessageStream,
       // Builder evidence: the phase denials were merged into this options set.
       // This does not certify a later caller's mutations to Options before query().
       ...(phaseDisallowedTools?.length &&
@@ -2444,31 +2436,23 @@ export class SdkQueryOptionsBuilder {
    *
    * Main Claude chat can opt into Ptah's full prompt. Other callers keep the
    * Claude Code preset and its existing append.
-   * Memory recall block injected whenever initialUserQuery is non-empty.
    *
    * @param sessionConfig - Session configuration with optional custom system prompt and preset selection
    * @param enhancedPromptsContent - Optional AI-generated guidance from EnhancedPromptsService
    * @param mcpServerRunning - Whether MCP server is running
-   * @param initialUserQuery - First user message text for memory recall
    * @param cwd - Workspace root for workspace-scoped memory recall
    * @param resolvedModel - The concrete model id assigned to `Options.model`,
    *   so the identity clarification names the model the session actually runs on
-   * @param fullPrompt - Environment and resolved style for the full-prompt route
+   * @param fullPrompt - Resolved style for the full-prompt route
    */
   private async buildSystemPrompt(
     sessionConfig?: AISessionConfig,
     enhancedPromptsContent?: string,
     mcpServerRunning = true,
-    initialUserQuery?: string,
     cwd?: string,
     authEnvOverride?: AuthEnv,
     resolvedModel?: string,
-    fullPrompt?: {
-      cwd: string;
-      model: string;
-      outputStyleBody?: string;
-      signal: AbortSignal;
-    },
+    fullPrompt?: { outputStyleBody?: string },
   ): Promise<SdkQueryOptions['systemPrompt']> {
     const effectiveAuthEnv: AuthEnv = authEnvOverride ?? this.authEnv;
     const activeProviderId = getActiveProviderId(effectiveAuthEnv);
@@ -2490,33 +2474,8 @@ export class SdkQueryOptionsBuilder {
       corpusPrimeBlock =
         await this.memoryPromptInjector.buildCorpusBlock(corpusName);
     }
-    let memoryBlock = '';
-    if (initialUserQuery?.trim()) {
-      memoryBlock = await this.memoryPromptInjector.buildBlock(
-        initialUserQuery,
-        cwd,
-      );
-    }
-    let codeSymbolBlock = '';
-    if (initialUserQuery?.trim() && this.codeSymbolPromptInjector) {
-      codeSymbolBlock = await this.codeSymbolPromptInjector.buildBlock(
-        initialUserQuery,
-        cwd,
-      );
-    }
-    const dynamicBlocks = [
-      sessionStartBlock,
-      corpusPrimeBlock,
-      memoryBlock,
-      codeSymbolBlock,
-    ];
     const ptahUiHint = this.ptahUiHintEnabled(sessionConfig);
     if (fullPrompt) {
-      const environment = await buildPromptEnvironment(
-        fullPrompt.cwd,
-        fullPrompt.model,
-        fullPrompt.signal,
-      );
       const blocks = [
         buildPtahFullPrompt(),
         ptahUiHint ? PTAH_UI_HINT : undefined,
@@ -2524,8 +2483,9 @@ export class SdkQueryOptionsBuilder {
         fullPrompt.outputStyleBody,
         enhancedPromptsContent,
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-        environment,
-        ...dynamicBlocks,
+        `Today's date: ${new Date().toLocaleDateString('sv-SE')}`,
+        sessionStartBlock,
+        corpusPrimeBlock,
       ].filter((block): block is string => !!block?.trim());
       this.logger.info('[SdkQueryOptionsBuilder] System prompt assembled', {
         mode: 'ptah-full',
@@ -2544,10 +2504,9 @@ export class SdkQueryOptionsBuilder {
       outputStyleBody: sessionConfig?.outputStyleBody,
       ptahUiHint,
     });
-    const finalContent = appendQueryDependentPromptBlocks(
-      result.content,
-      dynamicBlocks,
-    );
+    const append = [result.content, sessionStartBlock, corpusPrimeBlock]
+      .filter(Boolean)
+      .join('\n\n') || undefined;
 
     this.logger.info('[SdkQueryOptionsBuilder] System prompt assembled', {
       mcpServerRunning,
@@ -2560,17 +2519,26 @@ export class SdkQueryOptionsBuilder {
       sessionStartBlockLength: sessionStartBlock.length,
       hasCorpusPrimeBlock: !!corpusPrimeBlock,
       corpusPrimeBlockLength: corpusPrimeBlock.length,
-      hasMemoryBlock: !!memoryBlock,
-      memoryBlockLength: memoryBlock.length,
-      hasCodeSymbolBlock: !!codeSymbolBlock,
-      codeSymbolBlockLength: codeSymbolBlock.length,
-      totalAppendLength: finalContent?.length ?? 0,
+      totalAppendLength: append?.length ?? 0,
     });
     return {
       type: 'preset' as const,
       preset: 'claude_code' as const,
-      append: finalContent,
+      append,
     };
+  }
+
+  private async buildInitialQueryContext(
+    query?: string,
+    cwd?: string,
+  ): Promise<string | undefined> {
+    if (!query?.trim()) return undefined;
+    if (query.trimStart().startsWith('/')) return undefined;
+    const memoryBlock = await this.memoryPromptInjector.buildBlock(query, cwd);
+    const codeSymbolBlock = await this.codeSymbolPromptInjector?.buildBlock(query, cwd);
+    const context = [memoryBlock, codeSymbolBlock].filter(Boolean).join('\n\n');
+    if (!context) return undefined;
+    return `<system-reminder>\n${context}\n</system-reminder>`;
   }
 
   /**

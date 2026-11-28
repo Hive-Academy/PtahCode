@@ -23,7 +23,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-const childProcess: typeof import('node:child_process') = require('node:child_process');
 const fsModule: typeof import('node:fs') = require('node:fs');
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1468,6 +1467,7 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
     styleActivation: { resolveSessionFields: jest.Mock } | null = {
       resolveSessionFields: jest.fn().mockResolvedValue({ outputStyleBody: 'STYLE' }),
     },
+  symbolInjector = { buildBlock: jest.fn(async (query: string) => `SYMBOLS for ${query}`) },
   ): SdkQueryOptionsBuilder {
     const logger = {
       info: jest.fn(),
@@ -1523,7 +1523,7 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
       { createHooks: jest.fn().mockReturnValue({}) },
       { createHooks: jest.fn().mockReturnValue({}) },
       { createHooks: jest.fn().mockReturnValue({}) },
-      { buildBlock: jest.fn().mockResolvedValue('SYMBOLS') },
+      symbolInjector,
       undefined,
       undefined,
       undefined,
@@ -1612,39 +1612,7 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
     expect(options.systemPrompt).toMatchObject({ type: 'preset', preset: 'claude_code' });
   });
 
-  it.each([
-    { code: 'ENOENT', result: 'unknown' },
-    { code: 'ABORT_ERR', result: 'unknown' },
-    { code: 128, result: 'no' },
-    { code: null, result: 'unknown' },
-    { code: 'throw', result: 'unknown' },
-  ])('handles git probe failure (%j)', async ({ code, result }) => {
-    const shell = jest.replaceProperty(process, 'env', { ...process.env, SHELL: '', ComSpec: ' ' });
-    const input = fullPromptInput();
-    const git = jest.spyOn(childProcess, 'execFile').mockImplementationOnce(
-      (file, args, options, callback) => {
-        expect(file).toBe('git');
-        expect(args).toEqual(['rev-parse', '--git-dir']);
-        expect(options).toMatchObject({ timeout: 2_000, signal: input.abortController.signal });
-        if (code === 'throw') throw new TypeError('invalid cwd');
-        callback?.(Object.assign(new Error('git check failed'), { code, killed: code === null }), '', '');
-        return new childProcess.ChildProcess();
-      },
-    );
-    try {
-      const { options } = await makeBuilderForPrepend(emptyInjector()).build(input);
-      expect(git).toHaveBeenCalledTimes(1);
-      expect(options.systemPrompt).toContainEqual(expect.stringContaining(
-        `Shell: unknown
-Git repository: ${result}`,
-      ));
-    } finally {
-      git.mockRestore();
-      shell.restore();
-    }
-  });
-
-  it('sends static blocks before the cache boundary and environment and memory after it', async () => {
+  it('keeps the static prefix and uses only the date as Ptah environment context', async () => {
     const injector: InjectorStub = {
       buildSessionStartBlock: jest.fn().mockResolvedValue('SNAPSHOT'),
       buildCorpusBlock: jest.fn().mockResolvedValue('CORPUS'),
@@ -1669,8 +1637,8 @@ Git repository: ${result}`,
     expect(options.systemPrompt).toEqual([
       buildPtahFullPrompt(), PTAH_UI_HINT, 'USER', 'STYLE', 'GUIDANCE',
       SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
-      expect.stringMatching(/^# Environment\nWorking directory:[\s\S]+\nGit repository: (yes|no|unknown)\nToday's date: \d{4}-\d{2}-\d{2}\nModel: claude-sonnet-4$/),
-      'SNAPSHOT', 'CORPUS', 'RECALL', 'SYMBOLS',
+      expect.stringMatching(/^Today's date: \d{4}-\d{2}-\d{2}$/),
+      'SNAPSHOT', 'CORPUS',
     ]);
     expect(options.settings).not.toContain('outputStyle');
   });
@@ -1709,7 +1677,7 @@ Git repository: ${result}`,
       append: [
         PTAH_CORE_SYSTEM_PROMPT, PTAH_UI_HINT, 'USER', 'STYLE',
         ...(content?.trim() ? [content] : []),
-        'SNAPSHOT', 'CORPUS', 'RECALL', 'SYMBOLS',
+        'SNAPSHOT', 'CORPUS',
       ].join('\n\n'),
     });
   });
@@ -1738,29 +1706,96 @@ Git repository: ${result}`,
     return cfg.options.systemPrompt;
   }
 
-  it('places the static prompt prefix before session-specific blocks', async () => {
-    const injector: InjectorStub = {
-      buildSessionStartBlock: jest
-        .fn()
-        .mockResolvedValue('SESSION_START_TOKEN'),
-      buildCorpusBlock: jest.fn().mockResolvedValue('CORPUS_PRIME_TOKEN'),
-      buildBlock: jest.fn().mockResolvedValue('MEMORY_RECALL_TOKEN'),
+  it.each(['full', 'preset'] as const)(
+    'keeps the %s system prompt identical across queries and enriches only the first user message',
+    async (mode) => {
+      const injector = emptyInjector();
+      injector.buildBlock.mockImplementation(async (query) => `RECALL for ${query}`);
+      const builder = makeBuilderForPrepend(injector);
+
+      async function buildFor(query: string) {
+        const input = fullPromptInput();
+        const initial = {
+          type: 'user' as const,
+          session_id: '',
+          parent_tool_use_id: null,
+          message: {
+            role: 'user' as const,
+            content: [
+              { type: 'text' as const, text: query },
+              {
+                type: 'image' as const,
+                source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'aW1hZ2U=' },
+              },
+            ],
+          },
+        };
+        const followUp = { ...initial, message: { role: 'user' as const, content: 'Follow up' } };
+        const synthetic = { ...followUp, isSynthetic: true, shouldQuery: false };
+        const subagent = { ...followUp, parent_tool_use_id: 'tool-use-id' };
+        const { options, prompt } = await builder.build({
+          ...input,
+          enhancedPromptsContent: mode === 'full' ? input.enhancedPromptsContent : undefined,
+          initialUserQuery: query,
+          userMessageStream: (async function* () {
+            yield synthetic;
+            yield subagent;
+            yield initial;
+            yield followUp;
+          })(),
+        });
+        const turns = [];
+        for await (const turn of prompt) turns.push(turn);
+        expect(turns).toEqual([
+          synthetic,
+          subagent,
+          {
+            ...initial,
+            message: {
+              ...initial.message,
+              content: [
+                {
+                  type: 'text',
+                  text: `<system-reminder>\nRECALL for ${query}\n\nSYMBOLS for ${query}\n</system-reminder>`,
+                },
+                ...initial.message.content,
+              ],
+            },
+          },
+          followUp,
+        ]);
+        return options.systemPrompt;
+      }
+
+      const first = await buildFor('first question');
+      const second = await buildFor('second question');
+      expect(Array.isArray(first)).toBe(mode === 'full');
+      expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+      expect(JSON.stringify(first)).not.toMatch(/RECALL for|SYMBOLS for/);
+    },
+  );
+
+  it.each(['/compact', '  /compact'])('passes %j through without searching for context', async (content) => {
+    const injector = emptyInjector();
+    const symbols = { buildBlock: jest.fn(async (query: string) => `SYMBOLS for ${query}`) };
+    const command = {
+      type: 'user' as const,
+      session_id: '',
+      parent_tool_use_id: null,
+      message: { role: 'user' as const, content },
     };
-    const sp = await buildSystemPromptWith(
-      injector,
-      'a long enough query string',
-      {
-        corpusName: 'corpus-A',
-      },
-    );
-    expect(sp).toBeDefined();
-    const append = (sp as { append?: string }).append ?? '';
-    const startIdx = append.indexOf('SESSION_START_TOKEN');
-    const corpusIdx = append.indexOf('CORPUS_PRIME_TOKEN');
-    const recallIdx = append.indexOf('MEMORY_RECALL_TOKEN');
-    expect(startIdx).toBeGreaterThanOrEqual(0);
-    expect(corpusIdx).toBeGreaterThan(startIdx);
-    expect(recallIdx).toBeGreaterThan(corpusIdx);
+    const userMessageStream = (async function* () { yield command; })();
+    const { prompt } = await makeBuilderForPrepend(injector, {}, undefined, symbols).build({
+      ...fullPromptInput(),
+      initialUserQuery: command.message.content,
+      userMessageStream,
+    });
+    const turns = [];
+    for await (const turn of prompt) turns.push(turn);
+    expect(injector.buildBlock).not.toHaveBeenCalled();
+    expect(symbols.buildBlock).not.toHaveBeenCalled();
+    expect(prompt).toBe(userMessageStream);
+    expect(turns).toEqual([command]);
   });
 
   it('leaves the corpus slot empty when sessionConfig.corpusName is not set', async () => {
@@ -1791,7 +1826,7 @@ Git repository: ${result}`,
       'a long enough query string',
     );
     const append = (sp as { append?: string }).append ?? '';
-    expect(append).toContain('MEMORY_RECALL_TOKEN');
+    expect(append).toBe(PTAH_CORE_SYSTEM_PROMPT);
   });
 
   it('passes cwd as workspaceRoot to buildSessionStartBlock', async () => {

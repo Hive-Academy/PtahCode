@@ -74,11 +74,12 @@ const ULTRACODE_OFF_FAILED =
 
 /** Each row description is the row hint. It wraps, and its id stays `agent-behaviour-<row>-note`. */
 const PROMPT_NOTE_ON =
-  "Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.";
+  "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.";
 const PROMPT_NOTE_OFF =
-  'Claude Code preset with Ptah additions. Applies to new sessions.';
+  "Off: Claude Code preset with Ptah additions. Turn on to replace the preset with Ptah's prompt. " +
+  'Applies to new sessions.';
 const PROMPT_NOTE_MISSING =
-  'Run Setup to generate the project prompt first.';
+  'Uses the Claude Code preset. Run Setup to generate the project prompt first.';
 const PROMPT_NOTE_LOADING = 'Loading system prompt status…';
 const PROMPT_NOTE_UNKNOWN = 'The system prompt status is not loaded yet.';
 const WORKFLOWS_NOTE =
@@ -168,7 +169,7 @@ interface LoadError {
         <ptah-setting-row
           controlAlign="end"
           edgePadding="trim"
-          label="System prompt mode"
+          label="Replace Claude Code preset"
           controlId="agent-behaviour-prompt-toggle"
           [disabled]="promptToggleDisabled()"
           [hint]="promptNote()"
@@ -181,8 +182,8 @@ interface LoadError {
               [label]="promptEnabled() ? 'Ptah Enhanced' : 'Default'"
             />{{
               promptEnabled()
-                ? 'Applies to new sessions'
-                : 'Standard system prompt'
+                ? 'Ptah prompt replaces the Claude Code preset. Applies to new sessions'
+                : 'Claude Code preset'
             }}</span
           >
           <button

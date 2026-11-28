@@ -14,7 +14,6 @@
 import 'reflect-metadata';
 
 import {
-  appendQueryDependentPromptBlocks,
   assembleSystemPrompt,
   buildFlagSettings,
 } from './sdk-query-options-builder';
@@ -42,27 +41,6 @@ function countOf(haystack: string, needle: string): number {
 }
 
 describe('assembleSystemPrompt — output style body', () => {
-  it('keeps the static prefix byte-identical when query-dependent blocks are present', () => {
-    const staticPrefix = assembleSystemPrompt({
-      ...BASE_INPUT,
-      ptahUiHint: true,
-      userSystemPrompt: USER_PROMPT,
-      outputStyleBody: STYLE_BODY,
-      enhancedPromptsContent: 'Project guidance',
-    }).content;
-    const withDynamicBlocks = appendQueryDependentPromptBlocks(staticPrefix, [
-      'Session memory snapshot',
-      'Corpus context',
-      'Recalled memory',
-      '## Relevant Workspace Symbols\nquery results',
-    ]);
-
-    expect(withDynamicBlocks?.slice(0, staticPrefix?.length)).toBe(staticPrefix);
-    expect(withDynamicBlocks?.indexOf('## Relevant Workspace Symbols')).toBeGreaterThan(
-      staticPrefix?.length ?? 0,
-    );
-  });
-
   it('caps skill listing descriptions at 200 characters in flag settings', () => {
     expect(buildFlagSettings()['skillListingMaxDescChars']).toBe(200);
   });

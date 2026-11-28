@@ -263,7 +263,7 @@ export interface ExecuteQueryConfig {
   /**
    * The user's initial message text for this turn.
    * Used by SdkQueryOptionsBuilder to drive a memory recall search so the
-   * top-K hits are prepended to the system prompt. Only used when non-empty.
+   * top-K hits are attached to the first user turn. Only used when non-empty.
    */
   initialUserQuery?: string;
   /**

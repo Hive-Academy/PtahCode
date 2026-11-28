@@ -52,6 +52,9 @@ function makeLogger(): Logger {
 
 interface Harness {
   executor: SessionQueryExecutor;
+  wrappedPrompt: AsyncIterable<SDKUserMessage>;
+  streamInput: jest.Mock;
+  invokeWithLoadedQuery: jest.Mock;
   cleanupSpy: jest.Mock;
   logger: Logger;
   /**
@@ -96,6 +99,7 @@ function makeHarness(streamInputResult: () => Promise<void>): Harness {
     getQueryFunction: jest.fn().mockResolvedValue(jest.fn()),
   } as unknown as SdkModuleLoader;
 
+  let wrappedPrompt: AsyncIterable<SDKUserMessage> | undefined;
   const queryOptionsBuilder = {
     build: jest
       .fn()
@@ -107,16 +111,20 @@ function makeHarness(streamInputResult: () => Promise<void>): Harness {
           // The executor's own controller, captured at the one seam that
           // receives it.
           controller = input.abortController;
+          wrappedPrompt = {
+            [Symbol.asyncIterator]: () => input.userMessageStream[Symbol.asyncIterator](),
+          };
           return {
             options: { model: 'test-model', cwd: '/tmp/test' },
-            prompt: input.userMessageStream,
+            prompt: wrappedPrompt,
           };
         },
       ),
   } as unknown as SdkQueryOptionsBuilder;
 
+  const streamInput = jest.fn().mockImplementation(streamInputResult);
   const sdkQuery = {
-    streamInput: jest.fn().mockImplementation(streamInputResult),
+    streamInput,
     interrupt: async () => undefined,
     setPermissionMode: async () => undefined,
     setModel: async () => undefined,
@@ -125,8 +133,9 @@ function makeHarness(streamInputResult: () => Promise<void>): Harness {
     rewindFiles: async () => ({ canRewind: false }),
   } as unknown as Query;
 
+  const invokeWithLoadedQuery = jest.fn().mockReturnValue({ sdkQuery });
   const queryRunner = {
-    invokeWithLoadedQuery: jest.fn().mockReturnValue({ sdkQuery }),
+    invokeWithLoadedQuery,
   } as unknown as SdkQueryRunner;
 
   const executor = new SessionQueryExecutor(
@@ -143,6 +152,12 @@ function makeHarness(streamInputResult: () => Promise<void>): Harness {
 
   return {
     executor,
+    get wrappedPrompt() {
+      if (!wrappedPrompt) throw new Error('Expected the builder to wrap the input stream');
+      return wrappedPrompt;
+    },
+    streamInput,
+    invokeWithLoadedQuery,
     cleanupSpy,
     logger,
     abortedAtCleanup: () => abortedAtCleanup,
@@ -263,13 +278,16 @@ describe('SessionQueryExecutor — a dead input channel ends the session (TASK_2
   });
 
   it('a resolving streamInput leaves the session running', async () => {
-    const { executor, cleanupSpy } = makeHarness(() => Promise.resolve());
+    const harness = makeHarness(() => Promise.resolve());
+    const { executor, cleanupSpy, streamInput } = harness;
 
     const result = await executor.executeQuery(resumedConfig('tab-healthy'));
     await settle();
 
     expect(result.abortController.signal.aborted).toBe(false);
     expect(cleanupSpy).not.toHaveBeenCalled();
+    expect(streamInput).toHaveBeenCalledTimes(1);
+    expect(streamInput.mock.calls[0][0]).toBe(harness.wrappedPrompt);
   });
 });
 
@@ -278,8 +296,9 @@ describe('SessionQueryExecutor — a dead input channel ends the session (TASK_2
  * stream IS the query prompt — so there is no rejection to handle there.
  */
 describe('SessionQueryExecutor — the initial path has no separate input channel', () => {
-  it('does not call streamInput for a new session', async () => {
-    const { executor } = makeHarness(() => Promise.reject(new Error('unused')));
+  it('passes the builder prompt directly to the new query', async () => {
+    const harness = makeHarness(() => Promise.reject(new Error('unused')));
+    const { executor, streamInput, invokeWithLoadedQuery } = harness;
 
     const result = await executor.executeQuery({
       sessionId: 'tab-initial' as ExecuteQueryConfig['sessionId'],
@@ -292,5 +311,8 @@ describe('SessionQueryExecutor — the initial path has no separate input channe
     await settle();
 
     expect(result.abortController.signal.aborted).toBe(false);
+    expect(streamInput).not.toHaveBeenCalled();
+    expect(invokeWithLoadedQuery).toHaveBeenCalledTimes(1);
+    expect(invokeWithLoadedQuery.mock.calls[0][1]).toBe(harness.wrappedPrompt);
   });
 });

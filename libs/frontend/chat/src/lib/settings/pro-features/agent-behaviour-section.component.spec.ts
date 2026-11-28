@@ -222,7 +222,7 @@ describe('AgentBehaviourSectionComponent', () => {
       );
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
-      ).toBe('Run Setup to generate the project prompt first.');
+      ).toBe('Uses the Claude Code preset. Run Setup to generate the project prompt first.');
 
       call.mockClear();
       await click('Toggle Enhanced System Prompt');
@@ -295,7 +295,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(toggle.getAttribute('aria-disabled')).toBe('true');
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
-      ).toBe('Run Setup to generate the project prompt first.');
+      ).toBe('Uses the Claude Code preset. Run Setup to generate the project prompt first.');
     });
 
     it('shows loading hint and keeps toggle off and disabled while initial status is loading', async () => {
@@ -334,7 +334,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
       ).toBe(
-        "Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
       );
     });
 
@@ -349,7 +349,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
       ).toBe(
-        "Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
       );
 
       handlers['enhancedPrompts:getStatus'] = () =>
@@ -363,7 +363,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
       ).toBe(
-        'Claude Code preset with Ptah additions. Applies to new sessions.',
+        "Off: Claude Code preset with Ptah additions. Turn on to replace the preset with Ptah's prompt. Applies to new sessions.",
       );
     });
 
@@ -375,7 +375,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
       ).toBe(
-        'Claude Code preset with Ptah additions. Applies to new sessions.',
+        "Off: Claude Code preset with Ptah additions. Turn on to replace the preset with Ptah's prompt. Applies to new sessions.",
       );
     });
 
@@ -392,7 +392,7 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(
         element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
       ).toBe(
-        "Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
       );
       expect(
         element.querySelector('[data-testid="agent-behaviour-prompt-status"]')
@@ -948,9 +948,13 @@ describe('AgentBehaviourSectionComponent', () => {
         call.mockClear();
 
         if (trigger === 'generation completion') {
-          generated = true;
-          const checkAgain = element.querySelector<HTMLButtonElement>('[data-testid="regenerate-check-again"]');
+          // NativeDrawer renders the dialog in the CDK overlay outside the fixture root.
+          const checkAgain = document.querySelector<HTMLButtonElement>(
+            '[role="dialog"][aria-label="System prompt details"] [data-testid="regenerate-check-again"]',
+          );
           expect(checkAgain).not.toBeNull();
+          expect(checkAgain?.disabled).toBe(false);
+          generated = true;
           checkAgain?.click();
           await settle();
         } else {
