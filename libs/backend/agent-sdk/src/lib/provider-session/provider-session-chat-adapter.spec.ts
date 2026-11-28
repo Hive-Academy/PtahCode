@@ -960,6 +960,60 @@ describe('ProviderSessionChatAdapter', () => {
     },
   );
 
+  it('reuses the pooled process after an inherited permission refresh fails', async () => {
+    const h = setup({ readSavedPermissionLevel: () => 'ask' });
+    jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+      seed,
+      permission: 'yolo',
+    });
+    const { id, live } = await startCompleted(h);
+    live.prompt.mockClear();
+    live.setPermission.mockClear();
+    live.setPermission.mockRejectedValueOnce(new Error('Permission refused'));
+    const decision = live.approvals.request(
+      { requestId: 'refresh-approval', title: 'Edit file' },
+      new AbortController().signal,
+    );
+
+    const failed = await h.adapter.resumeSession(id, { prompt: 'continue' });
+    await expectCode(collect(failed), 'runtime-failed');
+    expect(live.setPermission).toHaveBeenNthCalledWith(1, 'ask');
+    expect(live.prompt).not.toHaveBeenCalled();
+    expect(h.ports.release).not.toHaveBeenCalled();
+    expect(h.cancelled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'refresh-approval',
+        reason: 'superseded',
+      }),
+    );
+    await expect(decision).resolves.toBe('cancel');
+
+    let finishPermission!: () => void;
+    const applying = new Promise<void>((resolve) => {
+      finishPermission = resolve;
+    });
+    live.setPermission.mockImplementationOnce(async () => {
+      await applying;
+      return applied;
+    });
+    const retry = await h.adapter.resumeSession(id, { prompt: 'retry' });
+    const events = collect(retry);
+    await flush();
+    expect(h.pool.get(id)).toBe(live);
+    expect(live.setPermission).toHaveBeenNthCalledWith(2, 'ask');
+    expect(live.prompt).not.toHaveBeenCalled();
+    finishPermission();
+
+    await promptedTurn(live, 2);
+    expect(live.prompt).toHaveBeenCalledWith({ text: 'retry' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
+    await events;
+  });
+
   it('applies a permission toggle queued during replacement attach before prompting', async () => {
     const h = setup({ readSavedPermissionLevel: () => 'yolo' });
     const { id, live } = await startCompleted(h);

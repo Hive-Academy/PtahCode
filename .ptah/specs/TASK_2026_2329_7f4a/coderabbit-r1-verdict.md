@@ -133,3 +133,15 @@ default read, and the adapter spec covers both first-acquisition paths.
 Permission refresh now saves the new level and drops an exited process before
 re-acquiring. The replacement receives the refreshed level before the prompt.
 The regression spec also verifies that a rejected permission prevents prompting.
+
+## Round 4
+
+Added a regression spec for a retained process whose inherited permission refresh
+rejects with `Permission refused`. The first resume rejects without prompting or
+releasing the process, and the open approval settles as `cancel` with reason
+`superseded`. A second resume reuses the same process and waits for the saved
+permission to apply before prompting.
+
+- Focused agent-sdk Jest passed all 62 tests. Node emitted the existing ES module
+  configuration warning.
+- ESLint passed on the changed spec with zero errors and warnings.
