@@ -147,6 +147,7 @@ export function onboardingHarnessTarget(
  *
  * - Retired `/onboarding/analyze/agents` and `/onboarding/analyze/generate`
  *   URLs still identify their original tab before the onboarding redirect;
+ * - `/onboarding/analyze/skills` binds an agent-generation tab for restore;
  * - `/onboarding/analyze/guidance` and `/onboarding/guidance` bind a project
  *   guidance tab.
  */
@@ -160,7 +161,7 @@ export function onboardingGenerationBinding(
   return isOnboardingIdentityValue(tabId) ? { tabId, workflow } : null;
 }
 
-function generationWorkflowForPath(
+export function generationWorkflowForPath(
   segments: readonly string[],
 ): SetupGenerationWorkflow | null {
   if (segments[0] !== 'onboarding') return null;

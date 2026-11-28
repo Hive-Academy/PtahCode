@@ -544,6 +544,35 @@ describe('webview routing composition', () => {
       expect(workspaceResolved()).toBe(false);
     });
 
+    it('waits for the Electron workspace before mounting recordless guidance', async () => {
+      const workspaceResolved = signal(false);
+      const validateRun = jest.fn();
+      TestBed.configureTestingModule({
+        providers: [
+          { provide: ElectronLayoutService, useValue: { workspaceResolved } },
+          {
+            provide: SurfaceRouterService.generationRouteTabValidatorToken,
+            useValue: validateRun,
+          },
+        ],
+      });
+      const route = '/onboarding/guidance';
+      installHost(savedRoute(route, 'chat'), 'chat');
+      hostIsElectron(true);
+      const navigate = jest.spyOn(
+        TestBed.inject(SurfaceRouterService),
+        'navigateToUrl',
+      );
+
+      const boot = runBoot();
+      expect(navigate).not.toHaveBeenCalled();
+      workspaceResolved.set(true);
+
+      expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(TestBed.inject(Router).url).toBe(route);
+      expect(validateRun).not.toHaveBeenCalled();
+    });
+
     it('keeps a newer host navigation that lands during the workspace wait', async () => {
       const workspaceResolved = signal(false);
       TestBed.configureTestingModule({
@@ -1303,6 +1332,17 @@ describe('app.config routing wiring', () => {
   it('starts the onboarding first-run tracker at bootstrap', () => {
     // The chat guard's redirect commits `shownAt` only through the tracker.
     expect(source).toContain('provideOnboardingFirstRun()');
+  });
+
+  it('validates restored generation routes through the Setup run store', () => {
+    const provider = source.match(
+      /provide:\s*SurfaceRouterService\.generationRouteTabValidatorToken,[\s\S]*?\n {4}\},/,
+    )?.[0];
+
+    expect(provider).toMatch(
+      /injector\.get\(SetupRunStore\)\.canRestoreGenerationRoute\(id,\s*workflow\)/,
+    );
+    expect(provider).not.toMatch(/TabManagerService|findTabByIdAcrossWorkspaces/);
   });
 
   it('registers HarnessChatProposalStore at bootstrap and drops HarnessWorkflowMessageHandler', () => {

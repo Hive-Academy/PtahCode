@@ -248,16 +248,17 @@ export class SetupRunStore {
     id: string,
     workflow: SetupGenerationWorkflow,
   ): boolean {
+    const workspace = this.workspacePath();
+    if (workspace === null) return false;
     let record = this.get(id);
     if (!record) {
       // A saved route can be checked before the workspace activation effect runs.
-      this.adoptLegacyTabs();
+      untracked(() => this.adoptLegacyTabs());
       record = this.get(id);
     }
-    if (!record || bindingOf(record)?.workflow !== workflow) return false;
-    const workspace = this.workspacePath();
     return (
-      workspace === null ||
+      record !== null &&
+      bindingOf(record)?.workflow === workflow &&
       sameSetupWorkspacePath(record.workspacePath, workspace)
     );
   }
@@ -337,6 +338,13 @@ export class SetupRunStore {
    * existing record when there is one.
    */
   public adopt(binding: SetupGenerationTabBinding): SetupRunRecord | null {
+    return this.adoptBinding(binding, true);
+  }
+
+  private adoptBinding(
+    binding: SetupGenerationTabBinding,
+    live: boolean,
+  ): SetupRunRecord | null {
     const existing = this.get(binding.tabId);
     if (existing)
       return matchesBinding(this.bindingFor(existing), binding)
@@ -344,7 +352,7 @@ export class SetupRunStore {
         : null;
     const record = createBoundRunRecord(binding);
     if (!record) return null;
-    this.liveThisSession.add(record.id);
+    if (live) this.liveThisSession.add(record.id);
     this.insert(record);
     return record;
   }
@@ -570,7 +578,7 @@ export class SetupRunStore {
 
   /** D6: restored chat tabs of a Setup workflow hand their binding over once. */
   private adoptLegacyTabs(): void {
-    for (const tab of consumeLegacySetupTabs()) this.adopt(tab);
+    for (const tab of consumeLegacySetupTabs()) this.adoptBinding(tab, false);
   }
 
   private async reconcile(): Promise<void> {

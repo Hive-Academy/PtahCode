@@ -1,19 +1,25 @@
-import { signal } from '@angular/core';
+import { computed, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import * as chatState from '@ptah-extension/chat-state';
-import { SurfaceRouterService, VSCodeService } from '@ptah-extension/core';
-import type {
-  SetupGenerationRunLifecycle,
-  SetupGenerationRunState,
-  SetupGenerationTabBinding,
+import {
+  SurfaceRoutePersistence,
+  SurfaceRouterService,
+  VSCodeService,
+} from '@ptah-extension/core';
+import {
+  WEBVIEW_ROUTE_STATE_KEY,
+  type SetupGenerationRunLifecycle,
+  type SetupGenerationRunState,
+  type SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 
 import {
   MAX_SETUP_RUNS_PER_WORKSPACE,
   SETUP_RUNS_STORAGE_KEY,
   serializeSetupRunIndex,
+  type StoredSetupRunRecord,
 } from './setup-run-persistence';
 import { SETUP_RUN_POLL_INTERVAL_MS, SetupRunStore } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
@@ -33,8 +39,8 @@ const WS = '/ws/a';
 const OTHER_WS = '/ws/b';
 
 function record(
-  over: Partial<SetupRunRecord> & { id: string },
-): SetupRunRecord {
+  over: Partial<StoredSetupRunRecord> & { id: string },
+): StoredSetupRunRecord {
   return {
     workspacePath: WS,
     workflow: 'agent-generation',
@@ -73,7 +79,7 @@ function binding(
 }
 
 describe('SetupRunStore', () => {
-  let workspace: ReturnType<typeof signal<string>>;
+  let workspace: ReturnType<typeof signal<string | null>>;
   let runnerWorkspace: ReturnType<typeof signal<string | null>>;
   let runnerRunning: ReturnType<typeof signal<boolean>>;
   let runnerCanceling: ReturnType<typeof signal<boolean>>;
@@ -118,7 +124,7 @@ describe('SetupRunStore', () => {
   beforeEach(() => {
     localStorage.clear();
     jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
-    workspace = signal(WS);
+    workspace = signal<string | null>(WS);
     runnerWorkspace = signal<string | null>(null);
     runnerRunning = signal(false);
     runnerCanceling = signal(false);
@@ -205,7 +211,7 @@ describe('SetupRunStore', () => {
     localStorage.clear();
   });
 
-  it('restores a saved guidance route from a Windows Setup record without a chat tab', async () => {
+  it('validates Windows Setup records for route restoration and persistence without chat tabs', async () => {
     workspace.set('c:/ptah-e2e-ws-a/');
     seed(
       record({
@@ -215,7 +221,13 @@ describe('SetupRunStore', () => {
         status: 'completed',
         backendRunId: 'e2e-guidance-run',
       }),
+      record({
+        id: 'e2e-agent-tab',
+        workspacePath: 'C:\\ptah-e2e-ws-a',
+        status: 'completed',
+      }),
     );
+    const setState = jest.fn();
     TestBed.configureTestingModule({
       providers: [
         provideRouter([
@@ -224,6 +236,14 @@ describe('SetupRunStore', () => {
           { path: 'onboarding/analyze/generate', children: [] },
         ]),
         SurfaceRouterService,
+        {
+          provide: VSCodeService,
+          useValue: {
+            config: signal({ workspaceRoot: '', panelId: 'electron-main' }),
+            isConnected: () => true,
+            setState,
+          },
+        },
         {
           provide: SurfaceRouterService.generationRouteTabValidatorToken,
           useFactory: (runs: SetupRunStore) =>
@@ -234,6 +254,7 @@ describe('SetupRunStore', () => {
     });
     const surface = TestBed.inject(SurfaceRouterService);
     const router = TestBed.inject(Router);
+    TestBed.inject(SurfaceRoutePersistence).start(null);
     const route =
       '/onboarding/analyze/guidance?tab=e2e-guidance-tab&run=e2e-guidance-run';
 
@@ -251,9 +272,27 @@ describe('SetupRunStore', () => {
         '/onboarding/analyze/generate?tab=e2e-guidance-tab',
       ),
     ).toBe('failed');
+    expect(
+      await surface.navigateToUrl('/onboarding/guidance?tab=e2e-agent-tab'),
+    ).toBe('failed');
+    const agent = '/onboarding/analyze/generate?tab=e2e-agent-tab';
+    expect(await surface.navigateToUrl(agent)).toBe('navigated');
+    expect(setState).toHaveBeenLastCalledWith(WEBVIEW_ROUTE_STATE_KEY, {
+      v: 1,
+      route: agent,
+      seed: null,
+      panelId: 'electron-main',
+    });
+
     workspace.set('C:\\other-workspace');
     expect(await surface.navigateToUrl(route)).toBe('failed');
-    expect(router.url).toBe(standalone);
+    workspace.set(null);
+    expect(await surface.navigateToUrl(route)).toBe('failed');
+    expect(router.url).toBe(agent);
+
+    setState.mockClear();
+    expect(await router.navigateByUrl(route)).toBe(true);
+    expect(setState).not.toHaveBeenCalled();
   });
 
   describe('status mapping: agent generation and guidance', () => {
@@ -712,17 +751,31 @@ describe('SetupRunStore', () => {
       expect(store.runs()[0].status).toBe('interrupted');
     });
 
-  it('adopts a legacy chat tab in time to validate its saved route', () => {
-    legacyTabs.mockReturnValueOnce([
-        binding('legacy-tab-1', 'setup-project-prompt'),
-      ]);
-    const store = TestBed.inject(SetupRunStore);
-    expect(
-      store.canRestoreGenerationRoute('legacy-tab-1', 'setup-project-prompt'),
-    ).toBe(true);
-      const adopted = store.get('legacy-tab-1');
-      expect(adopted?.workflow).toBe('project-guidance');
-      expect(adopted?.workspacePath).toBe(WS);
+    it('adopts a legacy guidance tab during reactive route validation and reconciles its saved output', async () => {
+      workspace.set('c:/ptah-e2e-ws-a/');
+      const legacy = binding(
+        'legacy-tab-1',
+        'setup-project-prompt',
+        'C:\\ptah-e2e-ws-a',
+      );
+      legacyTabs.mockReturnValueOnce([legacy]);
+      rpc['getEnhancedPromptsStatus'].mockResolvedValue({
+        generatedAt: new Date(Date.now() + 1_000).toISOString(),
+      });
+      const store = TestBed.inject(SetupRunStore);
+      const canRestore = computed(() =>
+        store.canRestoreGenerationRoute(legacy.tabId, legacy.workflow),
+      );
+      expect(canRestore()).toBe(true);
+      expect(store.get(legacy.tabId)).toMatchObject({
+        workflow: 'project-guidance',
+        status: 'running',
+      });
+
+      await flush();
+      expect(store.get(legacy.tabId)?.status).toBe('completed');
+      workspace.set('C:\\other-workspace');
+      expect(canRestore()).toBe(false);
     });
 
     it('adopts a push for an unknown id and returns the existing record', async () => {

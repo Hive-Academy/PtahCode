@@ -113,11 +113,16 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
       return navigateToHostSurface(plan.rawView);
     }
 
+    const savedUrl = router.parseUrl(plan.route);
+    const savedSegments = savedUrl.root.children[PRIMARY_OUTLET]?.segments ?? [];
+    const isGuidanceEntry =
+      savedSegments.length === 2 && savedSegments[1].path === 'guidance';
     if (
-      firstSegmentPath(router, plan.route) === 'onboarding' &&
-      router.parseUrl(plan.route).queryParams['tab'] !== undefined
+      savedSegments[0]?.path === 'onboarding' &&
+      (savedUrl.queryParams['tab'] !== undefined || isGuidanceEntry)
     ) {
-      // The saved tab can only be validated after Electron restores its workspace.
+      // Bound routes need workspace validation. The guidance entry also reads
+      // the workspace on mount to decide whether Start is available.
       await firstValueFrom(
         toObservable(layout.workspaceResolved, { injector }).pipe(filter(Boolean)),
       );

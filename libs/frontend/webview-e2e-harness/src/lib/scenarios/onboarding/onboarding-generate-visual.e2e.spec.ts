@@ -217,10 +217,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           {
             'enhancedPrompts:runWizard': {
               success: false,
-              rejection: {
-                reason: 'blocked',
-                ownerTabId: 'other-guidance-tab',
-              },
+              rejection: { reason: 'blocked' },
             },
           },
         );
