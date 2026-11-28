@@ -43,3 +43,9 @@ Not checked yet: how `CompactRailState` is derived for generation tabs; backend 
 
 See CLAUDE.md "STRICT: Verification commands" and "Two-level check". Lanes run only focused
 jest/tsc/eslint; the coordinator runs `npm run verify` scoped to changed projects.
+
+## Lane limits (2026-11-28)
+- Ollama Code (`pc-f3384f72-a556-4ab4-b2b1-7e1e028f22cb`, family ollama-cloud): session usage limit
+  reached (HTTP 429) during Batch 11 revise round 1; resets 2026-11-28 15:00 UTC. Batch 11 round 1
+  moved to codex; Batch 11 re-review moves to antigravity; Batch 9 re-review moves to antigravity.
+- Kimi Code (`pc-7594dcab-a859-41a0-8e8b-e8df5dba7d25`): 5-hour limit, resets 13:43 UTC.

@@ -1,4 +1,8 @@
 import { ONBOARDING_QUERY } from '@ptah-extension/core';
+import {
+  stepTarget,
+  type SetupRunRecord,
+} from '@ptah-extension/setup-wizard';
 
 
 export type OnboardingStepId =
@@ -41,4 +45,17 @@ export function onboardingStepLink(
     if (typeof value === 'string' && value) queryParams[key] = value;
   }
   return { commands: ['/onboarding', ...STEP_PATHS[to]], queryParams };
+}
+
+/**
+ * Where Setup opens a run record: `stepTarget` (setup-run-steps) as router
+ * commands. Every run entry point that holds a `SetupRunRecord` navigates
+ * through this, so a run always re-opens at the same place.
+ */
+export function setupRunStepLink(record: SetupRunRecord): OnboardingStepLink {
+  const target = stepTarget(record);
+  return {
+    commands: ['/onboarding', ...target.subPath],
+    queryParams: target.queryParams,
+  };
 }

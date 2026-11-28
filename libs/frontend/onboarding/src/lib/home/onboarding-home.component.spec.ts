@@ -17,14 +17,10 @@ import {
 import { OnboardingHomeComponent } from './onboarding-home.component';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import {
-  WizardAnalysisRunner,
-  WizardRpcService,
+  SetupRunStore,
+  isTerminalSetupRunStatus,
+  type SetupRunRecord,
 } from '@ptah-extension/setup-wizard';
-import { AnalysisStepStore } from '../analyze/analysis-step.store';
-import {
-  OnboardingResumeStore,
-  type OnboardingResumeItem,
-} from './onboarding-resume.store';
 
 /** The `SetupStatusStore` surface Home reads, as writable signals. */
 function createStatusStore() {
@@ -60,11 +56,30 @@ describe('OnboardingHomeComponent', () => {
   let flag: WritableSignal<OnboardingFlag>;
   let workspacePath: WritableSignal<string>;
   let workspaceReady: WritableSignal<boolean>;
-  const resume = {
-    items: signal<readonly OnboardingResumeItem[]>([]),
-    refresh: jest.fn().mockResolvedValue(undefined),
-    clear: jest.fn(),
+  const runsByPath = signal<Record<string, readonly SetupRunRecord[]>>({});
+  const runs = {
+    runsFor: (path: string | null | undefined) =>
+      path ? (runsByPath()[path] ?? []) : [],
+    isCancelling: (_id: string) => false,
+    markSeen: jest.fn(),
+    dismiss: (id: string): boolean => {
+      for (const [path, list] of Object.entries(runsByPath())) {
+        const target = list.find((candidate) => candidate.id === id);
+        if (!target) continue;
+        if (!isTerminalSetupRunStatus(target.status)) return false;
+        runsByPath.update((map) => ({
+          ...map,
+          [path]: list.filter((candidate) => candidate.id !== id),
+        }));
+        return true;
+      }
+      return false;
+    },
+    refresh: jest.fn(),
   };
+  function setRuns(list: readonly SetupRunRecord[]): void {
+    runsByPath.set({ '/workspace': list });
+  }
 
   function createReadinessStore(available: boolean) {
     return {
@@ -127,9 +142,7 @@ describe('OnboardingHomeComponent', () => {
     workspacePath = signal('/workspace');
     workspaceReady = signal(true);
     readiness = createReadinessStore(true);
-    resume.items.set([]);
-    resume.refresh.mockClear();
-    resume.clear.mockClear();
+    runsByPath.set({});
     TestBed.configureTestingModule({
       imports: [OnboardingHomeComponent],
       providers: [
@@ -139,7 +152,7 @@ describe('OnboardingHomeComponent', () => {
         { provide: ProviderReadinessStore, useValue: readiness },
         { provide: AppStateManager, useValue: { setCurrentView } },
         { provide: LoggingService, useValue: { warn: jest.fn() } },
-        { provide: OnboardingResumeStore, useValue: resume },
+        { provide: SetupRunStore, useValue: runs },
         {
           provide: OnboardingWorkspaceStore,
           useValue: {
@@ -151,23 +164,6 @@ describe('OnboardingHomeComponent', () => {
             activeIndex: signal(-1),
           },
         },
-        {
-          provide: WizardRpcService,
-          useValue: {
-            getAnalysisStatus: jest
-              .fn()
-              .mockResolvedValue({ state: 'missing' }),
-          },
-        },
-        {
-          provide: WizardAnalysisRunner,
-          useValue: {
-            isRunning: signal(false),
-            isCanceling: signal(false),
-            isRunningForWorkspace: () => false,
-          },
-        },
-        { provide: AnalysisStepStore, useValue: { useAnalysis: jest.fn() } },
       ],
     });
   });
@@ -181,76 +177,76 @@ describe('OnboardingHomeComponent', () => {
     expect(headings[0].textContent?.trim()).toBe('Set up Ptah for your work');
     expect(headings[0].getAttribute('tabindex')).toBe('-1');
     expect(store.refresh).toHaveBeenCalledTimes(1);
-    expect(resume.refresh).toHaveBeenCalledTimes(1);
-  });
-  it('refreshes resume actions when the active folder changes', () => {
-    render();
-    workspacePath.set('/another-workspace');
-    fixture.detectChanges();
-    expect(resume.refresh).toHaveBeenCalledTimes(2);
-  });
-  it('clears resume actions while a folder switch is pending', () => {
-    render();
-    workspaceReady.set(false);
-    workspacePath.set('/another-workspace');
-    fixture.detectChanges();
-    expect(resume.clear).toHaveBeenCalledTimes(1);
-    expect(resume.refresh).toHaveBeenCalledTimes(1);
-    workspaceReady.set(true);
-    fixture.detectChanges();
-    expect(resume.refresh).toHaveBeenCalledTimes(2);
+    // The runs store is the source of the runs list; Home never refreshes it.
+    expect(runs.refresh).not.toHaveBeenCalled();
   });
 
-  it('places resume banners after the connection banner and opens their target', () => {
-    resume.items.set([
+  it('places the setup runs list after the connection banner and opens its run', () => {
+    setRuns([
       {
-        id: 'generation:tab-1',
-        state: 'resumable',
-        title: 'Continue agent generation',
-        detail: null,
-        target: {
-          subPath: ['analyze', 'agents'],
-          queryParams: { tab: 'tab-1' },
-        },
+        id: 'setup-1',
+        workspacePath: '/workspace',
+        workflow: 'analysis',
+        status: 'running',
+        step: 'analyzing',
+        backendRunId: null,
+        analysisRunId: null,
+        parentId: null,
+        unseen: true,
+        createdAt: 1,
+        updatedAt: 1,
       },
     ]);
     render();
     setReadiness('missing');
     const banner = byTestId('connection-readiness-banner');
-    const banners = byTestId('onboarding-resume-banners');
+    const list = byTestId('setup-runs-list');
     expect(banner).not.toBeNull();
-    expect(banners?.textContent).toContain('Continue agent generation');
+    expect(list).not.toBeNull();
     expect(
-      banner!.compareDocumentPosition(banners!) &
+      banner!.compareDocumentPosition(list!) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     const navigate = jest
       .spyOn(TestBed.inject(Router), 'navigate')
       .mockResolvedValue(true);
-    banners?.querySelector('button')?.click();
-    expect(navigate).toHaveBeenCalledWith(
-      ['/onboarding', 'analyze', 'agents'],
-      {
-        queryParams: { tab: 'tab-1' },
-      },
-    );
+    list
+      ?.querySelector<HTMLButtonElement>('[data-testid="setup-run-open"]')
+      ?.click();
+    expect(runs.markSeen).toHaveBeenCalledWith('setup-1');
+    expect(navigate).toHaveBeenCalledWith(['/onboarding', 'analyze'], {
+      queryParams: { tab: 'setup-1' },
+    });
   });
 
-  it('passes active banner state through to the resume banner', () => {
-    resume.items.set([
+  it('renders no runs list while the store has no runs', () => {
+    render();
+    expect(byTestId('setup-runs-list')).toBeNull();
+  });
+
+  it('focuses Skip for now when the last run row is dismissed', () => {
+    setRuns([
       {
-        id: 'analysis',
-        state: 'running',
-        title: 'Workspace analysis in progress',
-        detail: null,
-        target: { subPath: ['analyze'], queryParams: {} },
+        id: 'setup-done',
+        workspacePath: '/workspace',
+        workflow: 'analysis',
+        status: 'completed',
+        step: 'analyzing',
+        backendRunId: null,
+        analysisRunId: null,
+        parentId: null,
+        unseen: true,
+        createdAt: 1,
+        updatedAt: 1,
       },
     ]);
     render();
-    const banners = byTestId('onboarding-resume-banners');
-    expect(banners?.textContent).toContain('Workspace analysis in progress');
-    expect(banners?.textContent).toContain('Running');
-    expect(banners?.querySelector('button')?.textContent?.trim()).toBe('View');
+    const dismiss = byTestId<HTMLButtonElement>('setup-run-dismiss');
+    dismiss?.focus();
+    expect(document.activeElement).toBe(dismiss);
+    dismiss?.click();
+    expect(byTestId('setup-runs-list')).toBeNull();
+    expect(document.activeElement).toBe(byTestId('onboarding-skip'));
   });
 
   it('shows the three paths in order, Analyze first, each named by its h2 link', () => {

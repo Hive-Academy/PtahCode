@@ -2,9 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  effect,
   inject,
-  untracked,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Router } from '@angular/router';
@@ -32,13 +30,8 @@ import { readyStripSettingsWord } from '../ready/ready-strip-state';
 import { onboardingStepLink } from '../shell/onboarding-step-link';
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
-import { AnalysisFoundCardComponent } from './analysis-found-card.component';
 import { OnboardingPathTileComponent } from './path-tile.component';
-import {
-  OnboardingResumeStore,
-  type OnboardingResumeItem,
-} from './onboarding-resume.store';
-import { ResumeBannerComponent } from './resume-banner.component';
+import { SetupRunsListComponent } from './setup-runs-list.component';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
 const NO_WORKSPACE_REASON = 'Open a folder to use this path.';
@@ -66,9 +59,8 @@ interface StatusChip {
     OnboardingPathTileComponent,
     ReadyStripComponent,
     ConnectionReadinessBannerComponent,
-    ResumeBannerComponent,
+    SetupRunsListComponent,
     WorkspaceHeaderComponent,
-    AnalysisFoundCardComponent,
     PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -108,7 +100,6 @@ interface StatusChip {
         shows what is happening; you never need to read an agent transcript.
       </p>
       <ptah-workspace-header class="mt-5 block" [canSwitch]="true" />
-      <ptah-analysis-found-card />
 
       @if (readyAvailable) {
         <ptah-connection-readiness-banner
@@ -118,18 +109,10 @@ interface StatusChip {
         />
       }
 
-      @if (resume.items().length > 0) {
-        <div class="mt-5 grid gap-3" data-testid="onboarding-resume-banners">
-          @for (item of resume.items(); track item.id) {
-            <ptah-resume-banner
-              [state]="item.state"
-              [title]="item.title"
-              [detail]="item.detail"
-              (resumeRequested)="resumeItem(item)"
-            />
-          }
-        </div>
-      }
+      <ptah-setup-runs-list
+        class="mt-5 block"
+        (lastRunDismissed)="skipButton.focus()"
+      />
 
       @if (status.workspaceNotOpen()) {
         <div
@@ -319,6 +302,7 @@ interface StatusChip {
           }
         </span>
         <button
+          #skipButton
           ptahButton
           variant="ghost"
           type="button"
@@ -336,7 +320,6 @@ export class OnboardingHomeComponent {
   private readonly flag = inject(OnboardingFlagService);
   private readonly appState = inject(AppStateManager);
   private readonly readinessStore = inject(ProviderReadinessStore);
-  protected readonly resume = inject(OnboardingResumeStore);
   private readonly router = inject(Router);
   private readonly workspace = inject(OnboardingWorkspaceStore);
 
@@ -432,21 +415,6 @@ export class OnboardingHomeComponent {
     // Read provider readiness on entry; the banner clears when the chosen
     // connection becomes ready without a flag write.
     if (this.readyAvailable) void this.readinessStore.refresh('mount');
-    effect(() => {
-      const path = this.workspace.activePath();
-      if (!path || !this.workspace.readyForActivePath()) {
-        this.resume.clear();
-        return;
-      }
-      // Track only the path and readiness, not the signals refresh() reads.
-      untracked(() => void this.resume.refresh());
-    });
-  }
-
-  protected resumeItem(item: OnboardingResumeItem): void {
-    void this.router.navigate(['/onboarding', ...item.target.subPath], {
-      queryParams: { ...item.target.queryParams },
-    });
   }
 
   protected retryStatus(): void {

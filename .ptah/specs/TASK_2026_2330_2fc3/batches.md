@@ -439,7 +439,7 @@ Edge cases:
   Checks: lint,typecheck onboarding + webview-e2e-harness, --related onboarding,
   typecheck-templates webview, degradation audit TOTAL 0.
 
-## Batch 11: Setup runs list on Home and removals — PENDING
+## Batch 11: Setup runs list on Home and removals — IMPLEMENTED
 
 - Shape: logic
 - Estimated weight (tokens): ~30k
@@ -468,6 +468,11 @@ Edge cases:
   (static `onboardingStepLink` table kept until Batches 12/14) APPROVED. A REJECTED: a completed
   analysis saved on disk with no run record must get a Home row — add store-side adoption of
   completed disk analyses in `SetupRunStore` (store split batch or a follow-up before Batch 14).
+
+- Result: implementer ollama-cloud (round 1 finished by codex after the Ollama session limit);
+  reviewers codex 5/10 REVISE → antigravity 8/10 APPROVED. Majors 1–3 moved to Batch 16.
+  Coordinator fixed review notes 11 (Show all `type="button"`) and 12 (no "0 agents installed").
+  Open Minor 10: the final Dismiss focuses "Skip for now"; review proposes the h1 / a top control.
 
 ## Batch 12: Analysis re-run and team-builder coordinator — PENDING
 
@@ -529,6 +534,26 @@ Edge cases:
   navigation id) 9/10 APPROVED. Launcher deleted (no callers left). Checks: lint,typecheck and
   --related chat-ui + chat; typecheck-templates passed after round 1 — re-run before the push
   (round 2 changed the back-button binding; onboarding was mid-edit by Batch 9 at commit time).
+
+## Batch 15: SetupRunStore split (behavior-preserving) — PENDING
+
+- Source: phase B style review findings 2 and 3 (`code-style-review-phase-b.md`, "Proposed Split").
+- Write set: `libs/frontend/setup-wizard/src/lib/services/setup-run.store.ts`, `setup-run-attempt.ts`,
+  new collaborators under `services/setup-run/`; specs move with their code. Public API unchanged.
+- Gate: after Batches 9 and 12 are committed (both may touch the store). No behavior change.
+
+## Batch 16: SetupRunStore discovery, dismissal and disk adoption — PENDING
+
+- Source: Batch 11 review Majors 1–3 (`code-logic-review-batch11.md`) and the user decision on
+  removal A (Batch 11 note).
+- Acceptance: (1) a completed analysis saved on disk with no run record gets a Home row and its
+  Review skills target, deduplicated by workspace and analysis identity; (2) a persisted dismissal
+  marker (workspace, workflow, backend run id) stops passive re-adoption of a dismissed checkpoint,
+  explicit resume stays available; (3) store-owned saved-analysis discovery exposes per-workspace
+  failure plus Retry, keeps last known data, Home shows it without a mount refresh.
+  (4) record data for the Home row context that Batch 11 could not show: the checkpoint
+  agents-written count and the saved-analysis freshness state and reason (stale/incomplete).
+- Gate: after Batch 15. Before Batch 14.
 
 ## Batch 14: App wiring, validator switch and cleanup — PENDING
 
