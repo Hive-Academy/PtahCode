@@ -1678,11 +1678,11 @@ export interface RpcMethodRegistry
     result: WizardPreviewGenerationResponse;
   };
   'wizard:list-analyses': {
-    params: Record<string, never>;
+    params: { workspacePath?: string };
     result: { analyses: SavedAnalysisMetadata[] };
   };
   'wizard:load-analysis': {
-    params: { filename: string };
+    params: { filename: string; workspacePath?: string };
     result: MultiPhaseAnalysisResponse;
   };
   'license:getStatus': {

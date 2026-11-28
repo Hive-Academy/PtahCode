@@ -693,6 +693,16 @@ describe('ProjectGuidancePage', () => {
       'The run continues in its bound session.',
     );
   });
+  it('shows the running title without the old session subtitle', async () => {
+    state.set('running');
+    const element = await render();
+    const panel = element.querySelector('ptah-run-panel');
+
+    expect(panel?.textContent).toContain('Creating guidance');
+    expect(panel?.textContent).not.toContain(
+      'The run continues in its bound session.',
+    );
+  });
   it('sanitizes a guidance failure reason', async () => {
     state.set('failed');
     workflow.startError.set('EACCES /private/key');

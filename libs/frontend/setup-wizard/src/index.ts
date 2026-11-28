@@ -7,7 +7,6 @@ export type { BoundAgentDecisions } from './lib/services/wizard-rpc.service';
 export { GenerationPreviewStore } from './lib/services/generation-preview.store';
 export type { PreviewConfirmation } from './lib/services/generation-preview.store';
 export { WizardAnalysisRunner } from './lib/services/wizard-analysis-runner.service';
-export { findBoundGenerationTab } from './lib/services/bound-generation-tab';
 export { SetupRunStore } from './lib/services/setup-run.store';
 export {
   normalizeSetupWorkspacePath,

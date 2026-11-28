@@ -42,6 +42,9 @@ export class SetupRunEntryService implements SetupRunEntry {
       );
     if (active) return this.openRun(active);
 
+    // New agent runs need a template selection and a confirmed preview.
+    if (requested === 'agent-generation') return Promise.resolve('failed');
+
     return this.router.navigateToSurface(
       'onboarding',
       entrySubPathFor(requested),

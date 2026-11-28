@@ -1,9 +1,10 @@
+import type { AnalysisStatus } from '@ptah-extension/shared';
 /**
  * Persistence of the Setup run index (TASK_2026_2330, plan 1.2).
  *
  * The index lives in localStorage under `ptah.setup-runs.v1` as
- * `{ version: 1, byWorkspace: Record<workspacePath, SetupRunRecord[]> }`.
- * It holds ids, statuses and steps only: no transcript, model output, file
+ * `{ version: 1, byWorkspace: Record<workspacePath, SetupRunRecord[]>, dismissals? }`.
+ * It holds run metadata and dismissal markers: no transcript, model output, file
  * contents or credentials. The backend stays the source of truth for status
  * and results; a lost or corrupt index is rebuilt by adoption.
  *
@@ -46,8 +47,61 @@ export type SetupRunIndex = Readonly<
 /** The result of reading the stored index. */
 export interface SetupRunIndexRead {
   index: SetupRunIndex;
+  dismissals?: SetupRunDismissal[];
   /** The stored payload was unreadable as a whole and was discarded. */
   corrupt: boolean;
+}
+
+export interface SetupRunDismissal {
+  workspacePath: string;
+  workflow: SetupRunWorkflow;
+  backendRunId: string;
+}
+
+const FRESHNESS_REASONS: readonly AnalysisStatus['reason'][] = [
+  'ok',
+  'no-analysis',
+  'legacy-v3',
+  'incomplete',
+  'workspace-changed',
+  'output-mismatch',
+  'unreadable',
+];
+
+function parseAnalysisFreshness(
+  value: unknown,
+): SetupRunRecord['analysisFreshness'] {
+  if (!isObject(value)) return undefined;
+  const state = value['state'];
+  const reason = FRESHNESS_REASONS.find((item) => item === value['reason']);
+  if (
+    (state === 'fresh' || state === 'stale' || state === 'missing') &&
+    reason
+  ) {
+    return { state, reason };
+  }
+  return undefined;
+}
+
+function parseDismissals(value: unknown): SetupRunDismissal[] {
+  if (!Array.isArray(value)) return [];
+  const dismissals: SetupRunDismissal[] = [];
+  for (const item of value) {
+    if (!isObject(item)) continue;
+    const rawPath = item['workspacePath'];
+    const workspacePath =
+      typeof rawPath === 'string' ? normalizeSetupWorkspacePath(rawPath) : null;
+    const workflow = item['workflow'];
+    const backendRunId = item['backendRunId'];
+    if (
+      workspacePath &&
+      isWorkflow(workflow) &&
+      isOnboardingIdentityValue(backendRunId)
+    ) {
+      dismissals.push({ workspacePath, workflow, backendRunId });
+    }
+  }
+  return dismissals;
 }
 
 const WORKFLOWS: readonly SetupRunWorkflow[] = [
@@ -210,6 +264,20 @@ export function parseSetupRunRecord(
   if (origin !== null) record.origin = origin;
   const error = boundedText(value['error'], MAX_TEXT_LENGTH);
   if (error !== null) record.error = error;
+  const agentsWritten = value['agentsWritten'];
+  if (
+    workflow === 'agent-generation' &&
+    typeof agentsWritten === 'number' &&
+    Number.isSafeInteger(agentsWritten) &&
+    agentsWritten >= 0
+  ) {
+    record.agentsWritten = agentsWritten;
+  }
+  if (workflow === 'analysis') {
+    const freshness = parseAnalysisFreshness(value['analysisFreshness']);
+    if (freshness) record.analysisFreshness = freshness;
+  }
+
   if (workflow === 'agent-generation' && status === 'completed') {
     const handoff = value['guidanceHandoff'];
     const deadline = timestamp(handoff);
@@ -341,11 +409,19 @@ export function readSetupRunIndex(
     }
     if (records.length > 0) index[workspace] = capWorkspaceRuns(records);
   }
-  return { index, corrupt: false };
+  const dismissals = parseDismissals(parsed['dismissals']);
+  return {
+    index,
+    corrupt: false,
+    ...(dismissals.length > 0 ? { dismissals } : {}),
+  };
 }
 
 /** The stored form of `index`: only known record fields, capped per workspace. */
-export function serializeSetupRunIndex(index: SetupRunIndex): string {
+export function serializeSetupRunIndex(
+  index: SetupRunIndex,
+  dismissals: readonly SetupRunDismissal[] = [],
+): string {
   const byWorkspace: Record<string, SetupRunRecord[]> = {};
   for (const [workspace, records] of Object.entries(index)) {
     const kept = capWorkspaceRuns(
@@ -355,16 +431,24 @@ export function serializeSetupRunIndex(index: SetupRunIndex): string {
     );
     if (kept.length > 0) byWorkspace[workspace] = kept;
   }
-  return JSON.stringify({ version: STORAGE_VERSION, byWorkspace });
+  return JSON.stringify({
+    version: STORAGE_VERSION,
+    byWorkspace,
+    ...(dismissals.length > 0 ? { dismissals } : {}),
+  });
 }
 
 /** Write `index`. Returns `false` (with a warning) when storage refuses it. */
 export function writeSetupRunIndex(
   storage: Pick<Storage, 'setItem'>,
   index: SetupRunIndex,
+  dismissals?: readonly SetupRunDismissal[],
 ): boolean {
   try {
-    storage.setItem(SETUP_RUNS_STORAGE_KEY, serializeSetupRunIndex(index));
+    storage.setItem(
+      SETUP_RUNS_STORAGE_KEY,
+      serializeSetupRunIndex(index, dismissals),
+    );
     return true;
   } catch {
     // degradation-audit: optional-capability - a refused storage write keeps Setup runs for the current session.

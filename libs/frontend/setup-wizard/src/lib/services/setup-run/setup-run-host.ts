@@ -7,6 +7,7 @@ import type {
   SetupRunRecord,
   SetupRunStatus,
   SetupRunStep,
+  SetupRunWorkflow,
 } from '../setup-run.types';
 import { SETUP_RUN_POLL_INTERVAL_MS } from './setup-run-poll';
 
@@ -19,7 +20,7 @@ export interface SetupRunReport {
   /** User-facing text only; `null` clears it. */
   error?: string | null;
   handoffTabId?: string;
-  teamBuilder?: { intent: string; installed: string[] };
+  teamBuilder?: NonNullable<SetupRunRecord['teamBuilder']>;
 }
 
 /** Record operations shared by the workflow coordinators. */
@@ -28,6 +29,11 @@ export interface SetupRunRecordHost {
   runsFor(workspacePath: string | null | undefined): StoredSetupRunRecord[];
   workspacePath(): string | null;
   isCancelling(id: string): boolean;
+  wasDismissed(
+    workspace: string,
+    workflow: SetupRunWorkflow,
+    runId: string,
+  ): boolean;
   setCancelling(id: string, on: boolean): void;
   insert(record: SetupRunRecord): void;
   apply(

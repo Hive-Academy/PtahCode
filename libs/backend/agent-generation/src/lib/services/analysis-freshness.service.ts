@@ -69,6 +69,7 @@ export class AnalysisFreshnessService {
       reason: AnalysisStatus['reason'],
       analysisDir: string | null = null,
       analyzedAt: string | null = null,
+      savedRun?: AnalysisStatus['savedRun'],
     ): AnalysisStatus => ({
       state,
       reason,
@@ -76,6 +77,7 @@ export class AnalysisFreshnessService {
       checkedAt,
       analyzedAt,
       ...(sharing ? { sharing } : {}),
+      ...(savedRun ? { savedRun } : {}),
     });
     if (!workspaceRoot) return status('missing', 'no-analysis');
 
@@ -120,11 +122,17 @@ export class AnalysisFreshnessService {
       if ('rejectedDir' in latest)
         return status('stale', 'unreadable', relativeDir(latest.rejectedDir));
       const result = await this.qualify(latest, workspaceRoot);
+      const { manifest } = latest.read;
       return status(
         result.state,
         result.reason,
         relativeDir(latest.dir),
-        latest.read.manifest.analyzedAt,
+        manifest.analyzedAt,
+        {
+          runId: manifest.runId,
+          lifecycle: manifest.lifecycle,
+          updatedAt: manifest.updatedAt,
+        },
       );
     } catch (error) {
       this.logger.warn(

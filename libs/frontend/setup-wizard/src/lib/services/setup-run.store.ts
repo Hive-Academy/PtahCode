@@ -48,6 +48,8 @@ import {
   matchesBinding,
 } from './setup-run/setup-run-binding';
 import { SetupRunBoundCoordinator } from './setup-run/setup-run-bound.coordinator';
+import { SetupRunDismissals } from './setup-run/setup-run-dismissals';
+import { SetupRunSavedAnalysis } from './setup-run/setup-run-saved-analysis';
 import {
   isLive,
   newRunId,
@@ -106,6 +108,7 @@ export class SetupRunStore {
   private readonly injector = inject(Injector);
   private readonly storage = browserStorage();
 
+  private readonly dismissals = new SetupRunDismissals();
   private readonly _index = signal<SetupRunIndex>({});
   private readonly _cancelling = signal<ReadonlySet<string>>(new Set());
 
@@ -151,6 +154,8 @@ export class SetupRunStore {
     runsFor: (workspace) => this.runsFor(workspace),
     workspacePath: this.workspacePath,
     isCancelling: (id) => this.isCancelling(id),
+    wasDismissed: (workspace, workflow, runId) =>
+      this.dismissals.has(workspace, workflow, runId),
     setCancelling: (id, on) => this.setCancelling(id, on),
     insert: (record) => this.insert(record),
     apply: (id, update, correction, finalizationRunId) =>
@@ -172,11 +177,16 @@ export class SetupRunStore {
     // Resolve lazily because the hand-off opens its child through this store.
     () => this.injector.get(GenerationHandoffStore),
   );
+  private readonly savedAnalysis = new SetupRunSavedAnalysis(
+    this.host,
+    this.rpc,
+  );
   private readonly analysis = new SetupRunAnalysisCoordinator(
     this.host,
     this.runner,
     this.wizardState,
     this.rpc,
+    this.savedAnalysis,
   );
   private readonly skillReview = new SetupRunSkillReviewCoordinator(
     this.host,
@@ -191,6 +201,7 @@ export class SetupRunStore {
       ? readSetupRunIndex(this.storage)
       : { index: {}, corrupt: false };
     this._index.set(read.index);
+    this.dismissals.restore(read.dismissals);
     if (read.corrupt) this.scheduleWrite();
 
     effect(() => {
@@ -333,12 +344,20 @@ export class SetupRunStore {
   }
 
   /**
-   * Adopt a backend binding that has no record yet: a push for an unknown
-   * id, or a `blocked` reply naming its `ownerTabId` (R1). Returns the
-   * existing record when there is one.
+   * Adopt a backend owner discovered through a bound workflow command (R1).
+   * Returns the existing record when there is one.
    */
   public adopt(binding: SetupGenerationTabBinding): SetupRunRecord | null {
     return this.adoptBinding(binding, true);
+  }
+
+  /** @internal Adopt a pushed run when it has not been dismissed. */
+  public adoptPushedRun(
+    binding: SetupGenerationRunBinding,
+  ): SetupRunRecord | null {
+    if (!this.get(binding.tabId) && this.dismissals.hasPushedBinding(binding))
+      return null;
+    return this.adopt(binding);
   }
 
   private adoptBinding(
@@ -386,7 +405,7 @@ export class SetupRunStore {
     return this.get(id);
   }
 
-  /** Apply the workflow view's verified state to its current record. */
+  /** @internal Apply the workflow view's verified state to its current record. */
   public reportRun(
     id: string,
     run: SetupGenerationRunState,
@@ -394,6 +413,7 @@ export class SetupRunStore {
     return this.bound.reportRun(id, run);
   }
 
+  /** @internal Bound-run coordination delegate. */
   public startInitial<T>(
     binding: SetupGenerationTabBinding,
     send: () => Promise<T>,
@@ -401,21 +421,35 @@ export class SetupRunStore {
     return this.bound.startInitial(binding, send);
   }
 
+  /** @internal Bound-run coordination delegate. */
   public reporterFor(id: string): (run: SetupGenerationRunState) => void {
     return this.bound.reporterFor(id);
   }
 
+  /** @internal Bound-run coordination delegate. */
   public reportStream(pushed: SetupGenerationRunBinding): boolean {
     return this.bound.reportStream(pushed);
   }
 
+  /** @internal Bound-run coordination delegate. */
   public verifyTerminal(pushed: SetupGenerationRunBinding): Promise<boolean> {
     return this.bound.verifyTerminal(pushed);
   }
 
-  /** Resolve the record carrying the run, including an owner reported by a settled start. */
+  /** @internal Resolve the record carrying the run, including an owner reported by a settled start. */
   public whenStarted(id: string): Promise<SetupRunRecord | null> {
     return this.bound.whenStarted(id);
+  }
+
+  /** @internal Resolve both initial starts and repeats against the backend's owner. */
+  public resolveBlockedStart(
+    binding: SetupGenerationTabBinding,
+    ownerTabId: string,
+  ): Promise<{
+    owner: SetupRunRecord | null;
+    run: SetupGenerationRunState | null;
+  }> {
+    return this.bound.resolveBlockedStart(binding, ownerTabId);
   }
 
   /** The backend binding of a generation or guidance record; else `null`. */
@@ -439,6 +473,7 @@ export class SetupRunStore {
   public dismiss(id: string): boolean {
     const record = this.get(id);
     if (!record || !isTerminalSetupRunStatus(record.status)) return false;
+    this.dismissals.remember(record);
     this.remove(id);
     return true;
   }
@@ -566,6 +601,30 @@ export class SetupRunStore {
     return this.skillReview.reviewSkills(id, options);
   }
 
+  public savedAnalysisError(workspacePath: string | null): string | null {
+    return this.savedAnalysis.errorFor(workspacePath);
+  }
+
+  public isDiscoveringSavedAnalysis(workspacePath: string | null): boolean {
+    return this.savedAnalysis.isDiscovering(workspacePath);
+  }
+
+  public retrySavedAnalysis(workspacePath: string): Promise<void> {
+    return this.savedAnalysis.discover(workspacePath);
+  }
+
+  public hasDismissedGeneration(workspacePath: string | null): boolean {
+    return this.bound.hasDismissedCheckpoint(workspacePath);
+  }
+
+  public reopenDismissedGeneration(
+    workspacePath: string,
+  ): SetupRunRecord | null {
+    if (!sameSetupWorkspacePath(this.workspacePath(), workspacePath))
+      return null;
+    return this.bound.reopenDismissedCheckpoint(workspacePath);
+  }
+
   /** Reconcile the active workspace's records with the backend now. */
   public refresh(): Promise<void> {
     return this.reconcile();
@@ -587,7 +646,7 @@ export class SetupRunStore {
     const sequence = ++this.reconcileSequence;
     const workspace = this.workspacePath();
     if (!workspace) return;
-    const resumable = await this.rpc.getResumableRun();
+    const resumable = await this.rpc.getResumableRun(workspace);
     if (sequence !== this.reconcileSequence) return;
     if (this.workspacePath() !== workspace) return;
     await this.analysis.reconcile(workspace, resumable);
@@ -597,11 +656,12 @@ export class SetupRunStore {
     )
       return;
     this.bound.adoptResumableGeneration(workspace, resumable);
-    await Promise.all(
-      this.runsFor(workspace)
+    await Promise.all([
+      this.savedAnalysis.discover(workspace),
+      ...this.runsFor(workspace)
         .filter((record) => isLive(record))
         .map((record) => this.reconcileRecord(record)),
-    );
+    ]);
   }
 
   private async reconcileRecord(record: SetupRunRecord): Promise<void> {
@@ -624,17 +684,6 @@ export class SetupRunStore {
       case 'analysis':
         return;
     }
-  }
-
-  /** Resolve both initial starts and repeats against the backend's owner. */
-  public resolveBlockedStart(
-    binding: SetupGenerationTabBinding,
-    ownerTabId: string,
-  ): Promise<{
-    owner: SetupRunRecord | null;
-    run: SetupGenerationRunState | null;
-  }> {
-    return this.bound.resolveBlockedStart(binding, ownerTabId);
   }
 
   private apply(
@@ -708,9 +757,7 @@ export class SetupRunStore {
     if (!workspace) return;
     this.forget(id);
     this._index.update((index) => {
-      const rest = (index[workspace] ?? []).filter(
-        (item) => item.id !== id,
-      );
+      const rest = (index[workspace] ?? []).filter((item) => item.id !== id);
       const next: Record<string, readonly SetupRunRecord[]> = { ...index };
       if (rest.length > 0) next[workspace] = rest;
       else delete next[workspace];
@@ -734,7 +781,12 @@ export class SetupRunStore {
     this.writeQueued = true;
     queueMicrotask(() => {
       this.writeQueued = false;
-      if (this.storage) writeSetupRunIndex(this.storage, this._index());
+      if (this.storage)
+        writeSetupRunIndex(
+          this.storage,
+          this._index(),
+          this.dismissals.snapshot(),
+        );
     });
   }
 }

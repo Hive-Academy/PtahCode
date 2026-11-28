@@ -52,6 +52,8 @@ export class SetupGenerationOpenHandler implements MessageHandler {
 
   private async open(workflow: SetupGenerationWorkflow): Promise<void> {
     this.launchNotice.set(null);
+    if (workflow === 'setup-agent-generation' && !this.entry) return;
+
     try {
       const result = await (this.entry
         ? this.entry.openWorkflow(workflow, 'host')

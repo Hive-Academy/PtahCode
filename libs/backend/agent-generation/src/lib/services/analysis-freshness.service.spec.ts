@@ -135,7 +135,7 @@ describe('AnalysisFreshnessService', () => {
   });
 
   it('reports a verified completed v4 run as fresh without writing', async () => {
-    await saveManifest();
+    const manifest = await saveManifest();
     expect(await service.getStatus(ROOT)).toEqual({
       state: 'fresh',
       reason: 'ok',
@@ -143,6 +143,11 @@ describe('AnalysisFreshnessService', () => {
       checkedAt: NOW.toISOString(),
       analyzedAt: NOW.toISOString(),
       sharing: 'shareable',
+      savedRun: {
+        runId: manifest.runId,
+        lifecycle: 'completed',
+        updatedAt: manifest.updatedAt,
+      },
     });
     expectNoWrites();
   });

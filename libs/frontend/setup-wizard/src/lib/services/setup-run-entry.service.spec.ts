@@ -120,22 +120,45 @@ describe('SetupRunEntryService', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ['setup-agent-generation', ['analyze', 'skills']],
-    ['setup-project-prompt', ['guidance']],
-  ] as const)(
-    'opens the %s entry when only terminal records exist',
-    async (workflow, entryPath) => {
-      records.set([
-        { ...agent, status: 'cancelled' },
-        { ...guidance, status: 'failed' },
-      ]);
+  it('declines a new agent-generation start without navigating', async () => {
+    records.set([{ ...agent, status: 'cancelled' }]);
 
-      await TestBed.inject(SETUP_RUN_ENTRY).openWorkflow(workflow, 'host');
+    const result = await TestBed.inject(SETUP_RUN_ENTRY).openWorkflow(
+      'setup-agent-generation',
+      'host',
+    );
 
-      expect(navigateToSurface).toHaveBeenCalledWith('onboarding', entryPath);
-      expect(targetOf).not.toHaveBeenCalled();
-      expect(start).not.toHaveBeenCalled();
-    },
-  );
+    expect(result).toBe('failed');
+    expect(navigateToSurface).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('opens an existing agent-generation run on the live route', async () => {
+    records.set([{ ...agent, status: 'running', step: 'generating' }]);
+
+    await TestBed.inject(SETUP_RUN_ENTRY).openWorkflow(
+      'setup-agent-generation',
+      'host',
+    );
+
+    expect(navigateToSurface).toHaveBeenCalledWith(
+      'onboarding',
+      ['analyze', 'generate'],
+      { queryParams: { tab: agent.id, analysis: 'analysis-1' } },
+    );
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('opens the guidance entry when only terminal records exist', async () => {
+    records.set([{ ...guidance, status: 'failed' }]);
+
+    await TestBed.inject(SETUP_RUN_ENTRY).openWorkflow(
+      'setup-project-prompt',
+      'host',
+    );
+
+    expect(navigateToSurface).toHaveBeenCalledWith('onboarding', ['guidance']);
+    expect(targetOf).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+  });
 });

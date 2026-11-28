@@ -11,6 +11,9 @@ export interface SavedAnalysisMetadata {
   filename: string;
   /** ISO 8601 timestamp of when the analysis was saved */
   savedAt: string;
+  /** Manifest identity and update time, available on hosts that expose recovery metadata. */
+  runId?: string;
+  updatedAt?: string;
   /** Human-readable project type description (from slug) */
   projectType: string;
   /** Number of completed phases */

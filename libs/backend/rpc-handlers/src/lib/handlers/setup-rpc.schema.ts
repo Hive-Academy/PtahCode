@@ -21,10 +21,8 @@ export const WizardDeepAnalyzeParamsSchema = z.object({
   workspacePath,
 });
 
-/** `wizard:get-resumable-run` takes no parameters; unknown keys are dropped. */
-export const WizardGetResumableRunParamsSchema = z.object({});
-/** `wizard:analysis-status` takes no parameters; unknown keys are dropped. */
-export const WizardAnalysisStatusParamsSchema = z.object({});
+export const WizardGetResumableRunParamsSchema = z.object({ workspacePath });
+export const WizardAnalysisStatusParamsSchema = z.object({ workspacePath });
 
 export const WizardRecommendSkillsParamsSchema = z.object({
   analysis: ProjectAnalysisZodSchema,

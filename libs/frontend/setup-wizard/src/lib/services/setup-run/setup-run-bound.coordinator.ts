@@ -1,8 +1,10 @@
+import { signal } from '@angular/core';
 import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type {
   SetupGenerationRunBinding,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
+  ResumableGenerationRun,
   WizardGetResumableRunResponse,
 } from '@ptah-extension/shared';
 import {
@@ -10,6 +12,7 @@ import {
   type SetupRunRecord,
   type SetupRunStatus,
 } from '../setup-run.types';
+import { sameSetupWorkspacePath } from '../setup-run-persistence';
 import type { WizardRpcService } from '../wizard-rpc.service';
 import {
   readBoundState,
@@ -40,6 +43,11 @@ interface GuidanceHandoffScheduler {
 
 export class SetupRunBoundCoordinator {
   private readonly poll: SetupRunPoll;
+
+  private readonly checkpoint = signal<{
+    workspace: string;
+    generation: ResumableGenerationRun;
+  } | null>(null);
 
   public constructor(
     private readonly host: SetupRunRecordHost,
@@ -209,24 +217,86 @@ export class SetupRunBoundCoordinator {
     resumable: WizardGetResumableRunResponse,
   ): void {
     const generation = resumable.generation;
+    if (!generation || !isOnboardingIdentityValue(generation.runId)) {
+      this.checkpoint.set(null);
+      return;
+    }
+    this.checkpoint.set({ workspace, generation });
+
+    const records = this.host.runsFor(workspace);
+    const existing = records.find(
+      (record) =>
+        record.workflow === 'agent-generation' &&
+        record.backendRunId === generation.runId,
+    );
+    const agentsWritten = this.agentsWritten(generation);
+    if (existing && agentsWritten !== undefined) {
+      this.host.patch(existing.id, (record) =>
+        record.agentsWritten === agentsWritten
+          ? record
+          : { ...record, agentsWritten },
+      );
+    }
     if (
-      !generation ||
+      existing ||
       generation.lifecycle === 'completed' ||
-      !isOnboardingIdentityValue(generation.runId) ||
-      this.host
+      this.host.wasDismissed(workspace, 'agent-generation', generation.runId) ||
+      records.some(
+        (record) => record.workflow === 'agent-generation' && isLive(record),
+      )
+    )
+      return;
+
+    this.insertCheckpoint(workspace, generation, false);
+  }
+
+  public hasDismissedCheckpoint(workspace: string | null): boolean {
+    const checkpoint = this.checkpoint();
+    return (
+      workspace !== null &&
+      checkpoint !== null &&
+      sameSetupWorkspacePath(workspace, checkpoint.workspace) &&
+      checkpoint.generation.lifecycle !== 'completed' &&
+      !this.host
         .runsFor(workspace)
         .some(
           (record) =>
             record.workflow === 'agent-generation' &&
-            (record.backendRunId === generation.runId || isLive(record)),
-        )
-    ) {
-      return;
-    }
+            (record.backendRunId === checkpoint.generation.runId ||
+              isLive(record)),
+        ) &&
+      this.host.wasDismissed(
+        workspace,
+        'agent-generation',
+        checkpoint.generation.runId,
+      )
+    );
+  }
+
+  /** Explicitly reopen the saved checkpoint on its existing Resume page. */
+  public reopenDismissedCheckpoint(workspace: string): SetupRunRecord | null {
+    const checkpoint = this.checkpoint();
+    if (!checkpoint || !this.hasDismissedCheckpoint(workspace)) return null;
+    return this.insertCheckpoint(workspace, checkpoint.generation, true);
+  }
+
+  private agentsWritten(
+    generation: ResumableGenerationRun,
+  ): number | undefined {
+    return generation.agents?.filter((agent) => agent.status === 'written')
+      .length;
+  }
+
+  private insertCheckpoint(
+    workspace: string,
+    generation: ResumableGenerationRun,
+    opened: boolean,
+  ): SetupRunRecord {
     const status: SetupRunStatus =
-      generation.lifecycle === 'running' ? 'running' : 'interrupted';
+      !opened && generation.lifecycle === 'running' ? 'running' : 'interrupted';
+    const agentsWritten = this.agentsWritten(generation);
     const now = Date.now();
-    this.host.insert({
+    const record: SetupRunRecord = {
       id: newRunId(),
       workspacePath: workspace,
       workflow: 'agent-generation',
@@ -235,10 +305,13 @@ export class SetupRunBoundCoordinator {
       backendRunId: generation.runId,
       analysisRunId: null,
       parentId: null,
-      unseen: status === 'interrupted',
+      unseen: !opened && status === 'interrupted',
       createdAt: now,
       updatedAt: now,
-    });
+      ...(agentsWritten !== undefined ? { agentsWritten } : {}),
+    };
+    this.host.insert(record);
+    return record;
   }
 
   public async reconcile(

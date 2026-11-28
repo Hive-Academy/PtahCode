@@ -469,6 +469,42 @@ describe('SetupRpcHandlers', () => {
       expect(getStatus).toHaveBeenCalledWith(null);
     });
 
+    it('reads the explicitly selected open workspace', async () => {
+      const selected = '/selected/workspace';
+      const h = makeHarness({ workspaceFolders: [WORKSPACE, selected] });
+      const getStatus = jest.fn().mockResolvedValue(missing);
+      const findLatestResumableRun = jest.fn().mockResolvedValue(null);
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
+        {
+          getStatus,
+        },
+      );
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        findLatestResumableRun,
+      });
+      h.handlers.register();
+
+      await callRaw(h, 'wizard:analysis-status', { workspacePath: selected });
+      await callRaw(h, 'wizard:get-resumable-run', { workspacePath: selected });
+      expect(getStatus).toHaveBeenCalledWith(selected);
+      expect(findLatestResumableRun).toHaveBeenCalledWith(selected);
+    });
+
+    it.each(['wizard:analysis-status', 'wizard:get-resumable-run'] as const)(
+      'rejects an out-of-workspace path on %s',
+      async (method) => {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE] });
+        h.handlers.register();
+
+        const response = await callRaw(h, method, {
+          workspacePath: '/not-open',
+        });
+        expect(response.success).toBe(false);
+        expect(response.errorCode).toBe('UNAUTHORIZED_WORKSPACE');
+      },
+    );
+
     it('returns the service result unchanged and does not mutate storage', async () => {
       const h = makeHarness();
       const status = {
@@ -2086,7 +2122,10 @@ describe('SetupRpcHandlers', () => {
       h.handlers.register();
 
       expect(
-        await call(h, 'wizard:load-analysis', { filename: 'run-1', workspacePath }),
+        await call(h, 'wizard:load-analysis', {
+          filename: 'run-1',
+          workspacePath,
+        }),
       ).toEqual(loaded);
       expect(loadMultiPhase).toHaveBeenCalledWith(workspacePath, 'run-1');
       expect(loadByRunId).toHaveBeenCalledTimes(1);
@@ -2098,10 +2137,15 @@ describe('SetupRpcHandlers', () => {
       async (filename) => {
         const h = makeHarness();
         const loadByRunId = jest.fn();
-        h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
-          loadMultiPhase: jest.fn().mockRejectedValue(new Error('Missing slug')),
-          loadByRunId,
-        });
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            loadMultiPhase: jest
+              .fn()
+              .mockRejectedValue(new Error('Missing slug')),
+            loadByRunId,
+          },
+        );
         h.handlers.register();
 
         expect(

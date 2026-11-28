@@ -59,6 +59,13 @@ describe('SetupRunsListComponent', () => {
         }
         return false;
       }),
+      savedAnalysisError: jest.fn(
+        (_path: string | null): string | null => null,
+      ),
+      isDiscoveringSavedAnalysis: jest.fn(() => false),
+      retrySavedAnalysis: jest.fn().mockResolvedValue(undefined),
+      hasDismissedGeneration: jest.fn(() => false),
+      reopenDismissedGeneration: jest.fn(),
       refresh: jest.fn(),
     };
   }
@@ -107,6 +114,79 @@ describe('SetupRunsListComponent', () => {
   });
 
   afterEach(() => TestBed.resetTestingModule());
+
+  it('renders a discovery failure without rows, and retries without reloading the runs list', () => {
+    runs.savedAnalysisError.mockImplementation((path) =>
+      path === '/workspace'
+        ? 'Could not check for saved workspace analyses.'
+        : null,
+    );
+    render();
+    expect(el().querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not check',
+    );
+    expect(byTestId('setup-runs-list')).toBeNull();
+    byTestId<HTMLButtonElement>('saved-analysis-retry')?.click();
+    expect(runs.retrySavedAnalysis).toHaveBeenCalledWith('/workspace');
+    expect(runs.refresh).not.toHaveBeenCalled();
+
+    setRecords([record({ status: 'completed', analysisRunId: 'run-1' })]);
+    fixture.detectChanges();
+    expect(byTestId('setup-runs-list')).not.toBeNull();
+    expect(byTestId('saved-analysis-retry')).not.toBeNull();
+
+    workspacePath.set('/other');
+    fixture.detectChanges();
+    expect(byTestId('saved-analysis-retry')).toBeNull();
+  });
+
+  it('shows checkpoint progress and the saved analysis freshness reason', () => {
+    setRecords([
+      record({
+        id: 'generation',
+        workflow: 'agent-generation',
+        status: 'interrupted',
+        step: 'generating',
+        agentsWritten: 1,
+      }),
+      record({
+        id: 'incomplete',
+        status: 'interrupted',
+        analysisFreshness: { state: 'stale', reason: 'incomplete' },
+      }),
+    ]);
+    render();
+    expect(rowById('generation')?.textContent).toContain('1 agent written');
+    expect(rowById('incomplete')?.textContent).toContain(
+      'Saved analysis is incomplete.',
+    );
+  });
+
+  it('opens a dismissed generation on its existing Resume route only after the user acts', () => {
+    runs.hasDismissedGeneration.mockReturnValue(true);
+    runs.reopenDismissedGeneration.mockReturnValue(
+      record({
+        id: 'reopened',
+        workflow: 'agent-generation',
+        status: 'interrupted',
+        step: 'generating',
+      }),
+    );
+    const navigate = jest
+      .spyOn(TestBed.inject(Router), 'navigate')
+      .mockResolvedValue(true);
+    render();
+    expect(runs.reopenDismissedGeneration).not.toHaveBeenCalled();
+    const action = Array.from(el().querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Open saved agent generation'),
+    );
+    action?.click();
+    expect(runs.reopenDismissedGeneration).toHaveBeenCalledWith('/workspace');
+    expect(navigate).toHaveBeenCalledWith(
+      ['/onboarding', 'analyze', 'generate'],
+      { queryParams: { tab: 'reopened' } },
+    );
+  });
 
   it('renders nothing without runs and never refreshes the store', () => {
     render();

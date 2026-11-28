@@ -2,7 +2,6 @@ import {
   ONBOARDING_QUERY,
   isOnboardingIdentityValue,
   onboardingGenerationBinding,
-  onboardingGenerationTarget,
   onboardingHarnessTarget,
   onboardingReadyTarget,
   parseOnboardingReadyArea,
@@ -31,20 +30,6 @@ describe('onboarding routes', () => {
       ['null', null],
     ])('rejects %s', (_label, value) => {
       expect(isOnboardingIdentityValue(value)).toBe(false);
-    });
-  });
-
-  describe('onboardingGenerationTarget', () => {
-    it('sends legacy agent generation to Review skills with the tab', () => {
-      expect(
-        onboardingGenerationTarget('setup-agent-generation', 'tab-1'),
-      ).toEqual({ subPath: ['analyze', 'skills'], queryParams: { tab: 'tab-1' } });
-    });
-
-    it('sends project guidance to the guidance-only entry with the tab', () => {
-      expect(onboardingGenerationTarget('setup-project-prompt', 'tab-2')).toEqual(
-        { subPath: ['guidance'], queryParams: { tab: 'tab-2' } },
-      );
     });
   });
 

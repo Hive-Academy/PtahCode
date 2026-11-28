@@ -178,9 +178,17 @@ export interface AnalysisStatus {
   analysisDir: string | null;
   checkedAt: string;
   analyzedAt: string | null;
+  /** Identity of the manifest qualified by this status, when readable. */
+  savedRun?: {
+    runId: string;
+    lifecycle: MultiPhaseManifestV4['lifecycle'];
+    updatedAt: string;
+  };
 }
 
-export type WizardAnalysisStatusParams = Record<string, never>;
+export interface WizardAnalysisStatusParams {
+  workspacePath?: string;
+}
 export type WizardAnalysisStatusResponse = AnalysisStatus;
 
 export interface PhaseResultV4 {
@@ -357,7 +365,9 @@ export interface WizardSubmitSelectionParams {
 }
 
 /** Parameters for the read-only resumable-run discovery RPC method. */
-export type WizardGetResumableRunParams = Record<string, never>;
+export interface WizardGetResumableRunParams {
+  workspacePath?: string;
+}
 
 /** A checkpoint agent record returned to the UI for generation recovery. */
 export interface ResumableGenerationAgent {

@@ -121,7 +121,7 @@ export class GenerationRunEventAdapter implements MessageHandler {
 
   public handleMessage(message: { type: string; payload?: unknown }): void {
     const push = readPush(message.type, message.payload);
-    if (!push || !this.runs.adopt(push.binding)) return;
+    if (!push || !this.runs.adoptPushedRun(push.binding)) return;
     const { binding, terminal } = push;
     if (terminal) void this.onTerminal(binding);
     else if (this.runs.reportStream(binding))

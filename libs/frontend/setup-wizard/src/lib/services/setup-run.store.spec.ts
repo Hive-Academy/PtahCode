@@ -141,6 +141,9 @@ describe('SetupRunStore', () => {
       getBoundRunState: jest.fn().mockResolvedValue(null),
       cancelBoundRun: jest.fn().mockResolvedValue(true),
       cancelAnalysis: jest.fn().mockResolvedValue(undefined),
+      getAnalysisStatus: jest
+        .fn()
+        .mockResolvedValue({ state: 'missing', reason: 'no-analysis' }),
       listAnalyses: jest.fn().mockResolvedValue([]),
       loadAnalysis: jest.fn(),
       startBoundAgents: jest
@@ -278,7 +281,8 @@ describe('SetupRunStore', () => {
       effect(() => {
         const run = workflow.run();
         if (run?.binding.tabId !== guidanceBinding.tabId) return;
-        if (++adoptions > 3) throw new Error('Guidance adoption did not settle');
+        if (++adoptions > 3)
+          throw new Error('Guidance adoption did not settle');
         guidance.adopt(run);
       }),
     );
@@ -291,7 +295,10 @@ describe('SetupRunStore', () => {
     jest.spyOn(guidance, 'refresh').mockResolvedValueOnce(undefined);
     guidance.bind(guidanceBinding);
     await flush();
-    expect(rpc['getBoundRunState']).toHaveBeenCalledWith(guidanceBinding, runId);
+    expect(rpc['getBoundRunState']).toHaveBeenCalledWith(
+      guidanceBinding,
+      runId,
+    );
     expect(guidance.status()).toBe('running');
     expect(runs.get(guidanceBinding.tabId)?.status).toBe('running');
 
@@ -556,6 +563,44 @@ describe('SetupRunStore', () => {
       expect(rpc['loadAnalysis']).toHaveBeenLastCalledWith('resumed', WS);
     });
 
+    it('uses listed manifest identities and skips an unreadable legacy candidate', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      rpc['getResumableRun'].mockResolvedValue({
+        analysisActive: false,
+        analysis: null,
+        generation: null,
+      });
+      const updatedAt = new Date().toISOString();
+      rpc['listAnalyses'].mockResolvedValue([
+        { filename: 'unreadable', lifecycle: 'completed' },
+        {
+          filename: 'known',
+          lifecycle: 'completed',
+          runId: 'an-known',
+          updatedAt,
+        },
+      ]);
+      rpc['loadAnalysis'].mockRejectedValue(new Error('private filename'));
+      const warn = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+
+      try {
+        const store = await create();
+        expect(store.get('setup-a1')).toMatchObject({
+          status: 'completed',
+          analysisRunId: 'an-known',
+        });
+        expect(rpc['loadAnalysis']).toHaveBeenCalledTimes(1);
+        expect(rpc['loadAnalysis']).toHaveBeenCalledWith('unreadable', WS);
+        expect(warn).toHaveBeenCalledWith(
+          '[setup-run-analysis] A saved analysis could not be read during recovery.',
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
     it('recovers a recent saved result when the inactive backend returns no resumable manifest', async () => {
       seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
       rpc['getResumableRun'].mockResolvedValue({
@@ -729,6 +774,218 @@ describe('SetupRunStore', () => {
       );
       const store = await create();
       expect(store.get('setup-t1')?.status).toBe('needs-input');
+    });
+  });
+
+  describe('saved analysis discovery', () => {
+    const saved = {
+      state: 'stale',
+      reason: 'workspace-changed',
+      analyzedAt: '2026-11-26T10:00:00.000Z',
+      savedRun: {
+        runId: 'analysis-on-disk',
+        lifecycle: 'completed',
+        updatedAt: '2026-11-26T10:10:00.000Z',
+      },
+    };
+
+    it('adopts a completed disk analysis once per workspace and opens its skill review', async () => {
+      rpc['getAnalysisStatus'].mockResolvedValue(saved);
+      const store = await create();
+      const [discovered] = store.runs();
+      expect(discovered).toMatchObject({
+        workflow: 'analysis',
+        status: 'completed',
+        analysisRunId: 'analysis-on-disk',
+        analysisFreshness: { state: 'stale', reason: 'workspace-changed' },
+      });
+      expect(store.targetOf(discovered)).toEqual({
+        subPath: ['analyze', 'skills'],
+        queryParams: { tab: discovered.id, analysis: 'analysis-on-disk' },
+      });
+      expect(rpc['loadAnalysis']).not.toHaveBeenCalled();
+      await store.refresh();
+      expect(store.runs()).toEqual([discovered]);
+
+      workspace.set(OTHER_WS);
+      await flush();
+      expect(store.runs()[0].id).not.toBe(discovered.id);
+      expect(rpc['getAnalysisStatus']).toHaveBeenLastCalledWith(OTHER_WS);
+    });
+
+    it('surfaces initial failure, retains cached data on later failure, and retries per workspace', async () => {
+      rpc['getAnalysisStatus'].mockRejectedValue(new Error('private filename'));
+      const store = await create();
+      expect(store.runs()).toEqual([]);
+      expect(store.savedAnalysisError(WS)).toBe(
+        'Could not check for saved workspace analyses.',
+      );
+      expect(store.savedAnalysisError(OTHER_WS)).toBeNull();
+
+      rpc['getAnalysisStatus'].mockResolvedValue(saved);
+      const retry = store.retrySavedAnalysis(WS);
+      expect(store.isDiscoveringSavedAnalysis(WS)).toBe(true);
+      expect(store.retrySavedAnalysis(WS)).toBe(retry);
+      await retry;
+      expect(store.savedAnalysisError(WS)).toBeNull();
+      expect(store.isDiscoveringSavedAnalysis(WS)).toBe(false);
+
+      const [discovered] = store.runs();
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        ...saved,
+        reason: 'unreadable',
+      });
+      await store.refresh();
+      expect(store.savedAnalysisError(WS)).toBeTruthy();
+      expect(store.runs()).toEqual([discovered]);
+
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        ...saved,
+        state: 'fresh',
+        reason: 'ok',
+      });
+      await store.retrySavedAnalysis(WS);
+      expect(store.savedAnalysisError(WS)).toBeNull();
+      expect(store.get(discovered.id)?.analysisFreshness).toEqual({
+        state: 'fresh',
+        reason: 'ok',
+      });
+    });
+
+    it('attaches incomplete freshness to its checkpoint and discovers the older completed analysis', async () => {
+      rpc['getResumableRun'].mockResolvedValue({
+        analysis: {
+          manifest: { runId: 'incomplete-analysis', lifecycle: 'paused' },
+        },
+        generation: null,
+        analysisActive: false,
+      });
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        ...saved,
+        reason: 'incomplete',
+        savedRun: {
+          ...saved.savedRun,
+          runId: 'incomplete-analysis',
+          lifecycle: 'paused',
+        },
+      });
+      rpc['listAnalyses'].mockResolvedValue([
+        {
+          runId: 'analysis-on-disk',
+          lifecycle: 'completed',
+          savedAt: saved.analyzedAt,
+        },
+      ]);
+      const store = await create();
+      expect(store.runs()).toMatchObject([
+        {
+          analysisRunId: 'incomplete-analysis',
+          status: 'interrupted',
+          analysisFreshness: { state: 'stale', reason: 'incomplete' },
+        },
+        { analysisRunId: 'analysis-on-disk', status: 'completed' },
+      ]);
+      expect(store.runs()[1].analysisFreshness).toBeUndefined();
+      expect(rpc['listAnalyses']).toHaveBeenCalledWith({
+        workspacePath: WS,
+        throwOnError: true,
+      });
+
+      expect(store.dismiss(store.runs()[0].id)).toBe(true);
+      expect(store.dismiss(store.runs()[0].id)).toBe(true);
+      await store.refresh();
+      expect(store.runs()).toEqual([]);
+    });
+  });
+
+  describe('checkpoint dismissal', () => {
+    it('survives a workspace switch and reload, while explicit generation resume still works', async () => {
+      const checkpoint = {
+        analysis: null,
+        generation: {
+          runId: 'gen-1',
+          lifecycle: 'paused',
+          agents: [
+            { status: 'written' },
+            { status: 'failed' },
+            { status: 'written' },
+          ],
+        },
+      };
+      rpc['getResumableRun'].mockResolvedValue(checkpoint);
+      let store = await create();
+      const [adopted] = store.runs();
+      const canReopen = computed(() => store.hasDismissedGeneration(WS));
+      expect(canReopen()).toBe(false);
+      expect(adopted).toMatchObject({
+        status: 'interrupted',
+        agentsWritten: 2,
+      });
+      expect(store.dismiss(adopted.id)).toBe(true);
+      expect(canReopen()).toBe(true);
+      workspace.set(OTHER_WS);
+      await flush();
+      expect(store.runs()).toHaveLength(1);
+
+      workspace.set(WS);
+      await flush();
+      expect(store.runs()).toEqual([]);
+      TestBed.resetTestingModule();
+      configureProviders();
+      store = await create();
+      expect(store.runs()).toEqual([]);
+      expect(store.hasDismissedGeneration(WS)).toBe(true);
+      expect(store.reopenDismissedGeneration(OTHER_WS)).toBeNull();
+
+      const reopened = store.reopenDismissedGeneration(WS);
+      expect(reopened).toMatchObject({
+        backendRunId: 'gen-1',
+        status: 'interrupted',
+        unseen: false,
+        agentsWritten: 2,
+      });
+      expect(store.hasDismissedGeneration(WS)).toBe(false);
+      if (!reopened) throw new Error('Expected a reopened generation record');
+      await store.retry(reopened.id);
+      expect(rpc['startBoundAgents']).toHaveBeenCalledWith(
+        expect.objectContaining({ tabId: reopened.id, workspacePath: WS }),
+        [],
+        true,
+      );
+    });
+  });
+
+  it('retains explicitly reported team builder recovery fields through later updates and reload', async () => {
+    let store = await create();
+    const run = store.start('team-builder', WS);
+    if (!run) throw new Error('Expected a Team Builder record');
+    const selectedIds = ['owner/agent'];
+    store.report(run.id, {
+      teamBuilder: {
+        intent: 'Build the team',
+        installed: [],
+        selectedIds,
+        ownerDecision: null,
+        installCompleted: false,
+        hadAttachments: true,
+      },
+    });
+    selectedIds.push('changed-after-report');
+    store.report(run.id, {
+      teamBuilder: { intent: 'Build the team', installed: ['owner/agent'] },
+    });
+    await flush();
+    TestBed.resetTestingModule();
+    configureProviders();
+    store = await create();
+
+    expect(store.get(run.id)?.teamBuilder).toEqual({
+      intent: 'Build the team',
+      installed: ['owner/agent'],
+      selectedIds: ['owner/agent'],
+      ownerDecision: null,
+      installCompleted: false,
+      hadAttachments: true,
     });
   });
 
@@ -1122,7 +1379,10 @@ describe('SetupRunStore', () => {
 
       store.report(run.id, { status: 'completed' });
       expect(store.runsFor(alias)).toEqual([
-        expect.objectContaining({ status: 'completed', workspacePath: nativePath }),
+        expect.objectContaining({
+          status: 'completed',
+          workspacePath: nativePath,
+        }),
       ]);
       expect(store.dismiss(run.id)).toBe(true);
       expect(store.runsFor(nativePath)).toEqual([]);

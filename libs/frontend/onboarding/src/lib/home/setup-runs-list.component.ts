@@ -67,6 +67,30 @@ function startedAtLabel(createdAt: number): string {
 }
 
 function progressOf(record: SetupRunRecord): string | null {
+  if (
+    record.workflow === 'agent-generation' &&
+    record.agentsWritten !== undefined
+  ) {
+    const count = record.agentsWritten;
+    return `${count} ${count === 1 ? 'agent' : 'agents'} written`;
+  }
+  if (
+    record.workflow === 'analysis' &&
+    record.analysisFreshness?.state === 'stale'
+  ) {
+    switch (record.analysisFreshness.reason) {
+      case 'incomplete':
+        return 'Saved analysis is incomplete.';
+      case 'workspace-changed':
+        return 'Saved analysis is stale because the workspace changed.';
+      case 'output-mismatch':
+        return 'Saved analysis is stale because its output changed.';
+      case 'legacy-v3':
+        return 'Saved analysis is stale because it uses an older format.';
+      default:
+        return 'Saved analysis is stale.';
+    }
+  }
   if (record.workflow === 'skill-review' && record.selection) {
     const count = record.selection.skillIds.length;
     return `${count} ${count === 1 ? 'skill' : 'skills'} selected`;
@@ -111,6 +135,24 @@ interface SetupRunRow {
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
+    @if (discoveryError(); as error) {
+      <div
+        class="mb-3 flex flex-wrap items-center gap-3 rounded-xl border border-base-300 px-4 py-3"
+      >
+        <p class="text-sm text-state-err" role="alert">{{ error }}</p>
+        <button
+          ptahButton
+          type="button"
+          variant="outline"
+          size="xs"
+          data-testid="saved-analysis-retry"
+          [disabled]="discovering()"
+          (click)="retryDiscovery()"
+        >
+          {{ discovering() ? 'Retrying…' : 'Retry' }}
+        </button>
+      </div>
+    }
     @if (rows().length > 0) {
       <ul
         class="grid gap-3"
@@ -191,6 +233,18 @@ interface SetupRunRow {
         </button>
       }
     }
+    @if (hasDismissedGeneration()) {
+      <button
+        ptahButton
+        type="button"
+        variant="link"
+        size="xs"
+        class="mt-2"
+        (click)="reopenGeneration()"
+      >
+        Open saved agent generation
+      </button>
+    }
   `,
 })
 export class SetupRunsListComponent {
@@ -207,6 +261,33 @@ export class SetupRunsListComponent {
     source: this.workspace.activePath,
     computation: () => false,
   });
+
+  private readonly readyWorkspace = computed(() =>
+    this.workspace.readyForActivePath() ? this.workspace.activePath() : null,
+  );
+
+  protected readonly discoveryError = computed(() =>
+    this.runs.savedAnalysisError(this.readyWorkspace()),
+  );
+
+  protected readonly discovering = computed(() =>
+    this.runs.isDiscoveringSavedAnalysis(this.readyWorkspace()),
+  );
+
+  protected readonly hasDismissedGeneration = computed(() =>
+    this.runs.hasDismissedGeneration(this.readyWorkspace()),
+  );
+
+  protected retryDiscovery(): void {
+    const workspace = this.readyWorkspace();
+    if (workspace) void this.runs.retrySavedAnalysis(workspace);
+  }
+
+  protected reopenGeneration(): void {
+    const workspace = this.readyWorkspace();
+    const record = workspace && this.runs.reopenDismissedGeneration(workspace);
+    if (record) this.navigateToRun(record);
+  }
 
   /** The rows of the active workspace; empty while no folder is resolved. */
   protected readonly rows = computed<readonly SetupRunRow[]>(() => {
@@ -226,7 +307,11 @@ export class SetupRunsListComponent {
   /** Open a run at its step target; opening marks it seen. */
   protected open(row: SetupRunRow): void {
     this.runs.markSeen(row.record.id);
-    const link = setupRunStepLink(row.record);
+    this.navigateToRun(row.record);
+  }
+
+  private navigateToRun(record: SetupRunRecord): void {
+    const link = setupRunStepLink(record);
     void this.router.navigate([...link.commands], {
       queryParams: { ...link.queryParams },
     });

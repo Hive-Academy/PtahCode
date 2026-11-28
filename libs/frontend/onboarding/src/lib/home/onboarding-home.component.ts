@@ -88,6 +88,7 @@ interface StatusChip {
           />
         </span>
         <h1
+          #homeTitle
           id="onboarding-home-title"
           tabindex="-1"
           class="text-[1.7rem] font-semibold leading-tight tracking-tight outline-none max-[720px]:text-[1.35rem]"
@@ -111,7 +112,7 @@ interface StatusChip {
 
       <ptah-setup-runs-list
         class="mt-5 block"
-        (lastRunDismissed)="skipButton.focus()"
+        (lastRunDismissed)="homeTitle.focus()"
       />
 
       @if (status.workspaceNotOpen()) {
@@ -302,7 +303,6 @@ interface StatusChip {
           }
         </span>
         <button
-          #skipButton
           ptahButton
           variant="ghost"
           type="button"

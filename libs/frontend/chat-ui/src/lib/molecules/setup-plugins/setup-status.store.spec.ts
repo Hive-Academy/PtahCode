@@ -106,17 +106,20 @@ describe('SetupStatusStore', () => {
     mount();
   });
 
-  it('counts only confirmed skills, scan and agents over three', async () => {
+  it('excludes agent configuration from readiness', async () => {
     TestBed.flushEffects();
     expect(store.readyCount()).toBeNull();
     await store.refresh();
     loaded.set(true);
     enabled.set(true);
     expect(store.readyCount()).toBe(2);
-    expect(store.allReady()).toBe(false);
+    expect(store.allReady()).toBe(true);
+    expect(store.agentsReady()).toBe(false);
+    expect(store.nextAction()).toBeNull();
     statusData = { ...status, isConfigured: true, agentCount: 2 };
     await store.refresh();
-    expect(store.readyCount()).toBe(3);
+    expect(store.agentsReady()).toBe(true);
+    expect(store.readyCount()).toBe(2);
     expect(store.allReady()).toBe(true);
     expect(store.nextAction()).toBeNull();
   });
@@ -253,7 +256,7 @@ describe('SetupStatusStore', () => {
     expect(store.scanReady()).toBe(false);
   });
 
-  it('maps the next action: first run, then Skills, Scan, Agents in order', async () => {
+  it('offers only actionable Skills and Scan steps', async () => {
     // Settle the mount read first, so each row below starts its own read.
     TestBed.flushEffects();
     await store.refresh();
@@ -262,10 +265,10 @@ describe('SetupStatusStore', () => {
       [false, false, false, 'run-setup'],
       [false, true, false, 'open-library'],
       [false, true, true, 'open-library'],
-      [false, false, true, 'open-library'],
+      [false, false, true, 'run-setup'],
       [true, false, false, 'run-setup'],
       [true, false, true, 'run-setup'],
-      [true, true, false, 'generate-agents'],
+      [true, true, false, null],
       [true, true, true, null],
     ];
     for (const [skills, scan, agents, expected] of matrix) {
@@ -280,7 +283,7 @@ describe('SetupStatusStore', () => {
         expected,
       ]);
       expect(store.readyCount()).toBe(
-        [skills, scan, agents].filter(Boolean).length,
+        [skills, scan].filter(Boolean).length,
       );
     }
   });
@@ -357,6 +360,8 @@ describe('SetupStatusStore', () => {
     mount();
     TestBed.flushEffects();
     await store.launchGeneration('setup-agent-generation');
+    expect(surfaceRouter.navigateToSurface).not.toHaveBeenCalled();
+    await store.launchGeneration('setup-project-prompt');
     expect(entry.openWorkflow).not.toHaveBeenCalled();
     expect(surfaceRouter.navigateToSurface).toHaveBeenCalledWith('onboarding');
     expect(store.launchError()).toBeNull();
@@ -477,7 +482,8 @@ describe('SetupStatusStore', () => {
       data: { ...status, isConfigured: true, agentCount: 1 },
     });
     await pending;
-    expect(store.readyCount()).toBe(3);
+    expect(store.agentsReady()).toBe(true);
+    expect(store.readyCount()).toBe(2);
   });
 
   it('dedupes simultaneous remount refreshes', async () => {

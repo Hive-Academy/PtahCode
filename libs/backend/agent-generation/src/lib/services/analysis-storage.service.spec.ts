@@ -1220,7 +1220,11 @@ describe('AnalysisStorageService', () => {
 
       expect(items.map((i) => i.filename)).toEqual(['full', 'partial']);
       expect(items[0].lifecycle).toBe('completed');
-      expect(items[1].phaseCount).toBe(3);
+      expect(items[1]).toMatchObject({
+        phaseCount: 3,
+        runId: partial.runId,
+        updatedAt: partial.updatedAt,
+      });
       expect(items[1].lifecycle).toBe('failed');
     });
 

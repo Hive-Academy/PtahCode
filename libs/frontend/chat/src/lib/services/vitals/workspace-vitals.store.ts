@@ -96,7 +96,6 @@ interface IndexingRead {
 const ACTION_LABELS: Readonly<Record<SetupNextAction, string>> = {
   'open-library': 'Open Library',
   'run-setup': 'Run setup',
-  'generate-agents': 'Generate agents',
 };
 
 function isSetupNextAction(id: string): id is SetupNextAction {
@@ -284,7 +283,6 @@ export class WorkspaceVitalsStore {
       checks: [
         { id: 'skills', label: 'Skills', ready: this.setup.skillsReady() },
         { id: 'scan', label: 'Project scan', ready: this.setup.scanReady() },
-        { id: 'agents', label: 'Agents', ready: this.setup.agentsReady() },
       ],
       action: next === null ? null : { id: next, label: ACTION_LABELS[next] },
       allReady: this.setup.allReady(),
@@ -386,9 +384,6 @@ export class WorkspaceVitalsStore {
         return;
       case 'run-setup':
         await this.setup.launchWizard();
-        return;
-      case 'generate-agents':
-        await this.setup.launchGeneration('setup-agent-generation');
         return;
     }
   }

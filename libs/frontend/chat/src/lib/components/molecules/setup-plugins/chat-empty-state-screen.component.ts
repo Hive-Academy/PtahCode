@@ -186,7 +186,6 @@ export class ChatEmptyStateViewComponent {
   protected readonly checks = computed<readonly ReadinessCheck[]>(() => [
     { id: 'skills', label: 'Skills', ready: this.setup.skillsReady() },
     { id: 'scan', label: 'Project scan', ready: this.setup.scanReady() },
-    { id: 'agents', label: 'Agents', ready: this.setup.agentsReady() },
   ]);
   protected readonly readinessAction = computed(() => {
     const id = this.setup.nextAction();
@@ -194,7 +193,6 @@ export class ChatEmptyStateViewComponent {
     const labels = {
       'open-library': 'Enable skills',
       'run-setup': 'Set up workspace',
-      'generate-agents': 'Generate agents',
     };
     return { id, label: labels[id] };
   });
@@ -215,7 +213,5 @@ export class ChatEmptyStateViewComponent {
     if (id === 'open-library')
       this.appState.openMarketplace({ page: 'skills', source: 'ptah-plugins' });
     else if (id === 'run-setup') await this.setup.launchWizard();
-    else if (id === 'generate-agents')
-      await this.setup.launchGeneration('setup-agent-generation');
   }
 }

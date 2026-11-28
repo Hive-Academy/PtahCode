@@ -1,3 +1,5 @@
+import type { AnalysisStatus } from '@ptah-extension/shared';
+
 /**
  * Setup run records (TASK_2026_2330).
  *
@@ -80,6 +82,10 @@ export interface SetupRunRecord {
   parentId: string | null;
   /** The caller that started the run (for example a chat-side launcher). */
   origin?: string;
+  /** Agent generation only: files written according to its checkpoint. */
+  agentsWritten?: number;
+  /** Analysis only: latest observed freshness for this saved run. */
+  analysisFreshness?: Pick<AnalysisStatus, 'state' | 'reason'>;
   /** Skill review only: the saved selection. */
   selection?: { skillIds: string[] };
   /** Team builder only. */

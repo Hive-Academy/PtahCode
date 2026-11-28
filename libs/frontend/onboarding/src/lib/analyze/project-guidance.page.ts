@@ -515,7 +515,7 @@ export class ProjectGuidancePage implements OnInit {
     if (state === 'idle') return 'Start when you are ready.';
     return state === 'completed'
       ? 'Your saved guidance is ready to use.'
-      : 'The run continues in its bound session.';
+      : '';
   });
   protected readonly sections = computed(() => {
     const binding = this.binding();

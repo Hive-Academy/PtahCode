@@ -883,9 +883,9 @@ export class ElectronShellComponent {
    * newer navigation that superseded this click, so this request must not act
    * on it; `navigated` and `already-there` need nothing. Only `failed` — or a
    * port call that throws or rejects, which the port is not required to
-   * convert — falls back to bare Home. Without the port (a test, or a host
-   * that does not install it) the app-state switch is the fallback, as before
-   * the port existed.
+   * convert — falls back to bare Home. Without the port, a click from
+   * another surface uses the app-state switch. From a Setup child page,
+   * the surface router opens Home directly.
    *
    * The fallback also carries an ownership token from
    * {@link beginShellNavigation}: the port may settle long after the click,
@@ -897,7 +897,11 @@ export class ElectronShellComponent {
     const intent = this.beginShellNavigation();
     const entry = this.setupEntry;
     if (!entry) {
-      this.appState.setCurrentView('onboarding');
+      if (this.appState.currentView() === 'onboarding') {
+        this.fallBackToSetupHome();
+      } else {
+        this.appState.setCurrentView('onboarding');
+      }
       return;
     }
     const navigationAtClick = this.router.lastSuccessfulNavigation()?.id;

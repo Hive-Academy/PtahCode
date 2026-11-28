@@ -101,23 +101,6 @@ export function isOnboardingIdentityValue(value: unknown): value is string {
 }
 
 /**
- * Where a generation workflow tab is shown.
- *
- * Agent generation opens at the analyze/skills step. Project guidance opens
- * on the guidance-only entry.
- */
-export function onboardingGenerationTarget(
-  workflow: SetupGenerationWorkflow,
-  tabId: string,
-): OnboardingTarget {
-  const subPath =
-    workflow === 'setup-agent-generation'
-      ? ['analyze', 'skills']
-      : ['guidance'];
-  return { subPath, queryParams: { [ONBOARDING_QUERY.tab]: tabId } };
-}
-
-/**
  * Where a harness launcher entry page is shown (`/onboarding/new-project` or
  * `/onboarding/team-builder`).
  *

@@ -24,10 +24,9 @@ import { z } from 'zod';
 
 /**
  * The one next step the readiness ring offers. The screen maps it to the
- * Marketplace skills page, `launchWizard()` or
- * `launchGeneration('setup-agent-generation')`.
+ * Marketplace skills page or `launchWizard()`.
  */
-export type SetupNextAction = 'open-library' | 'run-setup' | 'generate-agents';
+export type SetupNextAction = 'open-library' | 'run-setup';
 
 /** What the scan check needs from one `wizard:list-analyses` answer. */
 interface ScanSnapshot {
@@ -73,9 +72,8 @@ function toScanFacts(data: unknown): Omit<ScanSnapshot, 'key'> | null {
 }
 
 /**
- * One workspace-scoped source of readiness for canvas and single-chat: three
- * checks (Skills, Scan, Agents). A check is `null` while unknown, and every
- * count over the checks is `null` until all three are known.
+ * Workspace readiness for canvas and single-chat counts Skills and Scan.
+ * Agent configuration is reported separately for Setup Home.
  *
  * The scan check is `wizard:list-analyses` (any saved analysis). This lib must
  * not reach the indexing lib, so the scan caption here is the project type
@@ -90,8 +88,7 @@ export class SetupStatusStore {
   private readonly scope = inject(WorkspaceScopeService);
   private readonly vscode = inject(VSCodeService);
   private readonly electronLayout = inject(ElectronLayoutService);
-  // Optional by design: a host that does not install the port (the VS Code
-  // webview without its provider, a unit test) falls back to bare /onboarding.
+  // Hosts without the entry provider can still open Setup Home for guidance.
   private readonly setupEntry = inject(SETUP_RUN_ENTRY, { optional: true });
 
   private readonly snapshot = signal<{
@@ -143,27 +140,19 @@ export class SetupStatusStore {
     () => this.scan()?.projectType ?? null,
   );
   readonly readyCount = computed<number | null>(() => {
-    const checks = [this.skillsReady(), this.scanReady(), this.agentsReady()];
+    const checks = [this.skillsReady(), this.scanReady()];
     return checks.some((ready) => ready === null)
       ? null
       : checks.filter((ready) => ready === true).length;
   });
-  readonly allReady = computed(() => this.readyCount() === 3);
-  /**
-   * The next step, once all three checks are known. Nothing ready at all is a
-   * first run, which starts with setup; otherwise the first incomplete check
-   * in the order Skills, Scan, Agents. `null` when all are ready or any is
-   * unknown.
-   */
+  readonly allReady = computed(() => this.readyCount() === 2);
+  /** Workspace setup comes first on a fresh workspace. */
   readonly nextAction = computed<SetupNextAction | null>(() => {
     const skills = this.skillsReady();
     const scan = this.scanReady();
-    const agents = this.agentsReady();
-    if (skills === null || scan === null || agents === null) return null;
-    if (!skills && !scan && !agents) return 'run-setup';
-    if (!skills) return 'open-library';
+    if (skills === null || scan === null) return null;
+    if (!skills && scan) return 'open-library';
     if (!scan) return 'run-setup';
-    if (!agents) return 'generate-agents';
     return null;
   });
 
@@ -298,14 +287,16 @@ export class SetupStatusStore {
   }
 
   async launchGeneration(workflow: SetupGenerationWorkflow): Promise<void> {
-    if (this.launching()) return;
+    if (
+      this.launching() ||
+      (workflow === 'setup-agent-generation' && !this.setupEntry)
+    )
+      return;
     this.launching.set(true);
     this.launchError.set(null);
     try {
-      // The port attaches to the workflow's existing run or opens its entry
-      // step. Without it, the bare onboarding surface is the same fallback
-      // `launchWizard()` uses, requested through the surface router so the
-      // outcome is typed like the port's.
+      // The port reopens existing agent runs and handles the guidance entry.
+      // Guidance can still fall back to Setup Home on hosts without the port.
       const outcome = this.setupEntry
         ? await this.setupEntry.openWorkflow(workflow, 'independent-start')
         : await this.surfaceRouter.navigateToSurface('onboarding');

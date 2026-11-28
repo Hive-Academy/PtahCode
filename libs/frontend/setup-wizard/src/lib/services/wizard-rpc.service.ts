@@ -73,7 +73,8 @@ function guidanceFailure(
   fallback: string,
 ): WizardRpcError {
   const text = message || fallback;
-  const setup = code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
+  const setup =
+    code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
   const reason = setup?.[1].toLowerCase();
   const provider = setup?.[2];
   const detail = reason
@@ -395,11 +396,13 @@ export class WizardRpcService {
    * Discovery is best-effort: a failure returns an empty response so wizard
    * startup never breaks on it.
    */
-  public async getResumableRun(): Promise<WizardGetResumableRunResponse> {
+  public async getResumableRun(
+    workspacePath?: string,
+  ): Promise<WizardGetResumableRunResponse> {
     try {
       const result = await this.rpcService.call(
         'wizard:get-resumable-run',
-        {},
+        workspacePath ? { workspacePath } : {},
         { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
       );
       if (result.isSuccess() && result.data) {
@@ -651,10 +654,11 @@ export class WizardRpcService {
    */
   public async listAnalyses(options?: {
     throwOnError?: boolean;
+    workspacePath?: string;
   }): Promise<SavedAnalysisMetadata[]> {
     const result = await this.rpcService.call(
       'wizard:list-analyses',
-      {},
+      options?.workspacePath ? { workspacePath: options.workspacePath } : {},
       { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
     );
 
@@ -671,10 +675,12 @@ export class WizardRpcService {
   /**
    * Read the status of workspace analysis.
    */
-  public async getAnalysisStatus(): Promise<AnalysisStatus> {
+  public async getAnalysisStatus(
+    workspacePath?: string,
+  ): Promise<AnalysisStatus> {
     const result = await this.rpcService.call(
       'wizard:analysis-status',
-      {},
+      workspacePath ? { workspacePath } : {},
       { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
     );
     if (result.isSuccess() && result.data) return result.data;
@@ -688,11 +694,9 @@ export class WizardRpcService {
   ): Promise<MultiPhaseAnalysisResponse> {
     // The handler also accepts a workspace to pin recovery lookups.
     const params = workspacePath ? { filename, workspacePath } : { filename };
-    const result = await this.rpcService.call(
-      'wizard:load-analysis',
-      params,
-      { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
-    );
+    const result = await this.rpcService.call('wizard:load-analysis', params, {
+      timeout: WIZARD_RPC_TIMEOUTS.LIST_MS,
+    });
 
     if (result.isSuccess() && result.data) {
       return result.data as MultiPhaseAnalysisResponse;
@@ -700,5 +704,4 @@ export class WizardRpcService {
 
     throw new Error(result.error || 'Failed to load analysis');
   }
-
 }

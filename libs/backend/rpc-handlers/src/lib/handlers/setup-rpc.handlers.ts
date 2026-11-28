@@ -686,7 +686,7 @@ export class SetupRpcHandlers {
       WizardGetResumableRunParams,
       WizardGetResumableRunResponse
     >('wizard:get-resumable-run', async (rawParams) => {
-      this.parse(WizardGetResumableRunParamsSchema, rawParams);
+      const params = this.parse(WizardGetResumableRunParamsSchema, rawParams);
       this.logger.debug('RPC: wizard:get-resumable-run called');
       const none: WizardGetResumableRunResponse = {
         analysis: null,
@@ -694,7 +694,7 @@ export class SetupRpcHandlers {
         analysisActive: false,
       };
 
-      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
+      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
       if (!workspaceRoot) return none;
 
       const activeBefore = this.getActiveAnalysisRun(workspaceRoot);
@@ -803,12 +803,12 @@ export class SetupRpcHandlers {
       WizardAnalysisStatusParams,
       WizardAnalysisStatusResponse
     >('wizard:analysis-status', async (rawParams) => {
-      this.parse(WizardAnalysisStatusParamsSchema, rawParams);
+      const params = this.parse(WizardAnalysisStatusParamsSchema, rawParams);
+      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
       const freshnessService = this.resolveService<AnalysisFreshnessService>(
         AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
         'AnalysisFreshnessService',
       );
-      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot() ?? null;
       const activeRun = workspaceRoot
         ? this.getActiveAnalysisRun(workspaceRoot)
         : null;
@@ -819,6 +819,18 @@ export class SetupRpcHandlers {
           })
         : freshnessService.getStatus(workspaceRoot);
     });
+  }
+
+  private analysisWorkspaceRoot(workspacePath?: string): string | null {
+    if (!workspacePath)
+      return this.workspaceProvider.getWorkspaceRoot() ?? null;
+    if (!isAuthorizedWorkspace(workspacePath, this.workspaceProvider)) {
+      throw new RpcUserError(
+        'Access denied: workspace path is not an open folder.',
+        'UNAUTHORIZED_WORKSPACE',
+      );
+    }
+    return workspacePath;
   }
 
   /** Contents of every `completed` phase file; failed partials stay excluded. */
@@ -906,19 +918,9 @@ export class SetupRpcHandlers {
       const params = this.parse(WizardListAnalysesParamsSchema, rawParams);
       this.logger.debug('RPC: wizard:list-analyses called');
 
-      const workspaceRoot =
-        params?.workspacePath || this.workspaceProvider.getWorkspaceRoot();
+      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
       if (!workspaceRoot) {
         return { analyses: [] };
-      }
-      if (
-        params?.workspacePath &&
-        !isAuthorizedWorkspace(params.workspacePath, this.workspaceProvider)
-      ) {
-        throw new RpcUserError(
-          'Access denied: workspace path is not an open folder.',
-          'UNAUTHORIZED_WORKSPACE',
-        );
       }
 
       const storageService = this.resolveService<AnalysisStorageService>(
@@ -952,21 +954,11 @@ export class SetupRpcHandlers {
         filename: params.filename,
       });
 
-      const workspaceRoot =
-        params?.workspacePath || this.workspaceProvider.getWorkspaceRoot();
+      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
       if (!workspaceRoot) {
         throw new RpcUserError(
           'No workspace folder open.',
           'WORKSPACE_NOT_OPEN',
-        );
-      }
-      if (
-        params?.workspacePath &&
-        !isAuthorizedWorkspace(params.workspacePath, this.workspaceProvider)
-      ) {
-        throw new RpcUserError(
-          'Access denied: workspace path is not an open folder.',
-          'UNAUTHORIZED_WORKSPACE',
         );
       }
 

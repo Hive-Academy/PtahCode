@@ -95,9 +95,12 @@ describe('SetupGenerationOpenHandler', () => {
     expect(openWorkflow).toHaveBeenCalledWith('setup-agent-generation', 'host');
   });
 
-  it('opens Setup Home when the host has no entry provider', () => {
-    push(setup({ hasEntry: false }));
+  it('only falls back to Setup Home for guidance without an entry provider', () => {
+    const handler = setup({ hasEntry: false });
+    push(handler);
+    expect(navigateToSurface).not.toHaveBeenCalled();
 
+    push(handler, { ...payload, workflow: 'setup-project-prompt' });
     expect(navigateToSurface).toHaveBeenCalledWith('onboarding');
     expect(createWorkflowTabForWorkspace).not.toHaveBeenCalled();
   });

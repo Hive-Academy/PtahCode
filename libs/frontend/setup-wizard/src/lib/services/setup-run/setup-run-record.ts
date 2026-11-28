@@ -3,11 +3,11 @@ import type { SetupRunRecord } from '../setup-run.types';
 import type { SetupRunReport } from './setup-run-host';
 
 /** Apply a workflow report's fields before evaluating the terminal transition. */
-export function applyReportFields(
-  record: SetupRunRecord,
+export function applyReportFields<T extends SetupRunRecord>(
+  record: T,
   update: SetupRunReport,
-): SetupRunRecord {
-  const next: SetupRunRecord = { ...record };
+): T {
+  const next: T = { ...record };
   if (update.status !== undefined) next.status = update.status;
   if (update.step !== undefined) {
     if (isSetupRunStepOf(record.workflow, update.step)) {
@@ -19,9 +19,12 @@ export function applyReportFields(
     }
   }
   if (update.backendRunId !== undefined) {
+    if (update.backendRunId !== record.backendRunId) delete next.agentsWritten;
     next.backendRunId = update.backendRunId;
   }
   if (update.analysisRunId !== undefined) {
+    if (update.analysisRunId !== record.analysisRunId)
+      delete next.analysisFreshness;
     next.analysisRunId = update.analysisRunId;
   }
   if (update.error === null) delete next.error;
@@ -31,9 +34,13 @@ export function applyReportFields(
       next.handoffTabId = update.handoffTabId;
     }
     if (update.teamBuilder !== undefined) {
+      const selectedIds =
+        update.teamBuilder.selectedIds ?? record.teamBuilder?.selectedIds;
       next.teamBuilder = {
-        intent: update.teamBuilder.intent,
+        ...record.teamBuilder,
+        ...update.teamBuilder,
         installed: [...update.teamBuilder.installed],
+        ...(selectedIds ? { selectedIds: [...selectedIds] } : {}),
       };
     }
   }

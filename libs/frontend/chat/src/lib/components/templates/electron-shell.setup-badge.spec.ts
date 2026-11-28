@@ -9,8 +9,8 @@
  *   - `openSetupHub` delegates to the `SETUP_RUN_ENTRY` port, never acts on a
  *     `cancelled` outcome (the newer navigation owns the screen), falls back
  *     to the bare onboarding root through the surface router on `failed` or
- *     a thrown/rejected call, and falls back to the app-state switch when
- *     the port is absent;
+ *     a thrown/rejected call, and uses the app-state switch from outside
+ *     Setup when the port is absent;
  *   - a late failure of a superseded Setup click never runs the Home
  *     fallback: every shell navigation claims a monotonic intent id first.
  */
@@ -405,6 +405,21 @@ describe('ElectronShellComponent Setup tab badge', () => {
       await fixture.whenStable();
       expect(entryStub.openSetup).not.toHaveBeenCalled();
       expect(appStateStub.setCurrentView).toHaveBeenCalledWith('onboarding');
+    });
+
+    it('opens Setup Home from a child route when the token is absent', async () => {
+      TestBed.resetTestingModule();
+      await mount({ withEntry: false, realRouter: true });
+      const router = TestBed.inject(Router);
+      await router.navigateByUrl('/onboarding/analyze/skills');
+      appStateStub.currentView.set('onboarding');
+      fixture.detectChanges();
+
+      setupTab()?.click();
+      await fixture.whenStable();
+
+      expect(router.url).toBe('/onboarding');
+      expect(appStateStub.setCurrentView).not.toHaveBeenCalled();
     });
 
     it('keeps a Settings route that bypassed the shell handlers when Setup fails late', async () => {

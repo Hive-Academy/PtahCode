@@ -75,6 +75,11 @@ describe('OnboardingHomeComponent', () => {
       }
       return false;
     },
+    savedAnalysisError: jest.fn((_path: string | null): string | null => null),
+    isDiscoveringSavedAnalysis: jest.fn(() => false),
+    retrySavedAnalysis: jest.fn().mockResolvedValue(undefined),
+    hasDismissedGeneration: jest.fn(() => false),
+    reopenDismissedGeneration: jest.fn(),
     refresh: jest.fn(),
   };
   function setRuns(list: readonly SetupRunRecord[]): void {
@@ -204,8 +209,7 @@ describe('OnboardingHomeComponent', () => {
     expect(banner).not.toBeNull();
     expect(list).not.toBeNull();
     expect(
-      banner!.compareDocumentPosition(list!) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      banner!.compareDocumentPosition(list!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     const navigate = jest
       .spyOn(TestBed.inject(Router), 'navigate')
@@ -224,7 +228,7 @@ describe('OnboardingHomeComponent', () => {
     expect(byTestId('setup-runs-list')).toBeNull();
   });
 
-  it('focuses Skip for now when the last run row is dismissed', () => {
+  it('focuses the Home heading when the last run row is dismissed', () => {
     setRuns([
       {
         id: 'setup-done',
@@ -246,7 +250,9 @@ describe('OnboardingHomeComponent', () => {
     expect(document.activeElement).toBe(dismiss);
     dismiss?.click();
     expect(byTestId('setup-runs-list')).toBeNull();
-    expect(document.activeElement).toBe(byTestId('onboarding-skip'));
+    expect(document.activeElement).toBe(
+      fixture.nativeElement.querySelector('#onboarding-home-title'),
+    );
   });
 
   it('shows the three paths in order, Analyze first, each named by its h2 link', () => {

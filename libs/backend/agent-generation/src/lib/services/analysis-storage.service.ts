@@ -810,6 +810,8 @@ export class AnalysisStorageService {
       return {
         filename: entry,
         savedAt: manifest.analyzedAt,
+        runId: manifest.runId,
+        updatedAt: manifest.updatedAt,
         projectType: manifest.slug
           .replace(/-/g, ' ')
           .replace(/\b\w/g, (c) => c.toUpperCase()),

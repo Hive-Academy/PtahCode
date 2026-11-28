@@ -29,7 +29,6 @@ export {
   ONBOARDING_READY_QUERY,
   isOnboardingIdentityValue,
   onboardingGenerationBinding,
-  onboardingGenerationTarget,
   onboardingHarnessTarget,
   onboardingReadyTarget,
   parseOnboardingReadyArea,

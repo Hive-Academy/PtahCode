@@ -25,7 +25,8 @@ export interface SetupRunEntry {
   openSetup(): Promise<SurfaceNavigationResult>;
   /**
    * Opens the run of `workflow`: attaches to an existing non-terminal run, or
-   * opens the workflow's entry step. Never starts a second run.
+   * opens its entry step when available. Agent generation currently supports
+   * existing run re-entry only.
    *
    * `origin` names the caller that asked (for example a chat-side launcher).
    */

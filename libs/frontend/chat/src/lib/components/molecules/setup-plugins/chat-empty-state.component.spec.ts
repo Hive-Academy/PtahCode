@@ -24,9 +24,9 @@ describe('empty chat', () => {
   const launchWizard = jest.fn();
   const launchGeneration = jest.fn();
   const openMarketplace = jest.fn();
-  const nextAction = signal<
-    'open-library' | 'run-setup' | 'generate-agents' | null
-  >('run-setup');
+  const nextAction = signal<'open-library' | 'run-setup' | null>(
+    'run-setup',
+  );
   const setupError = signal<string | null>(null);
 
   beforeEach(async () => {
@@ -163,7 +163,9 @@ describe('empty chat', () => {
     ring.triggerEventHandler('actionRequested', 'generate-agents');
     ring.triggerEventHandler('actionRequested', 'open-library');
     expect(launchWizard).toHaveBeenCalledTimes(1);
-    expect(launchGeneration).toHaveBeenCalledWith('setup-agent-generation');
+    expect(launchGeneration).not.toHaveBeenCalled();
+    expect(ring.nativeElement.textContent).toContain('1/2');
+    expect(ring.nativeElement.textContent).not.toContain('Generate agents');
     expect(openMarketplace).toHaveBeenCalledWith({
       page: 'skills',
       source: 'ptah-plugins',

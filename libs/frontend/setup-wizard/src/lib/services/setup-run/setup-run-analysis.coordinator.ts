@@ -9,6 +9,7 @@ import {
 import type { SetupWizardStateService } from '../setup-wizard-state.service';
 import type { WizardAnalysisRunner } from '../wizard-analysis-runner.service';
 import type { WizardRpcService } from '../wizard-rpc.service';
+import type { SetupRunSavedAnalysis } from './setup-run-saved-analysis';
 import {
   FAILURE_COPY,
   isLive,
@@ -24,6 +25,7 @@ export class SetupRunAnalysisCoordinator {
     private readonly runner: WizardAnalysisRunner,
     private readonly wizardState: SetupWizardStateService,
     private readonly rpc: WizardRpcService,
+    private readonly saved: SetupRunSavedAnalysis,
   ) {}
 
   public async reconcile(
@@ -112,6 +114,12 @@ export class SetupRunAnalysisCoordinator {
     runId: string | null,
     createdAt = Date.now(),
   ): void {
+    if (
+      runId !== null &&
+      (!isOnboardingIdentityValue(runId) ||
+        this.host.wasDismissed(workspace, 'analysis', runId))
+    )
+      return;
     this.host.insert({
       id: newRunId(),
       workspacePath: workspace,
@@ -176,6 +184,7 @@ export class SetupRunAnalysisCoordinator {
           backendRunId: result.manifest.runId,
           analysisRunId: result.manifest.runId,
         });
+        void this.saved.discoverAfterCompletion(record.workspacePath);
       } else {
         this.host.apply(id, { status: 'interrupted' });
       }
@@ -195,28 +204,7 @@ export class SetupRunAnalysisCoordinator {
       !this.runner.isRunningForWorkspace(workspacePath);
     let runId: string | null = null;
     try {
-      const filenames = record.backendRunId
-        ? [record.backendRunId]
-        : (await this.rpc.listAnalyses({ throwOnError: true }))
-            .filter((item) => item.lifecycle === 'completed')
-            .map((item) => item.filename);
-      // A resumed analysis keeps its original savedAt. Check the manifest's
-      // last update before ruling out an older entry.
-      for (const filename of filenames) {
-        if (!isCurrent()) return;
-        const { manifest } = await this.rpc.loadAnalysis(filename, workspacePath);
-        if (
-          manifest.lifecycle === 'completed' &&
-          isOnboardingIdentityValue(manifest.runId) &&
-          (record.backendRunId
-            ? manifest.runId === record.backendRunId
-            : Date.parse(manifest.updatedAt ?? manifest.analyzedAt) >=
-              record.createdAt)
-        ) {
-          runId = manifest.runId;
-          break;
-        }
-      }
+      runId = await this.saved.recover(record, isCurrent);
     } catch {
       console.warn('[setup-run-analysis] Saved analysis recovery failed.');
     }

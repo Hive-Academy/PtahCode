@@ -394,6 +394,30 @@ describe('GenerationRunEventAdapter', () => {
       });
     });
 
+    it('keeps a dismissed checkpoint hidden on a late push', async () => {
+      seed(
+        record({
+          id: 'setup-g1',
+          status: 'interrupted',
+          backendRunId: 'run-1',
+        }),
+      );
+      const { adapter, runs } = await create();
+      expect(runs.dismiss('setup-g1')).toBe(true);
+
+      const binding = pushed('setup-g1');
+      stream(adapter, binding);
+      adapter.handleMessage({
+        type: 'setup-wizard:generation-complete',
+        payload: { tabBinding: binding },
+      });
+      expect(runs.get('setup-g1')).toBeNull();
+      expect(rpc['getBoundRunState']).not.toHaveBeenCalled();
+
+      stream(adapter, pushed('setup-g1', 'run-2'));
+      expect(runs.get('setup-g1')?.backendRunId).toBe('run-2');
+    });
+
     it('ignores a late push of a settled run', async () => {
       seed(
         record({ id: 'setup-g1', status: 'completed', backendRunId: 'run-1' }),

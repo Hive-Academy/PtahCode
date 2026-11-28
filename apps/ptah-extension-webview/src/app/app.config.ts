@@ -41,6 +41,7 @@ import {
   ORCHESTRA_CANVAS_COMPONENT,
   FILE_LINK_OPENER,
   AGENT_FEEDBACK_SENDER,
+  SETUP_RUN_ENTRY,
   SURFACE_ACTIVE,
   surfaceActiveFor,
   ClockService,
@@ -86,6 +87,7 @@ import { WorkspaceIndexingService } from '@ptah-extension/workspace-indexing';
 import {
   provideWizardInternalState,
   SetupWizardStateService,
+  SetupRunEntryService,
   SetupRunStore,
   SetupGenerationOpenHandler,
   GenerationRunEventAdapter,
@@ -243,6 +245,7 @@ export const appConfig: ApplicationConfig = {
     }),
     RendererFrameMonitorService,
     provideAppInitializer(() => { inject(RendererFrameMonitorService); }),
+    { provide: SETUP_RUN_ENTRY, useExisting: SetupRunEntryService },
     {
       provide: SurfaceRouterService.generationRouteTabValidatorToken,
       useFactory: () => {
