@@ -83,7 +83,14 @@ export interface SetupRunRecord {
   /** Skill review only: the saved selection. */
   selection?: { skillIds: string[] };
   /** Team builder only. */
-  teamBuilder?: { intent: string; installed: string[] };
+  teamBuilder?: {
+    intent: string;
+    installed: string[];
+    selectedIds?: string[];
+    ownerDecision?: 'match' | 'raise' | null;
+    installCompleted?: boolean;
+    hadAttachments?: boolean;
+  };
   /** Team builder only: the chat tab the conversation was handed off to. */
   handoffTabId?: string;
   /** User-facing text only; never a stack or a path. */

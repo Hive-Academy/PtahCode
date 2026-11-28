@@ -209,7 +209,30 @@ export function parseSetupRunRecord(
           : boundedText(teamBuilder['intent'], MAX_INTENT_LENGTH);
       const installed = stringList(teamBuilder['installed']);
       if (intent !== null && installed !== null) {
-        record.teamBuilder = { intent, installed };
+        const selectedIds = stringList(teamBuilder['selectedIds']);
+        const rawDecision = teamBuilder['ownerDecision'];
+        const ownerDecision =
+          rawDecision === 'match' ||
+          rawDecision === 'raise' ||
+          rawDecision === null
+            ? rawDecision
+            : undefined;
+        const installCompleted =
+          typeof teamBuilder['installCompleted'] === 'boolean'
+            ? teamBuilder['installCompleted']
+            : undefined;
+        const hadAttachments =
+          typeof teamBuilder['hadAttachments'] === 'boolean'
+            ? teamBuilder['hadAttachments']
+            : undefined;
+        record.teamBuilder = {
+          intent,
+          installed,
+          ...(selectedIds !== null ? { selectedIds } : {}),
+          ...(ownerDecision !== undefined ? { ownerDecision } : {}),
+          ...(installCompleted !== undefined ? { installCompleted } : {}),
+          ...(hadAttachments !== undefined ? { hadAttachments } : {}),
+        };
       }
     }
     const handoffTabId = value['handoffTabId'];

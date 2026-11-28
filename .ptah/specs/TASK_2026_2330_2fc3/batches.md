@@ -481,7 +481,17 @@ Edge cases:
   Coordinator fixed review notes 11 (Show all `type="button"`) and 12 (no "0 agents installed").
   Open Minor 10: the final Dismiss focuses "Skip for now"; review proposes the h1 / a top control.
 
-## Batch 12: Analysis re-run and team-builder coordinator — PENDING
+## Batch 12: Analysis re-run and team-builder coordinator — IMPLEMENTED
+
+- 2026-11-28: round 2 REVISE 6/10 → bounded correction (antigravity, findings 14–16) → final
+  review codex 6/10 REVISE. F14, F16 fixed. F15 partial; new Major F17: deferred parked-tab
+  cleanup can `closeTab(tabId, true)` a tab the user returned to and uses
+  (`team-builder-run.coordinator.ts:1199,1213,1234,1267`). Revise cap spent → reported to user,
+  stopped. Not committed. Finding 11 → Batch 17.
+- User decision: allow ONE more bounded correction for F17 only (antigravity), then one codex
+  review. If still REVISE, stop again.
+- F17 fix (antigravity, `fix-report-batch12-f17.md`) → codex review 8/10 APPROVED. F14–F17
+  fixed. Inner loop (lint, typecheck, --related for onboarding, setup-wizard) passed.
 
 - Shape: logic
 - Estimated weight (tokens): ~40k
@@ -566,7 +576,28 @@ Edge cases:
   failure plus Retry, keeps last known data, Home shows it without a mount refresh.
   (4) record data for the Home row context that Batch 11 could not show: the checkpoint
   agents-written count and the saved-analysis freshness state and reason (stale/incomplete).
+  (5) `SetupRunStore.report` keeps the optional teamBuilder recovery fields (`selectedIds`,
+  `ownerDecision`, `installCompleted`, `hadAttachments`) — Batch 12 round 2 clarification 2.
+  Put the new logic in `services/setup-run/` collaborators (Batch 15 review Minor 1).
 - Gate: after Batch 15. Before Batch 14.
+
+## Batch 17: Backend workspace pinning for the consent install — PENDING (follow-up)
+
+- Source: Batch 12 round 2 clarification 1. `wizard:install-skills-with-consent`
+  (`libs/backend/rpc-handlers/src/lib/handlers/setup-rpc.handlers.ts:1424-1456`) resolves the
+  workspace root per skill and cannot be stopped; a workspace switch mid-install can write skills
+  into the new workspace. The frontend already ignores late results after a switch.
+- Acceptance: accept an explicit `workspacePath` (and an optional install run id), pin it through
+  `SkillsShRpcHandlers.install`, check for cancellation between skills, return the confirmed
+  installed list. Backend scope; may be a separate task if the user prefers.
+- User decision (2026-11-28): Batch 17 STAYS in this task, before the PR. Batch 12 round 2
+  re-review (codex 6/10 REVISE) names finding 11 an approval dependency on this batch.
+  - 17a (backend + shared RPC types): codex lane, reviewer other family. IMPLEMENTED —
+    `impl-report-batch17a.md`; antigravity review 8/10 APPROVED (`code-logic-review-batch17a.md`),
+    Minors 1–4 open (missing duplicate-id/throw/schema/traversal tests, `PERSISTENCE_UNAVAILABLE`
+    drops `installed`, nullish `getWorkspaceFolders()`, cancel method missing in surface asserts).
+  - 17b (frontend wiring in `team-builder-run.coordinator.ts` and `analyze-skills.page.ts`):
+    after the Batch 12 bounded correction lands.
 
 ## Batch 14: App wiring, validator switch and cleanup — PENDING
 

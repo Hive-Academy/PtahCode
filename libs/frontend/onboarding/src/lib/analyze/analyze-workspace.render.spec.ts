@@ -6,6 +6,7 @@ import { ExecutionTreeBuilderService } from '@ptah-extension/chat-streaming';
 import type { SetupPairState } from '@ptah-extension/shared';
 import {
   AnalysisTranscriptComponent,
+  SetupRunStore,
   SetupWizardStateService,
   WizardAnalysisRunner,
   WizardRpcService,
@@ -143,6 +144,25 @@ describe('AnalyzeWorkspacePage rendered actions', () => {
               };
               return { isSuccess: () => true, data: { state } };
             },
+          },
+        },
+        {
+          provide: SetupRunStore,
+          useValue: {
+            workspacePath: signal(''),
+            runsFor: jest.fn(() => []),
+            get: jest.fn(() => null),
+            start: jest.fn(() => null),
+            rerun: jest.fn(() => null),
+            report: jest.fn(() => null),
+            attach: jest.fn(() => null),
+            release: jest.fn(),
+            cancel: jest.fn(async () => true),
+            isCancelling: jest.fn(() => false),
+            targetOf: jest.fn(() => ({
+              subPath: ['analyze', 'skills'],
+              queryParams: {},
+            })),
           },
         },
         { provide: SetupWizardStateService, useValue: { reset: jest.fn() } },

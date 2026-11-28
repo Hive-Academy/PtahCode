@@ -40,11 +40,13 @@ import {
 } from '@ptah-extension/ui';
 import {
   ConfirmationModalComponent,
+  SetupRunStore,
   SetupWizardStateService,
   WizardAnalysisRunner,
   WizardRpcService,
   safeFailureCopy,
   type GenerationViewState,
+  type SetupRunRecord,
 } from '@ptah-extension/setup-wizard';
 import { DetailsLogComponent } from '../shared/details-log.component';
 import { LiveRunLayoutComponent } from '../shared/live-run-layout.component';
@@ -299,6 +301,16 @@ function describeSetupIssue(
         </ptah-alert>
       }
 
+      @if (rerunNotice(); as notice) {
+        <ptah-alert
+          tone="info"
+          live="polite"
+          data-testid="analysis-rerun-notice"
+        >
+          {{ notice }}
+        </ptah-alert>
+      }
+
       @if (stopRecovery()) {
         <ptah-run-panel
           state="cancelling"
@@ -534,8 +546,10 @@ function describeSetupIssue(
 export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   public readonly analysis = input<string | undefined>();
   public readonly rerun = input<string | undefined>();
+  public readonly tab = input<string | undefined>();
   protected readonly store = inject(AnalysisStepStore);
   protected readonly runner = inject(WizardAnalysisRunner);
+  private readonly setupRuns = inject(SetupRunStore);
   private readonly rpc = inject(WizardRpcService);
   private readonly claudeRpc = inject(ClaudeRpcService);
   private readonly injector = inject(Injector);
@@ -549,6 +563,10 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   private destroyed = false;
   private pendingAnalysis: string | null = null;
   private pendingRerun = false;
+  private readonly currentRecordId = signal<string | null>(null);
+  private attachedRecordId: string | null = null;
+  private lastWorkspacePath: string | null = null;
+  private lastTabInput: string | undefined;
   private setupAbort: AbortController | null = null;
   private setupRequestSeq = 0;
   private savedRequestSeq = 0;
@@ -563,6 +581,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     { id: 'done', label: 'Done', state: 'upcoming' },
   ];
   protected readonly interrupted = signal(false);
+  protected readonly rerunNotice = signal<string | null>(null);
   protected readonly savedError = signal(false);
   protected readonly setupState = signal<SetupPairState | null>(null);
   protected readonly setupUpdating = signal(false);
@@ -628,17 +647,44 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       : 'Workspace model cannot be used for setup until fixed.';
   });
   protected readonly workspacePath = computed(
-    () => this.workspace?.activePath() ?? null,
+    () =>
+      this.workspace?.activePath() || this.setupRuns.workspacePath() || null,
   );
+  protected readonly activeRecord = computed<SetupRunRecord | null>(() => {
+    const path = this.workspacePath();
+    const runs = path
+      ? this.setupRuns
+          .runsFor(path)
+          .filter((record) => record.workflow === 'analysis')
+      : [];
+    const live = runs.find(
+      (record) =>
+        record.status === 'running' || record.status === 'needs-input',
+    );
+    if (live) return live;
+    const currentId = this.currentRecordId();
+    if (currentId) {
+      const current = runs.find((record) => record.id === currentId);
+      if (current) return current;
+    }
+    const tabId = this.tab();
+    if (tabId) {
+      const byTab = runs.find((record) => record.id === tabId);
+      if (byTab) return byTab;
+    }
+    return runs[0] ?? null;
+  });
   protected readonly isAnalysisActive = computed(() => {
     if (typeof this.runner.isRunningForWorkspace === 'function') {
       return this.runner.isRunningForWorkspace(this.workspacePath());
     }
     return this.runner.isRunning() || this.runner.isCanceling();
   });
-  protected readonly isAnalysisCanceling = computed(
-    () => this.isAnalysisActive() && this.runner.isCanceling(),
-  );
+  protected readonly isAnalysisCanceling = computed(() => {
+    const active = this.activeRecord();
+    if (active && this.setupRuns.isCancelling(active.id)) return true;
+    return this.isAnalysisActive() && this.runner.isCanceling();
+  });
   protected readonly isAnalysisRunning = computed(
     () => this.isAnalysisActive() && this.runner.isRunning(),
   );
@@ -708,6 +754,11 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       this.destroyed = true;
       this.setupAbort?.abort();
       this.setupAbort = null;
+      this.syncAttachedRecord(null);
+    });
+    effect(() => {
+      const id = this.activeRecord()?.id ?? null;
+      untracked(() => this.syncAttachedRecord(id));
     });
     const win = this.doc.defaultView;
     if (win) {
@@ -731,8 +782,24 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       });
     }
     effect(() => {
+      const tabId = this.tab();
+      untracked(() => {
+        if (tabId !== this.lastTabInput) {
+          this.lastTabInput = tabId;
+          if (tabId && tabId !== this.currentRecordId()) {
+            this.currentRecordId.set(null);
+          }
+        }
+      });
+    });
+    effect(() => {
       const path = this.workspacePath();
       untracked(() => {
+        if (this.lastWorkspacePath && this.lastWorkspacePath !== path) {
+          this.currentRecordId.set(null);
+          this.rerunNotice.set(null);
+        }
+        this.lastWorkspacePath = path;
         this.store.setWorkspacePath?.(path);
         this.runner.setCurrentWorkspacePath?.(path);
       });
@@ -762,29 +829,50 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   public async ngOnInit(): Promise<void> {
     this.runner.setCurrentWorkspacePath?.(this.workspacePath());
     this.pendingRerun = this.rerun() === '1';
-    const hadLocalRun = this.isAnalysisActive();
+    const hadRunnerActive = this.isAnalysisActive();
+    const liveRecord = this.findLiveAnalysisRecord();
+    const hadLiveRun = hadRunnerActive || liveRecord !== null;
     const initialRunGeneration = this.runner.runGeneration?.() ?? 0;
     const hadResult = this.runner.hasResult?.() ?? false;
     const hadLoaded = this.store.loaded() !== null;
-    if (hadLocalRun) {
+    if (hadLiveRun) {
       this.pendingRerun = false;
       this.interrupted.set(false);
-      this.startClock(this.runner.startedAt?.() ?? undefined);
+      if (liveRecord) {
+        this.currentRecordId.set(liveRecord.id);
+      }
+      if (hadRunnerActive) {
+        this.startClock(this.runner.startedAt?.() ?? undefined);
+      }
       if (this.rerun() === '1') {
+        const queryParams: Record<string, string | null> = { rerun: null };
+        if (liveRecord && this.tab() && this.tab() !== liveRecord.id) {
+          queryParams['tab'] = liveRecord.id;
+        }
         void this.router.navigate([], {
-          queryParams: { rerun: null },
+          queryParams,
           queryParamsHandling: 'merge',
           replaceUrl: true,
         });
+      } else if (liveRecord) {
+        this.bindUrlToRecord(liveRecord.id);
       }
     }
     const setup = this.refreshSetupModel();
     if (this.pendingRerun) {
       await Promise.all([setup, this.loadSaved()]);
-      return;
+      if (
+        this.destroyed ||
+        this.pendingRerun ||
+        this.isAnalysisActive() ||
+        this.hasLiveRun()
+      ) {
+        return;
+      }
+    } else {
+      this.pendingAnalysis = this.analysis() ?? null;
+      await this.loadSaved();
     }
-    this.pendingAnalysis = this.analysis() ?? null;
-    await this.loadSaved();
     if (this.destroyed) return;
     const resumable = await this.rpc.getResumableRun();
     if (this.destroyed) return;
@@ -793,7 +881,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       (!hadResult && (this.runner.hasResult?.() ?? false)) ||
       (!hadLoaded && this.store.loaded() !== null);
     if (resumable.analysisActive === true) {
-      if (!hadLocalRun && !localRunSettled && !this.runner.isRunning()) {
+      if (!hadRunnerActive && !localRunSettled && !this.runner.isRunning()) {
         this.runner.syncBackendActive?.(true, {
           startedAt: resumable.activeAnalysisStartedAt,
           workspacePath: this.workspacePath(),
@@ -973,6 +1061,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
   protected async useSaved(filename: string): Promise<void> {
     if (this.isAnalysisActive()) return;
+    this.rerunNotice.set(null);
     try {
       const [, result] = await Promise.all([
         this.consumePendingRerun(),
@@ -999,53 +1088,148 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
   private async startPendingRerun(): Promise<void> {
     if (!this.pendingRerun || this.destroyed) return;
-    if (this.isAnalysisActive()) {
-      await this.consumePendingRerun();
+    if (this.hasLiveRun()) {
+      const liveRecord = this.findLiveAnalysisRecord();
+      if (liveRecord) this.currentRecordId.set(liveRecord.id);
+      await this.consumePendingRerun(liveRecord?.id);
       return;
     }
     if (!this.setupReady()) return;
-    await this.startFresh();
+    await this.triggerRerun();
   }
-  private async consumePendingRerun(): Promise<void> {
+  private async triggerRerun(): Promise<void> {
+    if (this.hasLiveRun()) {
+      const liveRecord = this.findLiveAnalysisRecord();
+      if (liveRecord) this.currentRecordId.set(liveRecord.id);
+      await this.consumePendingRerun(liveRecord?.id);
+      return;
+    }
+    const source = this.findRerunSourceRecord();
+    if (!source) {
+      this.rerunNotice.set(
+        'No completed or cancelled analysis was found to re-run. Start a new analysis below.',
+      );
+      await this.consumePendingRerun();
+      return;
+    }
+    this.rerunNotice.set(null);
+    this.pendingAnalysis = null;
+    const next = this.setupRuns.rerun(source.id);
+    if (!next) {
+      this.rerunNotice.set(
+        'Could not re-run that analysis. Start a new analysis below.',
+      );
+      await this.consumePendingRerun();
+      return;
+    }
+    this.currentRecordId.set(next.id);
+    const rerunNavigation = this.consumePendingRerun(next.id);
+    this.stopRecovery.set(false);
+    this.store.clearSelection();
+    this.interrupted.set(false);
+    this.startClock(this.runner.startedAt?.() ?? undefined);
+    await rerunNavigation;
+    if (!this.destroyed && !this.isAnalysisActive()) {
+      await this.loadSaved();
+    }
+  }
+  private async consumePendingRerun(bindTabId?: string): Promise<void> {
     if (!this.pendingRerun) return;
     this.pendingRerun = false;
+    const queryParams: Record<string, string | null> = { rerun: null };
+    if (bindTabId && this.tab() && this.tab() !== bindTabId) {
+      queryParams['tab'] = bindTabId;
+    }
     await this.router.navigate([], {
-      queryParams: { rerun: null },
+      queryParams,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+  private bindUrlToRecord(recordId: string): void {
+    const boundTab = this.tab();
+    if (!boundTab || boundTab === recordId) return;
+    void this.router.navigate([], {
+      queryParams: { tab: recordId },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
   }
   protected async startFresh(): Promise<void> {
-    if (!this.setupReady()) return;
-    const rerunNavigation = this.consumePendingRerun();
+    if (!this.setupReady() || this.hasLiveRun()) return;
+    this.rerunNotice.set(null);
     this.pendingAnalysis = null;
-    this.wizardState.reset();
-    this.runner.reset();
+    const existingResult = this.wizardState.multiPhaseResult?.();
+    if (existingResult && existingResult.manifest.lifecycle !== 'completed') {
+      this.wizardState.reset();
+    }
+    const workspace = this.workspacePath();
+    const record = workspace
+      ? this.setupRuns.start('analysis', workspace)
+      : null;
+    if (record) {
+      this.currentRecordId.set(record.id);
+      if (record.status !== 'running') {
+        this.setupRuns.report(record.id, {
+          status: 'running',
+          step: 'analyzing',
+          error: null,
+        });
+      }
+    }
+    const hadPendingRerun = this.pendingRerun;
+    const rerunNavigation = this.consumePendingRerun(record?.id);
+    if (!hadPendingRerun && record) {
+      this.bindUrlToRecord(record.id);
+    }
     this.stopRecovery.set(false);
     this.store.clearSelection();
     this.interrupted.set(false);
     this.startClock();
     await Promise.all([
-      this.runner.startFreshAnalysis(this.workspacePath()),
+      this.runner.startFreshAnalysis(workspace),
       rerunNavigation,
     ]);
     if (this.destroyed) return;
     await this.loadSaved();
   }
   protected async continuePrevious(): Promise<void> {
-    if (!this.setupReady()) return;
-    const rerunNavigation = this.consumePendingRerun();
+    if (!this.setupReady() || this.hasLiveRun()) return;
+    this.rerunNotice.set(null);
     this.pendingAnalysis = null;
     const existingResult = this.wizardState.multiPhaseResult?.();
     if (existingResult && existingResult.manifest.lifecycle !== 'completed') {
       this.wizardState.reset();
+    }
+    const workspace = this.workspacePath();
+    const retryable = this.findRetryableAnalysisRecord();
+    let targetRecordId: string | undefined;
+    if (retryable) {
+      targetRecordId = retryable.id;
+      this.currentRecordId.set(retryable.id);
+      this.setupRuns.report(retryable.id, {
+        status: 'running',
+        step: 'analyzing',
+        error: null,
+      });
+    } else if (workspace) {
+      const record = this.setupRuns.start('analysis', workspace);
+      if (record) {
+        targetRecordId = record.id;
+        this.currentRecordId.set(record.id);
+      }
+    }
+    const hadPendingRerun = this.pendingRerun;
+    const rerunNavigation = this.consumePendingRerun(targetRecordId);
+    if (!hadPendingRerun && targetRecordId) {
+      this.bindUrlToRecord(targetRecordId);
     }
     this.store.clearSelection();
     this.interrupted.set(false);
     this.stopRecovery.set(false);
     this.startClock();
     await Promise.all([
-      this.runner.resumeAnalysis(this.workspacePath()),
+      this.runner.resumeAnalysis(workspace),
       rerunNavigation,
     ]);
     if (this.destroyed) return;
@@ -1059,8 +1243,14 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   }
   protected async stop(): Promise<void> {
     try {
-      await this.runner.cancel();
-      this.stopRecovery.set(false);
+      const liveRecord = this.findLiveAnalysisRecord();
+      if (liveRecord) {
+        const cancelled = await this.setupRuns.cancel(liveRecord.id);
+        this.stopRecovery.set(!cancelled);
+      } else {
+        await this.runner.cancel();
+        this.stopRecovery.set(false);
+      }
     } catch {
       this.stopRecovery.set(true);
     } finally {
@@ -1081,13 +1271,136 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.openedAt.set(null);
   }
   protected async reviewSkills(): Promise<void> {
+    const selected = this.store.selected();
+    const loaded = this.store.loaded();
+    if (!selected) {
+      const displayedRunId = loaded?.manifest.runId ?? null;
+      const record = this.resolveCompletedRecordForResult(displayedRunId);
+      if (record?.status === 'completed' && record.analysisRunId) {
+        const target = this.setupRuns.targetOf(record);
+        await this.router.navigate(['/onboarding', ...target.subPath], {
+          queryParams: target.queryParams,
+          state: { explicitBack: false },
+        });
+        return;
+      }
+      if (displayedRunId) {
+        const link = onboardingStepLink('analyze', 'skills', {
+          analysis: displayedRunId,
+        });
+        await this.router.navigate([...link.commands], {
+          queryParams: link.queryParams,
+          state: { explicitBack: false },
+        });
+        return;
+      }
+    }
     const identity = {
-      analysis: this.store.selected() ?? this.store.loaded()?.manifest.slug,
+      analysis: selected ?? loaded?.manifest.slug,
     };
     const link = onboardingStepLink('analyze', 'skills', identity);
     await this.router.navigate([...link.commands], {
       queryParams: link.queryParams,
       state: { explicitBack: false },
     });
+  }
+  private resolveCompletedRecordForResult(
+    displayedRunId: string | null,
+  ): SetupRunRecord | null {
+    const workspace = this.workspacePath();
+    if (!workspace) return null;
+    const completed = this.setupRuns
+      .runsFor(workspace)
+      .filter(
+        (record) =>
+          record.workflow === 'analysis' && record.status === 'completed',
+      );
+    const active = this.activeRecord();
+    if (displayedRunId) {
+      if (
+        active?.status === 'completed' &&
+        (active.analysisRunId === displayedRunId ||
+          active.backendRunId === displayedRunId)
+      ) {
+        return active;
+      }
+      return (
+        completed.find(
+          (record) =>
+            record.analysisRunId === displayedRunId ||
+            record.backendRunId === displayedRunId,
+        ) ?? null
+      );
+    }
+    return active?.status === 'completed' ? active : null;
+  }
+  private findLiveAnalysisRecord(): SetupRunRecord | null {
+    const workspace = this.workspacePath();
+    if (!workspace) return null;
+    return (
+      this.setupRuns
+        .runsFor(workspace)
+        .find(
+          (record) =>
+            record.workflow === 'analysis' && record.status === 'running',
+        ) ?? null
+    );
+  }
+  private findRerunSourceRecord(): SetupRunRecord | null {
+    const workspace = this.workspacePath();
+    if (!workspace) return null;
+    const runs = this.setupRuns
+      .runsFor(workspace)
+      .filter((record) => record.workflow === 'analysis');
+    const tabId = this.tab();
+    if (tabId) {
+      const byTab = runs.find((record) => record.id === tabId);
+      if (
+        byTab &&
+        (byTab.status === 'completed' || byTab.status === 'cancelled')
+      ) {
+        return byTab;
+      }
+      return null;
+    }
+    return (
+      runs.find(
+        (record) =>
+          record.status === 'completed' || record.status === 'cancelled',
+      ) ?? null
+    );
+  }
+  private findRetryableAnalysisRecord(): SetupRunRecord | null {
+    const active = this.activeRecord();
+    if (
+      active &&
+      (active.status === 'failed' || active.status === 'interrupted')
+    ) {
+      return active;
+    }
+    const workspace = this.workspacePath();
+    if (!workspace) return null;
+    return (
+      this.setupRuns
+        .runsFor(workspace)
+        .find(
+          (record) =>
+            record.workflow === 'analysis' &&
+            (record.status === 'failed' || record.status === 'interrupted'),
+        ) ?? null
+    );
+  }
+  private hasLiveRun(): boolean {
+    return this.isAnalysisActive() || this.findLiveAnalysisRecord() !== null;
+  }
+  private syncAttachedRecord(nextId: string | null): void {
+    if (nextId === this.attachedRecordId) return;
+    if (this.attachedRecordId) {
+      this.setupRuns.release(this.attachedRecordId);
+    }
+    this.attachedRecordId = nextId;
+    if (nextId) {
+      this.setupRuns.attach(nextId);
+    }
   }
 }

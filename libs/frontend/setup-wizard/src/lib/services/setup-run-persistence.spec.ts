@@ -195,6 +195,42 @@ describe('setup-run-persistence', () => {
       expect(team?.teamBuilder).toEqual({ intent: '', installed: ['skill-a'] });
       expect(team?.handoffTabId).toBe('tab-1');
 
+      const withRecovery = parseSetupRunRecord({
+        ...record({ workflow: 'team-builder', step: 'consent' }),
+        teamBuilder: {
+          intent: 'Build QA',
+          installed: ['skill-a'],
+          selectedIds: ['owner/repo/a'],
+          ownerDecision: 'raise',
+          installCompleted: true,
+          hadAttachments: true,
+        },
+      });
+      expect(withRecovery?.teamBuilder).toEqual({
+        intent: 'Build QA',
+        installed: ['skill-a'],
+        selectedIds: ['owner/repo/a'],
+        ownerDecision: 'raise',
+        installCompleted: true,
+        hadAttachments: true,
+      });
+
+      const invalidOptional = parseSetupRunRecord({
+        ...record({ workflow: 'team-builder', step: 'consent' }),
+        teamBuilder: {
+          intent: 'Build QA',
+          installed: [],
+          selectedIds: [42],
+          ownerDecision: 'invalid',
+          installCompleted: 'yes',
+          hadAttachments: 1,
+        },
+      });
+      expect(invalidOptional?.teamBuilder).toEqual({
+        intent: 'Build QA',
+        installed: [],
+      });
+
       const other = parseSetupRunRecord({
         ...record(),
         teamBuilder: { intent: 'x', installed: [] },
