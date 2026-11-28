@@ -116,8 +116,11 @@ describe('agent spawn surface parity', () => {
       ...http._meta,
       'anthropic/maxResultSizeChars': getToolResultBudget(http.name).chars,
     });
-    expect(http.description).toContain('HTTP calls wait at most 45 s');
-    expect(stdio.description).not.toContain('HTTP');
+    expect(http.description).toContain('ptah_agent_wait');
+    expect(http.description).toContain('ptah_agent_read');
+    expect(stdio.description).toContain('agent_wait');
+    expect(stdio.description).toContain('agent_read');
+    expect(stdio.description).not.toContain('ptah_agent_read');
   });
 
   it('requires only task on both surfaces', () => {

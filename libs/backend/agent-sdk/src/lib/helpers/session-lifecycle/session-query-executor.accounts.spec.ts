@@ -221,7 +221,7 @@ function fixture(settings: { fail?: string; cancel?: string; unproved?: string; 
   'tab-a', metadata);
   const run = async (resume?: string) => { await bootstrap(resume); return launch(); };
   return { flow, events, reads, options, registry, persistence, admission, controller, log, bootstrap, launch, run,
-    paused, entered, terminations, runner, iterators, preInitTools, yielded: () => yielded, saved: () => saved,
+    paused, entered, terminations, runner, queryFn, certifiedResources, iterators, preInitTools, yielded: () => yielded, saved: () => saved,
     epoch: () => epochListener };
 }
 
@@ -1087,6 +1087,33 @@ describe('named admission failure logs only fixed text', () => {
       f.log.error.mock.calls, refusal]);
     for (const value of adversarial) expect(logged).not.toContain(value);
   });
+});
+
+it('passes the certified named resources to the SDK options builder', async () => {
+  const f = fixture();
+  const build = jest.fn().mockRejectedValue(new Error('options builder stopped the launch'));
+  const Ctor = SessionQueryExecutor as unknown as new (...args: unknown[]) => SessionQueryExecutor;
+  const executor = new Ctor(
+    f.log,
+    { ...f.registry, register: () => ({ token: 'named-run' }), remove: jest.fn() },
+    { createUserMessageStream: jest.fn() },
+    { getPermissionLevel: () => 'ask' },
+    { getQueryFunction: async () => f.queryFn },
+    { build },
+    {},
+    {},
+    { ...f.runner, accountAdmission: f.admission, accountPersistence: f.persistence },
+  );
+  await expect(executor.executeQuery({
+    sessionId: 'tab-a',
+    sessionConfig: {
+      model: 'claude-sonnet-4-5',
+      projectPath: launchContext.cwd,
+      accountSelection: { kind: 'named', profileId: route.profileId },
+    },
+  } as unknown as Parameters<SessionQueryExecutor['executeQuery']>[0])).rejects.toBeDefined();
+  expect(build).toHaveBeenCalledTimes(1);
+  expect(build.mock.calls[0][0].accountResources).toBe(f.certifiedResources);
 });
 
 // P3 finding 7: a host without admission or persistence refuses `unavailable-storage`.

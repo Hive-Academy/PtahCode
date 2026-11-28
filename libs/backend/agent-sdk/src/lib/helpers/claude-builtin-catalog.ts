@@ -118,6 +118,18 @@ export const CLAUDE_BUILTIN_TERMINAL_SKILLS: readonly ClaudeBuiltinSkillRow[] =
     },
   ];
 
+/** SDK bundled skills controlled by `disableBundledSkills` and overrides. */
+export const CLAUDE_BUNDLED_SKILL_IDS: readonly string[] = [
+  'dataviz',
+  'claude-api',
+  'claude-approvals',
+  'schedule',
+  'loop',
+  'run',
+  'simplify',
+  'security-review',
+];
+
 /**
  * Built-ins Ptah depends on. The catalog must never contain one of them; a
  * spec pins that the two lists do not intersect.
@@ -292,8 +304,12 @@ export interface ClaudeBuiltinSkillCollisionResult {
 export function withoutCollidingBuiltinSkillDenials(
   deniedSkillNames: readonly string[],
   sameName: ClaudeSameNameSkills,
+  additionalCatalogNames: readonly string[] = [],
 ): ClaudeBuiltinSkillCollisionResult {
-  const catalog = new Set(CLAUDE_BUILTIN_TERMINAL_SKILL_IDS);
+  const catalog = new Set([
+    ...CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
+    ...additionalCatalogNames,
+  ]);
   const kept: string[] = [];
   const keptVisible: ClaudeBuiltinSkillKeptVisible[] = [];
   for (const name of deniedSkillNames) {

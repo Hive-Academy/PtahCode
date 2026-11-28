@@ -74,9 +74,12 @@ const ULTRACODE_OFF_FAILED =
 
 /** Each row description is the row hint. It wraps, and its id stays `agent-behaviour-<row>-note`. */
 const PROMPT_NOTE_ON =
-  "Ptah's project-specific prompt, used for all sessions when on.";
-const PROMPT_NOTE_WIZARD =
-  'Run Setup to analyze your project, review skills, and prepare project guidance.';
+  "Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.";
+const PROMPT_NOTE_OFF =
+  'Claude Code preset with Ptah additions. Applies to new sessions.';
+const PROMPT_NOTE_MISSING =
+  'Run Setup to generate the project prompt first.';
+const PROMPT_NOTE_LOADING = 'Loading system prompt status…';
 const PROMPT_NOTE_UNKNOWN = 'The system prompt status is not loaded yet.';
 const WORKFLOWS_NOTE =
   'Let the agent plan and run a multi-step workflow per task instead of a single-shot reply.';
@@ -167,6 +170,7 @@ interface LoadError {
           edgePadding="trim"
           label="System prompt mode"
           controlId="agent-behaviour-prompt-toggle"
+          [disabled]="promptToggleDisabled()"
           [hint]="promptNote()"
           hintElementId="agent-behaviour-prompt-note"
           data-testid="agent-behaviour-row-prompt"
@@ -177,7 +181,7 @@ interface LoadError {
               [label]="promptEnabled() ? 'Ptah Enhanced' : 'Default'"
             />{{
               promptEnabled()
-                ? 'Active for all sessions'
+                ? 'Applies to new sessions'
                 : 'Standard system prompt'
             }}</span
           >
@@ -310,7 +314,8 @@ interface LoadError {
       <ptah-system-prompt-drawer
         [isOpen]="drawerOpen()"
         (closed)="drawerOpen.set(false)"
-        (changed)="loadPromptStatus()"
+        (changed)="onPromptStatusInvalidated($event)"
+        (statusObserved)="onPromptStatusInvalidated($event)"
       />
     }
   `,
@@ -341,19 +346,37 @@ export class AgentBehaviourSectionComponent implements OnInit {
   /** Save triggers are disabled while any settings write is in flight (D3). */
   readonly saving = this.feedback.saving;
 
-  private readonly promptLoading = signal(true);
-  private readonly workflowsLoading = signal(true);
-  private readonly promptStatus =
-    signal<EnhancedPromptsGetStatusResponse | null>(null);
-  private readonly promptLoadError = signal<string | null>(null);
-  readonly promptEnabled = computed(
-    () => this.promptStatus()?.enabled ?? false,
+  private readonly promptWorkspace = computed(
+    () => this.workspaceScope.activeWorkspacePath() ?? '.',
   );
-  /** The mode can only be turned on once a prompt has been generated (A10). */
+  private readonly promptRead = signal<{
+    workspacePath: string;
+    status: EnhancedPromptsGetStatusResponse | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  private readonly scopedPromptRead = computed(() => {
+    const read = this.promptRead();
+    return read?.workspacePath === this.promptWorkspace() ? read : null;
+  });
+  private readonly promptLoading = computed(() => this.scopedPromptRead()?.loading ?? true);
+  private readonly workflowsLoading = signal(true);
+  private readonly promptStatus = computed(() => this.scopedPromptRead()?.status ?? null);
+  private readonly promptLoadError = computed(() => this.scopedPromptRead()?.error ?? null);
+  readonly hasGeneratedPrompt = computed(
+    () => this.promptStatus()?.hasGeneratedPrompt ?? false,
+  );
+  /**
+   * Toggle value: always off when no project prompt exists (or before status loads);
+   * when a project prompt exists, reflects its saved `enabled` state.
+   */
+  readonly promptEnabled = computed(() => {
+    const status = this.promptStatus();
+    return status !== null && status.hasGeneratedPrompt && status.enabled;
+  });
+  /** The mode stays disabled until a project prompt exists and status is not loading (A10). */
   readonly promptToggleDisabled = computed(
-    () =>
-      !(this.promptStatus()?.hasGeneratedPrompt ?? false) &&
-      !this.promptEnabled(),
+    () => !this.hasGeneratedPrompt() || this.promptLoading(),
   );
 
   /** `workflows.disabled`; `null` until `agent:getConfig` answers. */
@@ -364,10 +387,18 @@ export class AgentBehaviourSectionComponent implements OnInit {
     () => this.workflowsDisabled() === false,
   );
 
-  /** A failed status read never claims there is no prompt: until one read succeeds the note says it is not loaded. */
+  /**
+   * Row hint linked via `aria-describedby="agent-behaviour-prompt-note"`.
+   * A failed status read never claims there is no prompt: while loading it reports
+   * loading, and on failure it says the status is not loaded yet.
+   */
   readonly promptNote = computed(() => {
-    if (this.promptStatus() === null) return PROMPT_NOTE_UNKNOWN;
-    return this.promptToggleDisabled() ? PROMPT_NOTE_WIZARD : PROMPT_NOTE_ON;
+    const status = this.promptStatus();
+    if (status === null) {
+      return this.promptLoading() ? PROMPT_NOTE_LOADING : PROMPT_NOTE_UNKNOWN;
+    }
+    if (!status.hasGeneratedPrompt) return PROMPT_NOTE_MISSING;
+    return status.enabled ? PROMPT_NOTE_ON : PROMPT_NOTE_OFF;
   });
 
   readonly effortNote = computed(
@@ -398,6 +429,10 @@ export class AgentBehaviourSectionComponent implements OnInit {
 
   constructor() {
     effect(() => {
+      const workspacePath = this.promptWorkspace();
+      untracked(() => void this.loadPromptStatus(workspacePath));
+    });
+    effect(() => {
       const loaded = !this.promptLoading() && !this.workflowsLoading() &&
         this.promptStatus() !== null && this.workflowsLoaded();
       const failed = this.loadErrors().length > 0;
@@ -418,17 +453,22 @@ export class AgentBehaviourSectionComponent implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
-    await Promise.all([this.loadPromptStatus(), this.loadWorkflows()]);
+    await this.loadWorkflows();
   }
 
   /** A10, S-sel. Undo writes the previous mode back. */
   async onPromptModeChange(event: Event): Promise<void> {
     const checkbox = event.target as HTMLInputElement;
+    if (this.promptToggleDisabled()) {
+      checkbox.checked = this.promptEnabled();
+      return;
+    }
+    const workspacePath = this.promptWorkspace();
     const previous = this.promptEnabled();
     await this.feedback.saveGeneric({
       label: 'system prompt mode',
-      write: () => this.writePromptMode(!previous),
-      undo: () => this.writePromptMode(previous),
+      write: () => this.writePromptMode(workspacePath, !previous),
+      undo: () => this.writePromptMode(workspacePath, previous),
     });
     // OnPush keeps the binding when the saved value did not change: put the DOM back on it.
     checkbox.checked = this.promptEnabled();
@@ -473,28 +513,43 @@ export class AgentBehaviourSectionComponent implements OnInit {
     checkbox.checked = this.ultracode.enabled();
   }
 
+  protected onPromptStatusInvalidated(workspacePath: string): void {
+    if (workspacePath === this.promptWorkspace()) void this.loadPromptStatus(workspacePath);
+  }
+
   /**
    * The host answers a failed status check inside a successful RPC with a zeroed status plus `error`
    * (`enhanced-prompts-rpc.handlers.ts:185-192`); that is a load failure, not "no prompt" (lane Serious 1).
    */
-  protected async loadPromptStatus(): Promise<boolean> {
-    this.promptLoading.set(true);
+  private async loadPromptStatus(
+    workspacePath = this.promptWorkspace(),
+    savedEnabled?: boolean,
+  ): Promise<void> {
+    const previous = this.promptStatus();
+    const pending = {
+      workspacePath,
+      status: previous && savedEnabled !== undefined
+        ? { ...previous, enabled: savedEnabled }
+        : previous,
+      loading: true,
+      error: null,
+    };
+    this.promptRead.set(pending);
+    let status: EnhancedPromptsGetStatusResponse | null = null;
     try {
-      const result = await this.rpcService.call('enhancedPrompts:getStatus', {
-        workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.',
-      });
-      if (result.isSuccess() && !result.data.error) {
-        this.promptStatus.set(result.data);
-        this.promptLoadError.set(null);
-        this.promptLoading.set(false);
-        return true;
-      }
+      const result = await this.rpcService.call('enhancedPrompts:getStatus', { workspacePath });
+      if (result.isSuccess() && !result.data.error) status = result.data;
     } catch {
-      // Falls through to the fixed load error below.
+      // The row offers Retry for a failed status read.
     }
-    this.promptLoading.set(false);
-    this.promptLoadError.set(PROMPT_STATUS_LOAD_FAILED);
-    return false;
+    // A newer request or workspace change invalidates this response.
+    if (this.promptRead() !== pending || this.promptWorkspace() !== workspacePath) return;
+    this.promptRead.set({
+      workspacePath,
+      status: status ?? pending.status,
+      loading: false,
+      error: status === null ? PROMPT_STATUS_LOAD_FAILED : null,
+    });
   }
 
   private async loadWorkflows(): Promise<void> {
@@ -519,10 +574,10 @@ export class AgentBehaviourSectionComponent implements OnInit {
    * still stands: the checkbox and badge show the written value and the load error says the status was not
    * re-read, so "Saved" never sits next to a stale checkbox (Moderate 8, lane FM-3).
    */
-  private async writePromptMode(enabled: boolean): Promise<WriteResult> {
+  private async writePromptMode(workspacePath: string, enabled: boolean): Promise<WriteResult> {
     try {
       const result = await this.rpcService.call('enhancedPrompts:setEnabled', {
-        workspacePath: this.workspaceScope.activeWorkspacePath() ?? '.',
+        workspacePath,
         enabled,
       });
       if (!result.isSuccess() || !result.data.success) {
@@ -531,10 +586,8 @@ export class AgentBehaviourSectionComponent implements OnInit {
     } catch {
       return { ok: false, message: PROMPT_MODE_SAVE_FAILED };
     }
-    if (!(await this.loadPromptStatus())) {
-      this.promptStatus.update((status) =>
-        status === null ? status : { ...status, enabled },
-      );
+    if (workspacePath === this.promptWorkspace()) {
+      await this.loadPromptStatus(workspacePath, enabled);
     }
     return { ok: true };
   }

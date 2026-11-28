@@ -37,6 +37,7 @@ describe('buildFlagSettings — a style is active', () => {
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
       outputStyle: 'Explanatory',
+      skillListingMaxDescChars: 200,
     });
   });
 
@@ -87,7 +88,10 @@ describe('buildFlagSettings — a style is active', () => {
 
 describe('buildFlagSettings — auto-compact keys (TASK_2026_414)', () => {
   it('returns the shared constant when the auto-compact control has no opinion', () => {
-    expect(buildFlagSettings(undefined, {})).toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
+    expect(buildFlagSettings(undefined, {})).toEqual({
+      ...PTAH_DISABLE_SDK_AUTO_MEMORY,
+      skillListingMaxDescChars: 200,
+    });
   });
 
   it('merges autoCompactEnabled false into a fresh object', () => {
@@ -98,6 +102,7 @@ describe('buildFlagSettings — auto-compact keys (TASK_2026_414)', () => {
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
       autoCompactEnabled: false,
+      skillListingMaxDescChars: 200,
     });
     expect(settings).not.toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
   });
@@ -113,6 +118,7 @@ describe('buildFlagSettings — auto-compact keys (TASK_2026_414)', () => {
       autoDreamEnabled: false,
       outputStyle: 'Explanatory',
       autoCompactWindow: 400_000,
+      skillListingMaxDescChars: 200,
     });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
@@ -144,16 +150,22 @@ describe('buildFlagSettings — no style is active (G4b)', () => {
       expect(settings).toEqual({
         autoMemoryEnabled: false,
         autoDreamEnabled: false,
+        skillListingMaxDescChars: 200,
       });
     },
   );
 
   it('returns the shared constant unchanged when no style is active', () => {
-    expect(buildFlagSettings(undefined)).toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
+    expect(buildFlagSettings(undefined)).toEqual({
+      ...PTAH_DISABLE_SDK_AUTO_MEMORY,
+      skillListingMaxDescChars: 200,
+    });
   });
 
   it('the shared constant is frozen, so an accidental mutation cannot silently succeed', () => {
     expect(Object.isFrozen(PTAH_DISABLE_SDK_AUTO_MEMORY)).toBe(true);
+    expect(Object.isFrozen(buildFlagSettings())).toBe(true);
+    expect(Object.isFrozen(buildFlagSettings(undefined, undefined, undefined, undefined, undefined, true))).toBe(true);
   });
 });
 
@@ -166,12 +178,8 @@ describe('buildFlagSettings — no style is active (G4b)', () => {
 describe('buildFlagSettingsArg', () => {
   it('emits exactly the constant when there is no style and no inbound value', () => {
     // Byte for byte. This is the no-regression contract for the flag tier.
-    expect(buildFlagSettingsArg()).toBe(
-      JSON.stringify(PTAH_DISABLE_SDK_AUTO_MEMORY),
-    );
-    expect(buildFlagSettingsArg({})).toBe(
-      JSON.stringify(PTAH_DISABLE_SDK_AUTO_MEMORY),
-    );
+    expect(JSON.parse(buildFlagSettingsArg())).toEqual(buildFlagSettings());
+    expect(JSON.parse(buildFlagSettingsArg({}))).toEqual(buildFlagSettings());
   });
 
   it('parses back to the object buildFlagSettings produced', () => {
@@ -209,7 +217,7 @@ describe('buildFlagSettingsArg', () => {
 
     const arg = buildFlagSettingsArg(undefined, 'Accept', { warn });
 
-    expect(arg).toBe(JSON.stringify(PTAH_DISABLE_SDK_AUTO_MEMORY));
+    expect(JSON.parse(arg)).toEqual(buildFlagSettings());
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
@@ -293,7 +301,7 @@ describe('build() wiring', () => {
     // argument ORDER is what this guard is pinning.
     const normalized = source.replace(/\s+/g, ' ');
     expect(normalized).toContain(
-      "settings: buildFlagSettingsArg( sessionConfig, 'accept', this.logger, autoCompact, capabilityFlags, subagentTtl.sdkValue, claudeMdExcludes, ),",
+      "settings: buildFlagSettingsArg( flagStyleConfig, 'accept', this.logger, autoCompact, { ...capabilityFlags, deniedSkillNames: uniqueNames([ ...(capabilityFlags.deniedSkillNames ?? []), ...safeDeniedBundledSkills, ]), }, subagentTtl.sdkValue, claudeMdExcludes, enabledBundledSkills.size === 0, ),",
     );
     // The bare reference is what this task replaced. If it reappears on the
     // options object, the flag tier stops carrying the style.

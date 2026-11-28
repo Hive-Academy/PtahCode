@@ -13,7 +13,11 @@
 
 import 'reflect-metadata';
 
-import { assembleSystemPrompt } from './sdk-query-options-builder';
+import {
+  appendQueryDependentPromptBlocks,
+  assembleSystemPrompt,
+  buildFlagSettings,
+} from './sdk-query-options-builder';
 import { PTAH_CORE_SYSTEM_PROMPT } from '../prompt-harness';
 
 /** Unique enough that it cannot collide with the core prompt or the preset. */
@@ -38,6 +42,46 @@ function countOf(haystack: string, needle: string): number {
 }
 
 describe('assembleSystemPrompt — output style body', () => {
+  it('keeps the static prefix byte-identical when query-dependent blocks are present', () => {
+    const staticPrefix = assembleSystemPrompt({
+      ...BASE_INPUT,
+      ptahUiHint: true,
+      userSystemPrompt: USER_PROMPT,
+      outputStyleBody: STYLE_BODY,
+      enhancedPromptsContent: 'Project guidance',
+    }).content;
+    const withDynamicBlocks = appendQueryDependentPromptBlocks(staticPrefix, [
+      'Session memory snapshot',
+      'Corpus context',
+      'Recalled memory',
+      '## Relevant Workspace Symbols\nquery results',
+    ]);
+
+    expect(withDynamicBlocks?.slice(0, staticPrefix?.length)).toBe(staticPrefix);
+    expect(withDynamicBlocks?.indexOf('## Relevant Workspace Symbols')).toBeGreaterThan(
+      staticPrefix?.length ?? 0,
+    );
+  });
+
+  it('caps skill listing descriptions at 200 characters in flag settings', () => {
+    expect(buildFlagSettings()['skillListingMaxDescChars']).toBe(200);
+  });
+
+  it('puts the skill cap and bundled-skill switch in Settings, including the shared-constant path', () => {
+    const settings = buildFlagSettings(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect(settings['skillListingMaxDescChars']).toBe(200);
+    expect(settings['disableBundledSkills']).toBe(true);
+    expect(buildFlagSettings()['disableBundledSkills']).toBeUndefined();
+  });
+
   it('baseline: with no style and no user prompt the content is the core prompt alone', () => {
     const result = assembleSystemPrompt({ ...BASE_INPUT });
 

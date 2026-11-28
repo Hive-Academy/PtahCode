@@ -15,7 +15,6 @@ import {
   SYMBOL_INDEX_DEFAULT_LIMIT,
   SYMBOL_INDEX_MAX_LIMIT,
 } from '../namespace-builders/symbol-index-query';
-import { HTTP_MAX_AGENT_WAIT_SEC } from './wait-tools-args.schema';
 import {
   READ_SYMBOL_DEFAULT_MAX_LINES,
   READ_SYMBOL_HARD_MAX_LINES,
@@ -806,136 +805,64 @@ export function buildAgentSpawnTool({
   return {
     name: 'ptah_agent_spawn',
     description:
-      'Spawn a headless agent to work on a task in the background. ' +
-      `Supports system CLI agents (${SYSTEM_CLI_TYPES.join(', ')}) and Ptah CLI ` +
-      'agents, which are user-configured Anthropic-compatible providers. ' +
-      'WHICH of either family exists on this machine is a runtime fact — call ' +
-      'ptah_agent_list; do not assume a provider from any list you have read. ' +
-      'It may reply "starting" and runs while you work. ' +
-      'Exclusive external owners receive queued Completion ID blocks on later tool results, including wait. ' +
-      'In-process Ptah sessions receive a pushed completion turn carrying ' +
-      'status, exit code, duration and — when you declared "deliverables" — ' +
-      'whether each declared file was actually written. A verdict of ' +
-      '"no-deliverable" means the agent exited cleanly WITHOUT doing the ' +
-      'work, so declare "deliverables" on every spawn whose output is a file. ' +
-      `Keep working, or call ${transport === 'stdio' ? 'agent_wait' : 'ptah_agent_wait'} to block until lanes end. ` +
-      (transport === 'http'
-        ? `HTTP calls wait at most ${HTTP_MAX_AGENT_WAIT_SEC} s, so repeat while lanes run. `
-        : '') +
-      'Use status and read as recovery tools when a completion is unavailable. ' +
-      'For Ptah CLI agents, pass ptahCliId (from ptah_agent_list). ' +
-      'Use modelTier to control capability level: "opus" for complex work, ' +
-      '"sonnet" (default for Ptah CLI agents) for balanced work, ' +
-      '"haiku" for fast work. Applies to Ptah CLI and cli "claude". ' +
-      'To resume a previous CLI session, pass resume_session_id with the CLI session ID. ' +
-      'Ideal for delegating: code reviews, test generation, documentation, ' +
-      'and other independent subtasks.',
+      `Spawn an independent headless lane for a task. Call ${transport === 'stdio' ? 'agent_list' : 'ptah_agent_list'} first: the cli enum lists supported adapters, not installed agents; choose a listed system CLI or ptahCliId. ` +
+      'Declare every required file in deliverables so completion verifies it was written. Spawn is asynchronous: continue work, then use the completion signal or ' +
+      `${transport === 'stdio' ? 'agent_wait' : 'ptah_agent_wait'}; read finished output with ${transport === 'stdio' ? 'agent_read' : 'ptah_agent_read'}. ` +
+      'Resume with resume_session_id. modelTier selects capability tier; model is a CLI-specific model ID. Follow the agent-lanes skill for the full lane contract.',
     inputSchema: {
       type: 'object',
       properties: {
         task: {
           type: 'string',
-          description:
-            'Task description for the agent. Be specific about what to do, ' +
-            'which files to focus on, and what output to produce.',
+          description: 'Required task and expected result.',
         },
         cli: {
           type: 'string',
           enum: [...SYSTEM_CLI_TYPES],
-          description:
-            'Which system CLI agent to use. The enum above is the complete set ' +
-            'of adapters this build ships; it is NOT the set installed here. ' +
-            'Only CLIs actually installed on this machine will spawn — check ' +
-            'ptah_agent_list first; naming an uninstalled CLI fails at spawn time. ' +
-            'Omit to use the default (auto-detected or user-configured). ' +
-            'Not needed when using ptahCliId. "claude" is a Claude Agent SDK ' +
-            'session with Ptah tools over MCP, distinct from Ptah CLI agents.',
+          description: 'Installed system CLI from ptah_agent_list; omit for the configured default.',
         },
         ptahCliId: {
           type: 'string',
-          description:
-            'ID of a Ptah CLI agent to use (from ptah_agent_list results where cli="ptah-cli"). ' +
-            'Ptah CLI agents are user-configured Anthropic-compatible providers. ' +
-            'The set is per-user and per-machine, so ptah_agent_list is the only ' +
-            'way to know which exist here. When set, cli parameter is ignored.',
+          description: 'Listed Ptah CLI agent ID; takes precedence over cli.',
         },
         workingDirectory: {
           type: 'string',
-          description:
-            'Working directory for the agent (must be within workspace). Defaults to workspace root.',
+          description: 'Workspace directory for the lane; defaults to workspace root.',
         },
         timeout: {
           type: 'number',
-          description:
-            'Inactivity window in milliseconds: the agent is stopped after this long with no output (default: 3600000 = 1hr, no maximum, 0 disables it)',
+          description: 'Inactivity timeout in milliseconds; 0 disables it (default 3600000).',
         },
         files: {
           type: 'array',
           items: { type: 'string' },
-          description: 'List of files the agent should focus on',
+          description: 'Files to focus the lane on.',
         },
         taskFolder: {
           type: 'string',
-          description:
-            'Task-spec folder for shared workspace (e.g., ".ptah/specs/TASK_2026_157"). ' +
-            'Agent will write deliverables here.',
+          description: 'Shared task-spec folder; relative deliverables resolve here.',
         },
         deliverables: {
           type: 'array',
           items: { type: 'string' },
-          description:
-            'The files this agent MUST write before it exits. A relative ' +
-            'entry resolves against taskFolder when one is given, otherwise ' +
-            'against workingDirectory. Two things use it: the agent is told ' +
-            'to write exactly these paths, and the completion block delivered ' +
-            'back to you reports whether each one exists and is non-empty. ' +
-            'Omit it and the signal can only say the process exited — an ' +
-            'agent that exits 0 having written nothing then looks like a ' +
-            'success. Declare it whenever the agent owes you a file.',
+          description: 'Files the lane must write; completion verifies each exists and is non-empty.',
         },
         model: {
           type: 'string',
-          description:
-            'Model override for the CLI agent, as a model id that CLI accepts. ' +
-            'Valid ids are per-CLI and change between vendor releases — read them ' +
-            'from that agent rather than from any list. ' +
-            'Uses user-configured default if omitted.',
+          description: 'CLI-specific model ID; omit for the configured default.',
         },
         modelTier: {
           type: 'string',
           enum: ['opus', 'sonnet', 'haiku'],
-          description:
-            'Model capability tier for Ptah CLI agents. Controls which model tier the spawned agent uses. ' +
-            '"opus" = most capable (complex architecture, deep analysis), ' +
-            '"sonnet" = balanced (default, general coding tasks), ' +
-            '"haiku" = fastest (simple tasks, quick lookups). ' +
-            "The tier maps to a concrete model through the chosen provider's own " +
-            'tier mappings, so the same tier resolves differently per provider — ' +
-            'you pick the tier, never the model id. ' +
-            'Also applies to system cli "claude" as a native model alias ' +
-            'when model is omitted. Other system CLIs ignore it.',
+          description: 'Capability tier for Ptah CLI and Claude CLI; other system CLIs ignore it.',
         },
         resume_session_id: {
           type: 'string',
-          description:
-            'Resume a previous CLI agent session by its CLI-native session ID. ' +
-            'The agent will continue from where the previous session left off. ' +
-            'For cli "claude" this is the SDK session id; the resumed lane keeps ' +
-            'the account stored with that session.',
+          description: 'CLI-native session ID to resume the previous lane.',
         },
         accountSelection: {
           type: 'object',
-          description:
-            'Optional account route, accepted only with cli "claude" and no ' +
-            'ptahCliId. {"kind":"ambient"} uses the existing Claude login. ' +
-            '{"kind":"omitted"}, the same as leaving this out, uses the lane ' +
-            'account stored for the workspace when one is set, otherwise the ' +
-            'existing Claude login. ' +
-            '{"kind":"named","profileId":"<id>"} runs a fresh claude lane on ' +
-            'that named Claude account; the spawn is refused when the account ' +
-            'cannot be proved. A resume never takes a named account: it keeps ' +
-            'the account stored with its session. Takes no path, environment, ' +
-            'token or owner.',
+          description: 'Claude CLI only: omitted uses stored/login; ambient uses login; named profile is fresh-lane only.',
           properties: {
             kind: { type: 'string', enum: ['omitted', 'ambient', 'named'] },
             profileId: { type: 'string' },
@@ -946,73 +873,55 @@ export function buildAgentSpawnTool({
         permission: {
           type: 'string',
           enum: ['plan', 'ask', 'auto-edit', 'yolo'],
-          description:
-            'Requested lane permission mode. Unsupported choices are refused before spawn. ' +
-            'Omitted: the saved per-CLI default, else the built-in default (yolo, or the ' +
-            'most capable mode the CLI supports). A plan-mode parent caps lanes to plan.',
+          description: 'Requested permission mode; unsupported modes are refused.',
         },
         network: {
           type: 'string',
           enum: ['allow', 'deny'],
-          description:
-            'Requested network mode. Unsupported choices are refused before spawn. ' +
-            'Omitted: the saved per-CLI default, else allow where the mode supports it.',
+          description: 'Requested network mode; unsupported modes are refused.',
         },
         role: {
           type: 'string',
-          description:
-            'Name of an agent role generated for this workspace. ptah_agent_list ' +
-            'shows the valid names. The role definition is delivered to the agent, ' +
-            'and the spawn result reports how it was delivered. Do not paste a role ' +
-            'template into task; pass its name here instead.',
+          description: 'Generated workspace role name from ptah_agent_list.',
         },
         phase: {
           type: 'object',
-          description:
-            'Validated phase dispatch from the host: version, kind, rendered text, definition, tool profile and optional resolved skills.',
+          description: 'Host-resolved phase handoff context.',
         },
         skills: {
           type: 'array',
           items: { type: 'object' },
-          description:
-            'Host-resolved skills with name and path or text. Resolved skill text is included in the spawn prompt and reported as skillDelivery inline.',
+          description: 'Host-resolved skills included in the lane prompt.',
         },
         effort: {
           type: 'string',
-          description:
-            'Reasoning effort for this lane: minimal, low, medium, high, xhigh ' +
-            'or max. Wins over the per-CLI setting and the chat effort. A value ' +
-            'the chosen CLI does not take is ignored. Omit to use the setting.',
+          description: 'Effort: minimal, low, medium, high, xhigh, max; overrides CLI setting.',
         },
         taskKind: {
           type: 'string',
           enum: [...OUTCOME_TASK_KINDS],
-          description:
-            'Task kind this lane is routed for, recorded with its outcome.',
+          description: 'Task kind recorded with the lane outcome.',
         },
         routingSource: {
           type: 'string',
           enum: ['model', 'ranking', 'pin'],
-          description: 'What routed this lane: model, ranking, or pin.',
+          description: 'Source that selected this lane route.',
         },
         route: {
           type: 'object',
-          description:
-            'Route identity from ptah_route_decide when spawning a routed phase. ' +
-            'Pass route: { routeId, phaseId } from the ptah_route_decide result so the host records routed facts. ' +
-            'Unknown ids are ignored; callers never set routeFacts.',
+          description: 'Route identity returned by ptah_route_decide.',
           properties: {
             routeId: {
               type: 'string',
               minLength: 1,
               maxLength: 64,
-              description: 'routeId returned by ptah_route_decide.',
+              description: 'Route ID from ptah_route_decide.',
             },
             phaseId: {
               type: 'string',
               minLength: 1,
               maxLength: 64,
-              description: 'phaseId of the routed entry in ptah_route_decide.',
+              description: 'Phase ID from ptah_route_decide.',
             },
           },
           required: ['routeId', 'phaseId'],
@@ -1020,19 +929,13 @@ export function buildAgentSpawnTool({
         },
         force: {
           type: 'boolean',
-          description:
-            'Spawn even when ptah_agent_list shows this lane at its plan limit ' +
-            'or in a cooldown. Use only when the limit is known to be wrong. ' +
-            'force: true always starts a new lane, even with an idempotencyKey.',
+          description: 'Override a reported limit only when known to be wrong; always starts a new lane.',
         },
         idempotencyKey: {
           type: 'string',
           minLength: 1,
           maxLength: 128,
-          description:
-            'A retry with the same key and the same arguments replays the first spawn while that lane still runs, ' +
-            'for at most 120 s after the spawn reply. The record is in memory only, so it is not a permanent guarantee. ' +
-            'force: true always starts a new lane.',
+          description: 'Key to make an identical retry replay its in-flight spawn.',
         },
       },
       required: ['task'],

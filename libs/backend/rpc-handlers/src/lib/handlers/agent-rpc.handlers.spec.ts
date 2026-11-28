@@ -86,7 +86,7 @@ import type {
   PtahCliRegistry,
 } from '@ptah-extension/cli-agent-runtime';
 import { LaneAccountResumeError } from '@ptah-extension/cli-agent-runtime';
-import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { CLAUDE_BUNDLED_SKILL_IDS, SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import type { SessionMetadataStore } from '@ptah-extension/agent-sdk';
 import type {
   AgentGetClaudeBuiltinsResult,
@@ -1048,6 +1048,34 @@ describe('AgentRpcHandlers — Claude built-in opt-ins (TASK_2026_853)', () => {
     expect(
       h.settings.get('agentOrchestration.enabledClaudeBuiltinSkills'),
     ).toEqual(['code-review', 'init']);
+  });
+
+  it('keeps every bundled skill opt-in when writing and reading config', async () => {
+    const h = makeHarness();
+    const bundledSkillIds = [...CLAUDE_BUNDLED_SKILL_IDS].sort();
+
+    expect(bundledSkillIds.length).toBeGreaterThan(0);
+    const writeResult = await call<SetConfigResult>(h, 'agent:setConfig', {
+      enabledClaudeBuiltinSkills: bundledSkillIds,
+    });
+    expect(writeResult).toEqual({ success: true });
+    expect(
+      h.settings.get('agentOrchestration.enabledClaudeBuiltinSkills'),
+    ).toEqual(bundledSkillIds);
+
+    const readResult = await call<Record<string, unknown>>(
+      h,
+      'agent:getConfig',
+      {},
+    );
+    expect(readResult['enabledClaudeBuiltinSkills']).toEqual(bundledSkillIds);
+
+    const builtins = await call<AgentGetClaudeBuiltinsResult>(
+      h,
+      'agent:getClaudeBuiltins',
+      {},
+    );
+    expect(builtins.enabledSkills).toEqual(bundledSkillIds);
   });
 
   it.each([

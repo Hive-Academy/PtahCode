@@ -330,6 +330,15 @@ describe('EnhancedPromptsService', () => {
   });
 
   describe('isEnabled / setEnabled', () => {
+    it('keeps committed state after a failed write and recovers the queue', async () => {
+      mocks.context.globalState.update.mockRejectedValueOnce(new Error('write failed'));
+      const failedWrite = expect(service.setEnabled(testWorkspacePath, true)).rejects.toThrow('write failed');
+      await failedWrite;
+      expect(await service.isEnabled(testWorkspacePath)).toBe(false);
+      await service.setEnabled(testWorkspacePath, true);
+      expect(await service.isEnabled(testWorkspacePath)).toBe(true);
+    });
+
     it('returns false initially', async () => {
       expect(await service.isEnabled(testWorkspacePath)).toBe(false);
     });
@@ -1726,7 +1735,26 @@ describe('EnhancedPromptsService', () => {
       expect(r.error).toContain('Unable to analyze workspace');
     });
 
-    it('invalidates cache when force=true and forwards analysisDir', async () => {
+    it.each([
+      { preference: undefined, legacyPrompt: undefined, enabled: true },
+      { preference: false, legacyPrompt: undefined, enabled: false },
+      { preference: undefined, legacyPrompt: 'previous guidance', enabled: false },
+      { preference: undefined, legacyPrompt: '  ', enabled: true },
+      { preference: false, legacyPrompt: undefined, enabled: false, concurrent: true },
+    ])('generates with the expected enabled state for %j', async ({ preference, legacyPrompt, enabled, concurrent }) => {
+      if (legacyPrompt !== undefined) {
+        mocks.context.globalState.get.mockReturnValue({
+          enabled: false,
+          generatedPrompt: legacyPrompt,
+          generatedAt: null,
+          detectedStack: null,
+          configHash: null,
+          workspacePath: testWorkspacePath,
+        });
+      }
+      if (preference !== undefined && !concurrent) {
+        await service.setEnabled(testWorkspacePath, preference);
+      }
       mocks.freshness.getStatus.mockResolvedValue({
         state: 'fresh',
         analysisDir: '/slug',
@@ -1766,9 +1794,29 @@ describe('EnhancedPromptsService', () => {
         fullOutput(),
       );
 
-      const r = await service.regenerate(testWorkspacePath, { force: true });
+      let toggle: Promise<void> | undefined;
+      let releaseToggle: (() => void) | undefined;
+      if (concurrent) {
+        const pendingWrite = new Promise<void>((resolve) => { releaseToggle = resolve; });
+        mocks.context.globalState.update.mockReturnValueOnce(pendingWrite);
+        toggle = service.setEnabled(testWorkspacePath, false);
+      }
+      const generation = service.regenerate(testWorkspacePath, { force: true });
+      if (concurrent) {
+        try {
+          // Drain wizard preparation while the earlier preference write is pending.
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(mocks.analysisStorage.writeEnhancedPromptTrace).toHaveBeenCalled();
+          expect(mocks.context.globalState.update).toHaveBeenCalledTimes(1);
+        } finally {
+          releaseToggle?.();
+          await toggle;
+          await generation;
+        }
+      }
+      const r = await generation;
       expect(r.success).toBe(true);
-      expect(r.status).toBeDefined();
+      expect(r.status).toMatchObject({ enabled, hasGeneratedPrompt: true });
       expect(mocks.cacheService.invalidate).toHaveBeenCalledWith(
         testWorkspacePath,
         'manual',

@@ -81,6 +81,55 @@ interface ResolvedAgentContent {
 /** The write guard for an agent the run has no decision for. */
 const CREATE_ONLY: AgentWriteGuard = { mode: 'create-only' };
 
+const MAX_AGENT_DESCRIPTION_CHARS = 200;
+
+/** Count the characters the YAML double-quoted scalar emits for this value. */
+function serializedDescriptionLength(value: string): number {
+  return Array.from(value).reduce((length, point) => {
+    if (/^["\\\b\f\n\r\t]$/.test(point)) return length + 2;
+    return length + ((point.codePointAt(0) ?? 0) < 0x20 ? 6 : 1);
+  }, 0);
+}
+
+/** Keep emitted descriptions non-empty and within budget at safe boundaries. */
+function capAgentDescription(description: string, fallback: string): string {
+  const safeFallback = fallback.replace(/\s+/g, ' ').trim() || 'Agent';
+  const normalized = description.replace(/\s+/g, ' ').trim();
+  if (!normalized) return safeFallback;
+
+  const codePoints = Array.from(normalized);
+  let boundedLength = 0;
+  let serializedLength = 0;
+  for (const codePoint of codePoints) {
+    const width = serializedDescriptionLength(codePoint);
+    if (serializedLength + width > MAX_AGENT_DESCRIPTION_CHARS) break;
+    serializedLength += width;
+    boundedLength += 1;
+  }
+  if (boundedLength === codePoints.length) return normalized;
+
+  for (let index = boundedLength - 1; index >= 0; index -= 1) {
+    if (
+      /[.!?]/.test(codePoints[index] ?? '') &&
+      (index + 1 === codePoints.length || /\s/.test(codePoints[index + 1] ?? ''))
+    ) {
+      return codePoints.slice(0, index + 1).join('').trimEnd() || safeFallback;
+    }
+  }
+
+  if (codePoints[boundedLength] && /\s/.test(codePoints[boundedLength])) {
+    return codePoints.slice(0, boundedLength).join('').trimEnd() || safeFallback;
+  }
+  for (let index = boundedLength - 1; index >= 0; index -= 1) {
+    if (/\s/.test(codePoints[index] ?? '')) {
+      return codePoints.slice(0, index).join('').trimEnd() || safeFallback;
+    }
+  }
+
+  const hardCapped = codePoints.slice(0, boundedLength).join('');
+  return hardCapped || safeFallback;
+}
+
 /**
  * The decision for one agent. Own-property lookup only, so an agent id such
  * as `constructor` never picks up an inherited value; no entry is
@@ -1268,22 +1317,14 @@ export class AgentGenerationOrchestratorService {
     // from. Once the template won that contest the generated one had no
     // reachable success path, so it is gone rather than kept as a fallback.
     // What remains for a template that declares none is deterministic.
-    const description =
-      template.description || `${this.humanizeName(template.name)} agent`;
-    // 1,024 is the harness targets' own description ceiling. It was 120, which
-    // truncated all 15 shipped descriptions (417-647 chars) mid-sentence and
-    // always inside the WHEN clause — the half that makes an agent selectable.
-    const cappedDescription =
-      description.length > 1024
-        ? description.substring(0, 1021) + '...'
-        : description;
-    const safeDescription = cappedDescription
-      .replace(/\n/g, ' ')
-      .replace(/"/g, '\\"');
+    const fallbackDescription = `${this.humanizeName(template.name)} agent`;
+    const description = template.description ?? fallbackDescription;
+    // Keep the dispatch text compact while ending at a sentence or word boundary.
+    const safeDescription = capAgentDescription(description, fallbackDescription);
     const frontmatterLines = [
       '---',
       `name: ${template.name}`,
-      `description: "${safeDescription}"`,
+      `description: ${JSON.stringify(safeDescription)}`,
     ];
     if (model) {
       frontmatterLines.push(`model: ${model}`);

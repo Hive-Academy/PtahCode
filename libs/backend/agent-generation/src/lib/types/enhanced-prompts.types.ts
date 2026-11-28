@@ -79,6 +79,8 @@ export interface EnhancedPromptsState {
    * When true, generated prompt is automatically applied to all sessions.
    */
   enabled: boolean;
+  /** User preference, absent for the generation default and older records. */
+  enabledPreference?: boolean;
 
   /**
    * ISO timestamp when the prompt was last generated.

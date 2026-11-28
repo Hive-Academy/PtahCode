@@ -103,11 +103,10 @@ describe('agent-facing strings name no vendor as available', () => {
 });
 
 describe('the system CLI family is derived, not written down', () => {
-  it('spawn advertises exactly the adapters SYSTEM_CLI_TYPES ships', () => {
+  it('spawn distinguishes the supported enum from installed agents', () => {
     const description = buildAgentSpawnTool().description;
-    for (const cli of SYSTEM_CLI_TYPES) {
-      expect(description).toContain(cli);
-    }
+    expect(description).toContain('cli enum lists supported adapters, not installed agents');
+    expect(description).toContain('ptah_agent_list');
   });
 
   it('the spawn enum stays the source the description was built from', () => {

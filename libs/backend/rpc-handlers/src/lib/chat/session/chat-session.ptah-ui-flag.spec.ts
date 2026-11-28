@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import 'reflect-metadata';
+import { SessionChildRegistry } from '@ptah-extension/cli-agent-runtime';
 
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ProjectType: {},
@@ -63,7 +64,10 @@ interface Harness {
   resumeSession: jest.Mock;
 }
 
-function makeHarness(): Harness {
+function makeHarness(
+  enhancedPromptsContent?: string,
+  metadata: { isChildSession: boolean } | null = null,
+): Harness {
   const stream = { [Symbol.asyncIterator]: jest.fn() };
   const startChatSession = jest.fn().mockResolvedValue(stream);
   const resumeSession = jest.fn().mockResolvedValue(stream);
@@ -101,7 +105,7 @@ function makeHarness(): Harness {
       intercept: jest.fn().mockReturnValue({ action: 'passthrough' }),
     } as never,
     {
-      get: jest.fn().mockResolvedValue(null),
+      get: jest.fn().mockResolvedValue(metadata),
       getCliSessionsForRestore: jest.fn().mockResolvedValue([]),
     } as never,
     createMockWorkspaceProvider({
@@ -115,7 +119,7 @@ function makeHarness(): Harness {
     } as never,
     {
       isMcpServerRunning: jest.fn().mockReturnValue(false),
-      resolveEnhancedPromptsContent: jest.fn().mockResolvedValue(undefined),
+      resolveEnhancedPromptsContent: jest.fn().mockResolvedValue(enhancedPromptsContent),
     } as never,
     {
       handleStart: jest.fn().mockResolvedValue({ result: { success: false } }),
@@ -162,6 +166,10 @@ function makeHarness(): Harness {
     undefined,
     undefined,
     createFakeDriverLockCoordinator(),
+    undefined,
+    undefined,
+    undefined,
+    new SessionChildRegistry(),
   );
 
   jest
@@ -193,6 +201,69 @@ function expectFlag(
 }
 
 describe('ChatSessionService ptahUiFence forwarding', () => {
+  it.each([
+    { guidance: 'Project guidance', surfaceMode: false, preset: 'enhanced' },
+    { guidance: 'Project guidance', surfaceMode: true, preset: undefined },
+    { guidance: undefined, surfaceMode: false, preset: undefined },
+    { guidance: '  ', surfaceMode: false, preset: undefined },
+    { guidance: 'Project guidance', surfaceMode: false, mcpToolProfile: 'apps' as const, preset: undefined },
+  ])('marks full prompts only for new main chat with guidance (%j)', async ({
+    guidance, surfaceMode, mcpToolProfile, preset,
+  }) => {
+    const h = makeHarness(guidance);
+    await h.service.startSession({
+      tabId: TAB_ID,
+      prompt: 'hi',
+      workspacePath: WORKSPACE,
+      surfaceMode,
+      mcpToolProfile,
+    });
+    expect(h.startChatSession).toHaveBeenCalledTimes(1);
+    expect(h.startChatSession.mock.calls[0][0].preset).toBe(preset);
+  });
+
+  it.each([
+    { guidance: 'Project guidance', preset: 'enhanced' },
+    { guidance: undefined, preset: undefined },
+    { guidance: '  ', preset: undefined },
+  ])('restores the same preset on continued and activated main chats (%j)', async ({ guidance, preset }) => {
+    const continueHarness = makeHarness(guidance);
+    const session = { sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: WORKSPACE };
+    await continueHarness.service.continueSession({ ...session, prompt: 'continue' });
+    expect(continueHarness.resumeSession.mock.calls[0][1].preset).toBe(preset);
+
+    const resumeHarness = makeHarness(guidance);
+    await resumeHarness.service.resumeSession({ ...session, activate: true });
+    expect(resumeHarness.resumeSession.mock.calls[0][1].preset).toBe(preset);
+  });
+
+  it.each([{ surfaceMode: true }, { mcpToolProfile: 'apps' as const }])(
+    'keeps special-surface continuations on the preset route (%j)',
+    async (surface) => {
+      const h = makeHarness('Project guidance');
+      await h.service.continueSession({
+        sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: WORKSPACE,
+        prompt: 'continue', ...surface,
+      });
+      expect(h.resumeSession.mock.calls[0][1]).not.toHaveProperty('preset');
+    },
+  );
+
+  it.each(['continue', 'resume'] as const)(
+    'keeps a persisted child on the preset route with an empty registry on %s',
+    async (operation) => {
+      const h = makeHarness('Project guidance', { isChildSession: true });
+      const session = { sessionId: SESSION_ID, tabId: TAB_ID, workspacePath: WORKSPACE };
+      if (operation === 'continue') {
+        await h.service.continueSession({ ...session, prompt: 'continue' });
+      } else {
+        await h.service.resumeSession({ ...session, activate: true });
+      }
+      expect(h.resumeSession.mock.calls[0][1]).toMatchObject({ knownSessionChild: true });
+      expect(h.resumeSession.mock.calls[0][1]).not.toHaveProperty('preset');
+    },
+  );
+
   it.each([true, false, undefined])(
     'forwards %p unchanged on chat:start',
     async (ptahUiFence) => {

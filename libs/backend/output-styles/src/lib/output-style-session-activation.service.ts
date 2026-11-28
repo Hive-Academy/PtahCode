@@ -73,6 +73,7 @@ import {
 } from './output-style-discovery.service';
 import { OUTPUT_STYLE_TOKENS } from './di/tokens';
 import {
+  normalizeOutputStyleSelection,
   readOutputStyleSelection,
   resolveProviderBaseUrl,
   type OutputStyleSelectionContext,
@@ -93,6 +94,10 @@ export interface OutputStyleSessionFields {
 
 /** Per-call inputs. All optional; the chat path passes only `workspaceRoot`. */
 export interface ResolveSessionFieldsOptions {
+  /** Custom system prompts carry the resolved style directly in their text. */
+  readonly injectIntoSystemPrompt?: boolean;
+  /** Style name already resolved for this session, if available. */
+  readonly selectedStyleName?: string;
   /**
    * Scopes the project-tier scan. `undefined` lets discovery fall back to the
    * workspace provider's primary root.
@@ -154,7 +159,10 @@ export class OutputStyleSessionActivationService {
     context?: ClaudeAccountResolvedResourceContext,
   ): Promise<OutputStyleSessionFields> {
     try {
-      const selected = this.readSelectedName();
+      const selected =
+        options.selectedStyleName === undefined
+          ? this.readSelectedName()
+          : normalizeOutputStyleSelection(options.selectedStyleName);
       if (selected === null) return NO_OUTPUT_STYLE;
 
       const discoveryOptions = {
@@ -178,6 +186,14 @@ export class OutputStyleSessionActivationService {
           '[OutputStyleSessionActivation] selected style unavailable for this account; starting without a style',
         );
         return { ...NO_OUTPUT_STYLE, outputStyleUnavailable: true };
+      }
+
+      if (options.injectIntoSystemPrompt) {
+        const body =
+          winner?.tier === 'builtin'
+            ? `Follow the ${winner.name} output style. ${winner.description}`
+            : winner?.body;
+        return body?.trim() ? { outputStyleBody: body } : NO_OUTPUT_STYLE;
       }
 
       const decision = this.activation.resolve({

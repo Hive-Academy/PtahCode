@@ -13,10 +13,16 @@
  */
 
 import { injectable, inject } from 'tsyringe';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { release, tmpdir, type as osType } from 'node:os';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import {
+  normalizeOutputStyleSelection,
+  OUTPUT_STYLE_TOKENS,
+  type OutputStyleSessionActivationService,
+} from '@ptah-extension/output-styles';
 import {
   PLATFORM_TOKENS,
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -63,6 +69,7 @@ import { SDK_TOKENS } from '../di/tokens';
 import {
   AUTH_PROVIDERS_TOKENS,
   type ClaudeAccountNamedRoute,
+  type ClaudeAccountNamedResolvedResourceContext,
   type ClaudeAccountRoute,
   type ClaudeCertifiedLaunchContext,
 } from '@ptah-extension/auth-providers-tokens';
@@ -132,12 +139,17 @@ import {
 } from './sdk-model-service';
 import { experimentalBetaEnv, firstByteTimeoutEnv } from './build-safe-env';
 import {
+  CLAUDE_BUNDLED_SKILL_IDS,
   isSyncedClaudeSkillId,
   readClaudeBuiltinOptInSettings,
   resolveClaudeBuiltinPolicy,
+  withoutCollidingBuiltinSkillDenials,
   type ClaudeBuiltinPolicy,
 } from './claude-builtin-catalog';
-import { guardClaudeBuiltinSkillDenials } from './claude-skill-name-discovery';
+import {
+  discoverClaudeSkillNames,
+  guardClaudeBuiltinSkillDenials,
+} from './claude-skill-name-discovery';
 import {
   readSyncedClaudeSkills,
   resolveClaudeConfigDir,
@@ -150,6 +162,10 @@ import {
   OLLAMA_AUTH_TOKEN_PLACEHOLDER,
 } from '@ptah-extension/shared';
 import { PTAH_CORE_SYSTEM_PROMPT, PTAH_UI_HINT } from '../prompt-harness';
+import {
+  buildPtahFullPrompt,
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+} from '../prompt-harness/ptah-full-prompt';
 import { PTAH_MCP_PORT, PTAH_DISABLE_SDK_AUTO_MEMORY } from '../constants';
 
 /**
@@ -370,10 +386,7 @@ export function assembleSystemPrompt(
   if (userSystemPrompt) {
     appendParts.push(userSystemPrompt);
   }
-  // Output-style INJECT fallback. Pushed exactly once, from exactly one place:
-  // there is no other `appendParts.push(outputStyleBody)` in this file, which
-  // is what makes Req 5.3 ("applied exactly once") structural. The trim guard
-  // keeps an all-whitespace body from adding a stray blank section.
+  // Preset-route style injection; the flag route leaves this field unset.
   if (outputStyleBody?.trim()) {
     appendParts.push(outputStyleBody);
   }
@@ -425,11 +438,10 @@ export function assertSingleOutputStylePath(
  * style is merged into a FRESH spread and the shared constant is only ever
  * read.
  *
- * When no style is active the constant is returned unchanged, so `outputStyle`
- * is ABSENT rather than `undefined` or `'default'`. This matters: the flag tier
- * OUTRANKS user/project/local settings, so emitting the key when Ptah has no
- * opinion would silently clobber a style the user picked for their own Claude
- * Code CLI usage. Absence is the only correct "no opinion" value (G4b).
+ * When no style is active, a cached clone of the shared settings is returned
+ * with the skill listing cap; the shared constant is never mutated. `outputStyle`
+ * stays absent rather than `undefined` or `'default'`, so the flag tier does not
+ * clobber a style the user picked for their own Claude Code CLI usage (G4b).
  *
  * The same rule governs auto compaction: `autoCompact` comes from
  * `resolveAutoCompactControl`, which yields `{}` when Ptah has no opinion, and
@@ -438,17 +450,29 @@ export function assertSingleOutputStylePath(
  *
  * `subagentPromptCacheTtl` follows the same rule: only the main-session
  * `build()` passes it (the `sdkValue` of `resolveSubagentPromptCacheTtl`), and
- * an undefined value emits no key, so every other caller's output is unchanged.
+ * an undefined value emits no key. `disableBundledSkills` is also emitted only
+ * when the session has no enabled SDK bundled skill.
  */
+const PTAH_DISABLE_SDK_AUTO_MEMORY_WITH_SKILL_CAP: Settings = Object.freeze({
+  ...PTAH_DISABLE_SDK_AUTO_MEMORY,
+  skillListingMaxDescChars: 200,
+});
+
+const PTAH_DISABLE_SDK_AUTO_MEMORY_WITH_BUNDLED_SKILLS_DISABLED: Settings = Object.freeze({
+  ...PTAH_DISABLE_SDK_AUTO_MEMORY_WITH_SKILL_CAP,
+  disableBundledSkills: true,
+});
+
 export function buildFlagSettings(
   sessionConfig?: OutputStyleActivationFields,
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
   claudeMdExcludes?: readonly string[],
+  disableBundledSkills = false,
 ): Settings {
   assertSingleOutputStylePath(sessionConfig);
-  const styleName = sessionConfig?.outputStyleName?.trim();
+  const styleName = normalizeOutputStyleSelection(sessionConfig?.outputStyleName);
   const autoCompactKeys: AutoCompactSettings = {
     ...(autoCompact?.autoCompactEnabled === false
       ? { autoCompactEnabled: false }
@@ -465,7 +489,9 @@ export function buildFlagSettings(
     subagentPromptCacheTtl === undefined &&
     !claudeMdExcludes?.length
   ) {
-    return PTAH_DISABLE_SDK_AUTO_MEMORY;
+    return disableBundledSkills
+      ? PTAH_DISABLE_SDK_AUTO_MEMORY_WITH_BUNDLED_SKILLS_DISABLED
+      : PTAH_DISABLE_SDK_AUTO_MEMORY_WITH_SKILL_CAP;
   }
   return {
     ...PTAH_DISABLE_SDK_AUTO_MEMORY,
@@ -476,7 +502,18 @@ export function buildFlagSettings(
     ...(claudeMdExcludes?.length
       ? { claudeMdExcludes: [...claudeMdExcludes] }
       : {}),
+    ...(disableBundledSkills ? { disableBundledSkills: true } : {}),
+    skillListingMaxDescChars: 200,
   };
+}
+
+/** Put query/session-specific prompt blocks after the invariant static prefix. */
+export function appendQueryDependentPromptBlocks(
+  staticContent: string | undefined,
+  blocks: readonly string[],
+): string | undefined {
+  const parts = [staticContent ?? '', ...blocks].filter((part) => part.length > 0);
+  return parts.length > 0 ? parts.join('\n\n') : undefined;
 }
 
 /** Tools that spawn a subagent; the SDK has shipped it under both names. */
@@ -779,9 +816,8 @@ export type CrossSessionInbound = (typeof CROSS_SESSION_INBOUND_VALUES)[number];
  * TS union alone would not protect a value that arrives from a settings file at
  * runtime.
  *
- * With no style and no inbound value the result is
- * `JSON.stringify(PTAH_DISABLE_SDK_AUTO_MEMORY)` byte for byte — today's
- * behaviour, unchanged.
+ * The shared auto-memory settings constant is never mutated. The output always
+ * includes the skill description cap and optionally disables bundled skills.
  */
 export function buildFlagSettingsArg(
   sessionConfig?: OutputStyleActivationFields,
@@ -791,6 +827,7 @@ export function buildFlagSettingsArg(
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
   claudeMdExcludes?: readonly string[],
+  disableBundledSkills = false,
 ): string {
   const settings = buildFlagSettings(
     sessionConfig,
@@ -798,6 +835,7 @@ export function buildFlagSettingsArg(
     capabilityFlags,
     subagentPromptCacheTtl,
     claudeMdExcludes,
+    disableBundledSkills,
   );
   if (crossSessionInbound === undefined) {
     return JSON.stringify(settings);
@@ -831,6 +869,8 @@ export interface QueryOptionsInput {
    * refuses `identity-unproved`; an ambient route ignores it.
    */
   accountLaunch?: ClaudeCertifiedLaunchContext;
+  /** Certified resource context for resolving account-scoped prompt styles. */
+  accountResources?: ClaudeAccountNamedResolvedResourceContext;
   /** Async iterable stream of user messages */
   userMessageStream: AsyncIterable<SDKUserMessage>;
   /** Controller to abort the query */
@@ -861,10 +901,8 @@ export interface QueryOptionsInput {
    */
   mcpServerRunning?: boolean;
   /**
-   * Enhanced prompts content.
-   * AI-generated project-specific guidance appended as a top-up
-   * alongside the base prompt (either claude_code preset or PTAH_CORE_SYSTEM_PROMPT).
-   * Also triggers auto-selection of the Ptah harness path when no explicit preset is set.
+   * Enabled project guidance from the workspace's enhanced prompt service.
+   * The main chat marks its full-prompt route with `sessionConfig.preset`.
    */
   enhancedPromptsContent?: string;
   /**
@@ -1076,6 +1114,37 @@ function namedRunPolicy(
  */
 export type SdkQueryOptions = Options;
 
+async function buildPromptEnvironment(
+  cwd: string,
+  model: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const gitRepository = await new Promise<string>((resolve) => {
+    try {
+      execFile(
+        'git',
+        ['rev-parse', '--git-dir'],
+        { cwd, signal, timeout: 2_000, windowsHide: true },
+        (error) => resolve(!error ? 'yes' : error.code === 128 ? 'no' : 'unknown'),
+      );
+    } catch {
+      resolve('unknown');
+    }
+  });
+  const date = new Date().toLocaleDateString('sv-SE');
+  const shell = process.env['SHELL']?.trim() || process.env['ComSpec']?.trim() || 'unknown';
+  return [
+    '# Environment',
+    `Working directory: ${cwd}`,
+    `Platform: ${process.platform}`,
+    `OS: ${osType()} ${release()}`,
+    `Shell: ${shell}`,
+    `Git repository: ${gitRepository}`,
+    `Today's date: ${date}`,
+    `Model: ${model}`,
+  ].join('\n');
+}
+
 /** Apply the same host-resolved phase and skills to the SDK prompt. */
 export function withPhaseDelivery(
   systemPrompt: Options['systemPrompt'],
@@ -1266,6 +1335,8 @@ export class SdkQueryOptionsBuilder {
     private readonly mcpCallerCredentials?: IMcpCallerCredentials,
     @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
     private readonly mcpGateway?: IMcpGateway,
+    @inject(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { isOptional: true })
+    private readonly outputStyleActivation?: OutputStyleSessionActivationService,
   ) {}
 
   /**
@@ -1368,6 +1439,45 @@ export class SdkQueryOptionsBuilder {
         );
       }
     }
+    const fullPrompt =
+      sessionConfig.preset === 'enhanced' &&
+      !!enhancedPromptsContent?.trim() &&
+      !phase &&
+      !skills?.length &&
+      isFirstPartyAnthropicBaseUrl(effectiveAuthEnv.ANTHROPIC_BASE_URL);
+    assertSingleOutputStylePath(sessionConfig);
+    let fullPromptStyleBody = sessionConfig.outputStyleBody;
+    let flagStyleConfig: OutputStyleActivationFields | undefined = sessionConfig;
+    if (
+      fullPrompt &&
+      (named || (!fullPromptStyleBody && sessionConfig.outputStyleName))
+    ) {
+      // Named runs can read style files only through their admitted resources.
+      if (
+        named &&
+        (!this.outputStyleActivation || input.accountResources?.route !== named.route)
+      ) {
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] Skipping named-account output style: activation or matching admitted resources are unavailable',
+        );
+        fullPromptStyleBody = undefined;
+        flagStyleConfig = undefined;
+      } else {
+        const style = await this.outputStyleActivation?.resolveSessionFields(
+          {
+            workspaceRoot: sessionConfig.projectPath,
+            injectIntoSystemPrompt: true,
+            selectedStyleName: sessionConfig.outputStyleName,
+          },
+          input.accountResources,
+        );
+        fullPromptStyleBody = style?.outputStyleBody;
+        if (style?.outputStyleUnavailable) flagStyleConfig = undefined;
+      }
+    }
+    if (fullPrompt && fullPromptStyleBody) {
+      flagStyleConfig = undefined;
+    }
     const systemPrompt = await this.buildSystemPrompt(
       sessionConfig,
       enhancedPromptsContent,
@@ -1376,6 +1486,14 @@ export class SdkQueryOptionsBuilder {
       cwd,
       effectiveAuthEnv,
       model,
+      fullPrompt
+        ? {
+            cwd,
+            model,
+            outputStyleBody: fullPromptStyleBody,
+            signal: abortController.signal,
+          }
+        : undefined,
     );
     const routingId = sessionConfig?.tabId ?? sessionId;
     const routingSessionId = SessionId.safeParse(routingId);
@@ -1579,6 +1697,17 @@ export class SdkQueryOptionsBuilder {
       this.logger,
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
+    const enabledBundledSkills = new Set(
+      builtinOptIns.enabledSkills.filter((name) =>
+        CLAUDE_BUNDLED_SKILL_IDS.includes(name),
+      ),
+    );
+    const deniedBundledSkills =
+      enabledBundledSkills.size === 0
+        ? []
+        : CLAUDE_BUNDLED_SKILL_IDS.filter(
+            (name) => !enabledBundledSkills.has(name),
+          );
     // Preserve Claude preset denials and apply the phase profile to every route.
     if (
       phase &&
@@ -1673,6 +1802,23 @@ export class SdkQueryOptionsBuilder {
     const claudeConfigDir = resolveClaudeConfigDir(
       named ? [named.launch.env] : [effectiveAuthEnv, process.env],
     );
+    const bundledSkillDiscovery =
+      policy.status === 'verified' && deniedBundledSkills.length > 0
+        ? await discoverClaudeSkillNames(
+            { cwds: [cwd], claudeConfigDir, settingSources },
+            deniedBundledSkills,
+          )
+        : undefined;
+    const safeDeniedBundledSkills =
+      policy.status !== 'verified' || bundledSkillDiscovery === undefined
+        ? []
+        : withoutCollidingBuiltinSkillDenials(
+            deniedBundledSkills,
+            bundledSkillDiscovery.status === 'known'
+              ? bundledSkillDiscovery.found
+              : null,
+            CLAUDE_BUNDLED_SKILL_IDS,
+          ).deniedSkillNames;
     // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
     // its own checkout) would be sent on every turn. The flag tier unions
     // with the user's own `claudeMdExcludes`. The helper excludes nothing
@@ -1794,13 +1940,20 @@ export class SdkQueryOptionsBuilder {
         // URL drops the `user` setting source, never the flag tier. The
         // subagent prompt-cache TTL is set here only (main session).
         settings: buildFlagSettingsArg(
-          sessionConfig,
+          flagStyleConfig,
           'accept',
           this.logger,
           autoCompact,
-          capabilityFlags,
+          {
+            ...capabilityFlags,
+            deniedSkillNames: uniqueNames([
+              ...(capabilityFlags.deniedSkillNames ?? []),
+              ...safeDeniedBundledSkills,
+            ]),
+          },
           subagentTtl.sdkValue,
           claudeMdExcludes,
+          enabledBundledSkills.size === 0,
         ),
         tools: sessionTools,
         // Applies on the verified and the unverified path alike, and on every
@@ -2289,10 +2442,8 @@ export class SdkQueryOptionsBuilder {
   /**
    * Build system prompt configuration.
    *
-   * Always uses SDK's `claude_code` preset as base (provides MCP handling, tool routing,
-   * environment context). Always appends PTAH_CORE_SYSTEM_PROMPT with Ptah-specific
-   * MCP mandates, orchestration, and formatting rules. Enhanced prompts
-   * (project-specific guidance) are also appended when available.
+   * Main Claude chat can opt into Ptah's full prompt. Other callers keep the
+   * Claude Code preset and its existing append.
    * Memory recall block injected whenever initialUserQuery is non-empty.
    *
    * @param sessionConfig - Session configuration with optional custom system prompt and preset selection
@@ -2302,7 +2453,7 @@ export class SdkQueryOptionsBuilder {
    * @param cwd - Workspace root for workspace-scoped memory recall
    * @param resolvedModel - The concrete model id assigned to `Options.model`,
    *   so the identity clarification names the model the session actually runs on
-   * @returns System prompt configuration for SDK (always preset+append)
+   * @param fullPrompt - Environment and resolved style for the full-prompt route
    */
   private async buildSystemPrompt(
     sessionConfig?: AISessionConfig,
@@ -2312,6 +2463,12 @@ export class SdkQueryOptionsBuilder {
     cwd?: string,
     authEnvOverride?: AuthEnv,
     resolvedModel?: string,
+    fullPrompt?: {
+      cwd: string;
+      model: string;
+      outputStyleBody?: string;
+      signal: AbortSignal;
+    },
   ): Promise<SdkQueryOptions['systemPrompt']> {
     const effectiveAuthEnv: AuthEnv = authEnvOverride ?? this.authEnv;
     const activeProviderId = getActiveProviderId(effectiveAuthEnv);
@@ -2322,18 +2479,6 @@ export class SdkQueryOptionsBuilder {
       );
     }
 
-    const result = assembleSystemPrompt({
-      providerId: activeProviderId,
-      resolvedModel,
-      userSystemPrompt: sessionConfig?.systemPrompt,
-      mcpServerRunning,
-      enhancedPromptsContent,
-      preset: sessionConfig?.preset,
-      // Set only on the `inject` branch of ActivationDecision; the `flag`
-      // branch travels on options.settings instead (see buildFlagSettings).
-      outputStyleBody: sessionConfig?.outputStyleBody,
-      ptahUiHint: this.ptahUiHintEnabled(sessionConfig),
-    });
     let sessionStartBlock = '';
     if (cwd) {
       sessionStartBlock =
@@ -2359,17 +2504,50 @@ export class SdkQueryOptionsBuilder {
         cwd,
       );
     }
-    const finalContentJoined = [
+    const dynamicBlocks = [
       sessionStartBlock,
       corpusPrimeBlock,
       memoryBlock,
       codeSymbolBlock,
-      result.content ?? '',
-    ]
-      .filter((p) => p.length > 0)
-      .join('\n\n');
-    const finalContent =
-      finalContentJoined.length > 0 ? finalContentJoined : undefined;
+    ];
+    const ptahUiHint = this.ptahUiHintEnabled(sessionConfig);
+    if (fullPrompt) {
+      const environment = await buildPromptEnvironment(
+        fullPrompt.cwd,
+        fullPrompt.model,
+        fullPrompt.signal,
+      );
+      const blocks = [
+        buildPtahFullPrompt(),
+        ptahUiHint ? PTAH_UI_HINT : undefined,
+        sessionConfig?.systemPrompt,
+        fullPrompt.outputStyleBody,
+        enhancedPromptsContent,
+        SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+        environment,
+        ...dynamicBlocks,
+      ].filter((block): block is string => !!block?.trim());
+      this.logger.info('[SdkQueryOptionsBuilder] System prompt assembled', {
+        mode: 'ptah-full',
+        staticBlockCount: blocks.indexOf(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
+        blockCount: blocks.length,
+      });
+      return blocks;
+    }
+    const result = assembleSystemPrompt({
+      providerId: activeProviderId,
+      resolvedModel,
+      userSystemPrompt: sessionConfig?.systemPrompt,
+      mcpServerRunning,
+      enhancedPromptsContent,
+      preset: sessionConfig?.preset,
+      outputStyleBody: sessionConfig?.outputStyleBody,
+      ptahUiHint,
+    });
+    const finalContent = appendQueryDependentPromptBlocks(
+      result.content,
+      dynamicBlocks,
+    );
 
     this.logger.info('[SdkQueryOptionsBuilder] System prompt assembled', {
       mcpServerRunning,

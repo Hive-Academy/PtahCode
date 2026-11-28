@@ -13,7 +13,8 @@ import {
 
 describe('PTAH_CORE_SYSTEM_PROMPT', () => {
   it('stays within the measured token budget plus five percent', () => {
-    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(3652);
+    expect(PTAH_CORE_SYSTEM_PROMPT.length).toBeLessThanOrEqual(9000);
+    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(2261);
   });
 
   it('carries the MCP substitution section exactly once', () => {
@@ -48,8 +49,9 @@ describe('PTAH_CORE_SYSTEM_PROMPT', () => {
 
   it('keeps CLI delegation and routing guidance', () => {
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain(
-      '| CLI lane | A fresh agent can complete a written brief:',
+      'Follow the `orchestration` skill BEFORE writing code',
     );
+    expect(PTAH_CORE_SYSTEM_PROMPT).not.toContain('VS Code Extension');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain(
       'When 2+ independent subtasks exist, prefer running at least one as a CLI lane in parallel.',
     );

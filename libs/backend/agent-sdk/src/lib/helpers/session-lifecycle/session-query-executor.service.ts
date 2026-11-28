@@ -25,6 +25,7 @@ import { NamedAdmissionSettlements } from './named-admission-settlements';
 import { randomUUID } from 'node:crypto';
 import type {
   ClaudeAccountNamedRoute,
+  ClaudeAccountNamedResolvedResourceContext,
   ClaudeAccountRunReservation,
   ClaudeCertifiedLaunchContext,
   ClaudeLaunchBoundary,
@@ -806,6 +807,7 @@ class NamedQueryGate {
 /** Named-only lifecycle. The ambient executor never constructs this object. */
 export class NamedAccountQueryAdmission {
   route!: ClaudeAccountNamedRoute;
+  resources?: ClaudeAccountNamedResolvedResourceContext;
   certifiedLaunch?: ClaudeCertifiedLaunchContext;
   /** True while a boundary check's own children are not proved closed. */
   private boundaryUnproved = false;
@@ -1022,6 +1024,7 @@ export class NamedAccountQueryAdmission {
       if (admitted.resources.kind !== 'named')
         throw namedAccountRefusal('identity-unproved', 'not-named');
       this.route = admitted.resources.route;
+      this.resources = admitted.resources;
       // No certified launch: refuse before any bootstrap options or child exist.
       const launch = admitted.resources.launch;
       if (!launch)
@@ -1755,7 +1758,11 @@ export class SessionQueryExecutor {
         phase,
         skills,
         ...(named
-          ? { accountRoute: named.route, accountLaunch: named.certifiedLaunch }
+          ? {
+              accountRoute: named.route,
+              accountLaunch: named.certifiedLaunch,
+              accountResources: named.resources,
+            }
           : {}),
         userMessageStream,
         abortController,

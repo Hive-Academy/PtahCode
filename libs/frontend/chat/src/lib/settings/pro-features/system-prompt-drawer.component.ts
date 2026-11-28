@@ -419,9 +419,18 @@ export class SystemPromptDrawerComponent {
 
   readonly isOpen = input<boolean>(false);
   readonly closed = output<void>();
-  readonly changed = output<void>();
+  readonly changed = output<string>();
+  readonly statusObserved = output<string>();
+  private statusReadId = 0;
 
-  readonly status = signal<EnhancedPromptsGetStatusResponse | null>(null);
+  private readonly scopedStatus = signal<{
+    workspacePath: string;
+    status: EnhancedPromptsGetStatusResponse;
+  } | null>(null);
+  readonly status = computed(() => {
+    const observed = this.scopedStatus();
+    return observed?.workspacePath === this.workspacePath() ? observed.status : null;
+  });
   readonly isLoading = signal(false);
   readonly error = signal<string | null>(null);
   /** The last status read failed; the alert offers Retry and the empty state is not shown. */
@@ -487,10 +496,13 @@ export class SystemPromptDrawerComponent {
     // Runs once for a drawer created open, and again on every reopen: the only status load (Minor 13).
     effect(() => {
       if (this.isOpen()) {
+        const workspacePath = this.workspacePath();
         untracked(() => {
           this.error.set(null);
           this.confirmingRegenerate.set(false);
-          void this.loadStatus();
+          void this.loadStatus(false, workspacePath).then((loaded) => {
+            if (loaded) this.statusObserved.emit(workspacePath);
+          });
         });
       }
     });
@@ -514,26 +526,29 @@ export class SystemPromptDrawerComponent {
   }
 
   /** Reads the status; an RPC failure, a throw or a host-reported `error` all show the fixed load error. */
-  async loadStatus(background = false): Promise<boolean> {
+  async loadStatus(
+    background = false,
+    workspacePath = this.workspacePath(),
+  ): Promise<boolean> {
+    const readId = ++this.statusReadId;
     if (!background) this.isLoading.set(true);
     this.error.set(null);
+    let status: EnhancedPromptsGetStatusResponse | null = null;
     try {
-      const result = await this.rpcService.call('enhancedPrompts:getStatus', {
-        workspacePath: this.workspacePath(),
-      });
-      if (result.isSuccess() && !result.data.error) {
-        this.status.set(result.data);
-        this.statusLoadFailed.set(false);
-        return true;
-      }
+      const result = await this.rpcService.call('enhancedPrompts:getStatus', { workspacePath });
+      if (result.isSuccess() && !result.data.error) status = result.data;
     } catch {
-      // Falls through to the fixed load error below.
-    } finally {
-      if (!background) this.isLoading.set(false);
+      // The drawer offers Retry for a failed status read.
     }
-    this.statusLoadFailed.set(true);
-    this.error.set(PROMPT_STATUS_LOAD_FAILED);
-    return false;
+    if (readId !== this.statusReadId || workspacePath !== this.workspacePath()) return false;
+    this.isLoading.set(false);
+    this.statusLoadFailed.set(status === null);
+    if (status === null) {
+      this.error.set(PROMPT_STATUS_LOAD_FAILED);
+      return false;
+    }
+    this.scopedStatus.set({ workspacePath, status });
+    return true;
   }
 
   requestRegenerate(): void {
@@ -556,11 +571,12 @@ export class SystemPromptDrawerComponent {
     this.confirmingRegenerate.set(false);
     this.isRegenerating.set(true);
     this.error.set(null);
+    const workspacePath = this.workspacePath();
     const generatedBefore = this.status()?.generatedAt ?? null;
     try {
       await this.rpcService.call(
         'enhancedPrompts:regenerate',
-        { workspacePath: this.workspacePath(), force: true },
+        { workspacePath, force: true },
         { timeout: REGENERATE_TIMEOUT_MS },
       );
     } catch {
@@ -568,24 +584,27 @@ export class SystemPromptDrawerComponent {
     } finally {
       this.isRegenerating.set(false);
     }
-    if (await this.loadStatus()) this.resolveRegeneration(generatedBefore);
+    if (workspacePath === this.workspacePath() && (await this.loadStatus(false, workspacePath))) {
+      this.resolveRegeneration(workspacePath, generatedBefore);
+    }
   }
 
   /** Reconcile a host-reported run on demand or on the shared coarse tick. */
   async checkRegenerate(background = false): Promise<void> {
     if (this.regenerationStartedAt() === null) return;
+    const workspacePath = this.workspacePath();
     const generatedBefore = this.status()?.generatedAt ?? null;
-    if (!(await this.loadStatus(background))) return;
-    this.resolveRegeneration(generatedBefore);
+    if (!(await this.loadStatus(background, workspacePath))) return;
+    this.resolveRegeneration(workspacePath, generatedBefore);
   }
 
-  private resolveRegeneration(generatedBefore: string | null): void {
-    if (this.regenerationStartedAt() !== null) return;
+  private resolveRegeneration(workspacePath: string, generatedBefore: string | null): void {
+    if (workspacePath !== this.workspacePath() || this.regenerationStartedAt() !== null) return;
     const current = this.status()?.generatedAt ?? null;
     if (current !== null && current !== generatedBefore) {
       this.promptPreviewContent.set(null);
       this.promptPreviewExpanded.set(false);
-      this.changed.emit();
+      this.changed.emit(workspacePath);
     } else {
       this.feedback.announce(PROMPT_REGENERATE_FAILED, 'alert');
     }

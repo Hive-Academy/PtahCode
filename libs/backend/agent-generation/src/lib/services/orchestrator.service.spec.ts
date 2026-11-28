@@ -733,19 +733,12 @@ describe('AgentGenerationOrchestratorService', () => {
       expect(writtenAgent.content).toContain('Real body content');
     });
 
-    /**
-     * The cap was 120, which is narrower than any real agent description.
-     *
-     * A description's job is WHAT the agent does AND WHEN to reach for it, and
-     * the WHEN half is what makes it selectable. Measured across the 15 shipped
-     * templates, the shortest description is 417 characters and the longest
-     * 647 — so a 120-char cap truncated every one of them mid-sentence, always
-     * inside the WHEN clause, and the agent files went out advertising half a
-     * trigger. 1,024 is the ceiling the harness targets themselves impose.
-     */
-    it('leaves a real description intact and caps only a runaway one', async () => {
+    it('caps long descriptions at a sentence boundary within 200 chars', async () => {
       const { service, mocks } = createOrchestrator();
-      const realistic = 'A'.repeat(647);
+      const realistic =
+        'Reviews changes for correctness. Use for behavioral defects. Not for style review. '.repeat(
+          5,
+        );
       wireHappyPath(mocks, createMockTemplate({ description: realistic }));
 
       await service.generateAgents({
@@ -753,15 +746,35 @@ describe('AgentGenerationOrchestratorService', () => {
       });
 
       const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
-      expect(writtenAgent.content).toContain(realistic);
-      expect(writtenAgent.content).not.toContain('...');
+      const emittedDescription =
+        writtenAgent.content.match(/^description: "(.*)"$/m)?.[1] ?? '';
+      expect(emittedDescription.length).toBeLessThanOrEqual(200);
+      expect(emittedDescription).toMatch(/[.!?]$/);
+      expect(emittedDescription).toContain('Use for behavioral defects.');
+      expect(emittedDescription).toContain('Not for style review.');
     });
 
-    it('caps description at 1024 characters with ellipsis', async () => {
+    it('falls back to a whole-word boundary when no sentence fits', async () => {
+      const { service, mocks } = createOrchestrator();
+      const description = 'role trigger boundary '.repeat(20);
+      wireHappyPath(mocks, createMockTemplate({ description }));
+
+      await service.generateAgents({
+        workspacePath: '/workspace/test-project',
+      });
+
+      const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
+      const emittedDescription =
+        writtenAgent.content.match(/^description: "(.*)"$/m)?.[1] ?? '';
+      expect(emittedDescription.length).toBeLessThanOrEqual(200);
+      expect(description[emittedDescription.length]).toBe(' ');
+    });
+
+    it('does not split a single overlong word', async () => {
       const { service, mocks } = createOrchestrator();
       wireHappyPath(
         mocks,
-        createMockTemplate({ description: 'A'.repeat(2000) }),
+        createMockTemplate({ description: 'A'.repeat(201) }),
       );
 
       await service.generateAgents({
@@ -769,7 +782,53 @@ describe('AgentGenerationOrchestratorService', () => {
       });
 
       const writtenAgent = mocks.fileWriter.writeAgent.mock.calls[0]![0];
-      expect(writtenAgent.content).toMatch(/A{1021}\.\.\./);
+      expect(writtenAgent.content).toContain(`description: "${'A'.repeat(200)}"`);
+    });
+
+    it('uses a fallback for whitespace-only descriptions', async () => {
+      const { service, mocks } = createOrchestrator();
+      wireHappyPath(mocks, createMockTemplate({ name: 'backend-developer', description: '   \n  ' }));
+      await service.generateAgents({ workspacePath: '/workspace/test-project' });
+      expect(mocks.fileWriter.writeAgent.mock.calls[0]?.[0].content ?? '').toContain(
+        'description: "Backend Developer agent"',
+      );
+    });
+
+    it('counts code points and keeps surrogate pairs intact', async () => {
+      const { service, mocks } = createOrchestrator();
+      wireHappyPath(mocks, createMockTemplate({ description: `${'x'.repeat(199)}🚀tail` }));
+      await service.generateAgents({ workspacePath: '/workspace/test-project' });
+      const output = mocks.fileWriter.writeAgent.mock.calls[0]?.[0].content ?? '';
+      const emitted = output.match(/^description: (.*)$/m)?.[1] ?? '';
+      expect(Array.from(JSON.parse(emitted) as string)).toHaveLength(200);
+      expect(emitted).toContain('🚀');
+    });
+
+    it('does not split dotted tokens at the budget boundary', async () => {
+      const { service, mocks } = createOrchestrator();
+      wireHappyPath(mocks, createMockTemplate({ description: `${'A'.repeat(196)} v1.2.3 tail` }));
+      await service.generateAgents({ workspacePath: '/workspace/test-project' });
+      const emitted = mocks.fileWriter.writeAgent.mock.calls[0]?.[0].content.match(/^description: (.*)$/m)?.[1] ?? '';
+      expect(JSON.parse(emitted) as string).not.toContain('v1.');
+    });
+
+    it('keeps a complete word that ends exactly at the budget', async () => {
+      const { service, mocks } = createOrchestrator();
+      const description = `${'a'.repeat(195)} four more`;
+      wireHappyPath(mocks, createMockTemplate({ description }));
+      await service.generateAgents({ workspacePath: '/workspace/test-project' });
+      const emitted = mocks.fileWriter.writeAgent.mock.calls[0]?.[0].content.match(/^description: (.*)$/m)?.[1] ?? '';
+      expect(Array.from(JSON.parse(emitted) as string)).toHaveLength(200);
+      expect(JSON.parse(emitted) as string).toBe(description.slice(0, 200));
+    });
+
+    it('counts YAML escaping within the description budget', async () => {
+      const { service, mocks } = createOrchestrator();
+      wireHappyPath(mocks, createMockTemplate({ description: `${'say "x" \\ '.repeat(30)}end` }));
+      await service.generateAgents({ workspacePath: '/workspace/test-project' });
+      const emitted = mocks.fileWriter.writeAgent.mock.calls[0]?.[0].content.match(/^description: (.*)$/m)?.[1] ?? '';
+      expect(Array.from(emitted.slice(1, -1)).length).toBeLessThanOrEqual(200);
+      expect(JSON.parse(emitted)).toContain('say "x" \\');
     });
 
     /**

@@ -119,6 +119,7 @@ interface BuildInput {
   /** The permission callback `createCallback` returns. */
   ask?: jest.Mock;
   projectPath?: string;
+  workspace?: Pick<IWorkspaceProvider, 'getConfiguration'>;
 }
 
 interface Built {
@@ -194,7 +195,7 @@ async function build(input: BuildInput = {}): Promise<Built> {
     undefined,
     mcpStatus,
     mcpBackoff,
-    ALL_BUILTINS_ENABLED,
+    input.workspace ?? ALL_BUILTINS_ENABLED,
     undefined,
     {
       issue,
@@ -307,6 +308,8 @@ describe('SdkQueryOptionsBuilder — capability policy (TASK_2026_560, C5)', () 
         autoMemoryEnabled: false,
         autoDreamEnabled: false,
         crossSessionInbound: 'accept',
+        disableBundledSkills: true,
+        skillListingMaxDescChars: 200,
         subagentPromptCacheTtl: '1h',
       });
       expect(built.events).toEqual([]);
@@ -422,6 +425,21 @@ describe('SdkQueryOptionsBuilder — capability policy (TASK_2026_560, C5)', () 
         'ptah',
       ]);
     });
+  });
+
+  it('does not emit bundled skill overrides under an unverified policy', async () => {
+    const workspace: Pick<IWorkspaceProvider, 'getConfiguration'> = {
+      getConfiguration: <T>(section: string, key: string, fallback?: T) =>
+        key === CLAUDE_BUILTIN_SETTING_KEYS.skills
+          ? ([...CLAUDE_BUILTIN_TERMINAL_SKILL_IDS, 'dataviz'] as T)
+          : ALL_BUILTINS_ENABLED.getConfiguration(section, key, fallback),
+    };
+    const built = await build({
+      workspace,
+      capabilityPolicy: policy({ status: 'unverified' }),
+    });
+
+    expect(built.settings).not.toHaveProperty('skillOverrides');
   });
 
   describe('unverified policy → strict MCP, no skills, notice', () => {
@@ -705,7 +723,7 @@ describe('capability helpers', () => {
   it('buildFlagSettings returns the shared constant when the flags are empty', () => {
     expect(
       buildFlagSettings(undefined, undefined, capabilityFlagsFor(policy(), [])),
-    ).toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
+    ).toEqual({ ...PTAH_DISABLE_SDK_AUTO_MEMORY, skillListingMaxDescChars: 200 });
   });
 
   it('capabilityIsolationOptions: strict iff unverified or served by the gateway', () => {
@@ -790,9 +808,15 @@ describe('SdkQueryOptionsBuilder — repeated CLAUDE.md copies', () => {
     const built = await build({ projectPath: workspace });
 
     expect(built.options.cwd).toBe(workspace);
-    expect(built.settings['claudeMdExcludes']).toEqual([
-      toClaudeMdExcludePattern(join(root, 'checkout', 'CLAUDE.md')),
-    ]);
+    if (process.platform === 'linux') {
+      expect(built.settings['claudeMdExcludes']).toEqual([
+        toClaudeMdExcludePattern(join(root, 'checkout', 'CLAUDE.md')),
+      ]);
+    } else {
+      // Managed settings cannot be checked as files on Windows or macOS, so
+      // the production helper deliberately emits no excludes there.
+      expect(built.settings).not.toHaveProperty('claudeMdExcludes');
+    }
   });
 
   it('emits no excludes when the ancestor text differs', async () => {

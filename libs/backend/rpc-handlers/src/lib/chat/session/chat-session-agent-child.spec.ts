@@ -900,6 +900,7 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
     it('resolves prompts, provider profile and output style for the workspace root, not the worktree', async () => {
       const h = makeHarness();
       await h.service.startAgentChildSession(childParams());
+      expect(startConfig(h)).not.toHaveProperty('preset');
       expect(h.resolveEnhancedPromptsContent).toHaveBeenCalledWith(ROOT);
       expect(h.resolveProviderProfileForWorkspace).toHaveBeenCalledWith(
         ROOT,
@@ -1012,6 +1013,7 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
       const result = await h.service.startHandoffSession(handoffParams());
       expect(result).toEqual({ success: true });
       const config = startConfig(h);
+      expect(config).not.toHaveProperty('preset');
       expect(config['tabId']).toBe(HANDOFF_TAB);
       expect(config['workspaceId']).toBe(ROOT);
       expect(config['projectPath']).toBe(HANDOFF_CWD);
