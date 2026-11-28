@@ -122,7 +122,7 @@ describe('SurfaceRendererComponent', () => {
   it('renders a v1 spec with its specId in focus keys', () => {
     const { element, host } = setup({ contract: 'dashboard-spec/1', spec: { schemaVersion: 'dashboard-spec/1',
       catalogVersion: 'dashboard-catalog/1', specId: 'spec-1', revision: 1, generatedAt: '2026-09-25T00:00:00Z',
-      title: { text: 'Costs' }, components: [{ id: 'tile', kind: 'stat', value: 3 }] } });
+      title: { text: 'Costs' }, components: [{ id: 'tile', kind: 'stat', value: 3, description: { text: 'Spend' } }] } });
     expect(element.querySelector('h2')?.textContent).toBe('Costs');
     expect(element.querySelector('[data-apps-focus-key="spec-1:tile:expand"]')).not.toBeNull();
     expect(host.failures).toBe(0);
@@ -512,7 +512,7 @@ describe('SurfaceRendererComponent', () => {
   });
 
   it('writes presentation state per component and toggles a selection off when selected again', () => {
-    const { host, element, rerender, renderer } = setup(surface([{ id: 'tile', kind: 'stat', value: 1,
+    const { host, element, rerender, renderer } = setup(surface([{ id: 'tile', kind: 'stat', value: 1, description: { text: 'Detail' },
       actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] }]));
     const expand = () => element.querySelector<HTMLButtonElement>('[data-apps-focus-key="surface:tile:expand"]')!;
     expand().click(); rerender();

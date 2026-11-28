@@ -13,7 +13,10 @@ import { join } from 'path';
 import type { SurfaceActionInvoke, SurfaceActionUiState } from '../surface-interaction';
 import { buildSurfaceViewModel } from '../view-model/surface-view-model';
 import type { LayoutNode } from '../view-model/view-model.types';
-import { SURFACE_CONTAINER_BODY_STYLES, SURFACE_CONTAINER_GRID_STYLES, SurfaceLayoutComponent, type SurfaceLayoutWidth } from './surface-layout.component';
+import {
+  SURFACE_CONTAINER_BODY_STYLES, SURFACE_CONTAINER_GRID_STYLES, SURFACE_FLOW_STYLES, SurfaceLayoutComponent, groupLayoutChildren,
+  type SurfaceLayoutWidth,
+} from './surface-layout.component';
 
 const markup = '<img src=x onerror=alert(1)><script>alert(2)</script>';
 const submit: SurfaceAction = { id: 'send', action: 'surface.submit', label: { text: 'Submit rollback request' } };
@@ -128,12 +131,67 @@ describe('SurfaceLayoutComponent', () => {
 
   it('lays out a stack by direction with the gap enum', () => {
     const { element, host, rerender } = setup({ id: 'k', kind: 'stack', children: stats(2) });
-    const stack = () => element.querySelector('p.host-child')!.parentElement!;
+    // Stat children sit in one tile group, so the stack is the group's parent.
+    const stack = () => element.querySelector('[data-testid="stat-group"]')!.parentElement!;
     expect(Array.from(stack().classList)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-4']));
     host.node.set(layout({ id: 'k', kind: 'stack', direction: 'horizontal', gap: 'large', children: stats(2) })); rerender();
     expect(Array.from(stack().classList)).toEqual(expect.arrayContaining(['flex', 'flex-row', 'gap-6']));
     host.node.set(layout({ id: 'k', kind: 'stack', gap: 'none', children: stats(2) })); rerender();
     expect(stack().classList.contains('gap-0')).toBe(true);
+  });
+
+  describe('flow children (stat groups, row items, cards)', () => {
+    const avatar = (id: string): SurfaceComponent => ({ id, kind: 'avatar', name: id });
+
+    it('groups consecutive stats inside a vertical stack (col) into one tile group, in order', () => {
+      const { element } = setup({ id: 'col', kind: 'stack', children: [...stats(2), avatar('a'), ...stats(1)].map((child, index) =>
+        ({ ...child, id: `${child.id}-${index}` }) as SurfaceComponent) }, { catalog: SURFACE_CATALOG_VERSION_4 });
+      const groups = Array.from(element.querySelectorAll('[data-testid="stat-group"]'));
+      expect(groups).toHaveLength(2);
+      expect(Array.from(groups[0].querySelectorAll('p.host-child')).map(child => child.textContent)).toEqual(['stat-0-0', 'stat-1-1']);
+      expect(groups[0].classList.contains('dp-stat-group')).toBe(true);
+      expect(groups[0].classList.contains('dp-row-item')).toBe(false);
+      expect(Array.from(element.querySelectorAll('p.host-child')).map(child => child.getAttribute('data-index'))).toEqual(['0', '1', '2', '3']);
+      expect(SURFACE_FLOW_STYLES).toContain('.dp-stat-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));');
+    });
+
+    it('gives every block-like horizontal stack (row) child an equal-share, wrapping row item', () => {
+      const { element } = setup({ id: 'row', kind: 'stack', direction: 'horizontal', children: [
+        { id: 'col', kind: 'stack', children: stats(2) } as SurfaceComponent,
+        { id: 'col2', kind: 'stack', children: stats(1) } as SurfaceComponent] }, { catalog: SURFACE_CATALOG_VERSION_4 });
+      const row = element.querySelector('.flex-row')!;
+      expect(row.classList.contains('flex-wrap')).toBe(true);
+      const items = Array.from(row.children);
+      expect(items).toHaveLength(2);
+      expect(items.every(item => item.classList.contains('dp-row-item'))).toBe(true);
+      expect(SURFACE_FLOW_STYLES).toContain('.dp-row-item { flex: 1 1 14rem; min-width: min(100%, 14rem);');
+    });
+
+    it('keeps inline row children (badge, avatar) at their intrinsic size', () => {
+      const { element } = setup({ id: 'row', kind: 'stack', direction: 'horizontal', children: [
+        { id: 'b', kind: 'badge', tone: 'neutral', text: { text: 'New' } } as SurfaceComponent, avatar('a'),
+        { id: 'col', kind: 'stack', children: stats(1) } as SurfaceComponent] }, { catalog: SURFACE_CATALOG_VERSION_4 });
+      const items = Array.from(element.querySelector('.flex-row')!.children);
+      expect(items).toHaveLength(3);
+      expect(items.map(item => item.classList.contains('dp-row-item-inline'))).toEqual([true, true, false]);
+      expect(items.map(item => item.classList.contains('dp-row-item'))).toEqual([false, false, true]);
+      expect(SURFACE_FLOW_STYLES).toContain('.dp-row-item-inline { flex: 0 1 auto;');
+    });
+
+    it('does not regroup grid children, and stretches a card to its row height', () => {
+      const { element, host, rerender } = setup({ id: 'g', kind: 'grid', columns: 2, children: stats(2) });
+      expect(element.querySelector('[data-testid="stat-group"]')).toBeNull();
+      host.node.set(layout({ id: 'c', kind: 'card', title: { text: 'Card' }, children: stats(1) })); rerender();
+      const card = element.querySelector('[data-kind="card"]')!;
+      expect(Array.from(card.classList)).toEqual(expect.arrayContaining(['h-full', 'flex-1', 'flex-col']));
+      expect(Array.from(element.querySelector('ptah-surface-layout')!.classList)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'min-w-0']));
+    });
+
+    it('keeps position-plus-id keys for duplicate ids in a stat run', () => {
+      const groups = groupLayoutChildren(layout({ id: 'k', kind: 'stack', children: [...stats(1), ...stats(1)] }).children);
+      expect(groups).toHaveLength(1);
+      expect(groups[0].kind === 'stats' && groups[0].entries.map(entry => entry.key)).toEqual(['0:stat-0', '1:stat-0']);
+    });
   });
 
   it('renders surface.submit as btn btn-primary btn-sm, disabled while pending with the state text in role=status', () => {
@@ -345,7 +403,8 @@ describe('SurfaceLayoutComponent', () => {
     it('lays out a container stack by direction without a viewport breakpoint', () => {
       const { element } = setup({ id: 'k', kind: 'stack', direction: 'horizontal', gap: 'large', children: stats(2) },
         { width: 'container' });
-      expect(Array.from(gridOf(element).classList)).toEqual(expect.arrayContaining(['flex', 'flex-row', 'flex-wrap', 'gap-6']));
+      const row = element.querySelector('[data-testid="stat-group"]')!.parentElement!;
+      expect(Array.from(row.classList)).toEqual(expect.arrayContaining(['flex', 'flex-row', 'flex-wrap', 'gap-6']));
     });
 
     it('defines one column below 360 px, a 128 px auto-fit capped by columns above, and 3 stat columns from 700 px', () => {
@@ -358,7 +417,7 @@ describe('SurfaceLayoutComponent', () => {
       // jsdom has no layout and the Jest transform strips component styles: assert the rules are attached in
       // source, to the layout and to the renderer root (which is the `dp` container); V1 is the visual check.
       const layoutSource = readFileSync(join(__dirname, 'surface-layout.component.ts'), 'utf8');
-      expect(layoutSource).toMatch(/styles: \[SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES\]/);
+      expect(layoutSource).toMatch(/styles: \[SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES, SURFACE_FLOW_STYLES]/);
       const rendererSource = readFileSync(join(__dirname, 'surface-renderer.component.ts'), 'utf8');
       expect(rendererSource).toMatch(/styles: \[DISPLAY_TOKEN_STYLES, SURFACE_CONTAINER_GRID_STYLES\]/);
       expect(rendererSource).toContain(':host(.dp-root) { display: block; min-width: 0; container-type: inline-size; container-name: dp; }');

@@ -63,7 +63,11 @@ type PtahUiTextPart =
   template: `
     @for (part of parts(); track part.track) {
       @if (part.kind === 'markdown') {
-        <markdown [data]="part.text | surfaceMarkdown: active()" />
+        <!-- Prose styles ordinary markdown only; ptah-ui blocks sit outside it. -->
+        <markdown
+          class="prose prose-sm prose-invert max-w-none block"
+          [data]="part.text | surfaceMarkdown: active()"
+        />
       } @else if (part.kind === 'block') {
         <ptah-ui-block
           [raw]="part.raw"

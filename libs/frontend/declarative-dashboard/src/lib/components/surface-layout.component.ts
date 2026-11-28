@@ -91,6 +91,54 @@ const COLLAPSE_STYLES = `
   }
 `;
 
+/**
+ * Flow rules for stack and section children. Consecutive stats share one
+ * auto-fit tile group at any depth; horizontal stack items share the row
+ * width and wrap below 14rem, while inline kinds keep their intrinsic size.
+ * These are layout-owned wrappers, because emulated encapsulation cannot
+ * reach the hosts the child template creates.
+ */
+export const SURFACE_FLOW_STYLES = `
+  .dp-stat-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 0.5rem; min-width: 0; }
+  .dp-row-item { flex: 1 1 14rem; min-width: min(100%, 14rem); display: flex; flex-direction: column; }
+  .dp-row-item-inline { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; }
+`;
+
+/** Kinds that keep their intrinsic size in a row and are never stretched to fill a cell. */
+export const INLINE_SURFACE_KINDS: ReadonlySet<string> = new Set(['badge', 'avatar', 'radial-progress', 'checkbox']);
+
+/** One rendered slot of a flow container: a single child, or a run of consecutive stats. */
+export interface SurfaceLayoutChildEntry {
+  readonly key: string;
+  readonly child: SurfaceNode;
+  readonly index: number;
+}
+export type SurfaceLayoutChildGroup =
+  | { readonly kind: 'single'; readonly key: string; readonly entry: SurfaceLayoutChildEntry }
+  | { readonly kind: 'stats'; readonly key: string; readonly entries: readonly SurfaceLayoutChildEntry[] };
+
+/** Groups runs of consecutive `stat` children; every other child stays its own slot, in order. */
+export function groupLayoutChildren(children: readonly SurfaceNode[]): readonly SurfaceLayoutChildGroup[] {
+  const groups: SurfaceLayoutChildGroup[] = [];
+  let run: SurfaceLayoutChildEntry[] = [];
+  const flush = (): void => {
+    if (run.length > 0) groups.push({ kind: 'stats', key: `stats:${run[0].key}`, entries: run });
+    run = [];
+  };
+  children.forEach((child, index) => {
+    // Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view.
+    const entry = { key: `${index}:${child.id}`, child, index };
+    if (child.kind === 'stat') {
+      run.push(entry);
+      return;
+    }
+    flush();
+    groups.push({ kind: 'single', key: entry.key, entry });
+  });
+  flush();
+  return groups;
+}
+
 let nextLayoutInstance = 0;
 const GAP_CLASSES = { none: 'gap-0', small: 'gap-2', medium: 'gap-4', large: 'gap-6' } as const;
 const CONTAINER_GAP_CLASSES = {
@@ -131,12 +179,32 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
   standalone: true,
   imports: [NgTemplateOutlet, PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES],
+  host: { class: 'flex min-w-0 flex-col' },
+  styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES, SURFACE_FLOW_STYLES],
   template: `
     <ng-template #children>
-      <!-- Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view. -->
-      @for (child of node().children; track $index + ':' + child.id) {
-        <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: child, index: $index }" />
+      @if (node().kind === 'grid') {
+        <!-- Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view. -->
+        @for (child of node().children; track $index + ':' + child.id) {
+          <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: child, index: $index }" />
+        }
+      } @else {
+        <!-- Consecutive stats become one tile group; horizontal items share the row width. -->
+        @for (group of childGroups(); track group.key) {
+          @if (group.kind === 'stats') {
+            <div class="dp-stat-group" [class.dp-row-item]="horizontal()" data-testid="stat-group">
+              @for (entry of group.entries; track entry.key) {
+                <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: entry.child, index: entry.index }" />
+              }
+            </div>
+          } @else if (horizontal()) {
+            <div [class.dp-row-item]="!isInlineKind(group.entry.child)" [class.dp-row-item-inline]="isInlineKind(group.entry.child)" data-testid="row-item">
+              <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
+            </div>
+          } @else {
+            <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
+          }
+        }
       }
     </ng-template>
     <ng-template #responsiveChildren>
@@ -209,8 +277,8 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
         }
       }
       @case ('card') {
-        <div ptahSurface variant="inset" padding="md" class="flex flex-col gap-3 text-base-content">
-          @if (title(); as title) { <h3 class="text-sm font-semibold">{{ title }}</h3> }
+        <div ptahSurface variant="inset" padding="md" class="flex h-full min-w-0 flex-1 flex-col gap-3 text-base-content" data-kind="card">
+          @if (title(); as title) { <h3 class="text-sm font-semibold leading-snug">{{ title }}</h3> }
           @if (description(); as description) { <p class="text-sm text-base-content-muted">{{ description }}</p> }
           @if (layoutWidth() === 'container') {
             <ng-container [ngTemplateOutlet]="responsiveChildren" />
@@ -282,6 +350,11 @@ export class SurfaceLayoutComponent {
     if (node.kind === 'stack' && node.direction === 'horizontal') return `flex flex-row flex-wrap ${gap}`;
     return `flex flex-col ${gap}`;
   });
+  public readonly horizontal = computed(() => {
+    const node = this.node();
+    return node.kind === 'stack' && node.direction === 'horizontal';
+  });
+  public readonly childGroups = computed(() => groupLayoutChildren(this.node().children));
   public readonly gridColumns = computed(() => {
     const node = this.node();
     const columns = node.kind === 'grid' && Number.isFinite(node.columns) ? Math.floor(node.columns) : 1;
@@ -303,6 +376,7 @@ export class SurfaceLayoutComponent {
     toggle.nativeElement.focus();
   }
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
+  public isInlineKind(child: SurfaceNode): boolean { return INLINE_SURFACE_KINDS.has(child.kind); }
   public statusId(index: number): string { return `${this.instanceId}-status-${index}`; }
   public statusText(action: SurfaceAction): string { return submitStatusText(this.actionStates().get(action.id)); }
   public isSent(action: SurfaceAction): boolean { return this.actionStates().get(action.id)?.status === 'applied'; }

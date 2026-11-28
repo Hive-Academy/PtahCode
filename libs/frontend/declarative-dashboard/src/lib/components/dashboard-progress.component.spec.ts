@@ -30,7 +30,8 @@ describe('DashboardProgressComponent', () => {
       for (const theme of themeRoots) {
         element.setAttribute('data-theme', theme);
         fixture.detectChanges();
-        expect(bar.className).toBe(toneClasses[tone]);
+        // The tone string is applied whole beside the layout classes.
+        expect(bar.className.split(' ').sort()).toEqual([...toneClasses[tone].split(' '), 'h-2', 'w-full'].sort());
       }
     }
     expect(toneClasses.neutral).toBe('progress'); // daisyUI has no progress-neutral
@@ -55,6 +56,20 @@ describe('DashboardProgressComponent', () => {
     expect(element.textContent).toContain('42.5%');
     const whole = setup({ ...node, value: 7 }).element;
     expect(whole.textContent).toContain('7%');
+  });
+  it('lays out a full-width meter: label and value on one line, the track below', () => {
+    const { element } = setup();
+    expect(element.classList).toContain('w-full');
+    expect(element.classList).toContain('flex-col');
+    const row = element.firstElementChild!;
+    expect(row.classList).toContain('justify-between');
+    expect(row.querySelector('[data-testid="progress-label"]')?.textContent).toBe('Indexing');
+    expect(row.querySelector('[data-testid="progress-value"]')?.textContent).toBe('42.5%');
+    const bar = element.lastElementChild!;
+    expect(bar.tagName).toBe('PROGRESS');
+    expect(bar.classList).toContain('w-full');
+    expect(bar.classList).toContain('h-2');
+    expect(element.querySelector('[style]')).toBeNull();
   });
   it('interpolates label text only: agent markup never becomes markup, style or colour', () => {
     const { element } = setup({ ...node, label: { text: hostile } });

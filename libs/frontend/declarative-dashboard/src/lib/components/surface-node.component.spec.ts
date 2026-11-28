@@ -188,7 +188,7 @@ describe('SurfaceNodeComponent', () => {
       children: [
         { id: 'reason', kind: 'text', label: 'Reason', path: 'form.reason' },
         { id: 'notify', kind: 'checkbox', label: 'Notify', path: 'form.notify' },
-        { id: 'tile', kind: 'stat', value: 3, actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] },
+        { id: 'tile', kind: 'stat', value: 3, description: { text: 'Detail' }, actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] },
       ] }]);
     const { element, host } = setup(card);
     const input = element.querySelector<HTMLInputElement>('input[type=text]')!;

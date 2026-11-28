@@ -38,7 +38,7 @@ import { DashboardTableComponent } from './dashboard-table.component';
 import { SurfaceCheckboxInputComponent, type CheckboxInputNode } from './surface-checkbox-input.component';
 import { SurfaceChoiceInputComponent, type ChoiceInputNode } from './surface-choice-input.component';
 import { NO_DRAFTS, type SurfaceDrafts } from './surface-input-messages';
-import { SurfaceLayoutComponent, type SurfaceLayoutWidth } from './surface-layout.component';
+import { INLINE_SURFACE_KINDS, SurfaceLayoutComponent, type SurfaceLayoutWidth } from './surface-layout.component';
 import {
   SurfaceTextInputComponent,
   type SurfaceDraftWrite,
@@ -110,6 +110,9 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
     DashboardAvatarComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // A column flex host lets a card stretch to its grid row's height; inline
+  // kinds (badge, avatar, ...) align to the start so they keep their own width.
+  host: { class: 'flex min-w-0 flex-col', '[class.items-start]': 'inlineKind()' },
   template: `
     <ng-template #child let-child>
       <ptah-surface-node [node]="child" [surfaceId]="surfaceId()" [layoutWidth]="layoutWidth()" [componentStates]="componentStates()"
@@ -247,6 +250,7 @@ export class SurfaceNodeComponent {
   public readonly node: InputSignal<SurfaceNode> = input.required<SurfaceNode>();
   public readonly surfaceId = input('');
   public readonly layoutWidth = input<SurfaceLayoutWidth>('viewport');
+  protected readonly inlineKind = computed(() => INLINE_SURFACE_KINDS.has(this.node().kind));
   /** `SurfaceViewState.components` of the whole surface. */
   public readonly componentStates = input<ComponentStates>(NO_COMPONENT_STATES);
   /** `SurfaceViewState.drafts` of the whole surface. */

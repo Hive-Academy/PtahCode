@@ -58,7 +58,7 @@ describe('DashboardChartComponent', () => {
       expand.click(); fixture.detectChanges();
       expect(emitted).toHaveBeenLastCalledWith({ expanded: true });
       expect(expand.getAttribute('aria-expanded')).toBe('true');
-      expect(expand.textContent?.trim()).toBe('Collapse');
+      expect(expand.getAttribute('aria-label')).toBe(`Collapse ${node.title?.text}`);
       expect(content.querySelector('svg')?.classList.contains('max-h-64')).toBe(false);
       content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       fixture.detectChanges();
@@ -117,6 +117,43 @@ describe('DashboardChartComponent', () => {
     }
     expect(bars[1].textContent).toContain('Second');
     expect(element.querySelector('style, [style]')).toBeNull();
+  });
+  it('hides the legend for a single series and keeps it for several', () => {
+    const single = setup({ ...node, kind: 'bar-chart', series: [{ name: 'Only', points: [{ x: 'Mon', y: 1 }] }] });
+    expect(single.element.querySelector('ul[aria-label="Series"]')).toBeNull();
+    const several = setup({ ...node, kind: 'bar-chart' });
+    expect(several.element.querySelectorAll('ul[aria-label="Series"] li')).toHaveLength(2);
+  });
+  it('labels every bar category, truncating long names but keeping the full name as a title', () => {
+    const long = 'x'.repeat(60);
+    const { element } = setup({ ...node, kind: 'bar-chart',
+      series: [{ name: 'A', points: [{ x: 'Mon', y: 3 }, { x: long, y: 5 }, { x: 'Wed', y: 1 }] }] });
+    const labels = Array.from(element.querySelectorAll('[data-testid="chart-category"]'));
+    expect(labels).toHaveLength(3);
+    expect(labels[0].childNodes[0].textContent).toBe('Mon');
+    expect(labels[1].childNodes[0].textContent?.endsWith('…')).toBe(true);
+    expect(labels[1].querySelector('title')?.textContent).toBe(long);
+  });
+  it('keeps first and last labels only for numeric line charts', () => {
+    const { element } = setup({ ...node, series: [{ name: 'A', points: [{ x: 1, y: 1 }, { x: 9, y: 2 }] }] });
+    expect(element.querySelectorAll('[data-testid="chart-category"]')).toHaveLength(0);
+    expect(element.querySelector('svg[role="img"]')?.textContent).toContain('9');
+  });
+  it('writes compact value labels above positive and below negative bars', () => {
+    const { element } = setup({ ...node, kind: 'bar-chart',
+      series: [{ name: 'A', points: [{ x: 'Mon', y: 1200 }, { x: 'Tue', y: -300 }] }] });
+    const values = Array.from(element.querySelectorAll('[data-testid="chart-value"]'));
+    expect(values.map(value => value.textContent)).toEqual(['1.2K', '-300']);
+    const bars = element.querySelectorAll('svg[role="img"] > rect');
+    expect(Number(values[0].getAttribute('y'))).toBeLessThan(Number(bars[0].getAttribute('y')));
+    const negativeBottom = Number(bars[1].getAttribute('y')) + Number(bars[1].getAttribute('height'));
+    expect(Number(values[1].getAttribute('y'))).toBeGreaterThan(negativeBottom);
+  });
+  it('omits value labels on line charts and on bars too narrow to hold them', () => {
+    expect(setup().element.querySelector('[data-testid="chart-value"]')).toBeNull();
+    const crowded = setup({ ...node, kind: 'bar-chart',
+      series: [{ name: 'A', points: Array.from({ length: 30 }, (_, x) => ({ x: `c${x}`, y: x })) }] });
+    expect(crowded.element.querySelector('[data-testid="chart-value"]')).toBeNull();
   });
   it('uses unique hatch ids across chart instances with the same node id', () => {
     const first = setup({ ...node, kind: 'bar-chart' });

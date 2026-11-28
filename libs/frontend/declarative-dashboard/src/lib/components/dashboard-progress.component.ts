@@ -18,18 +18,26 @@ const PROGRESS_TONE_CLASSES = {
   error: 'progress progress-error',
 } as const;
 
-// Left raw: it uses native progress with the daisyUI track and fill, which differ visibly from ptah-meter.
+/**
+ * Full-width meter: label left and value right on one line, the track below.
+ * Native progress keeps the daisyUI theme-tinted rounded track and tone fill,
+ * and sets its width without any inline style.
+ */
 @Component({
   selector: 'ptah-dashboard-progress',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex w-full min-w-0 flex-col gap-1.5' },
   template: `
-    <!-- Visible label text, the native progress bar, then the unrounded percentage. The value is renderer-owned. -->
-    <span class="text-sm text-base-content" data-testid="progress-label">{{ node().label.text }}</span>
-    <progress [class]="toneClasses()" [value]="node().value" max="100"
+    <!-- Label and unrounded percentage on one line, the bar below. The value is renderer-owned. -->
+    <div class="flex min-w-0 items-baseline justify-between gap-3">
+      <span class="min-w-0 truncate text-sm text-base-content" data-testid="progress-label"
+        [attr.title]="node().label.text">{{ node().label.text }}</span>
+      <span class="shrink-0 text-sm font-medium tabular-nums text-base-content" data-testid="progress-value">{{ node().value }}%</span>
+    </div>
+    <progress class="h-2 w-full" [class]="toneClasses()" [value]="node().value" max="100"
       role="progressbar" aria-valuemin="0" aria-valuemax="100"
       [attr.aria-valuenow]="node().value" [attr.aria-label]="node().label.text"></progress>
-    <span class="text-sm tabular-nums text-base-content">{{ node().value }}%</span>
   `,
 })
 export class DashboardProgressComponent {

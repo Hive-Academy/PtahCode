@@ -49,25 +49,29 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
     PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'block min-w-0' },
   styles: [TREND_STYLES],
   template: `
     <!-- Compact tile (prototype stats row): label, inline delta and the expand toggle share one header line. -->
-    <section class="rounded border border-base-300 bg-base-200 px-2 py-1.5 text-base-content" (keydown.escape)="collapse($event)">
+    <section class="flex h-full min-w-0 flex-col rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex items-center gap-1">
         <h3 class="min-w-0 flex-1 break-words text-[10px] uppercase leading-tight tracking-wider text-base-content-muted">{{ node().title?.text ?? 'Stat' }}</h3>
         @if (node().delta !== undefined) {
           <span class="shrink-0 text-[10px] leading-tight tabular-nums text-base-content-muted" data-testid="stat-delta"><span aria-hidden="true">&Delta; </span><span class="sr-only">Change </span>{{ signedDelta() }}</span>
         }
-        <button #expandButton type="button" ptahIconButton size="xs" class="shrink-0"
-          [label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + (node().title?.text ?? 'Stat')"
-          [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="detailsId"
-          [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
-          <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
-            <path [attr.d]="viewState().expanded ? 'M7 14l5-5 5 5' : 'M7 10l5 5 5-5'" />
-          </svg>
-        </button>
+        <!-- The toggle only exists when there is something to reveal: a description or nested children. -->
+        @if (hasDetails()) {
+          <button #expandButton type="button" ptahIconButton size="xs" class="shrink-0"
+            [label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + (node().title?.text ?? 'Stat')"
+            [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="detailsId"
+            [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+              <path [attr.d]="viewState().expanded ? 'M7 14l5-5 5 5' : 'M7 10l5 5 5-5'" />
+            </svg>
+          </button>
+        }
       </div>
-      <p class="text-sm font-semibold leading-tight tabular-nums text-base-content" data-testid="stat-value">{{ node().value }} {{ node().unit }}</p>
+      <p class="mt-0.5 break-words text-lg font-semibold leading-tight tabular-nums text-base-content" data-testid="stat-value">{{ node().value }} {{ node().unit }}</p>
       @if (trend(); as trend) {
         <!-- Direction is the arrow plus the words "up"/"down", never colour alone (R4.3). -->
         <p class="mt-1 min-w-0"><span [class]="trend.classes" data-testid="stat-trend"><svg class="dp-trend-arrow" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path [attr.d]="trend.arrow" /></svg><span class="sr-only">Trend </span><span>{{ trend.text }}</span>@if (trend.polarity) {<span class="sr-only">, {{ trend.polarity }}</span>}</span></p>
@@ -81,7 +85,7 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
           [attr.aria-pressed]="selection()?.componentId === node().id && selection()?.target?.kind === 'stat'"
           [attr.data-apps-focus-key]="focusKey('select')" (click)="selectStat()">Select</button>
       }
-      <div [id]="detailsId" [hidden]="!viewState().expanded" class="mt-2 text-sm text-base-content-muted">
+      <div [id]="detailsId" [hidden]="!hasDetails() || !viewState().expanded" class="mt-2 text-sm text-base-content-muted">
         @if (node().description; as description) { <p>{{ description.text }}</p> }
         <ng-content />
       </div>
@@ -96,7 +100,13 @@ export class DashboardStatComponent {
   public readonly viewStateChange = output<SurfaceComponentViewState>();
   public readonly selectionChange = output<SurfaceSelection>();
   public readonly detailsId = `ptah-stat-details-${nextStatInstance++}`;
-  private readonly expandButton = viewChild.required<ElementRef<HTMLButtonElement>>('expandButton');
+  private readonly expandButton = viewChild<ElementRef<HTMLButtonElement>>('expandButton');
+
+  /** A description or nested children make the tile expandable; otherwise it has no toggle. */
+  public readonly hasDetails = computed(() => {
+    const node = this.node();
+    return node.description !== undefined || (node.children?.length ?? 0) > 0;
+  });
 
   /** The contract delta with an explicit sign for gains ("+2", "0", "-2"). */
   public readonly signedDelta = computed(() => {
@@ -122,7 +132,7 @@ export class DashboardStatComponent {
     if (!this.viewState().expanded) return;
     event.stopPropagation();
     this.viewStateChange.emit({ ...this.viewState(), expanded: false });
-    this.expandButton().nativeElement.focus();
+    this.expandButton()?.nativeElement.focus();
   }
   public selectStat(): void {
     if (this.node().selectable) this.selectionChange.emit({ componentId: this.node().id, target: { kind: 'stat' } });
