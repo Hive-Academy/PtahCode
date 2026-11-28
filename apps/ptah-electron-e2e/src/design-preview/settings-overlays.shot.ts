@@ -402,7 +402,22 @@ for (const theme of ['dark', 'light'] as const) {
       await setDashboardTheme(page, theme);
       await openSection(page, 'Decision matrix', width);
 
-      const dashboard = page.locator('ptah-decision-matrix-page');
+      const dashboard = page.getByRole('region', { name: 'Decision matrix dashboard', exact: true });
+      await expect(page.getByRole('heading', { name: 'Decision matrix', exact: true })).toHaveCount(1);
+      await expect(dashboard.getByText('How Ptah picks a lane, model and effort for each task.')).toHaveCount(0);
+      const toolbar = dashboard.locator('.dashboard-toolbar');
+      const back = toolbar.getByRole('button', { name: 'Context management' });
+      const refresh = toolbar.getByRole('button', { name: 'Refresh decision matrix' });
+      await expect(toolbar.getByText('Routing model: On')).toBeVisible();
+      await expect(toolbar.getByText(/^Updated /)).toBeVisible();
+      await expect(back).toBeVisible();
+      await expect(refresh).toBeVisible();
+      await expect.poll(async () => {
+        const backBox = await back.boundingBox();
+        const refreshBox = await refresh.boundingBox();
+        if (!backBox || !refreshBox || backBox.x + backBox.width > refreshBox.x) return Infinity;
+        return Math.abs(backBox.y + backBox.height / 2 - refreshBox.y - refreshBox.height / 2);
+      }).toBeLessThanOrEqual(rowTolerance);
       const rings = dashboard.locator('ptah-ring');
       await expect(rings).toHaveCount(4);
       for (const ring of await rings.all()) await expect(ring).toBeVisible();
@@ -411,6 +426,35 @@ for (const theme of ['dark', 'light'] as const) {
       }
       await expect(dashboard.locator('ptah-stacked-bar').first()).toBeVisible();
       await expect(dashboard.locator('ptah-donut')).toBeVisible();
+      const controls = dashboard.getByRole('region', { name: 'Routing controls' });
+      await expect(controls.getByRole('switch')).toHaveCount(3);
+      for (const toggle of await controls.getByRole('switch').all()) {
+        await expect.poll(() => toggle.evaluate((element) => {
+          const row = element.closest('[data-testid="setting-row"]');
+          const text = row?.firstElementChild?.getBoundingClientRect();
+          const control = element.getBoundingClientRect();
+          if (!row || !text || control.left < text.right) return Infinity;
+          return Math.max(
+            Math.abs(control.right - row.getBoundingClientRect().right),
+            Math.abs(control.top + control.height / 2 - text.top - text.height / 2),
+          );
+        })).toBeLessThanOrEqual(rowTolerance);
+      }
+
+      if (width >= 1440) {
+        const picks = dashboard.getByRole('region', { name: 'Current pick per task kind' });
+        const scores = picks.locator('.pick-meter');
+        await expect(scores).toHaveCount(5);
+        for (const score of await scores.all()) {
+          await expect.poll(() => score.evaluate((element) => {
+            const pick = element.previousElementSibling?.getBoundingClientRect();
+            const meter = element.getBoundingClientRect();
+            if (!pick || meter.left < pick.right) return Infinity;
+            return Math.abs(meter.top + meter.height / 2 - pick.top - pick.height / 2);
+          })).toBeLessThanOrEqual(rowTolerance);
+        }
+      }
+
       const expectNoHorizontalOverflow = () =>
         expect.poll(() => dashboard.evaluate((element) => {
           const root = element.ownerDocument.documentElement;

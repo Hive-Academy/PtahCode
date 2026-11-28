@@ -6,9 +6,7 @@
   font-size: .875rem;
 }
 
-:host > button { justify-self: start; }
-h1, h2, h3, h4, p, dl, dd { margin: 0; }
-h1 { font-size: 1.35rem; }
+h2, h3, h4, p, dl, dd { margin: 0; }
 h2, h3, h4 { font-size: inherit; font-weight: 650; }
 .muted { color: oklch(var(--bcm)); font-size: .8125rem; }
 .kind { text-transform: capitalize; }
@@ -20,6 +18,15 @@ h2, h3, h4 { font-size: inherit; font-weight: 650; }
   gap: var(--ptah-gap-controls);
 }
 .section-heading { justify-content: space-between; }
+.dashboard-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ptah-gap-controls);
+}
+.dashboard-toolbar > button { justify-self: start; }
+.header-actions { flex-wrap: nowrap; justify-content: flex-end; }
+.header-actions > button { flex-shrink: 0; }
 .ptah-card {
   min-inline-size: 0;
   display: grid;
@@ -74,6 +81,7 @@ h2, h3, h4 { font-size: inherit; font-weight: 650; }
 .routing-controls > :is(ptah-performance-routing-setting, ptah-lane-rotation-setting) {
   border-block-start: var(--ptah-card-border-width) solid var(--ptah-card-border);
 }
+.current-picks { container: current-picks / inline-size; }
 .pick-row {
   display: grid;
   grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr);
@@ -85,6 +93,7 @@ h2, h3, h4 { font-size: inherit; font-weight: 650; }
   border-block-start: var(--ptah-card-border-width) solid var(--ptah-card-border);
   padding-block-start: var(--ptah-space-2);
 }
+.pick-row > .muted { grid-column: 2 / -1; }
 .pick-meter { grid-template-columns: minmax(0, 1fr) minmax(2rem, auto); grid-column: 2; }
 
 .segments {
@@ -164,6 +173,10 @@ button.matrix-cell:focus-visible, .table-scroll:focus-visible {
 .detail-list > div { display: flex; justify-content: space-between; gap: var(--ptah-space-2); }
 .detail-list dd { text-align: end; font-variant-numeric: tabular-nums; }
 
+@container decision-dashboard (max-width: 24.75rem) {
+  .dashboard-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .header-actions { flex-wrap: wrap; }
+}
 @container decision-dashboard (min-width: 34rem) {
   .chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -175,7 +188,7 @@ button.matrix-cell:focus-visible, .table-scroll:focus-visible {
   .chart-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .matrix-layout { grid-template-columns: minmax(0, 7fr) minmax(0, 3fr); }
 }
-@container decision-dashboard (min-width: 68rem) {
+@container current-picks (min-width: 30rem) {
   .pick-row { grid-template-columns: minmax(4.5rem, auto) minmax(0, 1fr) minmax(6rem, 28%); }
   .pick-meter { grid-column: auto; }
 }

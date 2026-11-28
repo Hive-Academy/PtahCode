@@ -37,6 +37,7 @@ type ScoreSource = 'measured' | 'ratings';
     HostRoutingSettingComponent, LaneRotationSettingComponent, PerformanceRoutingSettingComponent,
   ],
   providers: [DecisionMatrixDashboardStore],
+  host: { role: 'region', 'aria-label': 'Decision matrix dashboard' },
   templateUrl: './decision-matrix-page.component.html',
   styleUrl: './decision-matrix-page.component.css',
 })

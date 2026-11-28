@@ -64,6 +64,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     >
       <div>
         <ptah-setting-row
+          compactSplit
           [label]="label"
           hint="Take turns when two lanes have close scores."
           [controlId]="load() === 'ready' && stored() !== null ? 'lane-rotation-toggle' : null"

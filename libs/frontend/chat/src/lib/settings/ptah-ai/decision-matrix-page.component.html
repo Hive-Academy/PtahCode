@@ -1,15 +1,8 @@
-<button ptahButton variant="ghost" type="button" (click)="back.emit()" aria-label="Context management">
-  <lucide-angular [img]="BackIcon" aria-hidden="true" />
-  Context management
-</button>
-
-@let data = evidence();
-@let model = dashboard();
-<header class="section-heading">
-  <div>
-    <h1>Decision matrix</h1>
-    <p class="muted">How Ptah picks a lane, model and effort for each task.</p>
-  </div>
+<header class="dashboard-toolbar">
+  <button ptahButton variant="ghost" type="button" (click)="back.emit()" aria-label="Context management">
+    <lucide-angular [img]="BackIcon" aria-hidden="true" />
+    Context management
+  </button>
   <div class="header-actions">
     @let configured = routingModelConfigured();
     <span ptahBadge>
@@ -23,6 +16,9 @@
     </button>
   </div>
 </header>
+
+@let data = evidence();
+@let model = dashboard();
 
 <ng-template #funnel let-stages="stages" let-max="max">
   @for (stage of stages; track stage.label) {
@@ -137,7 +133,7 @@
     <ptah-lane-rotation-setting />
   </section>
 
-  <section class="ptah-card" data-glass-surface="content" aria-labelledby="current-pick-heading">
+  <section class="ptah-card current-picks" data-glass-surface="content" aria-labelledby="current-pick-heading">
     <header class="section-heading">
       <div>
         <h2 id="current-pick-heading">Current pick per task kind</h2>

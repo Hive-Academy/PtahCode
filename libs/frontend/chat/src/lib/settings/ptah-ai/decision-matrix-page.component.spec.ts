@@ -79,8 +79,15 @@ describe('DecisionMatrixPageComponent', () => {
   it('renders four KPIs, three charts, picks, catalog ages and one controls card', async () => {
     await settle();
 
-    expect(root().querySelector('h1')?.textContent).toBe('Decision matrix');
-    expect(root().textContent).toContain('Routing model: Unknown');
+    expect(root().getAttribute('role')).toBe('region');
+    expect(root().getAttribute('aria-label')).toBe('Decision matrix dashboard');
+    expect(root().querySelector('h1')).toBeNull();
+    expect(root().textContent).not.toContain('How Ptah picks a lane, model and effort for each task.');
+    const toolbar = root().querySelector('header');
+    expect(toolbar?.querySelector('button[aria-label="Context management"]')).not.toBeNull();
+    expect(toolbar?.querySelector('button[aria-label="Refresh decision matrix"]')).not.toBeNull();
+    expect(toolbar?.textContent).toContain('Routing model: Unknown');
+    expect(toolbar?.textContent).toContain('Updated');
     const rings = root().querySelectorAll('[data-testid="decision-matrix-kpis"] ptah-ring');
     expect(Array.from(rings, (ring) => ring.textContent?.trim())).toEqual(['67%', '70%', '17%', '100%']);
     const decisions = root().querySelector('details:has(> summary)');

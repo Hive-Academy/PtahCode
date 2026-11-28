@@ -42,6 +42,7 @@ const TOAST_LABEL = 'performance routing';
       @let value = stored();
       <div>
         <ptah-setting-row
+          compactSplit
           label="Use measured performance"
           hint="Use recent outcomes to rank lane, model and effort choices."
           [controlId]="value !== 'loading' && value !== 'error' ? 'performance-routing-toggle' : null"

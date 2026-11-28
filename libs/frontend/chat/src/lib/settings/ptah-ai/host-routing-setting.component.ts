@@ -72,6 +72,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     >
       <div>
         <ptah-setting-row
+          compactSplit
           label="Suggest a lane for each task"
           hint="Suggestions appear before a lane starts."
           [controlId]="load() === 'ready' ? 'host-routing-toggle' : null"
