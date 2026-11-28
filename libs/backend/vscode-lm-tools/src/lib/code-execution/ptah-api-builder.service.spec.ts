@@ -452,6 +452,32 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
     });
   });
 
+  it('attributes cron and harness actions only after a Claude tab binds', () => {
+    const tabId = 'pending-claude-tab';
+    let session: LiveChatSession = {
+      runtime: 'claude-sdk', sessionId: tabId, tabId, sessionIdIsProvisional: true,
+    };
+    const builder = buildTestBuilder(
+      makeRawWorkspaceProvider(), makeSessionManager(), undefined, undefined, undefined,
+      undefined, undefined, makeLogger(), undefined, {
+        resolve: () => ({ kind: 'resolved', session }),
+      },
+    );
+    Object.assign(builder, { pluginLoader: {} });
+    builder.build();
+
+    const harness = jest.mocked(namespaceBuilders.buildHarnessNamespace).mock.calls.at(-1)?.[0];
+    const cron = jest.mocked(buildCronNamespace).mock.calls.at(-1)?.[0];
+    runWithMcpRequestContext({ callerSessionId: tabId }, () => {
+      expect(harness?.getCallerSdkSessionId?.()).toBeUndefined();
+      expect(cron?.getSessionId()).toBeUndefined();
+
+      session = { runtime: 'claude-sdk', sessionId: 'bound-sdk-id', tabId };
+      expect(harness?.getCallerSdkSessionId?.()).toBe('bound-sdk-id');
+      expect(cron?.getSessionId()).toBe('bound-sdk-id');
+    });
+  });
+
   it.each<LiveChatSession['runtime']>(['claude-sdk', 'codex-app-server', 'provider-session'])(
     'passes the ask ceiling from a live %s caller to lane spawn',
     (runtime) => {

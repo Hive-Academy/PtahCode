@@ -1278,7 +1278,11 @@ export class PtahAPIBuilder {
     try {
       if (this.liveChatSessions) {
         const result = this.liveChatSessions.resolve(callerId);
-        if (result.kind === 'resolved') return result.session.sessionId;
+        if (result.kind === 'resolved') {
+          if (!result.session.sessionIdIsProvisional) return result.session.sessionId;
+          this.logger.debug(`[PtahAPIBuilder] MCP caller ${callerId} is awaiting a session id`);
+          return undefined;
+        }
         this.logger.debug(`[PtahAPIBuilder] MCP caller ${callerId} is ${result.kind}`);
         return undefined;
       }

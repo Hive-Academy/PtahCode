@@ -13,6 +13,7 @@ export function toClaudeLiveChatSession(record: ClaudeSessionFields): LiveChatSe
   return {
     runtime: 'claude-sdk',
     sessionId: record.realSessionId ?? record.tabId,
+    ...(record.realSessionId === null ? { sessionIdIsProvisional: true } : {}),
     sessionName: record.config.sessionName,
     tabId: record.tabId,
     workspaceRoot: record.config.workspaceId ?? record.config.projectPath,

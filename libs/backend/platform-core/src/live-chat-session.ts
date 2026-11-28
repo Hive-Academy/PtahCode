@@ -3,6 +3,8 @@ import type { PermissionLevel } from '@ptah-extension/shared';
 export interface LiveChatSession {
   readonly runtime: 'claude-sdk' | 'codex-app-server' | 'provider-session';
   readonly sessionId: string;
+  /** True when the session id is a tab id awaiting a provider binding. */
+  readonly sessionIdIsProvisional?: boolean;
   readonly sessionName?: string;
   readonly tabId?: string;
   readonly workspaceRoot?: string;

@@ -33,6 +33,7 @@ describe('live chat session resolver', () => {
       kind: 'resolved',
       session: {
         runtime: 'claude-sdk', sessionId: 'pending-tab', tabId: 'pending-tab',
+        sessionIdIsProvisional: true,
         cwd: '/workspace', workspaceRoot: '/workspace', permissionLevel: 'ask',
       },
     });

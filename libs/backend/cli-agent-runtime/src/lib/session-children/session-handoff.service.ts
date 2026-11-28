@@ -60,7 +60,10 @@ import type {
   SessionChildSuccessionRefusalCode,
 } from './session-spawner.port';
 import { safeErrorKind } from './safe-error-kind';
-import { SessionHandoffAckStore } from './session-handoff-ack.store';
+import {
+  SessionHandoffAckStore,
+  type HandoffAckRecord,
+} from './session-handoff-ack.store';
 import { handoffCloseAckResult } from './session-handoff-close-result';
 import { HandoffWatchdogRecovery } from './handoff-watchdog-recovery';
 import type { ISessionHandoffChain } from './session-handoff-chain.port';
@@ -140,6 +143,8 @@ interface PendingChainBind {
 interface ArmedCallerStop {
   readonly callerTabId: string;
   readonly callerSdkId: string | null;
+  readonly successorTabId: string;
+  runtimeClosePending?: HandoffAckRecord['runtimeClosePending'];
 }
 
 @injectable()
@@ -502,10 +507,19 @@ export class SessionHandoffService
         const stop = new Promise<boolean>((resolveStop) =>
           this.stopWaiters.set(record.predecessorTabId, resolveStop),
         );
-        this.armed.set(record.predecessorTabId, {
-          callerTabId: record.predecessorTabId,
-          callerSdkId: record.predecessorSdkId,
-        });
+        if (!this.stopping.has(record.predecessorTabId)) {
+          const existingArm = this.armed.get(record.predecessorTabId);
+          this.armed.set(record.predecessorTabId, {
+            callerTabId: record.predecessorTabId,
+            callerSdkId: record.predecessorSdkId,
+            successorTabId: record.successorTabId,
+            runtimeClosePending:
+              record.runtimeClosePending ??
+              (existingArm?.successorTabId === record.successorTabId
+                ? existingArm.runtimeClosePending
+                : undefined),
+          });
+        }
         if (
           this.flushed.has(record.predecessorTabId) ||
           (record.predecessorSdkId && this.flushed.has(record.predecessorSdkId))
@@ -1205,13 +1219,6 @@ export class SessionHandoffService
     void this.stopCaller(arm);
   }
 
-  private armCallerStop(record: CallerRecord): void {
-    this.armed.set(record.tabId, {
-      callerTabId: record.tabId,
-      callerSdkId: record.realSessionId,
-    });
-  }
-
   private takeArmed(
     notice: HandoffTurnFlushNotice,
   ): ArmedCallerStop | undefined {
@@ -1234,6 +1241,10 @@ export class SessionHandoffService
     const result = this.liveChatSessions?.resolve(arm.callerTabId);
     if (result?.kind === 'ambiguous') throw new Error('Ambiguous handoff predecessor');
     const session = result?.kind === 'resolved' ? result.session : undefined;
+    // An adapter can remove its live entry before teardown rejects.
+    if (arm.runtimeClosePending && session?.runtime !== arm.runtimeClosePending) {
+      throw new Error('Handoff predecessor runtime is unavailable after a failed close');
+    }
     const sdkRecord = result?.kind === 'unresolved'
       ? this.lifecycle.find(arm.callerTabId)
       : undefined;
@@ -1248,10 +1259,29 @@ export class SessionHandoffService
         : SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER;
       const adapter = this.container?.resolve<CodexChatAdapter | ProviderSessionChatAdapter>(token);
       if (!adapter) throw new Error('Handoff predecessor runtime is unavailable');
+      // Persist before calling the adapter, which can drop the live row even
+      // when teardown fails. Only a successful close clears the marker.
+      await this.persistRuntimeClose(arm, session.runtime);
       await adapter.closeSession(SessionId.from(session.sessionId));
+      await this.persistRuntimeClose(arm, undefined);
       return;
     }
     await this.lifecycle.endSession(SessionId.from(arm.callerTabId), 'parent-stop');
+  }
+
+  private async persistRuntimeClose(
+    arm: ArmedCallerStop,
+    runtimeClosePending: ArmedCallerStop['runtimeClosePending'],
+  ): Promise<void> {
+    const updated = await this.ackStore?.compareAndSet(
+      arm.callerTabId,
+      'closePending',
+      { runtimeClosePending },
+      arm.successorTabId,
+    );
+    if (!updated)
+      throw new Error('Handoff acknowledgement changed during runtime close');
+    arm.runtimeClosePending = runtimeClosePending;
   }
 
   private async stopCaller(arm: ArmedCallerStop): Promise<void> {

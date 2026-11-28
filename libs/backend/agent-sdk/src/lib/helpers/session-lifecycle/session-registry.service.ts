@@ -487,16 +487,17 @@ export class SessionRegistry {
 
   /**
    * Find a session record by either tabId or realSessionId.
-   * Checks byTabId first, then bySessionId.
-   *
-   * Both lookups are O(1) — no scanning.
+   * Return every matching live tab, including tabs sharing an SDK session id.
    */
   findMatches(idOrTabId: string): SessionRecord[] {
     const byTab = this.byTabId.get(idOrTabId);
-    const bySession = this.bySessionId.get(idOrTabId);
-    return [byTab, bySession === byTab ? undefined : bySession].filter(
-      (record): record is SessionRecord => record !== undefined,
-    );
+    const matches = byTab ? [byTab] : [];
+    for (const record of this.byTabId.values()) {
+      if (record !== byTab && record.realSessionId === idOrTabId) {
+        matches.push(record);
+      }
+    }
+    return matches;
   }
 
   find(idOrTabId: string): SessionRecord | undefined {
