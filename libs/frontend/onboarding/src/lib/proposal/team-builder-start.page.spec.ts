@@ -387,14 +387,26 @@ describe('TeamBuilderStartPage', () => {
       }
       const consentComponent = consent.injector.get(StackSkillConsentComponent);
       const modalComponent = nativeModal.injector.get(NativeModalComponent);
+      const findConsentDialog = () =>
+        document.querySelector<HTMLElement>(
+          'dialog[aria-labelledby="skill-consent-title"], [role="dialog"][aria-labelledby="skill-consent-title"]',
+        );
+      const modalDetails = (dialog: HTMLElement | null) =>
+        `stage=${page.viewStage()}, isOpen=${modalComponent.isOpen()}, documentDialogs=${document.querySelectorAll('dialog, [role="dialog"]').length}, dialogHtml=${dialog?.outerHTML.slice(0, 500)}, consentHtml=${consentHost.outerHTML.slice(0, 500)}`;
+      const expectConsentClosed = (dialog: HTMLElement | null) => {
+        if (
+          dialog?.isConnected &&
+          !(dialog instanceof HTMLDialogElement && !dialog.open && dialog.inert)
+        ) {
+          throw new Error(
+            `Expected the consent dialog to be removed or closed and inert (${modalDetails(dialog)})`,
+          );
+        }
+      };
+
       expect(consentComponent.open()).toBe(false);
       expect(modalComponent.isOpen()).toBe(false);
-      const initialDialog = consentHost.getElementsByTagName('dialog').item(0);
-      if (initialDialog) {
-        expect(initialDialog.isConnected).toBe(true);
-        expect(root.contains(initialDialog)).toBe(true);
-        expect(initialDialog.open).toBe(false);
-      }
+      expectConsentClosed(findConsentDialog());
 
       page.state.setIntent('Build a team');
       page.state.setPreview([
@@ -409,41 +421,42 @@ describe('TeamBuilderStartPage', () => {
       page.state.setStage('consent');
       fixture.detectChanges();
       TestBed.tick();
+      await fixture.whenStable();
       expect(page.viewStage()).toBe('consent');
       expect(consentComponent.open()).toBe(true);
       expect(consentComponent.busy()).toBe(false);
       expect(consentComponent.allApproved()).toBe(true);
       expect(modalComponent.isOpen()).toBe(true);
 
-      const dialog = consentHost.getElementsByTagName('dialog').item(0);
-      if (dialog) {
-        expect(dialog.open).toBe(true);
-        const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
-          btn.textContent?.includes('Install 1 skill'),
+      const dialog = findConsentDialog();
+      if (
+        !dialog ||
+        (dialog instanceof HTMLDialogElement && !dialog.open) ||
+        dialog.closest('[inert]')
+      ) {
+        throw new Error(
+          `Expected an open consent dialog (${modalDetails(dialog)})`,
         );
-        if (!installBtn) {
-          throw new Error(
-            `Expected the consent Install button (stage=${page.viewStage()}, dialogHtml=${dialog.outerHTML.slice(0, 500)})`,
-          );
-        }
-        expect(installBtn.disabled).toBe(false);
-        installBtn.click();
-      } else {
-        // The page still receives the consent output when Jest omits the dialog view.
-        consentComponent.install.emit();
       }
+      const installBtn = [...dialog.querySelectorAll('button')].find(
+        (btn) => btn.textContent?.trim() === 'Install 1 skill and continue',
+      );
+      if (!installBtn || installBtn.disabled) {
+        throw new Error(
+          `Expected an enabled Install 1 skill button (${modalDetails(dialog)})`,
+        );
+      }
+      installBtn.click();
       fixture.detectChanges();
       TestBed.tick();
 
-      // Consent modal must be closed and inert; progress controls must be reachable.
       expect(page.viewStage()).toBe('installing');
       expect(consentComponent.open()).toBe(false);
       expect(consentComponent.busy()).toBe(true);
       expect(modalComponent.isOpen()).toBe(false);
-      if (dialog) {
-        expect(dialog.open).toBe(false);
-        expect(dialog.inert).toBe(true);
-      }
+      expectConsentClosed(dialog);
+      const remainingDialog = findConsentDialog();
+      if (remainingDialog !== dialog) expectConsentClosed(remainingDialog);
       const backBtn = root.querySelector<HTMLButtonElement>(
         '[data-testid="team-builder-installing-back"]',
       );
@@ -461,10 +474,14 @@ describe('TeamBuilderStartPage', () => {
       expect(backBtn.closest('[inert]')).toBeNull();
       expect(document.activeElement).toBe(cancelBtn);
 
-      // Keyboard activation (Enter on focused Cancel) cancels the pending install.
-      cancelBtn.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-      );
+      // jsdom does not synthesize a button click from Enter.
+      const enterEvent = new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      });
+      cancelBtn.dispatchEvent(enterEvent);
+      expect(enterEvent.defaultPrevented).toBe(false);
       cancelBtn.click();
       // Let the async handlers settle before checking each rendered state.
       await fixture.whenStable();
