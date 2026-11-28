@@ -171,4 +171,31 @@ describe('workspace reader — legacy Setup tabs', () => {
       'guidance',
     ]);
   });
+
+  it.each([undefined, null, '1000', 0, -1, Date.now() + 60_000])(
+    'normalizes an invalid persisted legacy activity timestamp (%s)',
+    (lastActivityAt) => {
+      localStorage.setItem(
+        partition.getStorageKeyForWorkspace(WORKSPACE_PATH),
+        JSON.stringify({
+          version: PERSISTED_TAB_STATE_VERSION,
+          activeTabId: 'guidance',
+          tabs: [
+            { ...storedTab('guidance', 'setup-project-prompt'), lastActivityAt },
+          ],
+        }),
+      );
+
+      tabManager.switchWorkspace(WORKSPACE_PATH);
+
+      expect(consumeLegacySetupTabs()).toEqual([
+        {
+          tabId: 'guidance',
+          workflow: 'setup-project-prompt',
+          workspacePath: WORKSPACE_PATH,
+          lastActivityAt: 0,
+        },
+      ]);
+    },
+  );
 });

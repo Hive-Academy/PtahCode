@@ -594,13 +594,13 @@ export class ProjectGuidancePage implements OnInit {
       const binding = this.binding();
       if (binding) {
         if (started.tabId === binding.tabId)
-          void this.bindRunSequence(binding, null);
+          untracked(() => void this.bindRunSequence(binding, null));
         return;
       }
       const record = this.runs.get(started.tabId);
       const parent = this.agentRecord(null);
       if (record && parent && record.parentId === parent.id)
-        void this.openRecord(record);
+        untracked(() => void this.openRecord(record));
     });
   }
 

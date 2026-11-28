@@ -278,11 +278,17 @@ describe('SetupRunStore', () => {
       effect(() => {
         const run = workflow.run();
         if (run?.binding.tabId !== guidanceBinding.tabId) return;
-        if (++adoptions > 2) throw new Error('Guidance adoption did not settle');
+        if (++adoptions > 3) throw new Error('Guidance adoption did not settle');
         guidance.adopt(run);
       }),
     );
     workflow.bind(guidanceBinding, runId);
+    await flush();
+    expect(workflow.run()).toEqual(running);
+    expect(guidance.run()).toBeNull();
+
+    // The existing workflow state must be adopted even without a new RPC result.
+    jest.spyOn(guidance, 'refresh').mockResolvedValueOnce(undefined);
     guidance.bind(guidanceBinding);
     await flush();
     expect(rpc['getBoundRunState']).toHaveBeenCalledWith(guidanceBinding, runId);
@@ -822,6 +828,24 @@ describe('SetupRunStore', () => {
         expect(store.get(legacy.tabId)?.status).toBe(status);
         workspace.set('C:\\other-workspace');
         expect(canRestore()).toBe(false);
+      },
+    );
+
+    it.each([undefined, 0, -1, NaN, Date.now() + 60_000])(
+      'uses the migration time for an invalid legacy activity timestamp (%s)',
+      async (lastActivityAt) => {
+        const now = Date.now();
+        const legacy = binding('legacy-tab-1', 'setup-project-prompt');
+        legacyTabs.mockReturnValueOnce([{ ...legacy, lastActivityAt }]);
+        rpc['getEnhancedPromptsStatus'].mockResolvedValue({
+          generatedAt: new Date(now - 1).toISOString(),
+        });
+
+        const store = await create();
+        expect(store.get(legacy.tabId)).toMatchObject({
+          createdAt: now,
+          status: 'interrupted',
+        });
       },
     );
 

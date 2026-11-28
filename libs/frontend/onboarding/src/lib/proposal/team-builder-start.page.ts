@@ -203,10 +203,12 @@ export class TeamBuilderStartPage {
     effect(() => {
       const root = this.launcher.workspaceRoot();
       if (this.workspace && !sameWorkspacePath(this.workspace, root)) {
-        this.coordinator.abortWorkspace(this.workspace);
-        this.currentRecordId.set(null);
-        this.hydratedRecordId = null;
-        this.resetRecordViewState();
+        untracked(() => {
+          this.coordinator.abortWorkspace(this.workspace);
+          this.currentRecordId.set(null);
+          this.hydratedRecordId = null;
+          this.resetRecordViewState();
+        });
       }
       this.workspace = root;
     });

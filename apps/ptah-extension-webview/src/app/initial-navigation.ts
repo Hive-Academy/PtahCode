@@ -1,7 +1,7 @@
 import { DestroyRef, inject, Injector } from '@angular/core';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { NavigationStart, PRIMARY_OUTLET, Router } from '@angular/router';
-import { filter, firstValueFrom, map, merge, timer } from 'rxjs';
+import { filter, firstValueFrom, map, merge } from 'rxjs';
 import {
   AppStateManager,
   ElectronLayoutService,
@@ -27,8 +27,6 @@ interface HostWindow {
   initialView?: string;
   ptahConfig?: { initialView?: string | null };
 }
-
-const WORKSPACE_RESTORE_TIMEOUT_MS = 30_000;
 
 /**
  * The application's ONE initial navigation (TASK_2026_524, decision D5).
@@ -126,6 +124,8 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
     ) {
       // Bound routes need workspace validation. The guidance entry also reads
       // the workspace on mount to decide whether Start is available.
+      // Layout settles after its bounded RPCs, including a persisted-folder
+      // fallback, so the route can still restore if the first RPC times out.
       if (
         destroyRef.destroyed ||
         router.navigated ||
@@ -142,9 +142,6 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
             filter(Boolean),
             map(() => 'resolved' as const),
           ),
-          timer(WORKSPACE_RESTORE_TIMEOUT_MS).pipe(
-            map(() => 'timeout' as const),
-          ),
         ).pipe(takeUntilDestroyed(destroyRef)),
         { defaultValue: 'cancelled' as const },
       );
@@ -155,12 +152,6 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
         router.currentNavigation()
       )
         return 'cancelled';
-      if (workspaceWait === 'timeout') {
-        console.warn(
-          '[App] Workspace resolution timed out during route restore.',
-        );
-        return navigateToBootSurface(DEFAULT_SURFACE_ID);
-      }
     }
 
     // SurfaceRouterService normalizes legacy setup URLs before navigating.

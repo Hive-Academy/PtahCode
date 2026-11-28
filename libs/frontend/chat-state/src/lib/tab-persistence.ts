@@ -212,17 +212,24 @@ function dropLegacySetupTabs(
 ): TabState[] {
   const kept: TabState[] = [];
   const workspace = workspacePath?.trim() ?? '';
+  const now = Date.now();
   for (const tab of tabs) {
     if (!isLegacySetupWorkflow(tab.workflow)) {
       kept.push(tab);
       continue;
     }
     if (workspace && typeof tab.id === 'string' && tab.id) {
+      const { lastActivityAt } = tab;
       pendingLegacySetupTabs.set(`${workspace}\u0000${tab.id}`, {
         tabId: tab.id,
         workflow: tab.workflow,
         workspacePath: workspace,
-        lastActivityAt: tab.lastActivityAt,
+        lastActivityAt:
+          Number.isFinite(lastActivityAt) &&
+          lastActivityAt > 0 &&
+          lastActivityAt <= now
+            ? lastActivityAt
+            : 0,
       });
     }
   }

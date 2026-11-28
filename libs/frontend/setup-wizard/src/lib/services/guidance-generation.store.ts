@@ -109,11 +109,13 @@ export class GuidanceGenerationStore {
     run: SetupGenerationRunState,
     acceptedThisSession = false,
   ): void {
-    // The page calls this from an effect. Reporting the run writes to the
-    // Setup index, so reads during adoption must stay out of that effect.
+    // Let the page effect retry adoption when the matching binding arrives.
+    const binding = this.bindingValue();
+    if (!binding || !matchesBinding(binding, run.binding)) return;
+
+    // Reporting the run writes to the Setup index. Keep those reads out of
+    // the page effect so reporting cannot trigger adoption again.
     untracked(() => {
-      const binding = this.bindingValue();
-      if (!binding || !this.sameBinding(run.binding)) return;
       const changedRun = this.snapshotValue()?.runId !== run.binding.runId;
       const changedStatus = this.runValue()?.status !== run.status;
       if (changedRun) {

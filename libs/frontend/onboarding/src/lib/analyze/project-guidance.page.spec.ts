@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { assertNotInReactiveContext, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BehaviorSubject } from 'rxjs';
 import {
@@ -564,6 +564,40 @@ describe('ProjectGuidancePage', () => {
     expect(step.bindGuidance).toHaveBeenCalledWith(binding, 'late-run');
     expect(runs.attach).toHaveBeenCalledWith(guidanceRecord.id);
     expect(workflow.startGuidance).not.toHaveBeenCalled();
+  });
+
+  it('attaches a late handoff outside the effect that observes the Setup index', async () => {
+    delete params['tab'];
+    delete params['run'];
+    records.set([agentRecord]);
+    handoff.inFlight.set(true);
+    await render();
+
+    let reactiveAttachError: unknown;
+    runs.attach.mockImplementationOnce((id: string) => {
+      try {
+        assertNotInReactiveContext(runs.attach);
+      } catch (error: unknown) {
+        reactiveAttachError = error;
+      }
+      records.update((current) =>
+        current.map((record) =>
+          record.id === id ? { ...record, unseen: false } : record,
+        ),
+      );
+    });
+    handoff.started.set({ ...binding, runId: 'late-run' });
+    records.set([{ ...guidanceRecord, unseen: true }, agentRecord]);
+    handoff.inFlight.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(runs.attach).toHaveBeenCalledTimes(1);
+    expect(reactiveAttachError).toBeUndefined();
+    expect(
+      records().find((record) => record.id === guidanceRecord.id)?.unseen,
+    ).toBe(false);
+    expect(step.bindGuidance).toHaveBeenCalledWith(binding, 'late-run');
   });
 
   it('ignores a late handoff run for another tab', async () => {

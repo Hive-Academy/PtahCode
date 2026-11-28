@@ -603,9 +603,9 @@ describe('webview routing composition', () => {
       expect(TestBed.inject(Router).url).toBe('/settings');
     });
 
-    it('falls back to chat when the Electron workspace does not resolve', async () => {
+    it('restores and preserves a saved Setup route after the first Electron RPC timeout', async () => {
       const workspaceResolved = signal(false);
-      const validateRun = jest.fn(() => true);
+      const validateRun = jest.fn(() => workspaceResolved());
       TestBed.configureTestingModule({
         providers: [
           { provide: ElectronLayoutService, useValue: { workspaceResolved } },
@@ -615,27 +615,28 @@ describe('webview routing composition', () => {
           },
         ],
       });
-      installHost(
-        savedRoute(`/onboarding/analyze/guidance?tab=${tabId}`, 'settings'),
-        'settings',
-      );
+      const route = `/onboarding/analyze/guidance?tab=${tabId}`;
+      installHost(savedRoute(route, 'settings'), 'settings');
       localStorage.setItem(
         ONBOARDING_FLAG_KEY,
         JSON.stringify({ shownAt: '2026-10-01T10:00:00.000Z' }),
       );
       hostIsElectron(true);
-      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
-      const boot = TestBed.runInInjectionContext(injectInitialNavigation)();
+      const boot = runBoot();
       try {
-        await jest.advanceTimersByTimeAsync(30_000);
+        await jest.advanceTimersByTimeAsync(45_000);
+        expect(TestBed.inject(Router).navigated).toBe(false);
+        expect(validateRun).not.toHaveBeenCalled();
+        expect(persisted()).toEqual(expect.objectContaining({ route }));
       } finally {
         jest.useRealTimers();
       }
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
+      workspaceResolved.set(true);
       expect(surfaceNavigationLanded(await boot)).toBe(true);
-      expect(TestBed.inject(Router).url).toBe('/chat');
-      expect(validateRun).not.toHaveBeenCalled();
+      expect(validateRun).toHaveBeenCalledWith(tabId, 'setup-project-prompt');
+      expect(TestBed.inject(Router).url).toBe(route);
+      expect(persisted()).toEqual(expect.objectContaining({ route }));
     });
 
     it('cancels the workspace wait when the injector is destroyed', async () => {

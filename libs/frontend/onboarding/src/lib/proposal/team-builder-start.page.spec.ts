@@ -1,5 +1,6 @@
-import { signal } from '@angular/core';
+import { assertNotInReactiveContext, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { Router } from '@angular/router';
 import {
   ActionBannerService,
@@ -23,8 +24,10 @@ import {
   type SetupRunStartOptions,
   type SetupRunWorkflow,
 } from '@ptah-extension/setup-wizard';
+import { NativeModalComponent } from '@ptah-extension/ui';
 import { HarnessChatLauncherService } from '../launcher/harness-chat-launcher.service';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
+import { StackSkillConsentComponent } from './stack-skill-consent.component';
 import { TeamBuilderRunCoordinator } from './team-builder-run.coordinator';
 import { TeamBuilderStartPage } from './team-builder-start.page';
 import { StackSkillStore } from './stack-skill.store';
@@ -285,57 +288,65 @@ describe('TeamBuilderStartPage', () => {
 
   it('retries a failed launch after successful installation without reinstalling', async () => {
     const fixture = TestBed.createComponent(TeamBuilderStartPage);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    const page = fixture.componentInstance;
-    page.state.setIntent('Build a team');
-    page.state.setPreview([
-      {
-        skillName: 'owner/repo/one',
-        files: [],
-        scriptFiles: [],
-        hasScripts: false,
-        contentHash: 'hash',
-      },
-    ]);
-    page.state.setStage('consent');
-    call.mockResolvedValueOnce({
-      isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
-    });
-    sendOrQueueMessage.mockRejectedValueOnce(new Error('navigation failed'));
-    await page.install();
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    expect(page.state.installed()).toEqual(['owner/repo/one']);
-    expect(root.textContent).toContain(
-      'Skills are installed. Could not start the team builder. Try again.',
-    );
-    expect(
-      root.querySelector('[data-testid="skill-install-primary"]'),
-    ).toBeNull();
-    expect('set' in page.loadError).toBe(false);
-    const installCallsBefore = call.mock.calls.filter(
-      ([method]) => method === 'wizard:install-skills-with-consent',
-    ).length;
-    await page.install();
-    expect(
-      call.mock.calls.filter(
+    try {
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const page = fixture.componentInstance;
+      page.state.setIntent('Build a team');
+      page.state.setPreview([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      page.state.setStage('consent');
+      call.mockResolvedValueOnce({
+        isSuccess: () => true,
+        data: {
+          success: true,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws',
+        },
+      });
+      sendOrQueueMessage.mockRejectedValueOnce(new Error('navigation failed'));
+      await page.install();
+      fixture.detectChanges();
+      const root = fixture.nativeElement as HTMLElement;
+      expect(page.state.installed()).toEqual(['owner/repo/one']);
+      expect(root.textContent).toContain(
+        'Skills are installed. Could not start the team builder. Try again.',
+      );
+      expect(
+        root.querySelector('[data-testid="skill-install-primary"]'),
+      ).toBeNull();
+      expect('set' in page.loadError).toBe(false);
+      const installCallsBefore = call.mock.calls.filter(
         ([method]) => method === 'wizard:install-skills-with-consent',
-      ),
-    ).toHaveLength(installCallsBefore);
-    const retry = [...root.querySelectorAll('button')].find((button) =>
-      button.textContent?.includes('Continue to team builder'),
-    );
-    expect(retry).toBeDefined();
-    retry?.click();
-    await fixture.whenStable();
-    expect(sendOrQueueMessage).toHaveBeenCalledTimes(2);
-    expect(
-      call.mock.calls.filter(
-        ([method]) => method === 'wizard:install-skills-with-consent',
-      ),
-    ).toHaveLength(installCallsBefore);
+      ).length;
+      await page.install();
+      expect(
+        call.mock.calls.filter(
+          ([method]) => method === 'wizard:install-skills-with-consent',
+        ),
+      ).toHaveLength(installCallsBefore);
+      const retry = [...root.querySelectorAll('button')].find((button) =>
+        button.textContent?.includes('Continue to team builder'),
+      );
+      expect(retry).toBeDefined();
+      retry?.click();
+      await fixture.whenStable();
+      expect(sendOrQueueMessage).toHaveBeenCalledTimes(2);
+      expect(
+        call.mock.calls.filter(
+          ([method]) => method === 'wizard:install-skills-with-consent',
+        ),
+      ).toHaveLength(installCallsBefore);
+    } finally {
+      fixture.destroy();
+    }
   });
 
   it('closes the consent modal on install so Back and Cancel are reachable by mouse and keyboard while installing', async () => {
@@ -353,70 +364,101 @@ describe('TeamBuilderStartPage', () => {
     });
 
     const fixture = TestBed.createComponent(TeamBuilderStartPage);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    const root = fixture.nativeElement as HTMLElement;
-    const page = fixture.componentInstance;
-    expect(page.viewStage()).toBe('intent');
-    page.state.setIntent('Build a team');
-    page.state.setPreview([
-      {
-        skillName: 'owner/repo/one',
-        files: [],
-        scriptFiles: [],
-        hasScripts: false,
-        contentHash: 'hash',
-      },
-    ]);
-    page.state.setStage('consent');
-    fixture.detectChanges();
-    await fixture.whenStable();
-    const dialog = root.querySelector<HTMLDialogElement>(
-      'ptah-stack-skill-consent dialog',
-    );
-    if (!dialog) throw new Error('Expected the team builder consent dialog');
-    expect(dialog.open).toBe(true);
+    try {
+      fixture.detectChanges();
+      TestBed.tick();
+      const root = fixture.nativeElement as HTMLElement;
+      const page = fixture.componentInstance;
+      expect(page.viewStage()).toBe('intent');
+      const consent = fixture.debugElement.query(
+        By.directive(StackSkillConsentComponent),
+      );
+      if (!consent) {
+        throw new Error(
+          `Expected skill consent (stage=${page.viewStage()}, rootChildren=${root.childElementCount}, rootHtml=${root.innerHTML.slice(0, 500)})`,
+        );
+      }
+      const consentHost = consent.nativeElement as HTMLElement;
+      const dialog = consentHost.getElementsByTagName('dialog').item(0);
+      if (!dialog) {
+        const nativeModal = consent.query(By.directive(NativeModalComponent));
+        throw new Error(
+          `Expected a native dialog in skill consent (nativeModal=${Boolean(nativeModal)}, rootDialogs=${root.getElementsByTagName('dialog').length}, documentDialogs=${document.getElementsByTagName('dialog').length}, consentHtml=${consentHost.outerHTML.slice(0, 500)})`,
+        );
+      }
+      expect(dialog.isConnected).toBe(true);
+      expect(root.contains(dialog)).toBe(true);
+      expect(dialog.open).toBe(false);
 
-    // Click Install from inside the consent modal.
-    const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
-      btn.textContent?.includes('Install 1 skill'),
-    );
-    expect(installBtn).toBeDefined();
-    installBtn?.click();
-    fixture.detectChanges();
-    TestBed.tick();
+      page.state.setIntent('Build a team');
+      page.state.setPreview([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      page.state.setStage('consent');
+      fixture.detectChanges();
+      TestBed.tick();
+      expect(page.viewStage()).toBe('consent');
+      expect(dialog.open).toBe(true);
 
-    // Consent modal must be closed and inert; progress controls must be reachable.
-    expect(dialog.open).toBe(false);
-    expect(dialog.inert).toBe(true);
-    const backBtn = root.querySelector<HTMLButtonElement>(
-      '[data-testid="team-builder-installing-back"]',
-    );
-    const cancelBtn = root.querySelector<HTMLButtonElement>(
-      '[data-testid="team-builder-cancel"]',
-    );
-    expect(backBtn).not.toBeNull();
-    expect(cancelBtn).not.toBeNull();
-    expect(cancelBtn?.closest('[inert]')).toBeNull();
-    expect(backBtn?.closest('[inert]')).toBeNull();
-    expect(document.activeElement).toBe(cancelBtn);
+      // Click Install from inside the consent modal.
+      const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
+        btn.textContent?.includes('Install 1 skill'),
+      );
+      if (!installBtn) {
+        throw new Error(
+          `Expected the consent Install button (stage=${page.viewStage()}, dialogHtml=${dialog.outerHTML.slice(0, 500)})`,
+        );
+      }
+      installBtn.click();
+      fixture.detectChanges();
+      TestBed.tick();
 
-    // Keyboard activation (Enter on focused Cancel) cancels the pending install.
-    cancelBtn?.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
-    );
-    cancelBtn?.click();
-    await fixture.whenStable();
-    finishInstall({
-      isSuccess: () => true,
-      data: { success: true, installed: [], workspacePath: '/ws' },
-    });
-    await fixture.whenStable();
-    fixture.detectChanges();
+      // Consent modal must be closed and inert; progress controls must be reachable.
+      expect(dialog.open).toBe(false);
+      expect(dialog.inert).toBe(true);
+      const backBtn = root.querySelector<HTMLButtonElement>(
+        '[data-testid="team-builder-installing-back"]',
+      );
+      const cancelBtn = root.querySelector<HTMLButtonElement>(
+        '[data-testid="team-builder-cancel"]',
+      );
+      if (!backBtn || !cancelBtn) {
+        throw new Error(
+          `Expected Back and Cancel while installing (stage=${page.viewStage()}, back=${Boolean(backBtn)}, cancel=${Boolean(cancelBtn)}, rootHtml=${root.innerHTML.slice(0, 500)})`,
+        );
+      }
+      expect(cancelBtn.closest('[inert]')).toBeNull();
+      expect(backBtn.closest('[inert]')).toBeNull();
+      expect(document.activeElement).toBe(cancelBtn);
 
-    expect(runRecords()[0]?.status).toBe('cancelled');
-    expect(page.viewStage()).toBe('intent');
-    fixture.destroy();
+      // Keyboard activation (Enter on focused Cancel) cancels the pending install.
+      cancelBtn.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+      cancelBtn.click();
+      // Let the async handlers settle before checking each rendered state.
+      await fixture.whenStable();
+      fixture.detectChanges();
+      TestBed.tick();
+      finishInstall({
+        isSuccess: () => true,
+        data: { success: true, installed: [], workspacePath: '/ws' },
+      });
+      await fixture.whenStable();
+      fixture.detectChanges();
+      TestBed.tick();
+
+      expect(runRecords()[0]?.status).toBe('cancelled');
+      expect(page.viewStage()).toBe('intent');
+    } finally {
+      fixture.destroy();
+    }
   });
 
   it('shows Conversation opened with Open conversation while the tab exists, and closed text once closed (D3)', async () => {
@@ -1460,6 +1502,40 @@ describe('TeamBuilderStartPage', () => {
     await pending;
     expect(page.state.error()).toBeNull();
     expect(page.state.stage()).toBe('intent');
+    expect(runRecords()[0]?.status).toBe('interrupted');
+  });
+
+  it('interrupts a Team Builder execution outside the workspace effect', async () => {
+    const fixture = TestBed.createComponent(TeamBuilderStartPage);
+    fixture.detectChanges();
+    const coordinator = TestBed.inject(TeamBuilderRunCoordinator);
+    const realAbort = coordinator.abortWorkspace.bind(coordinator);
+    const abort = jest
+      .spyOn(coordinator, 'abortWorkspace')
+      .mockImplementation((root) => {
+        assertNotInReactiveContext(coordinator.abortWorkspace);
+        realAbort(root);
+      });
+    let finish: (result: unknown) => void = () => {
+      throw new Error('launch not started');
+    };
+    call.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const page = fixture.componentInstance;
+    page.state.setIntent('Build a team');
+    const pending = page.launchChat();
+    expect(runRecords()[0]?.status).toBe('running');
+
+    workspaceRoot.set('/next');
+    fixture.detectChanges();
+    finish({ isSuccess: () => false });
+    await pending;
+
+    expect(abort).toHaveBeenCalledWith('/ws');
     expect(runRecords()[0]?.status).toBe('interrupted');
   });
 
