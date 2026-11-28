@@ -8,7 +8,13 @@ import { GlobalConfigActionsComponent } from './global-config-actions.component'
 
 describe('GlobalConfigActionsComponent', () => {
   let fixture: ComponentFixture<GlobalConfigActionsComponent>;
-  const ids: ConfigurationSurfaceId[] = ['thoth', 'marketplace', 'settings'];
+  const ids: ConfigurationSurfaceId[] = [
+    'thoth',
+    'marketplace',
+    'onboarding',
+    'settings',
+  ];
+  const testIds = ['thoth', 'marketplace', 'setup-hub', 'settings'];
   const appState = {
     openConfigurationSurface: signal<ConfigurationSurfaceId | null>(null),
     thothFirstRunDismissed: signal(false),
@@ -41,14 +47,15 @@ describe('GlobalConfigActionsComponent', () => {
 
   afterEach(() => fixture.destroy());
 
-  it('renders Thoth, Marketplace and Settings as labelled icon buttons, without a dropdown', () => {
+  it('always renders Thoth, Marketplace, Setup and Settings as labelled icon buttons, without a dropdown', () => {
     expect(buttons().map((b) => b.getAttribute('aria-label'))).toEqual([
       'Thoth',
       'Marketplace',
+      'Setup',
       'Settings',
     ]);
     expect(buttons().map((b) => b.getAttribute('data-test'))).toEqual(
-      ids.map((id) => `config-menu-item-${id}`),
+      testIds.map((id) => `config-menu-item-${id}`),
     );
     expect(buttons().every((b) => b.type === 'button')).toBe(true);
     expect(buttons().every((b) => b.textContent?.trim() === '')).toBe(true);
@@ -59,23 +66,16 @@ describe('GlobalConfigActionsComponent', () => {
     ).toBeNull();
   });
 
-  it('adds a Setup icon button after Thoth when showSetupHub is set', () => {
-    fixture.componentRef.setInput('showSetupHub', true);
-    fixture.detectChanges();
-    expect(buttons().map((b) => b.getAttribute('aria-label'))).toEqual([
-      'Thoth',
-      'Setup',
-      'Marketplace',
-      'Settings',
-    ]);
-    buttons()[1].click();
-    expect(buttons()[1].getAttribute('data-test')).toBe(
+  it('marks the Setup button current while the onboarding surface is open', () => {
+    const setup = () => buttons()[ids.indexOf('onboarding')];
+    expect(setup().getAttribute('data-test')).toBe(
       'config-menu-item-setup-hub',
     );
+    setup().click();
     expect(appState.setCurrentView).toHaveBeenCalledWith('onboarding');
     appState.openConfigurationSurface.set('onboarding');
     fixture.detectChanges();
-    expect(buttons()[1].getAttribute('aria-current')).toBe('page');
+    expect(setup().getAttribute('aria-current')).toBe('page');
   });
 
   it.each(ids)('navigates to %s on click', (id) => {
@@ -99,7 +99,7 @@ describe('GlobalConfigActionsComponent', () => {
   });
 
   it('updates aria-current from the settled surface signal', () => {
-    for (const surface of [null, ...ids, 'onboarding' as const, null]) {
+    for (const surface of [null, ...ids, null]) {
       appState.openConfigurationSurface.set(surface);
       fixture.detectChanges();
       buttons().forEach((button, index) => {

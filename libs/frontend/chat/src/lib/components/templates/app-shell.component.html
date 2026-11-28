@@ -118,8 +118,22 @@
       data-glass-surface="bar"
       [class.hidden]="isElectron"
     >
-      <!-- Dashboard (gold accent, VS Code only — Electron has it in global navbar) -->
+      <!-- VS Code nav: work items first (Tasks, Dashboard), configuration
+           last (Thoth, Marketplace). Electron has these in the global navbar. -->
       @if (!isElectron) {
+        <!-- Tasks nav button (VS Code only — Electron has it in global navbar) -->
+        <button
+          class="btn btn-ghost btn-xs gap-1"
+          [class.btn-active]="currentView() === 'tasks'"
+          aria-label="Tasks"
+          title="Tasks — .ptah/specs board"
+          (click)="openTasks()"
+        >
+          <lucide-angular [img]="ClipboardListIcon" class="w-4 h-4" />
+          <span class="icon-btn-label text-xs">Tasks</span>
+        </button>
+
+        <!-- Dashboard (gold accent, VS Code only — Electron has it in global navbar) -->
         <button
           class="btn btn-gold btn-xs gap-1"
           aria-label="Dashboard"
@@ -172,18 +186,6 @@
             </div>
           }
         </div>
-
-        <!-- Tasks nav button (VS Code only — Electron has it in global navbar) -->
-        <button
-          class="btn btn-ghost btn-xs gap-1"
-          [class.btn-active]="currentView() === 'tasks'"
-          aria-label="Tasks"
-          title="Tasks — .ptah/specs board"
-          (click)="openTasks()"
-        >
-          <lucide-angular [img]="ClipboardListIcon" class="w-4 h-4" />
-          <span class="icon-btn-label text-xs">Tasks</span>
-        </button>
 
         <!-- Marketplace nav button (VS Code only — Electron has it in global navbar). -->
         <button

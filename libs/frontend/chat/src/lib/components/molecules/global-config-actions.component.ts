@@ -1,9 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  computed,
   inject,
-  input,
 } from '@angular/core';
 import {
   AppStateManager,
@@ -20,10 +18,9 @@ import {
 
 import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /**
- * Global configuration actions for the Electron navbar: Thoth, Marketplace
- * and Settings as icon buttons, next to the theme toggle. With a workspace,
- * Setup is a navbar tab (see `ElectronShellComponent`); on the welcome
- * screen it is an icon button here (`showSetupHub`).
+ * Global configuration actions for the Electron navbar: Thoth, Marketplace,
+ * Setup and Settings as icon buttons, next to the theme toggle. They show
+ * with and without a workspace folder; the navbar tabs hold the work views.
  *
  * The `config-menu-item-<id>` hooks are kept from the former dropdown menu:
  * the Electron e2e specs and the showcase harness address surfaces by them.
@@ -34,7 +31,7 @@ import { PtahIconButtonDirective } from '@ptah-extension/ui';
   imports: [LucideAngularModule, PtahIconButtonDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @for (item of items(); track item.id) {
+    @for (item of items; track item.id) {
       <button
         type="button"
         ptahIconButton [label]="item.label"
@@ -58,14 +55,7 @@ export class GlobalConfigActionsComponent {
 
   protected readonly openConfigurationSurface =
     this.appState.openConfigurationSurface;
-  /**
-   * Also render Setup as an icon button. The shell sets this on the
-   * welcome screen, where the navbar tab strip (and its Setup tab) is
-   * not rendered.
-   */
-  readonly showSetupHub = input(false);
-
-  private readonly allItems: readonly {
+  protected readonly items: readonly {
     id: ConfigurationSurfaceId;
     testId?: string;
     label: string;
@@ -78,15 +68,10 @@ export class GlobalConfigActionsComponent {
       title: 'Thoth — agentic platform',
       icon: RadioTower,
     },
-    { id: 'onboarding', testId: 'setup-hub', label: 'Setup', icon: Wrench },
     { id: 'marketplace', label: 'Marketplace', icon: Store },
+    { id: 'onboarding', testId: 'setup-hub', label: 'Setup', icon: Wrench },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
-  protected readonly items = computed(() =>
-    this.showSetupHub()
-      ? this.allItems
-      : this.allItems.filter((item) => item.id !== 'onboarding'),
-  );
 
   protected selectItem(id: ConfigurationSurfaceId): void {
     if (id === 'thoth' && !this.appState.thothFirstRunDismissed()) {

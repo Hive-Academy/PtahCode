@@ -221,7 +221,7 @@ describe('ElectronShellComponent configuration gate', () => {
     ).toBe('Settings route');
   });
 
-  it('shows the workspace app shell and Chat, Voice, Apps, Tasks, Machines, Reviews, Analytics, Setup tabs in order', () => {
+  it('shows the workspace app shell and Chat, Voice, Tasks, Reviews, Apps, Machines, Analytics tabs in order', () => {
     layoutStub.hasWorkspaceFolders.set(true);
     fixture.detectChanges();
     expect(shell().querySelector('ptah-app-shell')).not.toBeNull();
@@ -234,12 +234,11 @@ describe('ElectronShellComponent configuration gate', () => {
     const names = [
       'Chat',
       'Voice',
-      'Apps',
       'Tasks',
-      'Machines',
       'Reviews',
+      'Apps',
+      'Machines',
       'Analytics',
-      'Setup',
     ];
     expect(tabs.map((tab) => tab.title)).toEqual(names);
     expect(tabs.map((tab) => tab.textContent?.trim())).toEqual(names);
@@ -251,24 +250,22 @@ describe('ElectronShellComponent configuration gate', () => {
       'false',
       'false',
       'false',
-      'false',
     ]);
-    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(8);
+    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(7);
   });
 
-  it('opens onboarding from Setup and marks the tab active once the surface settles', () => {
+  it('opens onboarding from the Setup icon button and marks it current once the surface settles', () => {
     layoutStub.hasWorkspaceFolders.set(true);
     fixture.detectChanges();
     const setupHub = shell().querySelector<HTMLButtonElement>(
-      '[role="tab"][data-test="config-menu-item-setup-hub"]',
+      '[data-testid="titlebar-global-actions"] [data-test="config-menu-item-setup-hub"]',
     )!;
+    expect(setupHub.getAttribute('role')).toBeNull();
     setupHub.click();
     expect(appStateStub.setCurrentView).toHaveBeenCalledWith('onboarding');
     appStateStub.openConfigurationSurface.set('onboarding');
     fixture.detectChanges();
-    expect(setupHub.getAttribute('aria-selected')).toBe('true');
-    expect(setupHub.getAttribute('aria-current')).toBe('true');
-    expect(setupHub.classList.contains('tab-active')).toBe(true);
+    expect(setupHub.getAttribute('aria-current')).toBe('page');
   });
 
   it('keeps the configuration icon buttons before the theme toggle in global no-drag actions without a workspace', () => {
@@ -300,14 +297,14 @@ describe('ElectronShellComponent configuration gate', () => {
       Array.from(actionsHost?.children ?? []).map((child) => hook(child)),
     ).toEqual([
       'config-menu-item-thoth',
-      'config-menu-item-setup-hub',
       'config-menu-item-marketplace',
+      'config-menu-item-setup-hub',
       'config-menu-item-settings',
     ]);
     expect(hook(actionsHost?.nextElementSibling)).toBe('ptah-theme-toggle');
   });
 
-  it('renders exactly one Setup entry: an icon button without a workspace, the tab with one', () => {
+  it('renders exactly one Setup entry, an icon button, with and without a workspace', () => {
     const setupHubEntries = () =>
       Array.from(
         shell().querySelectorAll<HTMLElement>(
@@ -319,7 +316,7 @@ describe('ElectronShellComponent configuration gate', () => {
     layoutStub.hasWorkspaceFolders.set(true);
     fixture.detectChanges();
     expect(setupHubEntries()).toHaveLength(1);
-    expect(setupHubEntries()[0].getAttribute('role')).toBe('tab');
+    expect(setupHubEntries()[0].getAttribute('role')).toBeNull();
   });
 
   it('returns to welcome after Back to welcome requests chat and configuration settles to null', async () => {

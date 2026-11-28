@@ -2,12 +2,12 @@ import { test, expect } from '../../support/fixtures';
 
 /**
  * Keyboard operation of the global configuration entry points, driven against
- * the real renderer: the Thoth / Marketplace / Settings icon buttons
- * (`GlobalConfigActionsComponent`) and the Setup navbar tab. They are
- * native `<button>`s, so Enter and Space activation run for real here.
+ * the real renderer: the Thoth / Marketplace / Setup / Settings icon buttons
+ * (`GlobalConfigActionsComponent`). They are native `<button>`s, so Enter
+ * and Space activation run for real here.
  */
 test.describe('Global configuration actions — keyboard operation', () => {
-  test('Enter on the focused Setup tab opens it and marks it current', async ({
+  test('Enter on the focused Setup button opens it and marks it current', async ({
     ui,
   }) => {
     const page = ui.page;
@@ -20,7 +20,7 @@ test.describe('Global configuration actions — keyboard operation', () => {
     await expect(
       page.locator('ptah-app-shell ptah-onboarding-home'),
     ).toBeVisible();
-    await expect(setupHub).toHaveAttribute('aria-current', 'true');
+    await expect(setupHub).toHaveAttribute('aria-current', 'page');
     await expect(
       page.locator('[data-test="config-menu-item-thoth"]'),
     ).not.toHaveAttribute('aria-current', 'page');

@@ -9,8 +9,9 @@
  * stays in the navbar without one, and the welcome yields to it.
  *
  * 3-panel layout:
- *   - Global navbar: Logo, tabs (incl. Setup), Thoth/Marketplace/Settings
- *     icon buttons, theme toggle, notifications
+ *   - Global navbar: Logo, tabs (Chat, Voice, Tasks, Reviews, Apps,
+ *     Machines, Analytics), Thoth/Marketplace/Setup/Settings icon buttons,
+ *     theme toggle, notifications
  *   - Workspace sidebar (left) — folder list
  *   - Chat panel (center) — reuses AppShellComponent entirely
  *   - Git dock (right, toggleable) — git status, source control, diff view
@@ -42,7 +43,6 @@ import {
   ClipboardList,
   GitPullRequest,
   AppWindow,
-  Wrench,
   Mic,
   RotateCw,
   Server,
@@ -281,18 +281,6 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
               <button
                 role="tab"
                 class="tab gap-1.5 no-drag whitespace-nowrap"
-                [class.tab-active]="appState.currentView() === 'apps'"
-                [attr.aria-selected]="appState.currentView() === 'apps'"
-                title="Apps"
-                aria-label="Apps"
-                (click)="openApps()"
-              >
-                <lucide-angular [img]="AppWindowIcon" class="w-3.5 h-3.5" />
-                <span class="tab-label whitespace-nowrap">Apps</span>
-              </button>
-              <button
-                role="tab"
-                class="tab gap-1.5 no-drag whitespace-nowrap"
                 [class.tab-active]="appState.currentView() === 'tasks'"
                 [attr.aria-selected]="appState.currentView() === 'tasks'"
                 title="Tasks"
@@ -301,6 +289,33 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
               >
                 <lucide-angular [img]="ClipboardListIcon" class="w-3.5 h-3.5" />
                 <span class="tab-label whitespace-nowrap">Tasks</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'review-runs'"
+                [attr.aria-selected]="appState.currentView() === 'review-runs'"
+                title="Reviews"
+                aria-label="Reviews"
+                (click)="openReviews()"
+              >
+                <lucide-angular
+                  [img]="GitPullRequestIcon"
+                  class="w-3.5 h-3.5"
+                />
+                <span class="tab-label whitespace-nowrap">Reviews</span>
+              </button>
+              <button
+                role="tab"
+                class="tab gap-1.5 no-drag whitespace-nowrap"
+                [class.tab-active]="appState.currentView() === 'apps'"
+                [attr.aria-selected]="appState.currentView() === 'apps'"
+                title="Apps"
+                aria-label="Apps"
+                (click)="openApps()"
+              >
+                <lucide-angular [img]="AppWindowIcon" class="w-3.5 h-3.5" />
+                <span class="tab-label whitespace-nowrap">Apps</span>
               </button>
             }
             <button
@@ -329,21 +344,6 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
               <button
                 role="tab"
                 class="tab gap-1.5 no-drag whitespace-nowrap"
-                [class.tab-active]="appState.currentView() === 'review-runs'"
-                [attr.aria-selected]="appState.currentView() === 'review-runs'"
-                title="Reviews"
-                aria-label="Reviews"
-                (click)="openReviews()"
-              >
-                <lucide-angular
-                  [img]="GitPullRequestIcon"
-                  class="w-3.5 h-3.5"
-                />
-                <span class="tab-label whitespace-nowrap">Reviews</span>
-              </button>
-              <button
-                role="tab"
-                class="tab gap-1.5 no-drag whitespace-nowrap"
                 [class.tab-active]="appState.currentView() === 'analytics'"
                 [attr.aria-selected]="appState.currentView() === 'analytics'"
                 title="Analytics"
@@ -352,29 +352,6 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
               >
                 <lucide-angular [img]="BarChart3Icon" class="w-3.5 h-3.5" />
                 <span class="tab-label whitespace-nowrap">Analytics</span>
-              </button>
-              <!-- Keep the former config-menu hook for the Setup entry. -->
-              <button
-                role="tab"
-                class="tab gap-1.5 no-drag whitespace-nowrap"
-                data-test="config-menu-item-setup-hub"
-                [class.tab-active]="
-                  appState.openConfigurationSurface() === 'onboarding'
-                "
-                [attr.aria-selected]="
-                  appState.openConfigurationSurface() === 'onboarding'
-                "
-                [attr.aria-current]="
-                  appState.openConfigurationSurface() === 'onboarding'
-                    ? 'true'
-                    : null
-                "
-                title="Setup"
-                aria-label="Setup"
-                (click)="openSetupHub()"
-              >
-                <lucide-angular [img]="WrenchIcon" class="w-3.5 h-3.5" />
-                <span class="tab-label whitespace-nowrap">Setup</span>
               </button>
             }
           </div>
@@ -420,9 +397,7 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
               </button>
             }
           </span>
-          <ptah-global-config-actions
-            [showSetupHub]="!layout.hasWorkspaceFolders()"
-          />
+          <ptah-global-config-actions />
           <ptah-theme-toggle />
           <ptah-notification-center #notificationCenter />
           <ptah-notification-announcer />
@@ -732,7 +707,6 @@ export class ElectronShellComponent {
   readonly ClipboardListIcon = ClipboardList;
   readonly GitPullRequestIcon = GitPullRequest;
   readonly AppWindowIcon = AppWindow;
-  readonly WrenchIcon = Wrench;
   readonly MicIcon = Mic;
   readonly RotateCwIcon = RotateCw;
   readonly ServerIcon = Server;
@@ -780,9 +754,5 @@ export class ElectronShellComponent {
 
   public openCommandCenter(): void {
     this.appState.setCurrentView('command-center');
-  }
-
-  openSetupHub(): void {
-    this.appState.setCurrentView('onboarding');
   }
 }
