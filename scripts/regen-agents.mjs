@@ -1,5 +1,6 @@
-// scripts/regen-agents.mjs — node scripts/regen-agents.mjs [--write]
+// scripts/regen-agents.mjs â€” node scripts/regen-agents.mjs [--write]
 import { createJiti } from 'jiti';
+import { isScalar, parseDocument } from 'yaml';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -41,17 +42,6 @@ export function truncateAgentDescription(description, fallback = 'Agent') {
   return points.slice(0, fit).join('') || safeFallback;
 }
 
-function decodeScalar(raw) {
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    return raw.slice(1, -1).replace(/\\(.)/gs, (_match, escaped) => {
-      const escapes = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
-      return Object.hasOwn(escapes, escaped) ? escapes[escaped] : escaped;
-    });
-  }
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1).replace(/''/g, "'");
-  return raw.trim();
-}
-
 /** Cap only the description inside an initial YAML frontmatter block. */
 export function capDescription(content, agentId = 'Agent') {
   const frontmatter = /^(---\r?\n)([\s\S]*?)(\r?\n---(?=\r?\n|$))/.exec(content);
@@ -60,11 +50,19 @@ export function capDescription(content, agentId = 'Agent') {
   const lines = header.split(/\r?\n/);
   const index = lines.findIndex((line) => /^description:[ \t]*/.test(line));
   if (index < 0) return content;
-  const raw = lines[index].replace(/^description:[ \t]*/, '').replace(/\r$/, '');
-  const fallback = `${agentId} agent`;
-  const capped = truncateAgentDescription(decodeScalar(raw), fallback);
-  lines[index] = `description: ${JSON.stringify(capped)}`;
-  const lineEnding = header.includes('\r\n') ? '\r\n' : '\n';
+  const document = parseDocument(header, { schema: 'failsafe' });
+  if (document.errors.length > 0) throw document.errors[0];
+  const node = document.get('description', true);
+  const description = isScalar(node) && typeof node.value === 'string' ? node.value : '';
+  const capped = truncateAgentDescription(description, `${agentId} agent`);
+  // The parser's value range covers continuation lines and block scalars.
+  // Leave blank lines and standalone comments following the value in place.
+  const valueEnd = node?.range?.[1];
+  const lastValueLine = valueEnd === undefined
+    ? index + 1
+    : header.slice(0, valueEnd).trimEnd().split(/\r?\n/).length;
+  lines.splice(index, Math.max(1, lastValueLine - index), `description: ${JSON.stringify(capped)}`);
+  const lineEnding = opening.endsWith('\r\n') ? '\r\n' : '\n';
   const replacement = `${opening}${lines.join(lineEnding)}${closing}`;
   return replacement + content.slice(frontmatter[0].length);
 }

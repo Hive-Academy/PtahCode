@@ -470,6 +470,7 @@ export { gatewayServesPtah } from './lib/helpers/gateway-session-wiring';
 // the Claude lanes and the settings RPC so all three apply ONE catalog.
 export {
   CLAUDE_BUNDLED_SKILL_IDS,
+  CLAUDE_BUNDLED_SKILLS,
   CLAUDE_BUILTIN_TOOLS,
   CLAUDE_BUILTIN_TERMINAL_SKILLS,
   CLAUDE_BUILTIN_TOOL_IDS,

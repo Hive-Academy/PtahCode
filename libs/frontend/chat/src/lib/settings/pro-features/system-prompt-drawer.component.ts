@@ -677,11 +677,11 @@ export class SystemPromptDrawerComponent {
           this.error.set(PROMPT_PREVIEW_LOAD_FAILED);
         }
       } catch {
-        if (!isCurrent()) return;
-        this.error.set(PROMPT_PREVIEW_LOAD_FAILED);
+        if (isCurrent()) this.error.set(PROMPT_PREVIEW_LOAD_FAILED);
       } finally {
         if (isCurrent()) this.isLoadingContent.set(false);
       }
+      if (!isCurrent()) return;
     }
     this.promptPreviewExpanded.set(true);
   }

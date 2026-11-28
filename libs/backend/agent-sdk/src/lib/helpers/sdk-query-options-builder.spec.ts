@@ -26,6 +26,15 @@ import {
 const fsModule: typeof import('node:fs') = require('node:fs');
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  OutputStyleDiscoveryService,
+  type OutputStyleSessionActivationService,
+} from '@ptah-extension/output-styles';
+import {
+  createMockFileSystemProvider,
+  createMockWorkspaceProvider,
+} from '@ptah-extension/platform-core/testing';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 import {
   SdkQueryOptionsBuilder,
@@ -3184,7 +3193,8 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
           launch: ClaudeCertifiedLaunchContext;
         };
     projectPath?: string;
-    fullPromptStyleResources?: 'matching' | 'missing' | 'mismatched';
+    fullPromptStyleResources?: 'matching' | 'missing' | 'mismatched' | 'ambient';
+    styleDiscovery?: OutputStyleSessionActivationService['resolveSessionFields'];
   }
 
   it.each(['matching', 'missing', 'mismatched'] as const)(
@@ -3209,6 +3219,61 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
       }
     },
   );
+
+  it('passes the Claude child config directory to ambient enhanced style discovery', async () => {
+    const configDir = join(fixtureRoot, 'override');
+    process.env['CLAUDE_CONFIG_DIR'] = configDir;
+    const { options, settings, resolveSessionFields } = await buildWith({
+      fullPromptStyleResources: 'ambient',
+    });
+    expect(options.env?.['CLAUDE_CONFIG_DIR']).toBe(configDir);
+    expect(resolveSessionFields).toHaveBeenCalledWith(
+      expect.objectContaining({ ambientConfigDir: configDir }),
+      undefined,
+    );
+    expect(options.systemPrompt).toContain('NAMED STYLE');
+    expect(settings).not.toHaveProperty('outputStyle');
+  });
+
+  it('starts an enhanced named session without a style when the account style junction dangles', async () => {
+    const account = join(fixtureRoot, 'account');
+    const target = join(account, 'styles');
+    mkdirSync(target, { recursive: true });
+    symlinkSync(target, join(account, 'output-styles'), 'junction');
+    rmSync(target, { recursive: true });
+    const env = {
+      ...NAMED_ENV,
+      CLAUDE_CONFIG_DIR: account,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: account,
+    };
+    const files = createMockFileSystemProvider();
+    const discovery = new OutputStyleDiscoveryService(
+      files,
+      createMockWorkspaceProvider(),
+      { debug: jest.fn(), warn: jest.fn() } as Pick<Logger, 'debug' | 'warn'> as Logger,
+    );
+    const { options, settings, warn, resolveSessionFields } = await buildWith({
+      named: {
+        route: { ...NAMED_ROUTE, canonicalConfigDir: account },
+        launch: { ...NAMED_LAUNCH, env, envDigest: certifiedEnvDigest(env) },
+      },
+      fullPromptStyleResources: 'matching',
+      styleDiscovery: async (_options, context) => {
+        await discovery.discover({}, context);
+        return { outputStyleBody: 'NAMED STYLE' };
+      },
+    });
+    expect(resolveSessionFields).toHaveBeenCalledTimes(1);
+    expect(files.readDirectory).not.toHaveBeenCalled();
+    expect(Array.isArray(options.systemPrompt)).toBe(true);
+    expect(options.systemPrompt).not.toContain('NAMED STYLE');
+    expect(settings).not.toHaveProperty('outputStyle');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Named-account output style discovery failed'),
+      expect.objectContaining({ reason: 'account output style unavailable' }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(account);
+  });
 
   // The same-name skill guard (R1) reads the account config dir; point it at
   // an empty fixture so the developer's own `~/.claude` never leaks in.
@@ -3238,14 +3303,18 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     const issuedBindings: McpCallerBinding[] = [];
     const warn = jest.fn();
     const resolveSessionFields = jest.fn().mockResolvedValue({ outputStyleBody: 'NAMED STYLE' });
+    if (input.styleDiscovery) resolveSessionFields.mockImplementationOnce(input.styleDiscovery);
     const styleResources = input.fullPromptStyleResources;
-    const accountResources = styleResources && styleResources !== 'missing'
+    const named = typeof input.named === 'object'
+      ? input.named
+      : { route: NAMED_ROUTE, launch: NAMED_LAUNCH };
+    const accountResources = styleResources === 'matching' || styleResources === 'mismatched'
       ? {
           kind: 'named' as const,
-          route: styleResources === 'matching' ? NAMED_ROUTE : { ...NAMED_ROUTE, authEpoch: 1 },
+          route: styleResources === 'matching' ? named.route : { ...named.route, authEpoch: 1 },
           accountDataDir: '/metadata',
           filesystemIdentity: { volumeId: 'v', fileId: 'f' },
-          launch: NAMED_LAUNCH,
+          launch: named.launch,
         }
       : undefined;
     const noopHooks = { createHooks: jest.fn().mockReturnValue({}) };

@@ -16,6 +16,7 @@ import { injectable, inject } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   normalizeOutputStyleSelection,
@@ -1434,6 +1435,12 @@ export class SdkQueryOptionsBuilder {
         );
       }
     }
+    // The config dir the Claude child reads (D-B2): a named run's certified
+    // launch env alone (it never inherits the host env), otherwise the auth
+    // env then the host env the child inherits, else `~/.claude`.
+    const claudeConfigDir = resolveClaudeConfigDir(
+      named ? [named.launch.env] : [effectiveAuthEnv, process.env],
+    );
     const fullPrompt =
       sessionConfig.preset === 'enhanced' &&
       !!enhancedPromptsContent?.trim() &&
@@ -1458,16 +1465,27 @@ export class SdkQueryOptionsBuilder {
         fullPromptStyleBody = undefined;
         flagStyleConfig = undefined;
       } else {
-        const style = await this.outputStyleActivation?.resolveSessionFields(
-          {
-            workspaceRoot: sessionConfig.projectPath,
-            injectIntoSystemPrompt: true,
-            selectedStyleName: sessionConfig.outputStyleName,
-          },
-          input.accountResources,
-        );
-        fullPromptStyleBody = style?.outputStyleBody;
-        if (style?.outputStyleUnavailable) flagStyleConfig = undefined;
+        try {
+          const style = await this.outputStyleActivation?.resolveSessionFields(
+            {
+              workspaceRoot: cwd,
+              injectIntoSystemPrompt: true,
+              selectedStyleName: sessionConfig.outputStyleName,
+              ...(!named ? { ambientConfigDir: resolve(cwd, claudeConfigDir) } : {}),
+            },
+            input.accountResources,
+          );
+          fullPromptStyleBody = style?.outputStyleBody;
+          if (style?.outputStyleUnavailable) flagStyleConfig = undefined;
+        } catch (error) {
+          if (!named) throw error;
+          this.logger.warn(
+            '[SdkQueryOptionsBuilder] Named-account output style discovery failed; starting without a style',
+            { sessionId, reason: 'account output style unavailable' },
+          );
+          fullPromptStyleBody = undefined;
+          flagStyleConfig = undefined;
+        }
       }
     }
     if (fullPrompt && fullPromptStyleBody) {
@@ -1786,12 +1804,6 @@ export class SdkQueryOptionsBuilder {
         : ['project', 'local'];
 
     const policy = this.sessionCapabilityPolicy(capabilityPolicy, cwd);
-    // The config dir the Claude child reads (D-B2): a named run's certified
-    // launch env alone (it never inherits the host env), otherwise the auth
-    // env then the host env the child inherits, else `~/.claude`.
-    const claudeConfigDir = resolveClaudeConfigDir(
-      named ? [named.launch.env] : [effectiveAuthEnv, process.env],
-    );
     const bundledSkillDiscovery =
       policy.status === 'verified' && deniedBundledSkills.length > 0
         ? await discoverClaudeSkillNames(

@@ -1050,6 +1050,27 @@ describe('AgentRpcHandlers — Claude built-in opt-ins (TASK_2026_853)', () => {
     ).toEqual(['code-review', 'init']);
   });
 
+  it('lists all bundled skills and supports toggling a listed skill individually', async () => {
+    const h = makeHarness();
+    const read = () => call<AgentGetClaudeBuiltinsResult>(h, 'agent:getClaudeBuiltins', {});
+    const initial = await read();
+    expect(initial.enabledSkills).toEqual([]);
+    for (const id of CLAUDE_BUNDLED_SKILL_IDS) {
+      expect(initial.terminalSkills).toContainEqual(
+        expect.objectContaining({ id, description: expect.stringMatching(/\S/) }),
+      );
+    }
+    for (const enabled of [true, false]) {
+      const result = await call<AgentSetClaudeBuiltinResult>(h, 'agent:setClaudeBuiltin', {
+        kind: 'skill',
+        id: 'dataviz',
+        enabled,
+      });
+      expect(result.success).toBe(true);
+      expect((await read()).enabledSkills).toEqual(enabled ? ['dataviz'] : []);
+    }
+  });
+
   it('keeps every bundled skill opt-in when writing and reading config', async () => {
     const h = makeHarness();
     const bundledSkillIds = [...CLAUDE_BUNDLED_SKILL_IDS].sort();
@@ -1168,7 +1189,7 @@ describe('AgentRpcHandlers — Claude built-in opt-ins (TASK_2026_853)', () => {
       approxTokens: 850,
       skillsNeedingIt: ['code-review'],
     });
-    expect(result.terminalSkills).toHaveLength(7);
+    expect(result.terminalSkills).toHaveLength(7 + CLAUDE_BUNDLED_SKILL_IDS.length);
     expect(
       result.terminalSkills.find((row) => row.id === 'code-review'),
     ).toEqual(expect.objectContaining({ needsTool: 'ReportFindings' }));

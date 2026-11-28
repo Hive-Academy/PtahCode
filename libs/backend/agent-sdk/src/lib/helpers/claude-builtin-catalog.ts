@@ -119,16 +119,20 @@ export const CLAUDE_BUILTIN_TERMINAL_SKILLS: readonly ClaudeBuiltinSkillRow[] =
   ];
 
 /** SDK bundled skills controlled by `disableBundledSkills` and overrides. */
-export const CLAUDE_BUNDLED_SKILL_IDS: readonly string[] = [
-  'dataviz',
-  'claude-api',
-  'claude-approvals',
-  'schedule',
-  'loop',
-  'run',
-  'simplify',
-  'security-review',
+// Bundled skill prompt sizes are not measured in the terminal catalog.
+export const CLAUDE_BUNDLED_SKILLS: readonly ClaudeBuiltinSkillRow[] = [
+  { id: 'dataviz', description: 'Creates data visualizations.', approxTokens: 0 },
+  { id: 'claude-api', description: 'Builds applications using the Claude API.', approxTokens: 0 },
+  { id: 'claude-approvals', description: 'Configures Claude approval workflows.', approxTokens: 0 },
+  { id: 'schedule', description: 'Creates and manages scheduled tasks.', approxTokens: 0 },
+  { id: 'loop', description: 'Runs a prompt repeatedly at an interval.', approxTokens: 0 },
+  { id: 'run', description: 'Launches and checks the current project.', approxTokens: 0 },
+  { id: 'simplify', description: 'Reviews changes for code quality and reuse.', approxTokens: 0 },
+  { id: 'security-review', description: 'Reviews changes for security vulnerabilities.', approxTokens: 0 },
 ];
+
+export const CLAUDE_BUNDLED_SKILL_IDS: readonly string[] =
+  CLAUDE_BUNDLED_SKILLS.map(({ id }) => id);
 
 /**
  * Built-ins Ptah depends on. The catalog must never contain one of them; a

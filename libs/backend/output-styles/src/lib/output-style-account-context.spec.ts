@@ -173,6 +173,18 @@ describe('selected Claude output styles', () => {
     expect(files.delete).not.toHaveBeenCalled();
   });
 
+  it('injects the ambient style from the child config directory over the home style', async () => {
+    const { writer, activation } = harness();
+    await writer.save({ ...params, body: 'Home style body.' }, ambient);
+    await writer.save(params, context);
+
+    await expect(activation.resolveSessionFields({
+      workspaceRoot,
+      ambientConfigDir: configRoot,
+      injectIntoSystemPrompt: true,
+    }, ambient)).resolves.toEqual({ outputStyleBody: params.body });
+  });
+
   it('bounds real directory junctions and allows a genuinely absent style directory', async () => {
     jest.restoreAllMocks();
     const root = await fs.mkdtemp(path.join(tmpdir(), 'ptah-style-bound-'));

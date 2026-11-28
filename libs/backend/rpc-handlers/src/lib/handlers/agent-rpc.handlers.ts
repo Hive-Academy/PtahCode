@@ -47,6 +47,7 @@ import {
 } from '@ptah-extension/cli-agent-runtime';
 import {
   CLAUDE_BUNDLED_SKILL_IDS,
+  CLAUDE_BUNDLED_SKILLS,
   CLAUDE_BUILTIN_TERMINAL_SKILLS,
   CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
   CLAUDE_BUILTIN_TOOLS,
@@ -586,7 +587,7 @@ export class AgentRpcHandlers {
           approxTokens: row.approxTokens,
           skillsNeedingIt: [...row.skillsNeedingIt],
         })),
-        terminalSkills: CLAUDE_BUILTIN_TERMINAL_SKILLS.map((row) => ({
+        terminalSkills: [...CLAUDE_BUILTIN_TERMINAL_SKILLS, ...CLAUDE_BUNDLED_SKILLS].map((row) => ({
           id: row.id,
           description: row.description,
           approxTokens: row.approxTokens,

@@ -53,3 +53,17 @@ test('uses a nonempty fallback for quoted whitespace descriptions', () => {
   const output = capDescription('---\ndescription: "  \\n "\n---\n', 'sample');
   assert.match(output, /description: "sample agent"/);
 });
+
+test('rewrites indented plain, quoted, folded, and literal descriptions', () => {
+  for (const description of [
+    ':\n  Dispatch on\n  matching requests.',
+    ':\n# Dispatch metadata\n  Dispatch on\n  matching requests.',
+    ': "Dispatch on\n  matching requests."',
+    ': >-\n  Dispatch on\n  matching requests.',
+    ': |2-\n  Dispatch on\n\n  matching requests.',
+  ]) {
+    const source = '---\nname: sample\ndescription' + description + '\n\nmodel: sonnet\n---\nBody\n';
+    const expected = '---\nname: sample\ndescription: "Dispatch on matching requests."\n\nmodel: sonnet\n---\nBody\n';
+    assert.equal(capDescription(source, 'sample'), expected);
+  }
+});

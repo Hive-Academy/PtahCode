@@ -103,6 +103,8 @@ export interface ResolveSessionFieldsOptions {
    * workspace provider's primary root.
    */
   readonly workspaceRoot?: string;
+  /** Claude child config directory for the ambient user tier. */
+  readonly ambientConfigDir?: string;
   /**
    * Whether THIS session's `Options.settingSources` will include `'user'`.
    *
@@ -168,6 +170,7 @@ export class OutputStyleSessionActivationService {
       const discoveryOptions = {
         workspaceRoot: options.workspaceRoot,
         activeName: selected,
+        ...(options.ambientConfigDir ? { ambientConfigDir: options.ambientConfigDir } : {}),
       };
       const { styles } = await (context === undefined
         ? this.discovery.discover(discoveryOptions)
