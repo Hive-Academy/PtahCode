@@ -5,14 +5,13 @@
  * boundary.
  *
  * `workspacePath` stays optional everywhere it appears: the backend's own
- * active root is trusted, and a caller-supplied path is additionally checked
- * with `isAuthorizedWorkspace` in the handler.
+ * active root is trusted, and caller-supplied paths are checked in the handler.
  */
 
 import { z } from 'zod';
 import { ProjectAnalysisZodSchema } from '@ptah-extension/agent-generation';
 
-const workspacePath = z.string().min(1).max(4096).optional();
+const workspacePath = z.string().trim().min(1).max(4096).optional();
 
 export const WizardDeepAnalyzeParamsSchema = z.object({
   model: z.string().min(1).max(200).optional(),
@@ -21,15 +20,16 @@ export const WizardDeepAnalyzeParamsSchema = z.object({
   workspacePath,
 });
 
-/** `wizard:get-resumable-run` takes no parameters; unknown keys are dropped. */
-export const WizardGetResumableRunParamsSchema = z.object({});
-/** `wizard:analysis-status` takes no parameters; unknown keys are dropped. */
-export const WizardAnalysisStatusParamsSchema = z.object({});
+export const WizardGetResumableRunParamsSchema = z.object({ workspacePath });
+export const WizardAnalysisStatusParamsSchema = z.object({ workspacePath });
 
 export const WizardRecommendSkillsParamsSchema = z.object({
   analysis: ProjectAnalysisZodSchema,
 });
 export const WizardRecommendAnalysisSkillsParamsSchema = z.strictObject({
+  runId: z.string().trim().min(1).max(200),
+});
+export const WizardGetSkillReviewParamsSchema = z.strictObject({
   runId: z.string().trim().min(1).max(200),
 });
 export const WizardSearchSkillsParamsSchema = z.object({
@@ -41,8 +41,12 @@ export const WizardGetProjectGuidanceParamsSchema = z.object({
 export const WizardPreviewSkillsForConsentParamsSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(255)).min(1).max(200),
 });
+const installRunId = z.string().trim().min(1).max(200);
+
 export const WizardInstallSkillsWithConsentParamsSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(255)).max(200),
+  workspacePath,
+  installRunId: installRunId.optional(),
   consentRecords: z
     .array(
       z.object({
@@ -52,6 +56,10 @@ export const WizardInstallSkillsWithConsentParamsSchema = z.object({
       }),
     )
     .max(200),
+});
+
+export const WizardCancelSkillInstallParamsSchema = z.strictObject({
+  installRunId,
 });
 
 export const WizardListAnalysesParamsSchema = z.object({ workspacePath });

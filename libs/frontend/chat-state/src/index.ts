@@ -23,6 +23,11 @@ export { WorkflowSessionIndexService } from './lib/workflow-session-index.servic
 export { SessionTurnActivityStore } from './lib/session-turn-activity.store';
 export { isActiveWorkspaceTabSet } from './lib/active-workspace-tab-set';
 export {
+  consumeLegacySetupTabs,
+  type LegacySetupTab,
+  type LegacySetupWorkflow,
+} from './lib/tab-persistence';
+export {
   TabWorkspacePartitionService,
   type WorkspaceTabSet,
   type TabLookupResult,

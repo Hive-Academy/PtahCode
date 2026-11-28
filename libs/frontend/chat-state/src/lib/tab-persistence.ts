@@ -137,16 +137,103 @@ export function projectTabForPersist(tab: TabState): TabState {
   };
 }
 
-/** Build the storage envelope for a tab set. */
+/**
+ * Build the storage envelope for a tab set.
+ *
+ * Legacy Setup tabs (D6, TASK_2026_2330) are left out: Setup runs live in
+ * Setup records now, so a tab of either Setup workflow is never written again.
+ * An active id that pointed at one is written as `null`.
+ */
 export function buildPersistedTabState(
   tabs: readonly TabState[],
   activeTabId: string | null,
 ): PersistedTabState {
+  const kept = tabs.filter((tab) => !isLegacySetupWorkflow(tab.workflow));
   return {
-    tabs: tabs.map(projectTabForPersist),
-    activeTabId,
+    tabs: kept.map(projectTabForPersist),
+    activeTabId:
+      activeTabId !== null && kept.some((tab) => tab.id === activeTabId)
+        ? activeTabId
+        : null,
     version: PERSISTED_TAB_STATE_VERSION,
   };
+}
+
+/** The two workflows whose tabs were replaced by Setup run records (D6). */
+export type LegacySetupWorkflow =
+  | 'setup-agent-generation'
+  | 'setup-project-prompt';
+
+/** One dropped Setup tab, handed once to the Setup run store. */
+export interface LegacySetupTab {
+  readonly tabId: string;
+  readonly workflow: LegacySetupWorkflow;
+  readonly workspacePath: string;
+  readonly lastActivityAt: number;
+}
+
+function isLegacySetupWorkflow(value: unknown): value is LegacySetupWorkflow {
+  return value === 'setup-agent-generation' || value === 'setup-project-prompt';
+}
+
+/**
+ * Setup tabs dropped on restore and not yet consumed.
+ *
+ * Module state on purpose: chat-state cannot import setup-wizard, and the
+ * restore path runs in the `TabManagerService` constructor, before any Setup
+ * store exists. Bounded by the number of tabs in storage; drained by
+ * {@link consumeLegacySetupTabs}.
+ */
+const pendingLegacySetupTabs = new Map<string, LegacySetupTab>();
+
+/**
+ * Take the Setup tabs dropped on restore since the last call (D6).
+ *
+ * One-shot: the queue is drained, so a second call returns `[]` until another
+ * workspace with legacy Setup tabs is restored. `SetupRunStore` calls it on
+ * init and adopts each entry into a Setup record.
+ */
+export function consumeLegacySetupTabs(): ReadonlyArray<LegacySetupTab> {
+  const taken = [...pendingLegacySetupTabs.values()];
+  pendingLegacySetupTabs.clear();
+  return taken;
+}
+
+/**
+ * Remove legacy Setup tabs from a restored set and queue them for hand-off.
+ *
+ * A tab restored without a known workspace (the pre-workspace global key)
+ * is dropped without a hand-off entry: the contract needs a workspace path,
+ * and the Setup store adopts such runs from `wizard:get-resumable-run`.
+ */
+function dropLegacySetupTabs(
+  tabs: readonly TabState[],
+  workspacePath: string | undefined,
+): TabState[] {
+  const kept: TabState[] = [];
+  const workspace = workspacePath?.trim() ?? '';
+  const now = Date.now();
+  for (const tab of tabs) {
+    if (!isLegacySetupWorkflow(tab.workflow)) {
+      kept.push(tab);
+      continue;
+    }
+    if (workspace && typeof tab.id === 'string' && tab.id) {
+      const { lastActivityAt } = tab;
+      pendingLegacySetupTabs.set(`${workspace}\u0000${tab.id}`, {
+        tabId: tab.id,
+        workflow: tab.workflow,
+        workspacePath: workspace,
+        lastActivityAt:
+          Number.isFinite(lastActivityAt) &&
+          lastActivityAt > 0 &&
+          lastActivityAt <= now
+            ? lastActivityAt
+            : 0,
+      });
+    }
+  }
+  return kept;
 }
 
 /**
@@ -333,9 +420,17 @@ export function sanitizeRestoredTab(tab: TabState): TabState {
   return sanitized;
 }
 
-/** Bring a whole stored tab set back. See {@link sanitizeRestoredTab}. */
-export function sanitizeRestoredTabs(tabs: readonly TabState[]): TabState[] {
-  return tabs.map(sanitizeRestoredTab);
+/**
+ * Bring a whole stored tab set back. See {@link sanitizeRestoredTab}.
+ *
+ * Tabs of the two legacy Setup workflows are dropped (D6) and, when the
+ * workspace is known, queued for {@link consumeLegacySetupTabs}.
+ */
+export function sanitizeRestoredTabs(
+  tabs: readonly TabState[],
+  workspacePath?: string,
+): TabState[] {
+  return dropLegacySetupTabs(tabs, workspacePath).map(sanitizeRestoredTab);
 }
 
 /**

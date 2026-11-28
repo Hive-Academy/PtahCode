@@ -4,13 +4,19 @@ import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   AppStateManager,
   ClaudeRpcService,
   VSCodeService,
 } from '@ptah-extension/core';
-import { WizardRpcService } from '@ptah-extension/setup-wizard';
+import {
+  SetupRunStore,
+  WizardRpcService,
+  type SetupRunRecord,
+  type SetupRunReport,
+  type SetupRunStartOptions,
+  type SetupRunWorkflow,
+} from '@ptah-extension/setup-wizard';
 import type {
   ModelPair,
   SetupPairState,
@@ -29,10 +35,20 @@ function overlay(): HTMLElement {
 }
 
 jest.mock('@ptah-extension/setup-wizard', () => ({
+  normalizeSetupWorkspacePath: jest.requireActual<
+    typeof import('@ptah-extension/setup-wizard')
+  >('@ptah-extension/setup-wizard').normalizeSetupWorkspacePath,
+  isTerminalSetupRunStatus: jest.requireActual<
+    typeof import('@ptah-extension/setup-wizard')
+  >('@ptah-extension/setup-wizard').isTerminalSetupRunStatus,
+  SetupRunStore: class SetupRunStore {},
   WizardRpcService: class WizardRpcService {},
 }));
 
-const DEFAULT_PAIR: ModelPair = { provider: 'claude', model: 'claude-sonnet-4' };
+const DEFAULT_PAIR: ModelPair = {
+  provider: 'claude',
+  model: 'claude-sonnet-4',
+};
 
 function emptyJudge(
   overrides: Partial<SkillJudgeResult> = {},
@@ -146,7 +162,10 @@ function makeJudgedResultWithInstallAndBuild(): WizardRecommendAnalysisSkillsRes
             {
               candidateId: 'owner/repo/legacy-ng',
               eligible: false,
-              rejection: { reason: 'Targets legacy NgModules', stage: 'decision' },
+              rejection: {
+                reason: 'Targets legacy NgModules',
+                stage: 'decision',
+              },
             },
           ],
           outcomes: [
@@ -217,11 +236,62 @@ function makeJudgedResultWithInstallAndBuild(): WizardRecommendAnalysisSkillsRes
 
 describe('AnalyzeSkillsPage', () => {
   afterEach(() => jest.restoreAllMocks());
-  const loaded = signal<{ manifest: { runId: string } } | null>({
+  const loaded = signal<{ manifest: { runId: string; slug?: string } } | null>({
     manifest: { runId: 'run-1' },
   });
   const root = signal({ workspaceRoot: '/ws' });
   const call = jest.fn();
+  const records = new Map<string, SetupRunRecord>();
+  const get = (id: string) => records.get(id) ?? null;
+  const runsFor = (workspacePath: string) =>
+    [...records.values()].filter(
+      (record) => record.workspacePath === workspacePath,
+    );
+  const start = jest.fn(
+    (
+      workflow: SetupRunWorkflow,
+      workspacePath: string,
+      options: SetupRunStartOptions,
+    ) => {
+      const live = runsFor(workspacePath).find(
+        (record) =>
+          record.workflow === workflow &&
+          (record.status === 'running' || record.status === 'needs-input'),
+      );
+      if (live) return live;
+      const record: SetupRunRecord = {
+        id: `setup-${records.size + 1}`,
+        workspacePath,
+        workflow,
+        status: 'running',
+        step: workflow === 'skill-review' ? 'reviewing' : 'generating',
+        analysisRunId: options.analysisRunId ?? null,
+        parentId: options.parentId ?? null,
+        backendRunId: null,
+        unseen: false,
+        createdAt: 0,
+        updatedAt: 0,
+      };
+      records.set(record.id, record);
+      return record;
+    },
+  );
+  const report = (id: string, update: SetupRunReport) => {
+    const record = get(id);
+    if (record) Object.assign(record, update);
+    return record;
+  };
+  const setSelection = (id: string, skillIds: readonly string[]) => {
+    const record = get(id);
+    if (record) record.selection = { skillIds: [...skillIds] };
+  };
+  const reviewSkills = jest.fn<
+    ReturnType<SetupRunStore['reviewSkills']>,
+    Parameters<SetupRunStore['reviewSkills']>
+  >();
+  const attach = jest.fn(get);
+  const release = jest.fn();
+  const getSkillReview = jest.fn();
   let setupStateResponse: SetupPairState;
   let recommendResponse: () => Promise<unknown>;
   const requestSettingsTab = jest.fn();
@@ -251,12 +321,39 @@ describe('AnalyzeSkillsPage', () => {
       });
     call.mockReset();
     call.mockImplementation((method: string) => defaultRpcImpl(method));
+    records.clear();
+    start.mockClear();
+    attach.mockClear();
+    release.mockClear();
+    getSkillReview
+      .mockReset()
+      .mockResolvedValue({ review: null, reviewedAt: null });
+    reviewSkills.mockReset().mockImplementation(async (id) => {
+      const record = get(id);
+      if (!record) return null;
+      const response = await call(
+        'wizard:recommend-analysis-skills',
+        { runId: record.analysisRunId },
+        { timeout: 75_000 },
+      );
+      if (!response.isSuccess()) {
+        throw Object.assign(new Error('Review failed'), {
+          code: response.errorCode,
+        });
+      }
+      if (record.status !== 'completed')
+        report(id, { status: 'needs-input', step: 'selecting' });
+      return response.data;
+    });
     requestSettingsTab.mockReset();
     setCurrentView.mockReset();
     TestBed.configureTestingModule({
       providers: [
         { provide: ClaudeRpcService, useValue: { call } },
-        { provide: WizardRpcService, useValue: { getResumableRun: jest.fn() } },
+        {
+          provide: WizardRpcService,
+          useValue: { getResumableRun: jest.fn(), getSkillReview },
+        },
         { provide: VSCodeService, useValue: { config: root } },
         {
           provide: AppStateManager,
@@ -281,8 +378,22 @@ describe('AnalyzeSkillsPage', () => {
         },
         { provide: Router, useValue: { navigate: jest.fn() } },
         {
-          provide: TabManagerService,
-          useValue: { createTab: jest.fn(), setWorkflow: jest.fn() },
+          provide: SetupRunStore,
+          useValue: {
+            start,
+            runsFor,
+            get,
+            attach,
+            release,
+            report,
+            markSeen: jest.fn(),
+            setSelection,
+            reviewSkills,
+            targetOf: (record: SetupRunRecord) => ({
+              subPath: record.parentId ? ['analyze', 'guidance'] : ['guidance'],
+              queryParams: { tab: record.id, analysis: record.analysisRunId },
+            }),
+          },
         },
       ],
     });
@@ -296,6 +407,244 @@ describe('AnalyzeSkillsPage', () => {
       throw new Error('Missing primary continue button');
     return button;
   }
+
+  function seedRoutedReview() {
+    const record = start('skill-review', '/ws', { analysisRunId: 'run-1' });
+    report(record.id, { status: 'needs-input', step: 'selecting' });
+    setSelection(record.id, []);
+    loaded.set(null);
+    const params = convertToParamMap({ analysis: 'run-1', tab: record.id });
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: {
+        snapshot: { queryParamMap: params },
+        queryParamMap: of(params),
+      },
+    });
+    const review = makeJudgedResultWithInstallAndBuild();
+    getSkillReview.mockResolvedValue({
+      review,
+      reviewedAt: '2026-11-28T00:00:00.000Z',
+    });
+    return { record, review };
+  }
+
+  it('opens a saved Setup review by run id and restores the selection without requesting recommendations', async () => {
+    const { record, review } = seedRoutedReview();
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(getSkillReview).toHaveBeenCalledWith('run-1');
+    expect(call).not.toHaveBeenCalled();
+    expect(reviewSkills).not.toHaveBeenCalled();
+    expect(attach).toHaveBeenCalledWith(record.id);
+    expect(fixture.componentInstance.summary()).toBe(review);
+    expect(fixture.componentInstance.state.selectedSelectionKeys()).toEqual([]);
+    expect(
+      TestBed.inject(AnalysisStepStore).useAnalysis,
+    ).not.toHaveBeenCalled();
+
+    fixture.componentInstance.state.toggle('owner/repo/angular');
+    fixture.destroy();
+    expect(get(record.id)?.selection).toEqual({
+      skillIds: ['owner/repo/angular'],
+    });
+    expect(release).toHaveBeenCalledWith(record.id);
+  });
+
+  it('completes the skill review and opens guidance without recording an unstarted run', async () => {
+    const { record } = seedRoutedReview();
+    jest.mocked(TestBed.inject(Router).navigate).mockResolvedValue(true);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    primaryButton(fixture.nativeElement).click();
+    await fixture.whenStable();
+
+    expect(
+      runsFor('/ws').some((entry) => entry.workflow === 'project-guidance'),
+    ).toBe(false);
+    expect(get(record.id)?.status).toBe('completed');
+    expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+      ['/onboarding', 'analyze', 'guidance'],
+      { queryParams: { analysis: 'run-1' } },
+    );
+  });
+
+  it.each(['agent-generation', 'project-guidance', 'recordless'] as const)(
+    'opens a review by its analysis ID from %s and sends the saved slug on Back',
+    async (source) => {
+      seedRoutedReview();
+      const record =
+        source === 'recordless'
+          ? null
+          : start(source, '/ws', { analysisRunId: 'run-1' });
+      const params = convertToParamMap({
+        analysis: 'run-1',
+        ...(record ? { tab: record.id } : {}),
+      });
+      TestBed.overrideProvider(ActivatedRoute, {
+        useValue: {
+          snapshot: { queryParamMap: params },
+          queryParamMap: of(params),
+        },
+      });
+      loaded.set({ manifest: { runId: 'run-1', slug: 'saved-slug' } });
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(getSkillReview).toHaveBeenCalledWith('run-1');
+      expect(
+        TestBed.inject(AnalysisStepStore).useAnalysis,
+      ).not.toHaveBeenCalled();
+      await fixture.componentInstance.back();
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+        ['/onboarding/analyze'],
+        { queryParams: { analysis: 'saved-slug' } },
+      );
+    },
+  );
+
+  it('enables and runs Review again from a routed review', async () => {
+    const { record } = seedRoutedReview();
+    const replacement = makeJudgedResultWithInstallAndBuild();
+    reviewSkills.mockResolvedValueOnce(replacement);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const element: HTMLElement = fixture.nativeElement;
+    const button = [...element.querySelectorAll('button')].find(
+      (entry) => entry.textContent?.trim() === 'Re-run skill search',
+    );
+    expect(button?.disabled).toBe(false);
+    button?.click();
+    await fixture.whenStable();
+
+    expect(reviewSkills).toHaveBeenCalledWith(record.id, { force: true });
+    expect(fixture.componentInstance.summary()).toBe(replacement);
+  });
+
+  it('keeps the prior selection when opening a different analysis interrupts it', async () => {
+    const earlier = start('skill-review', '/ws', { analysisRunId: 'run-2' });
+    report(earlier.id, { status: 'needs-input', step: 'selecting' });
+    setSelection(earlier.id, ['owner/repo/angular']);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(get(earlier.id)).toEqual(
+      expect.objectContaining({
+        status: 'interrupted',
+        selection: { skillIds: ['owner/repo/angular'] },
+      }),
+    );
+    expect(start).toHaveBeenCalledWith(
+      'skill-review',
+      '/ws',
+      expect.objectContaining({ analysisRunId: 'run-1' }),
+    );
+    expect(fixture.componentInstance.summary()).not.toBeNull();
+  });
+
+  it('leaves a waiting selection alone when another review is still running', async () => {
+    const waiting = start('skill-review', '/ws', { analysisRunId: 'run-2' });
+    report(waiting.id, { status: 'interrupted', step: 'selecting' });
+    const running = start('skill-review', '/ws', { analysisRunId: 'run-3' });
+    report(waiting.id, { status: 'needs-input' });
+    setSelection(waiting.id, ['owner/repo/angular']);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(get(waiting.id)).toEqual(
+      expect.objectContaining({
+        status: 'needs-input',
+        selection: { skillIds: ['owner/repo/angular'] },
+      }),
+    );
+    expect(get(running.id)?.status).toBe('running');
+    expect(reviewSkills).not.toHaveBeenCalled();
+    expect(fixture.componentInstance.state.error()).toContain(
+      'Wait for it to finish before opening this review.',
+    );
+  });
+
+  it('attaches a new page to the review that is already in flight in Setup', async () => {
+    const record = start('skill-review', '/ws', { analysisRunId: 'run-1' });
+    const review = makeJudgedResultWithInstallAndBuild();
+    let finish!: (review: WizardRecommendAnalysisSkillsResult) => void;
+    const pending = new Promise<WizardRecommendAnalysisSkillsResult>(
+      (resolve) => {
+        finish = resolve;
+      },
+    );
+    reviewSkills.mockReturnValue(pending);
+
+    const first = TestBed.createComponent(AnalyzeSkillsPage);
+    first.detectChanges();
+    first.destroy();
+    const second = TestBed.createComponent(AnalyzeSkillsPage);
+    second.detectChanges();
+    expect(second.componentInstance.state.loading()).toBe(true);
+    expect(reviewSkills.mock.calls).toEqual([[record.id], [record.id]]);
+    expect(getSkillReview).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(record.id);
+    finish(review);
+    await second.whenStable();
+
+    expect(second.componentInstance.summary()).toBe(review);
+    expect(attach.mock.calls).toEqual([[record.id], [record.id]]);
+  });
+
+  it('retains the saved review and selection when Review again fails and resets them on success', async () => {
+    const record = start('skill-review', '/ws', { analysisRunId: 'run-1' });
+    report(record.id, { status: 'needs-input', step: 'selecting' });
+    setSelection(record.id, []);
+    const review = makeJudgedResultWithInstallAndBuild();
+    getSkillReview.mockResolvedValue({
+      review,
+      reviewedAt: '2026-11-28T00:00:00.000Z',
+    });
+    reviewSkills.mockRejectedValueOnce(new Error('Offline'));
+
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentInstance.retry();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(reviewSkills).toHaveBeenCalledWith(record.id, { force: true });
+    expect(fixture.componentInstance.summary()).toBe(review);
+    expect(get(record.id)?.selection).toEqual({ skillIds: [] });
+
+    reviewSkills.mockResolvedValueOnce({
+      ...makeRecommendResult(),
+      summarySource: 'none',
+      warning: 'The saved analysis run was not found in this workspace.',
+    });
+    fixture.componentInstance.retry();
+    await fixture.whenStable();
+    expect(fixture.componentInstance.summary()).toBe(review);
+    expect(get(record.id)?.selection).toEqual({ skillIds: [] });
+
+    const replacement = makeJudgedResultWithInstallAndBuild();
+    reviewSkills.mockResolvedValueOnce(replacement);
+    fixture.componentInstance.retry();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.summary()).toBe(replacement);
+    expect(get(record.id)?.selection).toEqual({
+      skillIds: ['owner/repo/angular'],
+    });
+  });
 
   it('invalidates a pending manual search on rerun without leaving searching stuck', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
@@ -326,7 +675,7 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.searching()).toBe(false);
   });
 
-  it('opens only one guidance tab while navigation is pending', async () => {
+  it('starts guidance once while navigation is pending', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
     fixture.detectChanges();
     await fixture.whenStable();
@@ -344,9 +693,9 @@ describe('AnalyzeSkillsPage', () => {
     await fixture.componentInstance.preview();
     fixture.detectChanges();
     expect(primaryButton(fixture.nativeElement).disabled).toBe(true);
-    expect(TestBed.inject(TabManagerService).createTab).toHaveBeenCalledTimes(
-      1,
-    );
+    expect(
+      start.mock.calls.filter(([workflow]) => workflow === 'project-guidance'),
+    ).toHaveLength(0);
     expect(router.navigate).toHaveBeenCalledTimes(1);
     finish();
     await first;
@@ -400,9 +749,9 @@ describe('AnalyzeSkillsPage', () => {
       button.click();
       await fixture.whenStable();
       expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
-        ['/onboarding/analyze/guidance'],
+        ['/onboarding', 'analyze', 'guidance'],
         expect.objectContaining({
-          queryParams: expect.objectContaining({ analysis: 'saved' }),
+          queryParams: expect.objectContaining({ analysis: 'run-1' }),
         }),
       );
     },
@@ -442,18 +791,160 @@ describe('AnalyzeSkillsPage', () => {
     button.click();
     await fixture.whenStable();
     expect(fixture.componentInstance.state.stage()).toBe('consent');
-    call.mockImplementationOnce((method: string) => {
+    call.mockImplementationOnce((method: string, params: unknown) => {
       expect(method).toBe('wizard:install-skills-with-consent');
+      expect(params).toEqual({
+        skills: ['owner/repo/angular'],
+        consentRecords: [],
+        workspacePath: '/ws',
+        installRunId: expect.any(String),
+      });
       return Promise.resolve({
         isSuccess: () => true,
-        data: { success: true, installed: ['owner/repo/angular'] },
+        data: { success: true, installed: ['owner/repo/angular'], workspacePath: '/ws' },
       });
     });
     await fixture.componentInstance.install();
-    expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
-      ['/onboarding/analyze/guidance'],
+    const review = runsFor('/ws').find(
+      (record) => record.workflow === 'skill-review',
+    );
+    expect(review).toEqual(
+      expect.objectContaining({
+        status: 'completed',
+        selection: { skillIds: ['owner/repo/angular'] },
+      }),
+    );
+    expect(start).not.toHaveBeenCalledWith(
+      'project-guidance',
+      expect.anything(),
       expect.anything(),
     );
+    expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+      ['/onboarding', 'analyze', 'guidance'],
+      expect.anything(),
+    );
+  });
+
+  it.each([false, true])(
+    'shows confirmed installs when selection saving fails or installation is cancelled (cancelled %s)',
+    async (cancelled) => {
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const page = fixture.componentInstance;
+      page.state.openConsent([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      call.mockResolvedValueOnce({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws',
+          reason: 'Could not save workspace skill selection.',
+        },
+      });
+      await page.install();
+      fixture.detectChanges();
+      const text = (fixture.nativeElement as HTMLElement).textContent;
+      expect(text).toContain('Installed skills: owner/repo/one.');
+      expect(text).toContain('Could not save workspace skill selection.');
+      if (cancelled)
+        expect(text).toContain('Skill installation was cancelled.');
+      expect(page.skillsInstalled()).toBe(false);
+      expect(page.state.stage()).toBe('review');
+      expect(TestBed.inject(Router).navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['workspace switch', 'destroy'])(
+    'cancels the active install on %s and ignores its late response',
+    async (scenario) => {
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const router = TestBed.inject(Router);
+      const page = fixture.componentInstance;
+      page.state.openConsent([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      let finish!: (value: unknown) => void;
+      const reply = new Promise((resolve) => {
+        finish = resolve;
+      });
+      call.mockReturnValueOnce(reply);
+      const pending = page.install();
+      const install = call.mock.lastCall?.[1] as { installRunId: string };
+      expect(install.installRunId).toEqual(expect.any(String));
+      if (scenario === 'destroy') fixture.destroy();
+      else {
+        root.set({ workspaceRoot: '/other' });
+        loaded.set(null);
+        fixture.detectChanges();
+      }
+      expect(call).toHaveBeenCalledWith('wizard:cancel-skill-install', {
+        installRunId: install.installRunId,
+      });
+      finish({
+        isSuccess: () => true,
+        data: {
+          success: true,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws',
+        },
+      });
+      await pending;
+      expect(page.state.installed()).toEqual([]);
+      expect(router.navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not apply install effects reported for another workspace', async () => {
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.componentInstance;
+    page.state.openConsent([
+      {
+        skillName: 'owner/repo/one',
+        files: [],
+        scriptFiles: [],
+        hasScripts: false,
+        contentHash: 'hash',
+      },
+    ]);
+    call.mockResolvedValueOnce({
+      isSuccess: () => true,
+      data: {
+        success: true,
+        installed: ['owner/repo/one'],
+        workspacePath: '/other',
+      },
+    });
+
+    await page.install();
+
+    expect(call).toHaveBeenCalledWith(
+      'wizard:install-skills-with-consent',
+      expect.objectContaining({ workspacePath: '/ws' }),
+    );
+    expect(page.state.installed()).toEqual([]);
+    expect(page.skillsInstalled()).toBe(false);
+    expect(page.state.stage()).toBe('review');
+    expect(TestBed.inject(Router).navigate).not.toHaveBeenCalled();
   });
 
   it('blocks consent preview and duplicate re-runs during Setup preflight, then protects open consent', async () => {
@@ -538,7 +1029,7 @@ describe('AnalyzeSkillsPage', () => {
     expect(call).toHaveBeenCalledTimes(4);
     settleInstallation({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/angular'] },
+      data: { success: true, installed: ['owner/repo/angular'], workspacePath: '/ws' },
     });
     await installation;
   });
@@ -826,7 +1317,7 @@ describe('AnalyzeSkillsPage', () => {
         else
           call.mockResolvedValueOnce({
             isSuccess: () => true,
-            data: { success: false, installed: [] },
+            data: { success: false, installed: [], workspacePath: '/ws' },
           });
         TestBed.inject(Router).navigate = jest.fn().mockResolvedValue(false);
         await page.install();
@@ -861,7 +1352,7 @@ describe('AnalyzeSkillsPage', () => {
       fixture.detectChanges();
       call.mockResolvedValueOnce({
         isSuccess: () => true,
-        data: { success: true, installed: ['owner/repo/one'] },
+        data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
       });
       const navigate = jest.spyOn(TestBed.inject(Router), 'navigate');
       if (failure === 'reject')
@@ -1004,17 +1495,18 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.retainedSearchResults()).toEqual([]);
   });
 
-  it('reuses a guidance tab after navigation fails and ignores stale failures (GAP 63)', async () => {
+  it('reuses the guidance record after navigation fails and ignores stale failures (GAP 63)', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
     fixture.detectChanges();
     await fixture.whenStable();
     const router = TestBed.inject(Router);
-    const tabs = TestBed.inject(TabManagerService);
-    jest.spyOn(tabs, 'createTab').mockReturnValue('guidance-tab');
     jest.spyOn(router, 'navigate').mockResolvedValue(false);
     await fixture.componentInstance.continueToGuidance();
     await fixture.componentInstance.continueToGuidance();
-    expect(tabs.createTab).toHaveBeenCalledTimes(1);
+    expect(router.navigate).toHaveBeenCalledTimes(2);
+    expect(jest.mocked(router.navigate).mock.calls[0]).toEqual(
+      jest.mocked(router.navigate).mock.calls[1],
+    );
     let finish: (value: boolean) => void = () => {
       throw new Error('navigation not started');
     };
@@ -1301,7 +1793,7 @@ describe('AnalyzeSkillsPage', () => {
     await page.preview();
     expect(page.state.error()).toBeNull();
     expect(router.navigate).toHaveBeenCalledWith(
-      ['/onboarding/analyze/guidance'],
+      ['/onboarding', 'analyze', 'guidance'],
       expect.anything(),
     );
   });
@@ -1503,7 +1995,9 @@ describe('AnalyzeSkillsPage', () => {
         ([method]) => method === 'wizard:recommend-analysis-skills',
       ),
     ).toHaveLength(recCallsBeforeBlockedRerun + 1);
-    expect(element.querySelector('[data-testid="setup-model-blocked"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="setup-model-blocked"]'),
+    ).toBeNull();
   });
 
   it('shows the navigation error when Skip skills fails on the Setup-blocked screen', async () => {
@@ -1614,7 +2108,9 @@ describe('AnalyzeSkillsPage', () => {
       const panel = element.querySelector('ptah-state-panel[state="error"]');
       expect(panel).not.toBeNull();
       expect(panel?.textContent).toContain(expectedMessage);
-      expect(panel?.textContent).not.toContain('RAW_INTERNAL_ERROR_DO_NOT_LEAK');
+      expect(panel?.textContent).not.toContain(
+        'RAW_INTERNAL_ERROR_DO_NOT_LEAK',
+      );
       const tryAgainBtn = [...(panel?.querySelectorAll('button') ?? [])].find(
         (btn) => btn.textContent?.trim() === 'Try again',
       );
@@ -1634,9 +2130,10 @@ describe('AnalyzeSkillsPage', () => {
       );
       expect(backBtn).toBeDefined();
       backBtn?.click();
-      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith([
-        '/onboarding/analyze',
-      ]);
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+        ['/onboarding/analyze'],
+        { queryParams: { analysis: 'saved' } },
+      );
       fixture.destroy();
     }
   });
@@ -1649,7 +2146,9 @@ describe('AnalyzeSkillsPage', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.querySelector('ptah-state-panel[state="error"]')).not.toBeNull();
+    expect(
+      element.querySelector('ptah-state-panel[state="error"]'),
+    ).not.toBeNull();
     expect(element.textContent).toContain('Try again');
     expect(element.textContent).toContain('Back');
 
@@ -1819,8 +2318,12 @@ describe('AnalyzeSkillsPage', () => {
     expect(call).toHaveBeenCalledTimes(callsBeforeRerun);
     expect(page.state.searching()).toBe(true);
     expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
-    expect(page.state.openDraft()?.body).toContain('Preserve this unsaved draft.');
-    const confirmAlert = element.querySelector('[data-testid="dirty-draft-confirm"]');
+    expect(page.state.openDraft()?.body).toContain(
+      'Preserve this unsaved draft.',
+    );
+    const confirmAlert = element.querySelector(
+      '[data-testid="dirty-draft-confirm"]',
+    );
     expect(confirmAlert).not.toBeNull();
     expect(confirmAlert?.textContent).toContain('unsaved edits');
 
@@ -1829,7 +2332,9 @@ describe('AnalyzeSkillsPage', () => {
       .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-keep"]')
       ?.click();
     fixture.detectChanges();
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
     resolveSearch({
       isSuccess: () => true,
       data: { skills: [rerunSkill] },
@@ -1844,7 +2349,9 @@ describe('AnalyzeSkillsPage', () => {
       Promise.resolve({ isSuccess: () => true, data: rerunResult });
     page.retry();
     fixture.detectChanges();
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).not.toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).not.toBeNull();
 
     element
       .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-discard"]')
@@ -1858,7 +2365,9 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.openDraft()).toBeNull();
     expect(page.summary()?.detectedItems[0].name).toBe('Vitest');
     expect([...page.state.selectedIds()]).toEqual(['owner/repo/vitest']);
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
   });
 
   it('blocks Re-run and Try again with a visible reason while a draft Create or preview is in flight', async () => {
@@ -1890,7 +2399,9 @@ describe('AnalyzeSkillsPage', () => {
       '[data-testid="rerun-skill-search"]',
     );
     expect(rerunBtn?.disabled).toBe(true);
-    const reasonEl = element.querySelector('[data-testid="rerun-blocked-reason"]');
+    const reasonEl = element.querySelector(
+      '[data-testid="rerun-blocked-reason"]',
+    );
     expect(reasonEl?.textContent).toContain('skill creation');
 
     const callsBeforeRetry = call.mock.calls.length;
@@ -1912,7 +2423,8 @@ describe('AnalyzeSkillsPage', () => {
 
     expect(rerunBtn?.disabled).toBe(true);
     expect(
-      element.querySelector('[data-testid="rerun-blocked-reason"]')?.textContent,
+      element.querySelector('[data-testid="rerun-blocked-reason"]')
+        ?.textContent,
     ).toContain('draft generation');
     page.retry();
     await fixture.whenStable();
@@ -2151,7 +2663,8 @@ describe('AnalyzeSkillsPage', () => {
 
     // User opens and edits a draft while rerun is already in flight
     const dirtyOpened = page.state.openManualDraft('item-nx');
-    if (dirtyOpened.status !== 'ok') throw new Error('Second manual draft failed');
+    if (dirtyOpened.status !== 'ok')
+      throw new Error('Second manual draft failed');
     page.state.updateDraftFields({
       body: '## Unsaved\n\nDo not discard silently.',
     });
@@ -2168,7 +2681,9 @@ describe('AnalyzeSkillsPage', () => {
     const confirmAlert = element.querySelector(
       '[data-testid="dirty-draft-confirm"]',
     );
-    expect(confirmAlert?.textContent).toContain('New skill recommendations are ready');
+    expect(confirmAlert?.textContent).toContain(
+      'New skill recommendations are ready',
+    );
 
     // Confirming calls applyRecommendationResult again with { discardDirtyDraft: true }
     const applySpy = jest.spyOn(page.state, 'applyRecommendationResult');
@@ -2185,7 +2700,9 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.openDraft()).toBeNull();
     expect(page.selectionReset()).toBe(true);
     expect(runPill.badges()[1]?.pair).toBe('claude / claude-sonnet-4');
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
   });
 
   it.each(['replacement', 'edit'] as const)(
@@ -2215,7 +2732,8 @@ describe('AnalyzeSkillsPage', () => {
       await fixture.whenStable();
       fixture.detectChanges();
       expect(
-        element.querySelector('[data-testid="dirty-draft-confirm"]')?.textContent,
+        element.querySelector('[data-testid="dirty-draft-confirm"]')
+          ?.textContent,
       ).toContain('Discard edits and apply');
 
       if (change === 'replacement') {
@@ -2237,7 +2755,81 @@ describe('AnalyzeSkillsPage', () => {
       expect(apply).not.toHaveBeenCalled();
       expect(page.state.openDraft()).toBe(currentDraft);
       expect(page.summary()).toBe(initialResult);
-      expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+      expect(
+        element.querySelector('[data-testid="dirty-draft-confirm"]'),
+      ).toBeNull();
     },
   );
+
+  it('preserves the analysis query param when navigating back', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'saved' },
+    });
+  });
+
+  it('navigates back without queryParams when no analysis query param or loaded analysis is present', async () => {
+    loaded.set(null);
+    TestBed.overrideProvider(AnalysisStepStore, {
+      useValue: {
+        loaded,
+        selected: signal(null),
+        useAnalysis: jest.fn(),
+      },
+    });
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: {
+        snapshot: { queryParamMap: convertToParamMap({}) },
+        queryParamMap: of(convertToParamMap({})),
+      },
+    });
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {});
+  });
+
+  it('[m1] preserves the loaded analysis slug when navigating back after entering via ?run=', async () => {
+    loaded.set({
+      manifest: { runId: 'run-1', slug: 'from-loaded-manifest' },
+    } as { manifest: { runId: string; slug: string } });
+    const selected = signal<string | null>(null);
+    TestBed.overrideProvider(AnalysisStepStore, {
+      useValue: {
+        loaded,
+        selected,
+        useAnalysis: jest.fn(),
+      },
+    });
+    const query = convertToParamMap({ run: 'generation-1' });
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: {
+        snapshot: { queryParamMap: query },
+        queryParamMap: of(query),
+      },
+    });
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'from-loaded-manifest' },
+    });
+
+    selected.set('from-selected-slug');
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenLastCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'from-selected-slug' },
+    });
+  });
 });

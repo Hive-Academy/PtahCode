@@ -9,20 +9,41 @@ import {
 } from '@ptah-extension/core';
 import type { SetupPairState } from '@ptah-extension/shared';
 import {
+  SetupRunStore,
   SetupWizardStateService,
   WizardAnalysisRunner,
   WizardRpcService,
+  stepTarget,
+  type SetupRunRecord,
+  type SetupRunReport,
+  type SetupRunStartOptions,
+  type SetupRunWorkflow,
 } from '@ptah-extension/setup-wizard';
+import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import { AnalysisStepStore } from './analysis-step.store';
 import { AnalyzeWorkspacePage } from './analyze-workspace.page';
 
 describe('AnalyzeWorkspacePage', () => {
   const selected = signal<string | null>(null);
   const loaded = signal<{
-    manifest: { slug: string; totalDurationMs: number; model?: string };
+    manifest: {
+      slug: string;
+      runId?: string;
+      totalDurationMs: number;
+      model?: string;
+    };
     phaseContents: Record<string, string>;
   } | null>(null);
-  const saved = signal([
+  const saved = signal<
+    {
+      filename: string;
+      projectType: string;
+      savedAt: string;
+      durationMs: number;
+      lifecycle?: 'running' | 'paused' | 'completed' | 'failed';
+      isActive?: boolean;
+    }[]
+  >([
     {
       filename: 'saved',
       projectType: 'Angular',
@@ -40,6 +61,7 @@ describe('AnalyzeWorkspacePage', () => {
     streamCounts: signal(null),
     listAnalyses: jest.fn(),
     selectAnalysis: jest.fn(),
+    useAnalysis: jest.fn(),
     clearSelection: jest.fn(),
     hideAnalysis: jest.fn(),
     attachStream: jest.fn(),
@@ -50,26 +72,213 @@ describe('AnalyzeWorkspacePage', () => {
   const currentView = signal<ViewType>('onboarding');
   const requestSettingsTab = jest.fn();
   const setCurrentView = jest.fn();
+  const activePath = signal<string | null>('/workspace');
+  const clockNow = signal(200_000);
+  const runnerStartedAt = signal<number | null>(null);
+  const runnerActiveWorkspace = signal<string | null>(null);
+  const multiPhaseResult = signal<{
+    manifest: {
+      slug: string;
+      totalDurationMs: number;
+      lifecycle: 'running' | 'paused' | 'completed' | 'failed';
+    };
+    phaseContents: Record<string, string>;
+  } | null>(null);
   const runner = {
     isRunning: signal(false),
     isCanceling: signal(false),
+    startedAt: runnerStartedAt,
     errorMessage: signal<string | null>(null),
     statusText: signal(''),
+    isRunningForWorkspace: (path: string | null | undefined) => {
+      if (!runner.isRunning() && !runner.isCanceling()) return false;
+      const active = runnerActiveWorkspace();
+      return active === null || active === path;
+    },
+    syncBackendActive: jest.fn(
+      (
+        active: boolean,
+        options?: {
+          startedAt?: string | number | null;
+          workspacePath?: string | null;
+        },
+      ) => {
+        runner.isRunning.set(active);
+        if (active) {
+          runnerActiveWorkspace.set(options?.workspacePath ?? null);
+          if (typeof options?.startedAt === 'string') {
+            runnerStartedAt.set(Date.parse(options.startedAt));
+          } else if (typeof options?.startedAt === 'number') {
+            runnerStartedAt.set(options.startedAt);
+          }
+        } else {
+          runnerActiveWorkspace.set(null);
+          runnerStartedAt.set(null);
+        }
+      },
+    ),
     reset: jest.fn(),
     startFreshAnalysis: jest.fn().mockResolvedValue(undefined),
     resumeAnalysis: jest.fn().mockResolvedValue(undefined),
     cancel: jest.fn().mockResolvedValue(undefined),
   };
-  const wizard = { reset: jest.fn() };
+  const wizard = {
+    reset: jest.fn(() => multiPhaseResult.set(null)),
+    multiPhaseResult,
+    analysisStream: signal([]),
+    phaseStreamingStates: signal([]),
+    scanProgress: signal(null),
+    phaseStatuses: signal([]),
+  };
   const navigate = jest.fn();
+  const setupRunRecords = signal<SetupRunRecord[]>([]);
+  let nextSetupRunSeq = 0;
+  interface FakeSetupRunStore {
+    workspacePath: ReturnType<typeof signal<string>>;
+    runsFor: jest.Mock<SetupRunRecord[], [string | null | undefined]>;
+    get: jest.Mock<SetupRunRecord | null, [string]>;
+    start: jest.Mock<
+      SetupRunRecord | null,
+      [SetupRunWorkflow, string | null | undefined, SetupRunStartOptions?]
+    >;
+    rerun: jest.Mock<SetupRunRecord | null, [string]>;
+    report: jest.Mock<SetupRunRecord | null, [string, SetupRunReport]>;
+    attach: jest.Mock<SetupRunRecord | null, [string]>;
+    release: jest.Mock<void, [string]>;
+    cancel: jest.Mock<Promise<boolean>, [string]>;
+    isCancelling: jest.Mock<boolean, [string]>;
+    targetOf: jest.Mock<ReturnType<typeof stepTarget>, [SetupRunRecord]>;
+  }
+  const setupRuns: FakeSetupRunStore = {
+    workspacePath: signal('/workspace'),
+    runsFor: jest.fn((workspace: string | null | undefined) =>
+      workspace
+        ? setupRunRecords()
+            .filter((record) => record.workspacePath === workspace)
+            .sort(
+              (a, b) => b.createdAt - a.createdAt || b.updatedAt - a.updatedAt,
+            )
+        : [],
+    ),
+    get: jest.fn(
+      (id: string) =>
+        setupRunRecords().find((record) => record.id === id) ?? null,
+    ),
+    start: jest.fn(
+      (
+        workflow: SetupRunWorkflow,
+        workspace: string | null | undefined,
+        options: SetupRunStartOptions = {},
+      ): SetupRunRecord | null => {
+        if (!workspace) return null;
+        const live = setupRunRecords().find(
+          (record) =>
+            record.workspacePath === workspace &&
+            record.workflow === workflow &&
+            (record.status === 'running' || record.status === 'needs-input'),
+        );
+        if (live) return live;
+        const now = Date.now() + ++nextSetupRunSeq;
+        const record: SetupRunRecord = {
+          id: `setup-analysis-${nextSetupRunSeq}`,
+          workspacePath: workspace,
+          workflow,
+          status: options.status ?? 'running',
+          step: options.step ?? 'analyzing',
+          backendRunId: null,
+          analysisRunId: options.analysisRunId ?? null,
+          parentId: options.parentId ?? null,
+          unseen: false,
+          createdAt: now,
+          updatedAt: now,
+        };
+        setupRunRecords.update((list) => [...list, record]);
+        return record;
+      },
+    ),
+    rerun: jest.fn((id: string): SetupRunRecord | null => {
+      const previous = setupRunRecords().find((record) => record.id === id);
+      if (
+        !previous ||
+        (previous.status !== 'completed' && previous.status !== 'cancelled')
+      ) {
+        return null;
+      }
+      const live = setupRunRecords().find(
+        (record) =>
+          record.workspacePath === previous.workspacePath &&
+          record.workflow === previous.workflow &&
+          (record.status === 'running' || record.status === 'needs-input'),
+      );
+      if (live) return live;
+      const next = setupRuns.start(previous.workflow, previous.workspacePath, {
+        parentId: previous.parentId,
+        analysisRunId: previous.analysisRunId,
+      });
+      if (next && next.workflow === 'analysis') {
+        void runner.startFreshAnalysis(next.workspacePath);
+      }
+      return next;
+    }),
+    report: jest.fn((id: string, update: SetupRunReport) => {
+      let updated: SetupRunRecord | null = null;
+      setupRunRecords.update((list) =>
+        list.map((record) => {
+          if (record.id !== id) return record;
+          const next: SetupRunRecord = {
+            ...record,
+            ...(update.status !== undefined ? { status: update.status } : {}),
+            ...(update.step !== undefined ? { step: update.step } : {}),
+            ...(update.backendRunId !== undefined
+              ? { backendRunId: update.backendRunId }
+              : {}),
+            ...(update.analysisRunId !== undefined
+              ? { analysisRunId: update.analysisRunId }
+              : {}),
+            updatedAt: record.updatedAt + 1,
+          };
+          if (update.error === null) delete next.error;
+          else if (update.error !== undefined) next.error = update.error;
+          updated = next;
+          return next;
+        }),
+      );
+      return updated;
+    }),
+    attach: jest.fn((id: string): SetupRunRecord | null => setupRuns.get(id)),
+    release: jest.fn(),
+    cancel: jest.fn(async (id: string) => {
+      await runner.cancel();
+      setupRuns.report(id, { status: 'cancelled' });
+      return true;
+    }),
+    isCancelling: jest.fn<boolean, [string]>(() => false),
+    targetOf: jest.fn((record: SetupRunRecord) => stepTarget(record)),
+  };
   let setupStateResponse: SetupPairState;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    setupRunRecords.set([]);
+    nextSetupRunSeq = 0;
     selected.set(null);
     loaded.set(null);
+    saved.set([
+      {
+        filename: 'saved',
+        projectType: 'Angular',
+        savedAt: '',
+        durationMs: 1000,
+      },
+    ]);
+    activePath.set('/workspace');
+    clockNow.set(200_000);
     runner.isRunning.set(false);
     runner.isCanceling.set(false);
+    runner.errorMessage.set(null);
+    runnerStartedAt.set(null);
+    runnerActiveWorkspace.set(null);
+    multiPhaseResult.set(null);
     currentView.set('onboarding');
     setupStateResponse = {
       kind: 'unset',
@@ -92,9 +301,13 @@ describe('AnalyzeWorkspacePage', () => {
       providers: [
         {
           provide: ClockService,
-          useValue: { now: signal(Date.now()), acquire: () => () => undefined },
+          useValue: { now: clockNow, acquire: () => () => undefined },
         },
         { provide: AnalysisStepStore, useValue: store },
+        {
+          provide: OnboardingWorkspaceStore,
+          useValue: { activePath },
+        },
         { provide: WizardRpcService, useValue: rpc },
         { provide: ClaudeRpcService, useValue: { call: claudeRpcCall } },
         {
@@ -102,6 +315,7 @@ describe('AnalyzeWorkspacePage', () => {
           useValue: { currentView, requestSettingsTab, setCurrentView },
         },
         { provide: WizardAnalysisRunner, useValue: runner },
+        { provide: SetupRunStore, useValue: setupRuns },
         { provide: SetupWizardStateService, useValue: wizard },
         { provide: Router, useValue: { navigate } },
       ],
@@ -160,7 +374,21 @@ describe('AnalyzeWorkspacePage', () => {
       fixture.destroy();
     });
 
-    it('consumes a Re-run intent and starts a fresh analysis without loading the saved one', async () => {
+    it('consumes a Re-run intent via SetupRunStore.rerun, creates a new record, and keeps the old completed record', async () => {
+      const completed: SetupRunRecord = {
+        id: 'setup-old-complete',
+        workspacePath: '/workspace',
+        workflow: 'analysis',
+        status: 'completed',
+        step: 'analyzing',
+        backendRunId: 'run-old',
+        analysisRunId: 'run-old',
+        parentId: null,
+        unseen: false,
+        createdAt: 1000,
+        updatedAt: 1000,
+      };
+      setupRunRecords.set([completed]);
       selected.set('saved');
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       fixture.componentRef.setInput('rerun', '1');
@@ -172,16 +400,79 @@ describe('AnalyzeWorkspacePage', () => {
           replaceUrl: true,
         }),
       );
-      expect(wizard.reset).toHaveBeenCalledTimes(1);
-      expect(runner.reset).toHaveBeenCalledTimes(1);
+      expect(setupRuns.rerun).toHaveBeenCalledWith('setup-old-complete');
+      expect(wizard.reset).not.toHaveBeenCalled();
+      expect(runner.reset).not.toHaveBeenCalled();
       expect(store.clearSelection).toHaveBeenCalledTimes(1);
-      expect(runner.startFreshAnalysis).toHaveBeenCalledTimes(1);
+      expect(runner.startFreshAnalysis).toHaveBeenCalledWith('/workspace');
       expect(store.selectAnalysis).not.toHaveBeenCalled();
       expect(rpc.getResumableRun).not.toHaveBeenCalled();
+      const all = setupRunRecords();
+      expect(all).toHaveLength(2);
+      expect(all.find((r) => r.id === 'setup-old-complete')?.status).toBe(
+        'completed',
+      );
+      expect(all.find((r) => r.id !== 'setup-old-complete')?.status).toBe(
+        'running',
+      );
       fixture.destroy();
     });
 
+    it('never resets a live run when startFresh is called while active or when a running record exists', async () => {
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      await fixture.componentInstance.ngOnInit();
+      await fixture.componentInstance['startFresh']();
+      expect(wizard.reset).not.toHaveBeenCalled();
+      expect(runner.reset).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      fixture.destroy();
+
+      runner.isRunning.set(false);
+      runnerActiveWorkspace.set(null);
+      setupRunRecords.set([
+        {
+          id: 'setup-live-1',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'running',
+          step: 'analyzing',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+      const fixture2 = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture2.componentRef.setInput('rerun', '1');
+      await fixture2.componentInstance.ngOnInit();
+      await fixture2.componentInstance['startFresh']();
+      expect(setupRuns.rerun).not.toHaveBeenCalled();
+      expect(wizard.reset).not.toHaveBeenCalled();
+      expect(runner.reset).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      fixture2.destroy();
+    });
+
     it('preserves the selection and Re-run intent until a valid Setup read settles', async () => {
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
       selected.set('saved');
       let settleSetup!: (value: unknown) => void;
       claudeRpcCall.mockImplementationOnce(
@@ -237,6 +528,21 @@ describe('AnalyzeWorkspacePage', () => {
             settleSetup = resolve;
           }),
       );
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       fixture.componentRef.setInput('rerun', '1');
       const init = fixture.componentInstance.ngOnInit();
@@ -299,7 +605,10 @@ describe('AnalyzeWorkspacePage', () => {
           AnalysisStepStore,
           {
             provide: ClockService,
-            useValue: { now: signal(Date.now()), acquire: () => () => undefined },
+            useValue: {
+              now: signal(Date.now()),
+              acquire: () => () => undefined,
+            },
           },
           {
             provide: WizardRpcService,
@@ -311,6 +620,7 @@ describe('AnalyzeWorkspacePage', () => {
             useValue: { currentView, requestSettingsTab, setCurrentView },
           },
           { provide: WizardAnalysisRunner, useValue: runner },
+          { provide: SetupRunStore, useValue: setupRuns },
           {
             provide: SetupWizardStateService,
             useValue: {
@@ -331,6 +641,21 @@ describe('AnalyzeWorkspacePage', () => {
 
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       const realStore = TestBed.inject(AnalysisStepStore);
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
       fixture.componentRef.setInput('rerun', '1');
       const init = fixture.componentInstance.ngOnInit();
 
@@ -378,6 +703,21 @@ describe('AnalyzeWorkspacePage', () => {
           return secondReply;
         });
 
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       fixture.componentRef.setInput('rerun', '1');
       const init = fixture.componentInstance.ngOnInit();
@@ -394,6 +734,184 @@ describe('AnalyzeWorkspacePage', () => {
       expect(fixture.componentInstance['savedError']()).toBe(false);
       fixture.destroy();
     });
+
+    it('consumes rerun=1 without calling start or runner when no eligible record exists or when the explicit source failed', async () => {
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      await fixture.componentInstance.ngOnInit();
+
+      expect(setupRuns.rerun).not.toHaveBeenCalled();
+      expect(setupRuns.start).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(fixture.componentInstance['rerunNotice']()).toContain(
+        'No completed or cancelled analysis',
+      );
+      expect(navigate).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({
+          queryParams: { rerun: null },
+          replaceUrl: true,
+        }),
+      );
+      fixture.destroy();
+
+      jest.clearAllMocks();
+      setupRunRecords.set([
+        {
+          id: 'setup-failed-1',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'failed',
+          step: 'analyzing',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          error: 'boom',
+          unseen: true,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+      const fixture2 = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture2.componentRef.setInput('tab', 'setup-failed-1');
+      fixture2.componentRef.setInput('rerun', '1');
+      await fixture2.componentInstance.ngOnInit();
+
+      expect(setupRuns.rerun).not.toHaveBeenCalled();
+      expect(setupRuns.start).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(fixture2.componentInstance['rerunNotice']()).toBeTruthy();
+      fixture2.destroy();
+    });
+
+    it('hydrates a backend-active analysis on cold mount even when a persisted running record already exists', async () => {
+      const startedAtIso = new Date(192_000).toISOString();
+      clockNow.set(200_000);
+      setupRunRecords.set([
+        {
+          id: 'setup-persisted-running',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'running',
+          step: 'analyzing',
+          backendRunId: 'run-live-1',
+          analysisRunId: null,
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: { manifest: { lifecycle: 'running', runId: 'run-live-1' } },
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: startedAtIso,
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      await fixture.componentInstance.ngOnInit();
+
+      expect(rpc.getResumableRun).toHaveBeenCalledTimes(1);
+      expect(runner.syncBackendActive).toHaveBeenCalledWith(true, {
+        startedAt: startedAtIso,
+        workspacePath: '/workspace',
+      });
+      expect(store.attachStream).toHaveBeenCalledTimes(1);
+      expect(fixture.componentInstance['elapsedSeconds']()).toBe(8);
+      fixture.destroy();
+    });
+
+    it('scopes record lookups to the active workspace so a stale foreign tab id cannot trigger rerun across workspaces', async () => {
+      setupRunRecords.set([
+        {
+          id: 'setup-ws-a-complete',
+          workspacePath: '/workspace-a',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-a',
+          analysisRunId: 'run-a',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+      activePath.set('/workspace-b');
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('tab', 'setup-ws-a-complete');
+      fixture.componentRef.setInput('rerun', '1');
+      await fixture.componentInstance.ngOnInit();
+
+      expect(fixture.componentInstance['activeRecord']()).toBeNull();
+      expect(setupRuns.rerun).not.toHaveBeenCalled();
+      expect(setupRuns.start).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('rebinds URL tab on explicit-id rerun and navigates Review skills to the newly completed analysis', async () => {
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('tab', 'setup-old-complete');
+      fixture.componentRef.setInput('rerun', '1');
+      await fixture.componentInstance.ngOnInit();
+
+      expect(setupRuns.rerun).toHaveBeenCalledWith('setup-old-complete');
+      expect(navigate).toHaveBeenCalledWith(
+        [],
+        expect.objectContaining({
+          queryParams: { rerun: null, tab: 'setup-analysis-1' },
+          replaceUrl: true,
+        }),
+      );
+      expect(fixture.componentInstance['activeRecord']()?.id).toBe(
+        'setup-analysis-1',
+      );
+
+      // Simulate the new run finishing with a fresh analysisRunId while the URL input still had old tab before router update.
+      setupRuns.report('setup-analysis-1', {
+        status: 'completed',
+        backendRunId: 'run-new',
+        analysisRunId: 'run-new',
+      });
+      loaded.set({
+        manifest: {
+          slug: 'fresh-analysis',
+          runId: 'run-new',
+          totalDurationMs: 2000,
+        },
+        phaseContents: { 'project-profile': 'Fresh' },
+      });
+
+      navigate.mockClear();
+      await fixture.componentInstance['reviewSkills']();
+      expect(navigate).toHaveBeenCalledWith(
+        ['/onboarding', 'analyze', 'skills'],
+        expect.objectContaining({
+          queryParams: { tab: 'setup-analysis-1', analysis: 'run-new' },
+          state: { explicitBack: false },
+        }),
+      );
+      fixture.destroy();
+    });
   });
 
   describe('Setup model card', () => {
@@ -406,15 +924,29 @@ describe('AnalyzeWorkspacePage', () => {
         cause: 'model-stale',
       };
       let finishSelection!: (result: 'loaded') => void;
-      store.selectAnalysis.mockImplementationOnce(
-        () =>
-          new Promise<'loaded'>((resolve) => {
-            finishSelection = resolve;
-          }).then((result) => {
-            selected.set('saved');
-            return result;
-          }),
+      store.selectAnalysis.mockImplementationOnce(() =>
+        new Promise<'loaded'>((resolve) => {
+          finishSelection = resolve;
+        }).then((result) => {
+          selected.set('saved');
+          return result;
+        }),
       );
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
       const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
       fixture.componentRef.setInput('rerun', '1');
       fixture.detectChanges();
@@ -486,67 +1018,73 @@ describe('AnalyzeWorkspacePage', () => {
       fixture.destroy();
     });
 
-    it.each([true, false])('queues focus behind a Setup clear with success=%s', async (success) => {
-      setupStateResponse = {
-        kind: 'invalid',
-        source: 'setup',
-        provider: 'claude',
-        model: 'claude-retired',
-        cause: 'model-stale',
-      };
-      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
-      fixture.detectChanges();
-      await fixture.whenStable();
-      fixture.detectChanges();
-      const element = fixture.nativeElement as HTMLElement;
-      let settleClear!: (value: unknown) => void;
-      claudeRpcCall.mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            settleClear = resolve;
-          }),
-      );
-      const clear = element.querySelector<HTMLButtonElement>(
-        '[data-testid="setup-model-use-workspace"]',
-      );
-      if (!clear) throw new Error('Missing Use workspace model action');
-      clear.click();
-      window.dispatchEvent(new Event('focus'));
-      expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
-        'wizard:get-setup-model',
-        'wizard:set-setup-model',
-      ]);
-
-      if (success) {
+    it.each([true, false])(
+      'queues focus behind a Setup clear with success=%s',
+      async (success) => {
         setupStateResponse = {
-          kind: 'unset',
-          effective: { provider: 'claude', model: 'claude-sonnet-4' },
+          kind: 'invalid',
+          source: 'setup',
+          provider: 'claude',
+          model: 'claude-retired',
+          cause: 'model-stale',
         };
-      }
-      settleClear({
-        isSuccess: () => success,
-        data: { state: setupStateResponse },
-      });
-      await fixture.whenStable();
-      fixture.detectChanges();
-      expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
-        'wizard:get-setup-model',
-        'wizard:set-setup-model',
-        'wizard:get-setup-model',
-      ]);
-      expect(
-        element.querySelector('[data-testid="setup-model-badge"]')?.textContent,
-      ).toContain(success ? 'Default' : 'Needs attention');
-      expect(
-        element.querySelector<HTMLButtonElement>(
-          '[data-testid="start-analysis-button"]',
-        )?.disabled,
-      ).toBe(!success);
-      expect(
-        element.textContent?.includes('Could not switch to the workspace model.'),
-      ).toBe(!success);
-      fixture.destroy();
-    });
+        const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+        const element = fixture.nativeElement as HTMLElement;
+        let settleClear!: (value: unknown) => void;
+        claudeRpcCall.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              settleClear = resolve;
+            }),
+        );
+        const clear = element.querySelector<HTMLButtonElement>(
+          '[data-testid="setup-model-use-workspace"]',
+        );
+        if (!clear) throw new Error('Missing Use workspace model action');
+        clear.click();
+        window.dispatchEvent(new Event('focus'));
+        expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
+          'wizard:get-setup-model',
+          'wizard:set-setup-model',
+        ]);
+
+        if (success) {
+          setupStateResponse = {
+            kind: 'unset',
+            effective: { provider: 'claude', model: 'claude-sonnet-4' },
+          };
+        }
+        settleClear({
+          isSuccess: () => success,
+          data: { state: setupStateResponse },
+        });
+        await fixture.whenStable();
+        fixture.detectChanges();
+        expect(claudeRpcCall.mock.calls.map(([method]) => method)).toEqual([
+          'wizard:get-setup-model',
+          'wizard:set-setup-model',
+          'wizard:get-setup-model',
+        ]);
+        expect(
+          element.querySelector('[data-testid="setup-model-badge"]')
+            ?.textContent,
+        ).toContain(success ? 'Default' : 'Needs attention');
+        expect(
+          element.querySelector<HTMLButtonElement>(
+            '[data-testid="start-analysis-button"]',
+          )?.disabled,
+        ).toBe(!success);
+        expect(
+          element.textContent?.includes(
+            'Could not switch to the workspace model.',
+          ),
+        ).toBe(!success);
+        fixture.destroy();
+      },
+    );
 
     it.each<SetupPairState>([
       { kind: 'set', pair: { provider: 'claude', model: 'claude-sonnet-4' } },
@@ -561,53 +1099,56 @@ describe('AnalyzeWorkspacePage', () => {
         model: 'claude-retired',
         cause: 'model-stale',
       },
-    ])('clears a failed Setup write alert on return from Settings with $kind Setup ($source)', async (recoveredState) => {
-      setupStateResponse = {
-        kind: 'invalid',
-        source: 'setup',
-        provider: 'claude',
-        model: 'claude-retired',
-        cause: 'model-stale',
-      };
-      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
-      fixture.detectChanges();
-      await fixture.whenStable();
-      fixture.detectChanges();
-      const element = fixture.nativeElement as HTMLElement;
-      claudeRpcCall.mockResolvedValueOnce({ isSuccess: () => false });
-      element
-        .querySelector<HTMLButtonElement>(
-          '[data-testid="setup-model-use-workspace"]',
-        )
-        ?.click();
-      await fixture.whenStable();
-      fixture.detectChanges();
-      const alertText = 'Could not switch to the workspace model. Try again.';
-      expect(element.textContent).toContain(alertText);
+    ])(
+      'clears a failed Setup write alert on return from Settings with $kind Setup ($source)',
+      async (recoveredState) => {
+        setupStateResponse = {
+          kind: 'invalid',
+          source: 'setup',
+          provider: 'claude',
+          model: 'claude-retired',
+          cause: 'model-stale',
+        };
+        const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+        const element = fixture.nativeElement as HTMLElement;
+        claudeRpcCall.mockResolvedValueOnce({ isSuccess: () => false });
+        element
+          .querySelector<HTMLButtonElement>(
+            '[data-testid="setup-model-use-workspace"]',
+          )
+          ?.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+        const alertText = 'Could not switch to the workspace model. Try again.';
+        expect(element.textContent).toContain(alertText);
 
-      currentView.set('settings');
-      fixture.detectChanges();
-      setupStateResponse = recoveredState;
-      currentView.set('onboarding');
-      fixture.detectChanges();
-      await fixture.whenStable();
-      fixture.detectChanges();
+        currentView.set('settings');
+        fixture.detectChanges();
+        setupStateResponse = recoveredState;
+        currentView.set('onboarding');
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
 
-      expect(element.textContent).not.toContain(alertText);
-      const issueAlert = element.querySelector(
-        '[data-testid="setup-model-alert"]',
-      );
-      if (recoveredState.kind === 'invalid') {
-        // The workspace issue stays visible; only the stale write error goes.
-        expect(issueAlert?.textContent).toContain('The workspace model');
-        expect(
-          element.querySelector('[data-testid="setup-model-use-workspace"]'),
-        ).toBeNull();
-      } else {
-        expect(issueAlert).toBeNull();
-      }
-      fixture.destroy();
-    });
+        expect(element.textContent).not.toContain(alertText);
+        const issueAlert = element.querySelector(
+          '[data-testid="setup-model-alert"]',
+        );
+        if (recoveredState.kind === 'invalid') {
+          // The workspace issue stays visible; only the stale write error goes.
+          expect(issueAlert?.textContent).toContain('The workspace model');
+          expect(
+            element.querySelector('[data-testid="setup-model-use-workspace"]'),
+          ).toBeNull();
+        } else {
+          expect(issueAlert).toBeNull();
+        }
+        fixture.destroy();
+      },
+    );
 
     it('only gives Start the primary treatment when Setup is ready', async () => {
       setupStateResponse = {
@@ -657,7 +1198,9 @@ describe('AnalyzeWorkspacePage', () => {
       const element = fixture.nativeElement as HTMLElement;
       const continueButton = Array.from(
         element.querySelectorAll<HTMLButtonElement>('button'),
-      ).find((button) => button.textContent?.trim() === 'Continue previous run');
+      ).find(
+        (button) => button.textContent?.trim() === 'Continue previous run',
+      );
       expect(continueButton?.disabled).toBe(true);
       expect(continueButton?.classList.contains('btn-primary')).toBe(false);
 
@@ -757,21 +1300,23 @@ describe('AnalyzeWorkspacePage', () => {
       expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
 
       // Explicit "Use workspace model" clears Setup via wizard:set-setup-model
-      claudeRpcCall.mockImplementationOnce((method: string, params: unknown) => {
-        expect(method).toBe('wizard:set-setup-model');
-        expect(params).toEqual({ provider: '', model: '' });
-        return Promise.resolve({
-          isSuccess: () => true,
-          data: {
-            committed: null,
-            commitSeq: 2,
-            state: {
-              kind: 'unset',
-              effective: { provider: 'claude', model: 'claude-sonnet-4' },
+      claudeRpcCall.mockImplementationOnce(
+        (method: string, params: unknown) => {
+          expect(method).toBe('wizard:set-setup-model');
+          expect(params).toEqual({ provider: '', model: '' });
+          return Promise.resolve({
+            isSuccess: () => true,
+            data: {
+              committed: null,
+              commitSeq: 2,
+              state: {
+                kind: 'unset',
+                effective: { provider: 'claude', model: 'claude-sonnet-4' },
+              },
             },
-          },
-        });
-      });
+          });
+        },
+      );
       element
         .querySelector<HTMLButtonElement>(
           '[data-testid="setup-model-use-workspace"]',
@@ -902,9 +1447,9 @@ describe('AnalyzeWorkspacePage', () => {
       expect(useWorkspace).not.toBeNull();
 
       const retryButton = () =>
-        Array.from(element.querySelectorAll('ptah-run-panel button')).find(
-          (button) => button.textContent?.trim() === 'Retry',
-        );
+        Array.from(
+          element.querySelectorAll<HTMLButtonElement>('ptah-run-panel button'),
+        ).find((button) => button.textContent?.trim() === 'Retry');
       retryButton()?.click();
       await fixture.whenStable();
       expect(runner.resumeAnalysis).not.toHaveBeenCalled();
@@ -958,6 +1503,589 @@ describe('AnalyzeWorkspacePage', () => {
       ).toBeNull();
       expect(fixture.componentInstance['setupReady']()).toBe(true);
       runner.isRunning.set(false);
+      fixture.destroy();
+    });
+  });
+
+  describe('stream reconnection, active-run guards, and lifecycle transitions', () => {
+    it('re-attaches stream and preserves elapsed time on remount while active, and ignores rerun=1', async () => {
+      runnerActiveWorkspace.set('/workspace');
+      runnerStartedAt.set(185_000);
+      clockNow.set(200_000);
+      runner.isRunning.set(true);
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: { manifest: { lifecycle: 'running' } },
+        generation: null,
+      });
+
+      setupRunRecords.set([
+        {
+          id: 'setup-old-complete',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'completed',
+          step: 'analyzing',
+          backendRunId: 'run-old',
+          analysisRunId: 'run-old',
+          parentId: null,
+          unseen: false,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('rerun', '1');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const page = fixture.componentInstance;
+      expect(store.attachStream).toHaveBeenCalledTimes(1);
+      expect(page['elapsedSeconds']()).toBe(15);
+      expect(page['interrupted']()).toBe(false);
+      expect(wizard.reset).not.toHaveBeenCalled();
+      expect(runner.reset).not.toHaveBeenCalled();
+      expect(runner.startFreshAnalysis).not.toHaveBeenCalled();
+      expect(navigate).toHaveBeenCalledWith([], {
+        queryParams: { rerun: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+      fixture.destroy();
+    });
+
+    it('hydrates backend-active analysis from getResumableRun on reload and attaches stream', async () => {
+      const startedAtIso = new Date(190_000).toISOString();
+      clockNow.set(200_000);
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: { manifest: { lifecycle: 'running' } },
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: startedAtIso,
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const page = fixture.componentInstance;
+      expect(runner.syncBackendActive).toHaveBeenCalledWith(true, {
+        startedAt: startedAtIso,
+        workspacePath: '/workspace',
+      });
+      expect(store.attachStream).toHaveBeenCalledTimes(1);
+      expect(page['elapsedSeconds']()).toBe(10);
+      expect(page['interrupted']()).toBe(false);
+      fixture.destroy();
+    });
+
+    it('refreshes saved analyses and clears interrupted when an active run completes on a remounted page', async () => {
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(store.listAnalyses).toHaveBeenCalledTimes(1);
+
+      fixture.componentInstance['interrupted'].set(true);
+      loaded.set({
+        manifest: { slug: 'fresh-run', totalDurationMs: 3000 },
+        phaseContents: { 'project-profile': 'Done' },
+      });
+      runner.isRunning.set(false);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      expect(fixture.componentInstance['interrupted']()).toBe(false);
+      expect(store.listAnalyses).toHaveBeenCalledTimes(2);
+      fixture.destroy();
+    });
+
+    it('shows the linked failure with safe copy and lets the user inspect a saved analysis', async () => {
+      setupRunRecords.set([
+        {
+          id: 'setup-failed',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'failed',
+          step: 'analyzing',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          unseen: true,
+          createdAt: 1,
+          updatedAt: 2,
+          error: 'Analysis failed while reading /private/workspace/config.',
+        },
+      ]);
+      loaded.set({
+        manifest: {
+          slug: 'newer-analysis',
+          totalDurationMs: 2000,
+        },
+        phaseContents: {},
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('tab', 'setup-failed');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Analysis failed');
+      expect(fixture.nativeElement.textContent).toContain(
+        'Analysis could not finish. Try again.',
+      );
+      expect(fixture.nativeElement.textContent).not.toContain('/private/workspace');
+      expect(fixture.nativeElement.textContent).not.toContain('Analysis complete');
+
+      store.selectAnalysis.mockImplementationOnce(async (filename: string) => {
+        selected.set(filename);
+        return 'loaded';
+      });
+      await fixture.componentInstance['useSaved']('newer-analysis');
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Analysis complete');
+      expect(fixture.nativeElement.textContent).not.toContain('Analysis failed');
+    });
+
+    it('resolves a run-ID Back link when the saved list is keyed by slug', async () => {
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('analysis', '01K77VZ3XZJ6P1GKMV4BXCS0FT');
+      await fixture.componentInstance.ngOnInit();
+      expect(store.useAnalysis).toHaveBeenCalledWith(
+        '01K77VZ3XZJ6P1GKMV4BXCS0FT',
+      );
+    });
+
+    it('uses the analysis slug in Review skills when no completed Setup record exists', async () => {
+      loaded.set({
+        manifest: {
+          runId: '01K77VZ3XZJ6P1GKMV4BXCS0FT',
+          slug: 'workspace-analysis',
+          totalDurationMs: 2000,
+        },
+        phaseContents: {},
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      await fixture.componentInstance['reviewSkills']();
+      expect(navigate).toHaveBeenCalledWith(
+        ['/onboarding', 'analyze', 'skills'],
+        {
+          queryParams: { analysis: 'workspace-analysis' },
+          state: { explicitBack: false },
+        },
+      );
+    });
+
+    it('surfaces a failed panel when multiPhaseResult has lifecycle failed without runner errorMessage', async () => {
+      multiPhaseResult.set({
+        manifest: {
+          slug: 'failed-run',
+          totalDurationMs: 1200,
+          lifecycle: 'failed',
+        },
+        phaseContents: {},
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const element = fixture.nativeElement as HTMLElement;
+      expect(element.textContent).toContain('Analysis failed');
+      expect(fixture.componentInstance['viewState']()).toBe('failed');
+
+      await fixture.componentInstance['retry']();
+      expect(wizard.reset).toHaveBeenCalledTimes(1);
+      expect(runner.resumeAnalysis).toHaveBeenCalledWith('/workspace');
+      fixture.destroy();
+    });
+
+    it('disables Use and blocks useSaved while analysis is active, and filters active/non-completed saved entries', async () => {
+      saved.set([
+        {
+          filename: 'completed-one',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 1000,
+          lifecycle: 'completed',
+        },
+        {
+          filename: 'in-progress-one',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 0,
+          lifecycle: 'running',
+          isActive: true,
+        },
+        {
+          filename: 'failed-one',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 500,
+          lifecycle: 'failed',
+        },
+      ]);
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const element = fixture.nativeElement as HTMLElement;
+      expect(
+        fixture.componentInstance['visibleSaved']().map((i) => i.filename),
+      ).toEqual(['completed-one']);
+      const useButton = Array.from(
+        element.querySelectorAll<HTMLButtonElement>('button'),
+      ).find((button) => button.textContent?.trim() === 'Use');
+      expect(useButton?.disabled).toBe(true);
+
+      await fixture.componentInstance['useSaved']('completed-one');
+      expect(store.selectAnalysis).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('passes workspacePath to startFreshAnalysis and skips loadSaved after destroy in continuePrevious', async () => {
+      let finishResume!: () => void;
+      runner.resumeAnalysis.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishResume = resolve;
+          }),
+      );
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      await fixture.componentInstance['startFresh']();
+      expect(runner.startFreshAnalysis).toHaveBeenCalledWith('/workspace');
+      // Mark the mock store record interrupted as if the previous run ended before resuming.
+      for (const rec of setupRunRecords()) {
+        setupRuns.report(rec.id, { status: 'interrupted' });
+      }
+
+      store.listAnalyses.mockClear();
+      const pending = fixture.componentInstance['continuePrevious']();
+      expect(runner.resumeAnalysis).toHaveBeenCalledWith('/workspace');
+      fixture.destroy();
+      finishResume();
+      await pending;
+      expect(store.listAnalyses).not.toHaveBeenCalled();
+    });
+
+    it('[B1] completes cleanly and refreshes saved analyses after remounting mid-run when getResumableRun returns analysisActive true (real runner)', async () => {
+      let resolveDeepAnalyze!: (value: {
+        isMultiPhase: true;
+        analysisDir: string;
+        manifest: {
+          version: number;
+          runId: string;
+          slug: string;
+          analyzedAt: string;
+          updatedAt: string;
+          lifecycle: 'completed';
+          model: string;
+          totalDurationMs: number;
+          phases: Record<
+            string,
+            { status: 'completed'; file: string; durationMs: number }
+          >;
+        };
+        phaseContents: Record<string, string>;
+      }) => void;
+      const realMultiPhase = signal<unknown>(null);
+      const listAnalysesRpc = jest.fn().mockResolvedValue([
+        {
+          filename: 'completed-run',
+          projectType: 'Angular',
+          savedAt: '',
+          durationMs: 2000,
+          lifecycle: 'completed',
+        },
+      ]);
+      const realWizardRpc = {
+        deepAnalyze: jest.fn(
+          () =>
+            new Promise((resolve) => {
+              resolveDeepAnalyze = resolve as typeof resolveDeepAnalyze;
+            }),
+        ),
+        cancelAnalysis: jest.fn().mockResolvedValue(undefined),
+        getResumableRun: jest.fn().mockResolvedValue({
+          analysis: { manifest: { lifecycle: 'running' } },
+          generation: null,
+          analysisActive: true,
+          activeAnalysisStartedAt: new Date(195_000).toISOString(),
+        }),
+        resumeGeneration: jest.fn().mockResolvedValue({ success: true }),
+        listAnalyses: listAnalysesRpc,
+        loadAnalysis: jest.fn(),
+      };
+      const realWizardState = {
+        multiPhaseResult: realMultiPhase.asReadonly(),
+        recommendations: signal([]),
+        skillGenerationProgress: signal([]),
+        phaseStatuses: signal([]),
+        currentPhaseNumber: signal(null),
+        totalPhaseCount: signal(null),
+        analysisStream: signal([]),
+        phaseStreamingStates: signal([]),
+        scanProgress: signal(null),
+        reset: jest.fn(() => realMultiPhase.set(null)),
+        setMultiPhaseResult: jest.fn((value: unknown) =>
+          realMultiPhase.set(value),
+        ),
+        setCurrentStep: jest.fn(),
+        setRecommendations: jest.fn(),
+        setSkillGenerationProgress: jest.fn(),
+      };
+
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          AnalysisStepStore,
+          WizardAnalysisRunner,
+          {
+            provide: ClockService,
+            useValue: { now: clockNow, acquire: () => () => undefined },
+          },
+          {
+            provide: OnboardingWorkspaceStore,
+            useValue: { activePath },
+          },
+          { provide: WizardRpcService, useValue: realWizardRpc },
+          { provide: SetupRunStore, useValue: setupRuns },
+          { provide: ClaudeRpcService, useValue: { call: claudeRpcCall } },
+          {
+            provide: AppStateManager,
+            useValue: { currentView, requestSettingsTab, setCurrentView },
+          },
+          { provide: SetupWizardStateService, useValue: realWizardState },
+          { provide: Router, useValue: { navigate } },
+        ],
+      });
+
+      const realRunner = TestBed.inject(WizardAnalysisRunner);
+      // Start local run before the page mounts (simulating Home -> View remount)
+      const inFlight = realRunner.startFreshAnalysis('/workspace');
+      expect(realRunner.isRunning()).toBe(true);
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(realRunner.backendActive()).toBe(false);
+      expect(listAnalysesRpc).toHaveBeenCalledTimes(1);
+
+      // Now the local run finishes cleanly
+      resolveDeepAnalyze({
+        isMultiPhase: true,
+        analysisDir: '/workspace/.ptah/analysis/completed-run',
+        manifest: {
+          version: 3,
+          runId: 'run-real',
+          slug: 'completed-run',
+          analyzedAt: '',
+          updatedAt: '',
+          lifecycle: 'completed',
+          model: 'claude-sonnet-4',
+          totalDurationMs: 2500,
+          phases: {
+            'project-profile': {
+              status: 'completed',
+              file: 'profile.md',
+              durationMs: 2500,
+            },
+          },
+        },
+        phaseContents: { 'project-profile': 'Workspace A profile' },
+      });
+      await inFlight;
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const element = fixture.nativeElement as HTMLElement;
+      expect(realRunner.isRunning()).toBe(false);
+      expect(realRunner.backendActive()).toBe(false);
+      expect(realRunner.isRunningForWorkspace('/other')).toBe(false);
+      expect(element.textContent).toContain('Analysis complete');
+      expect(listAnalysesRpc).toHaveBeenCalledTimes(2);
+      fixture.destroy();
+    });
+
+    it('[B1] does not re-arm backendActive when a stale getResumableRun resolves after a local run settles', async () => {
+      let resolveResumable!: (value: {
+        analysis: null;
+        generation: null;
+        analysisActive: boolean;
+        activeAnalysisStartedAt: string;
+      }) => void;
+      rpc.getResumableRun.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveResumable = resolve;
+        }),
+      );
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      const init = fixture.componentInstance.ngOnInit();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Local run finishes while getResumableRun is still in flight
+      runner.isRunning.set(false);
+      runnerActiveWorkspace.set(null);
+
+      // Stale RPC reply arrives saying analysisActive: true
+      resolveResumable({
+        analysis: null,
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: new Date(195_000).toISOString(),
+      });
+      await init;
+
+      expect(runner.syncBackendActive).not.toHaveBeenCalledWith(
+        true,
+        expect.anything(),
+      );
+      expect(runner.isRunning()).toBe(false);
+      fixture.destroy();
+    });
+
+    it('[B2] clears hydrated backendActive on ngOnInit when getResumableRun returns analysisActive false', async () => {
+      const backendActive = signal(true);
+      const syncSpy = jest.fn((active: boolean) => {
+        backendActive.set(active);
+        runner.isRunning.set(active);
+        if (!active) runnerActiveWorkspace.set(null);
+      });
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+      TestBed.overrideProvider(WizardAnalysisRunner, {
+        useValue: {
+          ...runner,
+          backendActive,
+          syncBackendActive: syncSpy,
+        },
+      });
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(syncSpy).toHaveBeenCalledWith(false);
+      expect(runner.isRunning()).toBe(false);
+      expect(fixture.componentInstance['isAnalysisActive']()).toBe(false);
+      fixture.destroy();
+    });
+
+    it('[N2] does not clear hydrated backendActive on ngOnInit when getResumableRun returns the error fallback (analysisActive undefined)', async () => {
+      const backendActive = signal(true);
+      const syncSpy = jest.fn((active: boolean) => {
+        backendActive.set(active);
+        runner.isRunning.set(active);
+        if (!active) runnerActiveWorkspace.set(null);
+      });
+      const setCurrentWorkspacePath = jest.fn();
+      runnerActiveWorkspace.set('/workspace');
+      runner.isRunning.set(true);
+      TestBed.overrideProvider(WizardAnalysisRunner, {
+        useValue: {
+          ...runner,
+          backendActive,
+          syncBackendActive: syncSpy,
+          setCurrentWorkspacePath,
+        },
+      });
+      // Matches real WizardRpcService.getResumableRun() RPC failure fallback
+      rpc.getResumableRun.mockResolvedValue({
+        analysis: null,
+        generation: null,
+      });
+
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(setCurrentWorkspacePath).toHaveBeenCalledWith('/workspace');
+      expect(syncSpy).not.toHaveBeenCalledWith(false);
+      expect(runner.isRunning()).toBe(true);
+      expect(fixture.componentInstance['isAnalysisActive']()).toBe(true);
+      fixture.destroy();
+    });
+
+    it('[S1] does not surface Workspace A error or failed manifest when viewing Workspace B', async () => {
+      const resultWorkspace = signal<string | null>('/workspace-a');
+      runner.errorMessage.set('Workspace A timed out');
+      multiPhaseResult.set({
+        manifest: {
+          slug: 'ws-a-failed',
+          totalDurationMs: 1000,
+          lifecycle: 'failed',
+        },
+        phaseContents: {},
+      });
+      TestBed.overrideProvider(WizardAnalysisRunner, {
+        useValue: {
+          ...runner,
+          isResultForWorkspace: (path: string | null | undefined) =>
+            resultWorkspace() === null || resultWorkspace() === path,
+        },
+      });
+
+      activePath.set('/workspace-b');
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(fixture.componentInstance['analysisError']()).toBeNull();
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain(
+        'Analysis failed',
+      );
+
+      activePath.set('/workspace-a');
+      fixture.detectChanges();
+      expect(fixture.componentInstance['analysisError']()).toBe(
+        'Workspace A timed out',
+      );
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+        'Analysis failed',
+      );
+      fixture.destroy();
+    });
+
+    it('[S2] continuePrevious resets a paused multiPhaseResult before resuming', async () => {
+      multiPhaseResult.set({
+        manifest: {
+          slug: 'paused-run',
+          totalDurationMs: 1200,
+          lifecycle: 'paused',
+        },
+        phaseContents: {},
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      await fixture.componentInstance['continuePrevious']();
+      expect(wizard.reset).toHaveBeenCalledTimes(1);
+      expect(runner.resumeAnalysis).toHaveBeenCalledWith('/workspace');
       fixture.destroy();
     });
   });

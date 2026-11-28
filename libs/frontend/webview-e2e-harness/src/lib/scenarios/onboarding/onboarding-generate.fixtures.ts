@@ -1,6 +1,6 @@
 /**
  * Generate agents (A3), Project guidance (A4), and Done (A5) visual fixtures.
- * The real Electron shell boots from a saved logical route. Bound tabs and
+ * The real Electron shell boots from a saved logical route. Setup records and
  * wizard RPCs are seeded before Angular starts; no live generator is needed.
  */
 import { expect, type Page } from '@playwright/test';
@@ -297,7 +297,7 @@ async function installRouteBridge(
   };
 }
 
-/** Start the Electron host on a logical onboarding route with two real bound tabs. */
+/** Start the Electron host on a logical onboarding route with Setup-owned records. */
 export async function bootOnboardingGenerate(
   page: Page,
   fixtureUrl: string,
@@ -319,56 +319,57 @@ export async function bootOnboardingGenerate(
     },
     ...options.rpc,
   });
+  const query = new URLSearchParams(options.route.split('?')[1]);
+  const agentId = query.get('gen');
+  const guidanceId = query.get('tab');
+  const record = {
+    workspacePath: WORKSPACE,
+    step: 'generating',
+    analysisRunId: null,
+    unseen: false,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const records = [];
+  if (agentId === AGENT_TAB) {
+    records.push({
+      ...record,
+      id: agentId,
+      workflow: 'agent-generation',
+      status: 'completed',
+      backendRunId: AGENT_RUN_ID,
+      parentId: null,
+    });
+  }
+  if (guidanceId === GUIDANCE_TAB) {
+    records.push({
+      ...record,
+      id: guidanceId,
+      workflow: 'project-guidance',
+      status: agentId ? 'completed' : 'running',
+      backendRunId: agentId ? GUIDANCE_RUN_ID : query.get('run'),
+      parentId: agentId,
+    });
+  }
   await page.addInitScript(
-    (seed: {
-      theme: string;
-      flag: string;
-      workspace: string;
-      agentTab: string;
-      guidanceTab: string;
-      activeTab: string;
-    }) => {
+    (seed) => {
       localStorage.setItem('ptah-theme-v2', seed.theme);
       localStorage.setItem('ptah.onboarding.v1', seed.flag);
-      const tabs = [
-        {
-          id: seed.agentTab,
-          workflow: 'setup-agent-generation',
-          name: 'Generate agents',
-          title: 'Generate agents',
-          order: 0,
-          status: 'loaded',
-          isDirty: false,
-          lastActivityAt: 1,
-          messages: [],
-          streamingState: null,
-        },
-        {
-          id: seed.guidanceTab,
-          workflow: 'setup-project-prompt',
-          name: 'Project guidance',
-          title: 'Project guidance',
-          order: 1,
-          status: 'loaded',
-          isDirty: false,
-          lastActivityAt: 1,
-          messages: [],
-          streamingState: null,
-        },
-      ];
-      const key = `ptah.tabs.ws.${encodeURIComponent(seed.workspace).replace(/%/g, '_')}.e2e-harness`;
-      localStorage.setItem(
-        key,
-        JSON.stringify({ version: 2, tabs, activeTabId: seed.activeTab }),
-      );
+      if (seed.records.length) {
+        localStorage.setItem(
+          'ptah.setup-runs.v1',
+          JSON.stringify({
+            version: 1,
+            byWorkspace: { [seed.workspace]: seed.records },
+          }),
+        );
+      }
     },
     {
       theme: options.theme,
       flag: JSON.stringify(FLAG_DONE),
       workspace: WORKSPACE,
-      agentTab: AGENT_TAB,
-      guidanceTab: GUIDANCE_TAB,
-      activeTab: options.route.includes('/guidance') ? GUIDANCE_TAB : AGENT_TAB,
+      records,
     },
   );
   await page.goto(fixtureUrl, { timeout: 30_000 });

@@ -10,9 +10,12 @@ import type {
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import {
+  buildJudgeItemRows,
   buildJudgedStackCoverage,
   buildStackCoverage,
   canonicalCandidateId,
+  compareSkillsByInstallsDesc,
+  computeJudgeResidualCandidates,
   coverageSummaryText,
   coverageVerdictLabel,
   deriveCoverageVerdict,
@@ -131,7 +134,11 @@ function makeJudgeFixture(
       itemId: 'framework:angular',
       item: { ...angular },
       registry: 'matched',
-      candidateIds: ['acme/repo/one', 'acme/repo/legacy-ng', 'other/org/generic-js'],
+      candidateIds: [
+        'acme/repo/one',
+        'acme/repo/legacy-ng',
+        'other/org/generic-js',
+      ],
       candidateAssessments: [
         { candidateId: 'acme/repo/one', eligible: true },
         {
@@ -539,10 +546,10 @@ describe('StackSkillStore', () => {
     expect(store.selectedSelectionKeys()).toEqual(['Acme/Repo/One']);
 
     // Re-run with a different analysisPair does not overwrite the recorded analysisPair (R14)
-    const rerun = makeRecommendResult(
-      makeJudgeFixture({ method: 'none' }),
-      { provider: 'openai', model: 'gpt-4.1' },
-    );
+    const rerun = makeRecommendResult(makeJudgeFixture({ method: 'none' }), {
+      provider: 'openai',
+      model: 'gpt-4.1',
+    });
     expect(store.applyRecommendationResult(rerun)).toEqual({ status: 'ok' });
     expect(store.analysisPair()).toEqual({
       provider: 'anthropic',
@@ -561,18 +568,25 @@ describe('StackSkillStore', () => {
     const generalSearchSkill = { ...manualSkill, skillId: 'general-result' };
     store.setItemSearchResults(itemId, [manualSkill]);
     store.setSearchResults([generalSearchSkill]);
-    store.setSelectedIds(new Set([
-      'Manual/Org/Jest-Tips',
-      'Manual/Org/general-result',
-      'Manual/Org/custom',
-    ]));
+    store.setSelectedIds(
+      new Set([
+        'Manual/Org/Jest-Tips',
+        'Manual/Org/general-result',
+        'Manual/Org/custom',
+      ]),
+    );
     store.setSearchResults([]);
     store.setItemSearchResults(itemId, [currentSearchSkill]);
     store.setSelectedCandidateIds(new Set());
 
-    const itemRow = () => store.visibleItemRows().find((row) => row.itemId === itemId);
-    const coverage = () => store.stackCoverage().find((item) => item.itemId === itemId);
-    expect(itemRow()?.manualCandidates).toEqual([manualSkill, currentSearchSkill]);
+    const itemRow = () =>
+      store.visibleItemRows().find((row) => row.itemId === itemId);
+    const coverage = () =>
+      store.stackCoverage().find((item) => item.itemId === itemId);
+    expect(itemRow()?.manualCandidates).toEqual([
+      currentSearchSkill,
+      manualSkill,
+    ]);
     expect(store.selectionKeyByCandidateId().size).toBe(initialTotal + 4);
     expect(coverage()).toMatchObject({ state: 'available', totalCount: 2 });
 
@@ -598,17 +612,22 @@ describe('StackSkillStore', () => {
     const selection = store.selectedCandidateIds();
     const rerun = makeRecommendResult(makeJudgeFixture({ method: 'none' }));
 
-    expect(store.applyRecommendationResult(rerun)).toEqual({ status: 'confirm-dirty' });
+    expect(store.applyRecommendationResult(rerun)).toEqual({
+      status: 'confirm-dirty',
+    });
     expect(store.openDraft()).toBe(draft);
     expect(store.judge()).toBe(judge);
     expect(store.recommendations()).toBe(recommendations);
     expect(store.selectedCandidateIds()).toBe(selection);
-    expect(store.itemSearchResultsByItemId().get('library:tailwind')).toEqual([manualSkill]);
+    expect(store.itemSearchResultsByItemId().get('library:tailwind')).toEqual([
+      manualSkill,
+    ]);
     expect(store.verdictFilter()).toBe('no-skill');
     expect(store.activeItemId()).toBe('library:tailwind');
 
-    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
-      .toEqual({ status: 'ok' });
+    expect(
+      store.applyRecommendationResult(rerun, { discardDirtyDraft: true }),
+    ).toEqual({ status: 'ok' });
     expect(store.openDraft()).toBeNull();
     expect(store.judge()?.method).toBe('none');
     expect(store.verdictFilter()).toBe('all');
@@ -620,25 +639,31 @@ describe('StackSkillStore', () => {
     const judge = store.judge();
     const rerun = makeRecommendResult(makeJudgeFixture({ method: 'none' }));
     const opened = store.openProposalDraft('prop-angular-app');
-    if (opened.status !== 'ok') throw new Error('Expected an open proposal draft');
+    if (opened.status !== 'ok')
+      throw new Error('Expected an open proposal draft');
 
     expect(store.openDraft()?.previewLoading).toBe(true);
-    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
-      .toEqual({ status: 'busy' });
+    expect(
+      store.applyRecommendationResult(rerun, { discardDirtyDraft: true }),
+    ).toEqual({ status: 'busy' });
     expect(store.judge()).toBe(judge);
     expect(store.openDraft()).toBe(opened.draft);
-    expect(store.applyDraftPreviewError(opened.draft, 'Preview failed')).toBe(true);
+    expect(store.applyDraftPreviewError(opened.draft, 'Preview failed')).toBe(
+      true,
+    );
 
     store.updateDraftFields({ body: '# Keep these edits' });
     const submission = store.beginCreateDraft();
     if (!submission) throw new Error('Expected a draft Create submission');
     const submittedDraft = store.openDraft();
-    expect(store.applyRecommendationResult(rerun, { discardDirtyDraft: true }))
-      .toEqual({ status: 'busy' });
+    expect(
+      store.applyRecommendationResult(rerun, { discardDirtyDraft: true }),
+    ).toEqual({ status: 'busy' });
     expect(store.judge()).toBe(judge);
     expect(store.openDraft()).toBe(submittedDraft);
-    expect(store.completeCreateDraft(submission.revision, '/workspace/SKILL.md'))
-      .toBe('/workspace/SKILL.md');
+    expect(
+      store.completeCreateDraft(submission.revision, '/workspace/SKILL.md'),
+    ).toBe('/workspace/SKILL.md');
   });
 
   it('toggles repeated candidates under one canonical ID and drives unified R19 coverage across strip and rail', () => {
@@ -646,12 +671,12 @@ describe('StackSkillStore', () => {
 
     // Angular and RxJS are both covered by the single shared Install candidate
     expect(store.coveredItemCount()).toBe(2);
-    expect(
-      [...(store.selectedCandidateIdsByItemId().get('framework:angular') ?? [])],
-    ).toEqual(['acme/repo/one']);
-    expect(
-      [...(store.selectedCandidateIdsByItemId().get('library:rxjs') ?? [])],
-    ).toEqual(['acme/repo/one']);
+    expect([
+      ...(store.selectedCandidateIdsByItemId().get('framework:angular') ?? []),
+    ]).toEqual(['acme/repo/one']);
+    expect([
+      ...(store.selectedCandidateIdsByItemId().get('library:rxjs') ?? []),
+    ]).toEqual(['acme/repo/one']);
 
     // Manual per-item search result covers the search-failed Jest item (R19)
     store.setItemSearchResults('test-tool:jest', [manualSkill]);
@@ -680,9 +705,15 @@ describe('StackSkillStore', () => {
     expect(store.showOtherCandidatesSection()).toBe(true);
     expect(store.residualCandidates()).toEqual([
       expect.objectContaining({
-        candidate: expect.objectContaining({ candidateId: 'other/org/generic-js' }),
+        candidate: expect.objectContaining({
+          candidateId: 'other/org/generic-js',
+        }),
         rejections: [
-          { itemId: 'framework:angular', itemName: 'Angular', reason: 'Too generic for Angular' },
+          {
+            itemId: 'framework:angular',
+            itemName: 'Angular',
+            reason: 'Too generic for Angular',
+          },
         ],
       }),
     ]);
@@ -737,7 +768,11 @@ describe('StackSkillStore', () => {
             },
           ],
           outcomes: [
-            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+            {
+              verdict: 'no-skill',
+              reason: 'Not needed for A',
+              stage: 'decision',
+            },
           ],
           judgedBy: 'decision',
         },
@@ -804,7 +839,11 @@ describe('StackSkillStore', () => {
             },
           ],
           outcomes: [
-            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+            {
+              verdict: 'no-skill',
+              reason: 'Not needed for A',
+              stage: 'decision',
+            },
           ],
           judgedBy: 'decision',
         },
@@ -872,7 +911,11 @@ describe('StackSkillStore', () => {
             },
           ],
           outcomes: [
-            { verdict: 'no-skill', reason: 'Not needed for A', stage: 'decision' },
+            {
+              verdict: 'no-skill',
+              reason: 'Not needed for A',
+              stage: 'decision',
+            },
           ],
           judgedBy: 'decision',
         },
@@ -982,12 +1025,16 @@ describe('StackSkillStore', () => {
     // F30: filtering to 'install' keeps the pinned manual draft row visible
     store.setVerdictFilter('install');
     expect(
-      store.visibleItemRows().some((row) => row.itemId === 'library:tailwind' && row.pinned),
+      store
+        .visibleItemRows()
+        .some((row) => row.itemId === 'library:tailwind' && row.pinned),
     ).toBe(true);
     store.resetFilters();
 
     // Dirty manual draft triggers R18 confirm-dirty on all 4 triggers
-    store.updateDraftFields({ body: '## Project evidence\n\nCustom user edits' });
+    store.updateDraftFields({
+      body: '## Project evidence\n\nCustom user edits',
+    });
     expect(store.openProposalDraft('prop-angular-app')).toEqual({
       status: 'confirm-dirty',
       trigger: 'preview-draft',
@@ -1014,9 +1061,9 @@ describe('StackSkillStore', () => {
 
     // F30: proposal stays pinned under 'no-skill' filter
     store.setVerdictFilter('no-skill');
-    expect(
-      store.visibleProposals().map((p) => p.proposalId),
-    ).toEqual(['prop-angular-app']);
+    expect(store.visibleProposals().map((p) => p.proposalId)).toEqual([
+      'prop-angular-app',
+    ]);
     store.resetFilters();
 
     // Generation failure opens edit mode with deterministic Project evidence + linked Build reasons
@@ -1034,7 +1081,9 @@ describe('StackSkillStore', () => {
       retryable: true,
     });
     expect(store.openDraft()?.body).toContain('Add repo-specific conventions');
-    expect(store.openDraft()?.body).toContain('Capture Jest config conventions');
+    expect(store.openDraft()?.body).toContain(
+      'Capture Jest config conventions',
+    );
 
     // Editing makes draft dirty -> R18 trigger 4 (retry-generation) requires confirm
     store.updateDraftFields({ body: '# My custom guide\n\nKeep this.' });
@@ -1043,7 +1092,9 @@ describe('StackSkillStore', () => {
       trigger: 'retry-generation',
     });
 
-    const retried = store.beginRetryDraftGeneration({ forceDiscardDirty: true });
+    const retried = store.beginRetryDraftGeneration({
+      forceDiscardDirty: true,
+    });
     expect(retried.status).toBe('ok');
     if (retried.status !== 'ok') return;
 
@@ -1090,7 +1141,9 @@ describe('StackSkillStore', () => {
     expect(store.closeDraft({ forceDiscardDirty: true })).toEqual({
       status: 'busy',
     });
-    expect(store.openManualDraft('pattern:nx', { forceDiscardDirty: true })).toEqual({
+    expect(
+      store.openManualDraft('pattern:nx', { forceDiscardDirty: true }),
+    ).toEqual({
       status: 'busy',
     });
 
@@ -1130,12 +1183,21 @@ describe('StackSkillStore', () => {
   it('restores the proposal defaults when a retry fails after confirming Discard edits', () => {
     store.applyRecommendationResult(makeRecommendResult());
     const opened = store.openProposalDraft('prop-angular-app');
-    if (opened.status !== 'ok') throw new Error('Expected the proposal draft to open');
-    const failure = { ok: false, category: 'timed-out', message: 'Draft timed out' } as const;
+    if (opened.status !== 'ok')
+      throw new Error('Expected the proposal draft to open');
+    const failure = {
+      ok: false,
+      category: 'timed-out',
+      message: 'Draft timed out',
+    } as const;
     expect(store.applyDraftPreviewResult(opened.draft, failure)).toBe(true);
     const fallbackBody = store.openDraft()?.body;
     expect(fallbackBody).toContain('Add repo-specific conventions');
-    const edits = { name: 'my-name', description: 'My description', body: 'My custom guide' };
+    const edits = {
+      name: 'my-name',
+      description: 'My description',
+      body: 'My custom guide',
+    };
     store.updateDraftFields(edits);
 
     expect(store.beginRetryDraftGeneration()).toEqual({
@@ -1144,36 +1206,54 @@ describe('StackSkillStore', () => {
     });
     expect(store.openDraft()).toMatchObject({ ...edits, dirty: true });
 
-    const retried = store.beginRetryDraftGeneration({ forceDiscardDirty: true });
-    if (retried.status !== 'ok') throw new Error('Expected draft generation to retry');
-    const defaults = { name: opened.draft.name, description: opened.draft.description };
-    expect(retried.draft).toMatchObject({ ...defaults, body: '', dirty: false });
-    expect(store.applyDraftPreviewResult(retried.draft, failure)).toBe(true);
-    expect(store.openDraft()).toMatchObject({ ...defaults, body: fallbackBody, dirty: false, mode: 'edit' });
-  });
-
-  it.each([undefined, '   '])('keeps edits when the Create receipt path is %p', (path) => {
-    store.openBlankManualDraft();
-    const fields = {
-      name: 'edited-skill',
-      description: 'Edited description',
-      body: '# Edited skill',
+    const retried = store.beginRetryDraftGeneration({
+      forceDiscardDirty: true,
+    });
+    if (retried.status !== 'ok')
+      throw new Error('Expected draft generation to retry');
+    const defaults = {
+      name: opened.draft.name,
+      description: opened.draft.description,
     };
-    store.updateDraftFields(fields);
-    const submission = store.beginCreateDraft();
-    if (!submission) throw new Error('Expected a draft Create submission');
-
-    expect(store.completeCreateDraft(submission.revision, path)).toBeNull();
-    expect(store.createdPathsByKey().size).toBe(0);
-    expect(store.createdSkillSlugs()).toEqual([]);
+    expect(retried.draft).toMatchObject({
+      ...defaults,
+      body: '',
+      dirty: false,
+    });
+    expect(store.applyDraftPreviewResult(retried.draft, failure)).toBe(true);
     expect(store.openDraft()).toMatchObject({
-      ...fields,
-      dirty: true,
-      busy: false,
-      submitted: null,
-      createError: expect.stringContaining('did not return a path'),
+      ...defaults,
+      body: fallbackBody,
+      dirty: false,
+      mode: 'edit',
     });
   });
+
+  it.each([undefined, '   '])(
+    'keeps edits when the Create receipt path is %p',
+    (path) => {
+      store.openBlankManualDraft();
+      const fields = {
+        name: 'edited-skill',
+        description: 'Edited description',
+        body: '# Edited skill',
+      };
+      store.updateDraftFields(fields);
+      const submission = store.beginCreateDraft();
+      if (!submission) throw new Error('Expected a draft Create submission');
+
+      expect(store.completeCreateDraft(submission.revision, path)).toBeNull();
+      expect(store.createdPathsByKey().size).toBe(0);
+      expect(store.createdSkillSlugs()).toEqual([]);
+      expect(store.openDraft()).toMatchObject({
+        ...fields,
+        dirty: true,
+        busy: false,
+        submitted: null,
+        createError: expect.stringContaining('did not return a path'),
+      });
+    },
+  );
 
   it('preserves unjudged team-builder path compatibility', () => {
     expect(store.judgedMode()).toBe(false);
@@ -1182,7 +1262,9 @@ describe('StackSkillStore', () => {
     store.setSelectedIds(new Set(['Acme/Repo/One']));
     store.setSearchResults([skillOne]);
     store.setSearchResults([skillNotJudged]);
-    expect(store.retainedSearchResults().map((s) => s.skillId)).toEqual(['One']);
+    expect(store.retainedSearchResults().map((s) => s.skillId)).toEqual([
+      'One',
+    ]);
     store.setPreview([
       {
         skillName: 'Acme/Repo/One',
@@ -1195,5 +1277,197 @@ describe('StackSkillStore', () => {
     expect(store.previewScriptCount()).toBe(1);
     store.approve('Acme/Repo/One');
     expect(store.approvedIds().has('Acme/Repo/One')).toBe(true);
+  });
+});
+
+describe('download-count ordering', () => {
+  const makeSkill = (
+    overrides: Partial<SkillShEntry> & Pick<SkillShEntry, 'skillId'>,
+  ): SkillShEntry => ({
+    source: 'owner/repo',
+    name: overrides.skillId,
+    description: '',
+    installs: 0,
+    isInstalled: false,
+    ...overrides,
+  });
+
+  it('orders skills by installs descending, normalizes non-finite/negative installs to 0, and applies deterministic tie-breakers', () => {
+    const entries: SkillShEntry[] = [
+      makeSkill({
+        skillId: 'z-zero',
+        source: 'b/repo',
+        name: 'Z',
+        installs: 0,
+      }),
+      makeSkill({
+        skillId: 'neg',
+        source: 'a/repo',
+        name: 'Neg',
+        installs: -50,
+      }),
+      makeSkill({
+        skillId: 'nan-skill',
+        source: 'a/repo',
+        name: 'NaN',
+        installs: Number.NaN,
+      }),
+      makeSkill({
+        skillId: 'inf-skill',
+        source: 'a/repo',
+        name: 'Inf',
+        installs: Number.POSITIVE_INFINITY,
+      }),
+      makeSkill({
+        skillId: 'mid-b',
+        source: 'org-b/repo',
+        name: 'Beta',
+        installs: 500,
+      }),
+      makeSkill({
+        skillId: 'mid-a',
+        source: 'org-b/repo',
+        name: 'Alpha',
+        installs: 500,
+      }),
+      makeSkill({
+        skillId: 'mid-a',
+        source: 'org-a/repo',
+        name: 'Zeta',
+        installs: 500,
+      }),
+      makeSkill({
+        skillId: 'mid-a',
+        source: 'org-a/repo',
+        name: 'Alpha',
+        installs: 500,
+      }),
+      makeSkill({
+        skillId: 'top',
+        source: 'z/repo',
+        name: 'Top',
+        installs: 9900,
+      }),
+    ];
+
+    const sorted = [...entries].sort(compareSkillsByInstallsDesc);
+    expect(sorted.map((s) => `${s.source}/${s.skillId}:${s.name}`)).toEqual([
+      'z/repo/top:Top',
+      'org-a/repo/mid-a:Alpha',
+      'org-a/repo/mid-a:Zeta',
+      'org-b/repo/mid-a:Alpha',
+      'org-b/repo/mid-b:Beta',
+      'a/repo/inf-skill:Inf',
+      'a/repo/nan-skill:NaN',
+      'a/repo/neg:Neg',
+      'b/repo/z-zero:Z',
+    ]);
+  });
+
+  it('sorts row.candidates and row.manualCandidates by installs descending in buildJudgeItemRows', () => {
+    const low = makeCandidate(makeSkill({ skillId: 'low', installs: 15 }));
+    const high = makeCandidate(makeSkill({ skillId: 'high', installs: 8500 }));
+    const mid = makeCandidate(makeSkill({ skillId: 'mid', installs: 420 }));
+    const judge: SkillJudgeResult = {
+      method: 'none',
+      counts: { decision: 0, normal: 0, notJudged: 1 },
+      items: [
+        {
+          itemId: 'pattern:nx',
+          item: nxItem,
+          registry: 'matched',
+          candidateIds: [low.candidateId, mid.candidateId, high.candidateId],
+          candidateAssessments: [],
+          outcomes: [],
+          judgedBy: 'none',
+        },
+      ],
+      candidates: [low, mid, high],
+      proposals: [],
+      stages: [],
+    };
+    const candidatesById = new Map(
+      judge.candidates.map((c) => [canonicalCandidateId(c.candidateId), c]),
+    );
+    const retainedLow = makeSkill({ skillId: 'manual-low', installs: 20 });
+    const retainedHigh = makeSkill({ skillId: 'manual-high', installs: 3000 });
+    const currentMid = makeSkill({ skillId: 'manual-mid', installs: 500 });
+    const currentTop = makeSkill({ skillId: 'manual-top', installs: 9000 });
+
+    const rows = buildJudgeItemRows(
+      judge,
+      candidatesById,
+      new Map(),
+      new Map([['pattern:nx', [currentMid, currentTop]]]),
+      new Map([['pattern:nx', [retainedLow, retainedHigh]]]),
+      null,
+    );
+
+    expect(rows[0]?.candidates.map((c) => c.candidate.skill.skillId)).toEqual([
+      'high',
+      'mid',
+      'low',
+    ]);
+    expect(rows[0]?.manualCandidates.map((s) => s.skillId)).toEqual([
+      'manual-top',
+      'manual-high',
+      'manual-mid',
+      'manual-low',
+    ]);
+  });
+
+  it('sorts residual candidates by installs descending in computeJudgeResidualCandidates', () => {
+    const shown = makeCandidate(
+      makeSkill({ skillId: 'installed', installs: 100 }),
+    );
+    const resLow = makeCandidate(
+      makeSkill({ skillId: 'res-low', installs: 10 }),
+    );
+    const resHigh = makeCandidate(
+      makeSkill({ skillId: 'res-high', installs: 4500 }),
+    );
+    const resMid = makeCandidate(
+      makeSkill({ skillId: 'res-mid', installs: 750 }),
+    );
+    const judge: SkillJudgeResult = {
+      method: 'decision',
+      counts: { decision: 1, normal: 0, notJudged: 0 },
+      items: [
+        {
+          itemId: 'framework:angular',
+          item: angular,
+          registry: 'matched',
+          candidateIds: [
+            shown.candidateId,
+            resLow.candidateId,
+            resMid.candidateId,
+            resHigh.candidateId,
+          ],
+          candidateAssessments: [],
+          outcomes: [
+            {
+              verdict: 'install',
+              candidateId: shown.candidateId,
+              reason: 'Install',
+              stage: 'decision',
+            },
+          ],
+          judgedBy: 'decision',
+        },
+      ],
+      candidates: [shown, resLow, resMid, resHigh],
+      proposals: [],
+      stages: [],
+    };
+
+    const residual = computeJudgeResidualCandidates(
+      judge,
+      new Set([shown.candidateId]),
+    );
+    expect(residual.map((entry) => entry.candidate.skill.skillId)).toEqual([
+      'res-high',
+      'res-mid',
+      'res-low',
+    ]);
   });
 });

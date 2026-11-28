@@ -98,6 +98,7 @@ export function toResumableGenerationRun(
 ): ResumableGenerationRun {
   return {
     runId: manifest.runId,
+    ...(manifest.tabBinding ? { ownerTabId: manifest.tabBinding.tabId } : {}),
     analysisDirectory: manifest.analysisDirectory ?? null,
     outputDirectory: manifest.outputDirectory,
     lifecycle: manifest.lifecycle,

@@ -26,7 +26,6 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generationRouteTabValidator } from './app.config';
 
 import { PlatformLocation } from '@angular/common';
 import { ErrorHandler, signal } from '@angular/core';
@@ -216,24 +215,6 @@ function savedRoute(
 }
 
 describe('webview routing composition', () => {
-  it('keeps a restored workflow route until its workspace activates and then revalidates', () => {
-    const tabs = {
-      activeWorkspacePath: null as string | null,
-      findTabByIdAcrossWorkspaces: jest.fn().mockReturnValue({
-        workspacePath: '/ws',
-        tab: { workflow: 'setup-agent-generation' },
-      }),
-    };
-    const valid = generationRouteTabValidator(tabs);
-    expect(valid('restored', 'setup-agent-generation')).toBe(true);
-    expect(valid('restored', 'setup-project-prompt')).toBe(false);
-    tabs.activeWorkspacePath = '/ws';
-    expect(valid('restored', 'setup-agent-generation')).toBe(true);
-    tabs.activeWorkspacePath = '/other';
-    expect(valid('restored', 'setup-agent-generation')).toBe(false);
-    tabs.findTabByIdAcrossWorkspaces.mockReturnValue(null);
-    expect(valid('missing', 'setup-agent-generation')).toBe(false);
-  });
   let history: Record<string, jest.SpyInstance>;
 
   beforeEach(() => {
@@ -521,18 +502,15 @@ describe('webview routing composition', () => {
       );
     }, 30_000);
 
-    it('waits for the Electron workspace before restoring an onboarding tab', async () => {
+    it('waits for the Electron workspace before validating a saved Setup run', async () => {
       const workspaceResolved = signal(false);
-      const tabs = {
-        activeWorkspacePath: '/ws',
-        findTabByIdAcrossWorkspaces: jest.fn().mockReturnValue(null),
-      };
+      const validateRun = jest.fn(() => workspaceResolved());
       TestBed.configureTestingModule({
         providers: [
           { provide: ElectronLayoutService, useValue: { workspaceResolved } },
           {
             provide: SurfaceRouterService.generationRouteTabValidatorToken,
-            useValue: generationRouteTabValidator(tabs),
+            useValue: validateRun,
           },
         ],
       });
@@ -542,15 +520,11 @@ describe('webview routing composition', () => {
 
       const boot = runBoot();
       await Promise.resolve();
-      expect(tabs.findTabByIdAcrossWorkspaces).not.toHaveBeenCalled();
-
-      tabs.findTabByIdAcrossWorkspaces.mockReturnValue({
-        workspacePath: '/ws',
-        tab: { workflow: 'setup-project-prompt' },
-      });
+      expect(validateRun).not.toHaveBeenCalled();
       workspaceResolved.set(true);
 
       expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(validateRun).toHaveBeenCalledWith(tabId, 'setup-project-prompt');
       expect(TestBed.inject(Router).url).toBe(route);
       expect(TestBed.inject(AppStateManager).currentView()).toBe('onboarding');
     });
@@ -570,7 +544,36 @@ describe('webview routing composition', () => {
       expect(workspaceResolved()).toBe(false);
     });
 
-    it('keeps a newer host navigation that lands during the workspace wait', async () => {
+    it('waits for the Electron workspace before mounting recordless guidance', async () => {
+      const workspaceResolved = signal(false);
+      const validateRun = jest.fn();
+      TestBed.configureTestingModule({
+        providers: [
+          { provide: ElectronLayoutService, useValue: { workspaceResolved } },
+          {
+            provide: SurfaceRouterService.generationRouteTabValidatorToken,
+            useValue: validateRun,
+          },
+        ],
+      });
+      const route = '/onboarding/guidance';
+      installHost(savedRoute(route, 'chat'), 'chat');
+      hostIsElectron(true);
+      const navigate = jest.spyOn(
+        TestBed.inject(SurfaceRouterService),
+        'navigateToUrl',
+      );
+
+      const boot = runBoot();
+      expect(navigate).not.toHaveBeenCalled();
+      workspaceResolved.set(true);
+
+      expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(TestBed.inject(Router).url).toBe(route);
+      expect(validateRun).not.toHaveBeenCalled();
+    });
+
+    it('ends the workspace wait when a newer host navigation starts', async () => {
       const workspaceResolved = signal(false);
       TestBed.configureTestingModule({
         providers: [
@@ -595,10 +598,68 @@ describe('webview routing composition', () => {
           ),
         ),
       ).toBe(true);
+      expect(await boot).toBe('cancelled');
+      expect(workspaceResolved()).toBe(false);
+      expect(TestBed.inject(Router).url).toBe('/settings');
+    });
+
+    it('restores and preserves a saved Setup route after the first Electron RPC timeout', async () => {
+      const workspaceResolved = signal(false);
+      const validateRun = jest.fn(() => workspaceResolved());
+      TestBed.configureTestingModule({
+        providers: [
+          { provide: ElectronLayoutService, useValue: { workspaceResolved } },
+          {
+            provide: SurfaceRouterService.generationRouteTabValidatorToken,
+            useValue: validateRun,
+          },
+        ],
+      });
+      const route = `/onboarding/analyze/guidance?tab=${tabId}`;
+      installHost(savedRoute(route, 'settings'), 'settings');
+      localStorage.setItem(
+        ONBOARDING_FLAG_KEY,
+        JSON.stringify({ shownAt: '2026-10-01T10:00:00.000Z' }),
+      );
+      hostIsElectron(true);
+      jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+      const boot = runBoot();
+      try {
+        await jest.advanceTimersByTimeAsync(45_000);
+        expect(TestBed.inject(Router).navigated).toBe(false);
+        expect(validateRun).not.toHaveBeenCalled();
+        expect(persisted()).toEqual(expect.objectContaining({ route }));
+      } finally {
+        jest.useRealTimers();
+      }
       workspaceResolved.set(true);
+      expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(validateRun).toHaveBeenCalledWith(tabId, 'setup-project-prompt');
+      expect(TestBed.inject(Router).url).toBe(route);
+      expect(persisted()).toEqual(expect.objectContaining({ route }));
+    });
+
+    it('cancels the workspace wait when the injector is destroyed', async () => {
+      TestBed.configureTestingModule({
+        providers: [
+          {
+            provide: ElectronLayoutService,
+            useValue: { workspaceResolved: signal(false) },
+          },
+        ],
+      });
+      installHost(
+        savedRoute(`/onboarding/analyze/guidance?tab=${tabId}`, 'chat'),
+        'chat',
+      );
+      hostIsElectron(true);
+      const navigate = jest.spyOn(TestBed.inject(Router), 'navigateByUrl');
+
+      const boot = TestBed.runInInjectionContext(injectInitialNavigation)();
+      TestBed.resetTestingModule();
 
       expect(await boot).toBe('cancelled');
-      expect(TestBed.inject(Router).url).toBe('/settings');
+      expect(navigate).not.toHaveBeenCalled();
     });
 
     it('lets a new host deep link win over the saved route, and seeds it', async () => {
@@ -1329,6 +1390,17 @@ describe('app.config routing wiring', () => {
   it('starts the onboarding first-run tracker at bootstrap', () => {
     // The chat guard's redirect commits `shownAt` only through the tracker.
     expect(source).toContain('provideOnboardingFirstRun()');
+  });
+
+  it('validates restored generation routes through the Setup run store', () => {
+    const provider = source.match(
+      /provide:\s*SurfaceRouterService\.generationRouteTabValidatorToken,[\s\S]*?\n {4}\},/,
+    )?.[0];
+
+    expect(provider).toMatch(
+      /injector\.get\(SetupRunStore\)\.canRestoreGenerationRoute\(id,\s*workflow\)/,
+    );
+    expect(provider).not.toMatch(/TabManagerService|findTabByIdAcrossWorkspaces/);
   });
 
   it('registers HarnessChatProposalStore at bootstrap and drops HarnessWorkflowMessageHandler', () => {

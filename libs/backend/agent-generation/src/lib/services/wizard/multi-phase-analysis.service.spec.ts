@@ -673,7 +673,9 @@ describe('MultiPhaseAnalysisService', () => {
     it('reuses a completed phase after its markdown is copied with CRLF', async () => {
       const manifest = await seedPausedManifest();
       if (manifest.version !== 4) throw new Error('Expected v4 fixture');
-      manifest.phases['project-profile'].verification.outputSha256 = createHash('sha256')
+      manifest.phases['project-profile'].verification.outputSha256 = createHash(
+        'sha256',
+      )
         .update('OLD\nPROFILE')
         .digest('hex');
       await storage.writeManifest(SLUG_DIR, manifest);
@@ -687,7 +689,10 @@ describe('MultiPhaseAnalysisService', () => {
 
       expect(result.isOk()).toBe(true);
       expect(execute).toHaveBeenCalledTimes(3);
-      expect((result.value as MultiPhaseManifestV4).phases['project-profile'].attempt).toBe(1);
+      expect(
+        (result.value as MultiPhaseManifestV4).phases['project-profile']
+          .attempt,
+      ).toBe(1);
     });
 
     // A FAILED or PAUSED run leaves its lossy diagnostic text on disk and
@@ -1473,7 +1478,11 @@ describe('MultiPhaseAnalysisService', () => {
             model: 'sonnet',
             cause: 'model-stale' as const,
           },
-          expectedSubstrings: ['Setup model', 'anthropic/sonnet', 'model-stale'],
+          expectedSubstrings: [
+            'Setup model',
+            'anthropic/sonnet',
+            'model-stale',
+          ],
           forbiddenSubstrings: ['Workspace model'],
         },
         {
@@ -1713,5 +1722,354 @@ describe('MultiPhaseAnalysisService', () => {
     const diskContent = await fs.readFile(join(SLUG_DIR, FILES[2]));
     expect(diskContent).toBe(diagnosticText);
     expect(result.value?.lifecycle).toBe('failed');
+  });
+
+  describe('active run tracking and concurrent join', () => {
+    it('tracks active run metadata with normalized workspace paths while running and clears on completion', async () => {
+      expect(service.getActiveRun()).toBeNull();
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(false);
+
+      const otherWorkspace = resolve('/ws/other');
+      let observedActiveRun: ReturnType<
+        MultiPhaseAnalysisService['getActiveRun']
+      > = null;
+      let observedSameWithSlash = false;
+      let observedOtherWorkspace = true;
+      let observedByOther: ReturnType<
+        MultiPhaseAnalysisService['getActiveRun']
+      > = null;
+
+      scenarios = [
+        streamOf([assistant('p1'), success('p1')], async () => {
+          observedActiveRun = service.getActiveRun();
+          observedSameWithSlash = service.isRunningForWorkspace(
+            `${WORKSPACE}/`,
+          );
+          observedOtherWorkspace =
+            service.isRunningForWorkspace(otherWorkspace);
+          observedByOther = service.getActiveRun(otherWorkspace);
+          await storage.writePhaseFile(SLUG_DIR, FILES[0], '# p1');
+        }),
+        ...FILES.slice(1).map((file) => agentWritesFile(file)),
+      ];
+
+      const result = await service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+
+      expect(result.isOk()).toBe(true);
+      expect(observedActiveRun).toEqual({
+        workspacePath: WORKSPACE,
+        runId: result.value?.runId,
+        slug: 'demo',
+        startedAt: expect.any(String),
+      });
+      expect(observedSameWithSlash).toBe(true);
+      expect(observedOtherWorkspace).toBe(false);
+      expect(observedByOther).toBeNull();
+      expect(service.getActiveRun()).toBeNull();
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(false);
+    });
+
+    it('clears active run immediately on cancelAnalysis and does not clobber a replacement run', async () => {
+      let releaseSecondRun!: () => void;
+      const secondRunGate = new Promise<void>((res) => {
+        releaseSecondRun = res;
+      });
+      let secondRunStarted!: () => void;
+      const secondRunStartedPromise = new Promise<void>((res) => {
+        secondRunStarted = res;
+      });
+
+      scenarios = [
+        hangingStream(),
+        // Second run phases:
+        async function* () {
+          secondRunStarted();
+          await secondRunGate;
+          await storage.writePhaseFile(SLUG_DIR, FILES[0], '# second p1');
+          yield assistant('second p1');
+          yield success('second p1');
+        },
+        ...FILES.slice(1).map((file) => agentWritesFile(file)),
+      ];
+
+      const firstPromise = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      while (execute.mock.calls.length < 1) {
+        await Promise.resolve();
+      }
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(true);
+
+      service.cancelAnalysis();
+      expect(service.getActiveRun()).toBeNull();
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(false);
+
+      const secondPromise = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      await secondRunStartedPromise;
+
+      const firstResult = await firstPromise;
+      expect(firstResult.isOk()).toBe(true);
+      expect(firstResult.value?.lifecycle).toBe('paused');
+      // First run's finally must NOT clear the active second run.
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(true);
+      expect(service.getActiveRun()?.runId).not.toBe(firstResult.value?.runId);
+
+      releaseSecondRun();
+      const secondResult = await secondPromise;
+      expect(secondResult.isOk()).toBe(true);
+      expect(secondResult.value?.lifecycle).toBe('completed');
+      expect(service.getActiveRun()).toBeNull();
+      expect(service.isRunningForWorkspace(WORKSPACE)).toBe(false);
+    });
+
+    it('joins the active run on a second same-workspace call instead of aborting or wiping the slug', async () => {
+      let releasePhase1!: () => void;
+      const phase1Gate = new Promise<void>((res) => {
+        releasePhase1 = res;
+      });
+      let phase1Started!: () => void;
+      const phase1StartedPromise = new Promise<void>((res) => {
+        phase1Started = res;
+      });
+
+      scenarios = [
+        async function* () {
+          phase1Started();
+          await phase1Gate;
+          await storage.writePhaseFile(SLUG_DIR, FILES[0], '# p1');
+          yield assistant('p1');
+          yield success('p1');
+        },
+        ...FILES.slice(1).map((file) => agentWritesFile(file)),
+      ];
+
+      const firstCall = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      await phase1StartedPromise;
+
+      const secondCall = service.analyzeWorkspace(`${WORKSPACE}/`, {
+        mcpServerRunning: true,
+      });
+
+      expect(resolveSetup).toHaveBeenCalledTimes(1);
+
+      releasePhase1();
+      const [firstResult, secondResult] = await Promise.all([
+        firstCall,
+        secondCall,
+      ]);
+
+      expect(firstResult.isOk()).toBe(true);
+      expect(secondResult.isOk()).toBe(true);
+      expect(secondResult.value?.runId).toBe(firstResult.value?.runId);
+      expect(firstResult.value?.lifecycle).toBe('completed');
+      expect(execute).toHaveBeenCalledTimes(4);
+      expect(service.getActiveRun()).toBeNull();
+    });
+
+    it('joins when two same-workspace calls race while Setup is still resolving', async () => {
+      let releaseSetup!: () => void;
+      const setupGate = new Promise<void>((res) => {
+        releaseSetup = res;
+      });
+      resolveSetup.mockImplementation(async () => {
+        await setupGate;
+        return {
+          kind: 'set',
+          snapshot: {
+            providerId: 'kimi-code',
+            model: 'snapshot-model',
+            auth: SNAPSHOT_AUTH,
+          },
+        };
+      });
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const firstCall = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      const secondCall = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+
+      releaseSetup();
+      const [firstResult, secondResult] = await Promise.all([
+        firstCall,
+        secondCall,
+      ]);
+
+      expect(firstResult.isOk()).toBe(true);
+      expect(secondResult.isOk()).toBe(true);
+      expect(secondResult.value?.runId).toBe(firstResult.value?.runId);
+      expect(execute).toHaveBeenCalledTimes(4);
+      expect(service.getActiveRun()).toBeNull();
+    });
+
+    it('aborts an active run when a different workspace starts analysis', async () => {
+      const otherWorkspace = resolve('/ws/other');
+      const otherSlugDir = join(otherWorkspace, '.ptah', 'analysis', 'other');
+      await fs.createDirectory(otherWorkspace);
+
+      let firstPhaseStarted!: () => void;
+      const firstPhaseStartedPromise = new Promise<void>((res) => {
+        firstPhaseStarted = res;
+      });
+
+      scenarios = [
+        hangingStream(() => firstPhaseStarted()),
+        ...FILES.map((file) =>
+          streamOf([assistant('other'), success('other')], () =>
+            storage.writePhaseFile(otherSlugDir, file, `# ${file}\nother`),
+          ),
+        ),
+      ];
+
+      const firstCall = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      await firstPhaseStartedPromise;
+
+      const secondCall = service.analyzeWorkspace(otherWorkspace, {
+        mcpServerRunning: true,
+      });
+
+      const [firstResult, secondResult] = await Promise.all([
+        firstCall,
+        secondCall,
+      ]);
+
+      expect(firstResult.isOk()).toBe(true);
+      expect(firstResult.value?.lifecycle).toBe('paused');
+      expect(secondResult.isOk()).toBe(true);
+      expect(secondResult.value?.lifecycle).toBe('completed');
+      expect(secondResult.value?.slug).toBe('other');
+      expect(service.getActiveRun()).toBeNull();
+    });
+
+    it('pre-populates activeRun.slug synchronously while AnalysisRunCheckpoint.open is pending', async () => {
+      let releaseOpen!: () => void;
+      const openGate = new Promise<void>((res) => {
+        releaseOpen = res;
+      });
+      const origCreateSlugDir = storage.createSlugDir.bind(storage);
+      let openReached!: () => void;
+      const openReachedPromise = new Promise<void>((res) => {
+        openReached = res;
+      });
+      jest
+        .spyOn(storage, 'createSlugDir')
+        .mockImplementationOnce(async (...args) => {
+          openReached();
+          await openGate;
+          return origCreateSlugDir(...args);
+        });
+
+      scenarios = FILES.map((file) => agentWritesFile(file));
+
+      const runPromise = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      await openReachedPromise;
+
+      const activeDuringOpen = service.getActiveRun(WORKSPACE);
+      expect(activeDuringOpen).not.toBeNull();
+      expect(activeDuringOpen?.slug).toBe('demo');
+      expect(activeDuringOpen?.runId).toBeNull();
+
+      releaseOpen();
+      const result = await runPromise;
+      expect(result.isOk()).toBe(true);
+      expect(result.value?.slug).toBe('demo');
+      expect(service.getActiveRun(WORKSPACE)).toBeNull();
+    });
+
+    it('awaits prior aborted run checkpoint.pause cleanup before opening an immediate same-workspace restart', async () => {
+      let releaseFirstPauseWrite!: () => void;
+      const firstPauseWriteGate = new Promise<void>((res) => {
+        releaseFirstPauseWrite = res;
+      });
+      let pauseWriteStarted!: () => void;
+      const pauseWriteStartedPromise = new Promise<void>((res) => {
+        pauseWriteStarted = res;
+      });
+      let releaseSecondPhase!: () => void;
+      const secondPhaseGate = new Promise<void>((res) => {
+        releaseSecondPhase = res;
+      });
+      let secondPhaseStarted!: () => void;
+      const secondPhaseStartedPromise = new Promise<void>((res) => {
+        secondPhaseStarted = res;
+      });
+
+      const origWriteManifest = storage.writeManifest.bind(storage);
+      let delayedOnce = false;
+      jest
+        .spyOn(storage, 'writeManifest')
+        .mockImplementation(async (slugDir, manifest) => {
+          if (!delayedOnce && manifest.lifecycle === 'paused') {
+            delayedOnce = true;
+            pauseWriteStarted();
+            await firstPauseWriteGate;
+          }
+          return origWriteManifest(slugDir, manifest);
+        });
+
+      scenarios = [
+        hangingStream(),
+        async function* () {
+          secondPhaseStarted();
+          await secondPhaseGate;
+          await storage.writePhaseFile(SLUG_DIR, FILES[0], '# second p1');
+          yield assistant('second p1');
+          yield success('second p1');
+        },
+        ...FILES.slice(1).map((file) => agentWritesFile(file)),
+      ];
+
+      const firstPromise = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+      while (execute.mock.calls.length < 1) {
+        await Promise.resolve();
+      }
+
+      service.cancelAnalysis();
+      const secondPromise = service.analyzeWorkspace(WORKSPACE, {
+        mcpServerRunning: true,
+      });
+
+      // Wait until the aborted first run is in the middle of persisting its paused manifest.
+      await pauseWriteStartedPromise;
+      // Second run must NOT have started its phase yet while first run is still tearing down.
+      expect(execute).toHaveBeenCalledTimes(1);
+
+      releaseFirstPauseWrite();
+      await secondPhaseStartedPromise;
+
+      const firstResult = await firstPromise;
+      expect(firstResult.isOk()).toBe(true);
+      expect(firstResult.value?.lifecycle).toBe('paused');
+
+      // Manifest on disk must belong to the active second run (`running`), never overwritten with `paused`.
+      const onDisk = await storage.readManifest(SLUG_DIR);
+      expect(onDisk?.kind).toBe('current');
+      if (onDisk?.kind === 'current') {
+        expect(onDisk.manifest.lifecycle).toBe('running');
+        expect(onDisk.manifest.runId).toBe(
+          service.getActiveRun(WORKSPACE)?.runId,
+        );
+        expect(onDisk.manifest.runId).not.toBe(firstResult.value?.runId);
+      }
+
+      releaseSecondPhase();
+      const secondResult = await secondPromise;
+      expect(secondResult.isOk()).toBe(true);
+      expect(secondResult.value?.lifecycle).toBe('completed');
+    });
   });
 });

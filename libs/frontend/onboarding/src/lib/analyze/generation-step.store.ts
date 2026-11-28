@@ -3,11 +3,12 @@ import type {
   SetupGenerationRunState,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
-  findBoundGenerationTab,
   GenerationWorkflowStore,
   GuidanceGenerationStore,
+  normalizeSetupWorkspacePath,
+  sameSetupWorkspacePath,
+  SetupRunStore,
   WizardRpcService,
 } from '@ptah-extension/setup-wizard';
 import {
@@ -22,7 +23,7 @@ export interface AnalyzeDoneFacts {
 
 @Injectable({ providedIn: 'root' })
 export class GenerationStepStore {
-  private readonly tabs = inject(TabManagerService);
+  private readonly runs = inject(SetupRunStore);
   private readonly workflow = inject(GenerationWorkflowStore);
   private readonly guidance = inject(GuidanceGenerationStore);
   private readonly rpc = inject(WizardRpcService);
@@ -92,12 +93,12 @@ export class GenerationStepStore {
     runId?: string,
   ): 'bound' | 'invalid-tab' | 'workspace-mismatch' {
     if (binding.workflow !== workflow) return 'invalid-tab';
-    const located = this.tabs.findTabByIdAcrossWorkspaces(binding.tabId);
-    if (!located) return 'invalid-tab';
-    const tab = findBoundGenerationTab(this.tabs, binding);
-    if (!tab) return 'workspace-mismatch';
-    if (tab.workflow !== workflow) return 'invalid-tab';
-    this.workflow.bind(binding, runId);
+    const record = this.runs.get(binding.tabId);
+    const expected = record && this.runs.bindingFor(record);
+    if (!expected || expected.workflow !== workflow) return 'invalid-tab';
+    if (!sameSetupWorkspacePath(expected.workspacePath, binding.workspacePath))
+      return 'workspace-mismatch';
+    this.workflow.bind(expected, runId);
     return 'bound';
   }
 
@@ -105,10 +106,12 @@ export class GenerationStepStore {
     binding: SetupGenerationTabBinding,
     runId: string,
   ): Promise<'captured' | 'unavailable' | 'stale'> {
-    const key = `${binding.workspacePath}\u0000${runId}`;
+    const workspace = normalizeSetupWorkspacePath(binding.workspacePath);
+    if (!workspace) return 'stale';
+    const key = `${workspace}\u0000${runId}`;
     const pending = this.inFlight.get(key);
     if (pending) return pending;
-    const capture = this.readGuidanceSections(binding, runId);
+    const capture = this.readGuidanceSections(binding, runId, key);
     this.inFlight.set(key, capture);
     try {
       return await capture;
@@ -120,12 +123,13 @@ export class GenerationStepStore {
   private async readGuidanceSections(
     binding: SetupGenerationTabBinding,
     runId: string,
+    key: string,
   ): Promise<'captured' | 'unavailable' | 'stale'> {
     const current = async (): Promise<boolean> => {
       const run = await this.rpc.getBoundRunState(binding);
       return (
         run?.binding.tabId === binding.tabId &&
-        run.binding.workspacePath === binding.workspacePath &&
+        sameSetupWorkspacePath(run.binding.workspacePath, binding.workspacePath) &&
         run.binding.workflow === binding.workflow &&
         run.binding.runId === runId &&
         run.status === 'completed' &&
@@ -163,7 +167,7 @@ export class GenerationStepStore {
       if (
         !localBinding ||
         localBinding.tabId !== binding.tabId ||
-        localBinding.workspacePath !== binding.workspacePath ||
+        !sameSetupWorkspacePath(localBinding.workspacePath, binding.workspacePath) ||
         localBinding.workflow !== binding.workflow ||
         this.guidance.run()?.binding.runId !== runId ||
         this.guidance.status() !== 'completed'
@@ -172,7 +176,7 @@ export class GenerationStepStore {
       const counts = parseGuidanceSectionCounts(content);
       if (!counts) return 'unavailable';
       this.captured.set({
-        key: `${binding.workspacePath}\u0000${runId}\u0000${first.generatedAt}`,
+        key: `${key}\u0000${first.generatedAt}`,
         counts,
       });
       return 'captured';
@@ -196,7 +200,7 @@ export class GenerationStepStore {
       return null;
     const captured = this.captured();
     return captured?.key ===
-      `${workspacePath}\u0000${runId}\u0000${generatedAt}`
+      `${normalizeSetupWorkspacePath(workspacePath)}\u0000${runId}\u0000${generatedAt}`
       ? captured.counts
       : null;
   }

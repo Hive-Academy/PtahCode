@@ -1,10 +1,17 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import {
+  DestroyRef,
+  Injectable,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import type {
   MultiPhaseAnalysisResponse,
   ResumableGenerationAgent,
   ResumableGenerationRun,
 } from '@ptah-extension/shared';
 
+import { normalizeSetupWorkspacePath } from './setup-run-persistence';
 import { SetupWizardStateService } from './setup-wizard-state.service';
 import type { SkillGenerationProgressItem } from './setup-wizard-state.types';
 import { WizardRpcService } from './wizard-rpc.service';
@@ -53,12 +60,52 @@ function toProgressItem(
   };
 }
 
+/**
+ * Check whether `candidatePath` is equal to or inside `workspacePath`.
+ * Normalizes path separators and compares Windows drive paths case-insensitively.
+ */
+function isPathWithinWorkspace(
+  candidatePath: string,
+  workspacePath: string,
+): boolean {
+  const candidate = normalizeSetupWorkspacePath(candidatePath);
+  const workspace = normalizeSetupWorkspacePath(workspacePath);
+  if (!candidate || !workspace) return false;
+  if (candidate === workspace) {
+    return true;
+  }
+  const prefix = workspace.endsWith('/') ? workspace : `${workspace}/`;
+  return candidate.startsWith(prefix);
+}
+
+/** Parse a numeric or ISO 8601 timestamp into epoch milliseconds. */
+function parseStartedAtMs(
+  value: string | number | null | undefined,
+): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+const BACKEND_POLL_INTERVAL_MS = 2500;
+const MAX_BACKEND_POLL_ERRORS = 5;
+
 @Injectable({
   providedIn: 'root',
 })
 export class WizardAnalysisRunner {
   private readonly wizardState = inject(SetupWizardStateService);
   private readonly wizardRpc = inject(WizardRpcService);
+  private readonly destroyRef = inject(DestroyRef, { optional: true });
 
   private readonly INITIAL_STATUS = 'Initializing workspace scan...';
 
@@ -74,8 +121,21 @@ export class WizardAnalysisRunner {
   /** One-shot guard: `wizard:get-resumable-run` is queried once per session. */
   private discoveryDone = false;
 
+  /** Bounded watcher for a post-reload backend-hydrated analysis run. */
+  private backendWatcherTimer: ReturnType<typeof setTimeout> | null = null;
+  private backendWatcherToken = 0;
+  private backendWatcherErrors = 0;
+
+  /** Currently active frontend workspace path; pauses backend polling on other workspaces. */
+  private currentWorkspacePath: string | null = null;
+
   private readonly _isRunning = signal(false);
+  private readonly _backendActive = signal(false);
   private readonly _isCanceling = signal(false);
+  private readonly _startedAt = signal<number | null>(null);
+  private readonly _activeWorkspacePath = signal<string | null>(null);
+  private readonly _resultWorkspacePath = signal<string | null>(null);
+  private readonly _runGeneration = signal(0);
   private readonly _statusText = signal(this.INITIAL_STATUS);
   private readonly _errorMessage = signal<string | null>(null);
   private readonly _resumableAnalysis =
@@ -84,8 +144,15 @@ export class WizardAnalysisRunner {
     null,
   );
 
-  public readonly isRunning = this._isRunning.asReadonly();
+  public readonly backendActive = this._backendActive.asReadonly();
+  public readonly isRunning = computed(
+    () => this._isRunning() || this._backendActive(),
+  );
   public readonly isCanceling = this._isCanceling.asReadonly();
+  public readonly startedAt = this._startedAt.asReadonly();
+  public readonly activeWorkspacePath = this._activeWorkspacePath.asReadonly();
+  public readonly resultWorkspacePath = this._resultWorkspacePath.asReadonly();
+  public readonly runGeneration = this._runGeneration.asReadonly();
   public readonly statusText = this._statusText.asReadonly();
   public readonly errorMessage = this._errorMessage.asReadonly();
   /** An unfinished persisted analysis the user can resume or discard. */
@@ -98,6 +165,266 @@ export class WizardAnalysisRunner {
     () => this.wizardState.multiPhaseResult() !== null,
   );
 
+  public constructor() {
+    this.destroyRef?.onDestroy(() => this.stopBackendWatcher());
+  }
+
+  /**
+   * Whether an analysis run is currently active (running, canceling, or
+   * hydrated from an active backend run) for the given workspace path.
+   * When the caller that started the run omitted `workspacePath`, returns
+   * `true` for backward compatibility.
+   */
+  public isRunningForWorkspace(
+    workspacePath: string | null | undefined,
+  ): boolean {
+    if (!this._isRunning() && !this._isCanceling() && !this._backendActive()) {
+      return false;
+    }
+    const activePath = this._activeWorkspacePath();
+    if (activePath === null) {
+      return true;
+    }
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
+    return normalized !== null && normalized === activePath;
+  }
+
+  /**
+   * Whether the last completed or failed result/error belongs to the given
+   * workspace path. Returns `true` when no result workspace was recorded
+   * (legacy callers or no result yet), or when the normalized paths match.
+   */
+  public isResultForWorkspace(
+    workspacePath: string | null | undefined,
+  ): boolean {
+    const resultPath = this._resultWorkspacePath();
+    if (resultPath === null) {
+      return true;
+    }
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
+    return normalized !== null && normalized === resultPath;
+  }
+
+  /**
+   * Notify the runner which workspace is currently active in the frontend.
+   * Pauses the backend completion watcher while another workspace is active so
+   * `getResumableRun()` is never polled against the wrong backend workspace,
+   * and resumes watching when the user switches back.
+   */
+  public setCurrentWorkspacePath(
+    workspacePath: string | null | undefined,
+  ): void {
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
+    if (normalized === this.currentWorkspacePath) {
+      return;
+    }
+    this.currentWorkspacePath = normalized;
+
+    if (!this._backendActive() || this._isRunning()) {
+      return;
+    }
+
+    if (!this.isWatcherAllowedForCurrentWorkspace()) {
+      // Pause polling without clearing `_backendActive` — the other workspace is still running.
+      this.stopBackendWatcher();
+      return;
+    }
+
+    if (this.backendWatcherTimer === null) {
+      this.startBackendWatcher();
+    }
+  }
+
+  /**
+   * Synchronize runner state with an in-process analysis running on the
+   * backend (e.g., after a webview reload).
+   */
+  public syncBackendActive(
+    active: boolean,
+    options?: {
+      startedAt?: string | number | null;
+      workspacePath?: string | null;
+    },
+  ): void {
+    if (!active) {
+      this.stopBackendWatcher();
+      this._backendActive.set(false);
+      if (!this._isRunning()) {
+        this._startedAt.set(null);
+        this._activeWorkspacePath.set(null);
+      }
+      return;
+    }
+
+    // Never latch backend-hydrated state while a local run owns the lifecycle.
+    if (this._isRunning()) {
+      return;
+    }
+
+    this._backendActive.set(true);
+    this._resumableAnalysis.set(null);
+
+    const normalizedWorkspace = normalizeSetupWorkspacePath(
+      options?.workspacePath,
+    );
+    if (
+      this._startedAt() === null ||
+      (normalizedWorkspace !== null &&
+        normalizedWorkspace !== this._activeWorkspacePath())
+    ) {
+      this._startedAt.set(parseStartedAtMs(options?.startedAt));
+    }
+
+    if (normalizedWorkspace !== null) {
+      this._activeWorkspacePath.set(normalizedWorkspace);
+    }
+
+    if (this.isWatcherAllowedForCurrentWorkspace()) {
+      this.startBackendWatcher();
+    } else {
+      this.stopBackendWatcher();
+    }
+  }
+
+  private isWatcherAllowedForCurrentWorkspace(
+    watchedWorkspace: string | null = this._activeWorkspacePath(),
+  ): boolean {
+    return (
+      this.currentWorkspacePath === null ||
+      watchedWorkspace === null ||
+      this.currentWorkspacePath === watchedWorkspace
+    );
+  }
+
+  private startBackendWatcher(): void {
+    if (
+      this.backendWatcherTimer !== null ||
+      !this._backendActive() ||
+      this._isRunning() ||
+      !this.isWatcherAllowedForCurrentWorkspace()
+    ) {
+      return;
+    }
+    this.backendWatcherErrors = 0;
+    const watcherToken = ++this.backendWatcherToken;
+    this.scheduleBackendWatcherTick(watcherToken);
+  }
+
+  private scheduleBackendWatcherTick(watcherToken: number): void {
+    if (
+      watcherToken !== this.backendWatcherToken ||
+      !this._backendActive() ||
+      this._isRunning() ||
+      !this.isWatcherAllowedForCurrentWorkspace()
+    ) {
+      return;
+    }
+    this.backendWatcherTimer = setTimeout(() => {
+      this.backendWatcherTimer = null;
+      void this.pollBackendActive(watcherToken);
+    }, BACKEND_POLL_INTERVAL_MS);
+  }
+
+  private async pollBackendActive(watcherToken: number): Promise<void> {
+    if (
+      watcherToken !== this.backendWatcherToken ||
+      !this._backendActive() ||
+      this._isRunning()
+    ) {
+      this.stopBackendWatcher();
+      return;
+    }
+
+    const watchedWorkspace = this._activeWorkspacePath();
+    const workspaceBefore = this.currentWorkspacePath;
+    if (!this.isWatcherAllowedForCurrentWorkspace(watchedWorkspace)) {
+      this.stopBackendWatcher();
+      return;
+    }
+
+    try {
+      const resumable = await this.wizardRpc.getResumableRun();
+      if (
+        watcherToken !== this.backendWatcherToken ||
+        !this._backendActive() ||
+        this._isRunning()
+      ) {
+        return;
+      }
+      if (
+        this.currentWorkspacePath !== workspaceBefore ||
+        !this.isWatcherAllowedForCurrentWorkspace(watchedWorkspace)
+      ) {
+        if (this.isWatcherAllowedForCurrentWorkspace(watchedWorkspace)) {
+          this.scheduleBackendWatcherTick(watcherToken);
+        } else {
+          this.stopBackendWatcher();
+        }
+        return;
+      }
+
+      if (resumable.analysisActive === true) {
+        this.backendWatcherErrors = 0;
+        this.scheduleBackendWatcherTick(watcherToken);
+        return;
+      }
+
+      if (resumable.analysisActive === false) {
+        this.backendWatcherErrors = 0;
+        const analysis = resumable.analysis;
+        const analysisMatchesWorkspace =
+          watchedWorkspace === null ||
+          !analysis?.analysisDir ||
+          isPathWithinWorkspace(analysis.analysisDir, watchedWorkspace);
+        if (
+          analysis &&
+          analysisMatchesWorkspace &&
+          (analysis.manifest.lifecycle === 'completed' ||
+            analysis.manifest.lifecycle === 'failed') &&
+          !this.wizardState.multiPhaseResult()
+        ) {
+          this._resultWorkspacePath.set(watchedWorkspace);
+          this.wizardState.setMultiPhaseResult(analysis);
+        }
+        this.syncBackendActive(false);
+        return;
+      }
+
+      // `WizardRpcService.getResumableRun()` swallows RPC errors and returns
+      // `{ analysis: null, generation: null }` (`analysisActive === undefined`).
+      // Treat missing `analysisActive` as a transient poll error, not completion.
+      this.handleBackendPollError(watcherToken);
+    } catch {
+      // degradation-audit: optional-capability - backend watcher retries transient poll failures up to a bounded limit.
+      this.handleBackendPollError(watcherToken);
+    }
+  }
+
+  private handleBackendPollError(watcherToken: number): void {
+    if (
+      watcherToken !== this.backendWatcherToken ||
+      !this._backendActive() ||
+      this._isRunning()
+    ) {
+      return;
+    }
+    this.backendWatcherErrors++;
+    if (this.backendWatcherErrors >= MAX_BACKEND_POLL_ERRORS) {
+      this.stopBackendWatcher();
+      return;
+    }
+    this.scheduleBackendWatcherTick(watcherToken);
+  }
+
+  private stopBackendWatcher(): void {
+    this.backendWatcherToken++;
+    if (this.backendWatcherTimer !== null) {
+      clearTimeout(this.backendWatcherTimer);
+      this.backendWatcherTimer = null;
+    }
+    this.backendWatcherErrors = 0;
+  }
+
   /**
    * Start the analysis unless one is already running. Safe to call from every
    * `ngOnInit` — a remount during a run joins the existing promise, and a
@@ -108,25 +435,25 @@ export class WizardAnalysisRunner {
    * never deleted or restarted automatically — the user chooses through
    * `resumeAnalysis()` or `startFreshAnalysis()`.
    */
-  public ensureStarted(): Promise<void> {
-    return this.launch(() => this.launchAfterDiscovery());
+  public ensureStarted(workspacePath?: string | null): Promise<void> {
+    return this.launch(() => this.launchAfterDiscovery(workspacePath));
   }
 
   /** Re-run after a failure. Identical to `ensureStarted()` by design. */
-  public retry(): Promise<void> {
-    return this.ensureStarted();
+  public retry(workspacePath?: string | null): Promise<void> {
+    return this.ensureStarted(workspacePath);
   }
 
   /** Continue the discovered unfinished analysis on the backend. */
-  public resumeAnalysis(): Promise<void> {
+  public resumeAnalysis(workspacePath?: string | null): Promise<void> {
     this._resumableAnalysis.set(null);
-    return this.launch(() => this.run(true));
+    return this.launch(() => this.run(true, workspacePath, false));
   }
 
   /** Discard the resume offer and run a fresh analysis. */
-  public startFreshAnalysis(): Promise<void> {
+  public startFreshAnalysis(workspacePath?: string | null): Promise<void> {
     this._resumableAnalysis.set(null);
-    return this.launch(() => this.run(false));
+    return this.launch(() => this.run(false, workspacePath, false));
   }
 
   /**
@@ -179,29 +506,48 @@ export class WizardAnalysisRunner {
   }
 
   /** First-start path: discover a resumable run, then hold or analyze. */
-  private async launchAfterDiscovery(): Promise<void> {
+  private async launchAfterDiscovery(
+    workspacePath?: string | null,
+  ): Promise<void> {
     const token = this.runToken;
-    await this.discoverResumableRun();
+    await this.discoverResumableRun(token, workspacePath);
     if (token !== this.runToken) {
       // A cancel/reset landed while discovery was in flight.
+      return;
+    }
+    if (this._backendActive()) {
+      this._statusText.set('Analyzing project structure...');
       return;
     }
     if (this._resumableAnalysis()) {
       this._statusText.set('An unfinished analysis was found.');
       return;
     }
-    return this.run(false);
+    return this.run(false, workspacePath, true);
   }
 
-  private async discoverResumableRun(): Promise<void> {
+  private async discoverResumableRun(
+    token: number,
+    workspacePath?: string | null,
+  ): Promise<void> {
     if (this.discoveryDone) {
       return;
     }
     this.discoveryDone = true;
 
     const resumable = await this.wizardRpc.getResumableRun();
+    if (token !== this.runToken) {
+      return;
+    }
     if (resumable.generation) {
       this._resumableGeneration.set(resumable.generation);
+    }
+    if (resumable.analysisActive === true) {
+      this.syncBackendActive(true, {
+        startedAt: resumable.activeAnalysisStartedAt,
+        workspacePath,
+      });
+      return;
     }
     const analysis = resumable.analysis;
     if (!analysis) {
@@ -211,6 +557,9 @@ export class WizardAnalysisRunner {
       // Not resumable — adopt it as the stored result so the wizard can
       // continue where it stopped (e.g. resume its generation run).
       if (!this.wizardState.multiPhaseResult()) {
+        this._resultWorkspacePath.set(
+          normalizeSetupWorkspacePath(workspacePath),
+        );
         this.wizardState.setMultiPhaseResult(analysis);
       }
       return;
@@ -225,9 +574,11 @@ export class WizardAnalysisRunner {
    * result (or advance the step) after the user has already cancelled.
    */
   public async cancel(): Promise<void> {
+    this.stopBackendWatcher();
     this._isCanceling.set(true);
     this._statusText.set('Canceling analysis...');
     this.runToken++;
+    this._runGeneration.update((n) => n + 1);
     this.inFlight = null;
     try {
       await this.wizardRpc.cancelAnalysis();
@@ -239,22 +590,44 @@ export class WizardAnalysisRunner {
 
   /** Drop runner-local UI state and invalidate any run still in flight. */
   public reset(): void {
+    this.stopBackendWatcher();
     this.runToken++;
+    this._runGeneration.update((n) => n + 1);
     this.inFlight = null;
     this._isRunning.set(false);
+    this._backendActive.set(false);
     this._isCanceling.set(false);
+    this._startedAt.set(null);
+    this._activeWorkspacePath.set(null);
+    this._resultWorkspacePath.set(null);
     this._errorMessage.set(null);
     this._statusText.set(this.INITIAL_STATUS);
   }
 
-  private async run(resume: boolean): Promise<void> {
+  private async run(
+    resume: boolean,
+    workspacePath?: string | null,
+    allowCachedResult = false,
+  ): Promise<void> {
     const token = ++this.runToken;
+    this._runGeneration.update((n) => n + 1);
+    this.stopBackendWatcher();
+    const normalizedWorkspace = normalizeSetupWorkspacePath(workspacePath);
     this._isRunning.set(true);
+    this._backendActive.set(false);
+    this._startedAt.set(Date.now());
+    this._activeWorkspacePath.set(normalizedWorkspace);
     this._errorMessage.set(null);
 
     try {
       const existingMultiPhase = this.wizardState.multiPhaseResult();
-      if (existingMultiPhase) {
+      const existingLifecycle = existingMultiPhase?.manifest?.lifecycle;
+      if (
+        allowCachedResult &&
+        !resume &&
+        existingMultiPhase &&
+        (existingLifecycle === undefined || existingLifecycle === 'completed')
+      ) {
         this.wizardState.setCurrentStep('analysis');
         return;
       }
@@ -266,6 +639,7 @@ export class WizardAnalysisRunner {
       );
       const multiPhaseResult = await this.wizardRpc.deepAnalyze({ resume });
       if (token !== this.runToken) return;
+      this._resultWorkspacePath.set(normalizedWorkspace);
       this.wizardState.setMultiPhaseResult(multiPhaseResult);
 
       this.wizardState.setCurrentStep('analysis');
@@ -275,12 +649,18 @@ export class WizardAnalysisRunner {
         error instanceof Error
           ? error.message
           : 'Analysis failed. Please try again.';
+      this._resultWorkspacePath.set(normalizedWorkspace);
       this._errorMessage.set(message);
       this._statusText.set('Analysis failed');
       console.error('[WizardAnalysisRunner] Analysis failed:', error);
     } finally {
       if (token === this.runToken) {
+        this.stopBackendWatcher();
         this._isRunning.set(false);
+        this._backendActive.set(false);
+        this._startedAt.set(null);
+        this._activeWorkspacePath.set(null);
+        this._runGeneration.update((n) => n + 1);
       }
     }
   }

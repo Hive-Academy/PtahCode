@@ -25,6 +25,7 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
 }));
 
 import {
+  WizardCancelSkillInstallParamsSchema,
   WizardDeepAnalyzeParamsSchema,
   WizardRecommendAnalysisSkillsParamsSchema,
   WizardGetResumableRunParamsSchema,
@@ -91,6 +92,25 @@ describe('setup-rpc.schema', () => {
         WizardListAnalysesParamsSchema.safeParse({ workspacePath: '/ws' })
           .success,
       ).toBe(true);
+    });
+  });
+
+  describe('WizardCancelSkillInstallParamsSchema', () => {
+    it('accepts an install run ID', () => {
+      expect(
+        WizardCancelSkillInstallParamsSchema.safeParse({ installRunId: 'install-1' }).success,
+      ).toBe(true);
+    });
+
+    it.each([
+      undefined,
+      {},
+      { installRunId: ' ' },
+      { installRunId: 1 },
+      { installRunId: 'a'.repeat(201) },
+      { installRunId: 'install-1', workspacePath: '/ws' },
+    ])('rejects invalid cancel params %p', (params) => {
+      expect(WizardCancelSkillInstallParamsSchema.safeParse(params).success).toBe(false);
     });
   });
 

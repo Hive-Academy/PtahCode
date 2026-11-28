@@ -74,6 +74,19 @@ interface PropagationOutcome {
   libraryPass: LibraryPassStatus;
 }
 
+function normalizeInstalls(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+function compareSkillsByInstallsDesc(a: SkillShEntry, b: SkillShEntry): number {
+  return (
+    normalizeInstalls(b.installs) - normalizeInstalls(a.installs) ||
+    a.skillId.localeCompare(b.skillId) ||
+    a.source.localeCompare(b.source) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 const CURATED_POPULAR_SKILLS: SkillShEntry[] = [
   {
     source: 'vercel-labs/agent-skills',
@@ -248,7 +261,7 @@ export class SkillsShRpcHandlers {
         try {
           const apiSkills = await this.apiClient.search(sanitizedQuery);
           const enriched = await this.enrichWithInstallStatus(apiSkills);
-          return { skills: enriched };
+          return { skills: [...enriched].sort(compareSkillsByInstallsDesc) };
         } catch (error: unknown) {
           const message =
             error instanceof Error ? error.message : String(error);
@@ -276,7 +289,9 @@ export class SkillsShRpcHandlers {
           };
         }
 
-        const skills = this.parseSkillsOutput(result.stdout);
+        const skills = this.parseSkillsOutput(result.stdout).sort(
+          compareSkillsByInstallsDesc,
+        );
         this.logger.debug('RPC: skillsSh:search success', {
           resultCount: skills.length,
         });
@@ -365,6 +380,7 @@ export class SkillsShRpcHandlers {
     verifyStaged?: (
       staged: { slug: string; dir: string }[],
     ) => Promise<void> | void,
+    pinnedWorkspaceRoot?: string,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -414,7 +430,7 @@ export class SkillsShRpcHandlers {
       // The default is THIS workspace (Phase D). With no folder open there
       // is no workspace root to write, so the request is refused before the
       // legacy sweep or any write; only an explicit `'global'` proceeds.
-      const workspaceRoot = this.getWorkspaceRoot();
+      const workspaceRoot = pinnedWorkspaceRoot ?? this.getWorkspaceRoot();
       if (parsed.data.scope === 'workspace' && workspaceRoot === '') {
         throw new RpcUserError(
           SKILLS_SH_NO_WORKSPACE_ERROR,
@@ -426,7 +442,7 @@ export class SkillsShRpcHandlers {
           ? { scope: 'global' }
           : { scope: 'workspace', workspaceRoot };
 
-      await this.adoptLegacyInstalls();
+      await this.adoptLegacyInstalls(workspaceRoot);
 
       const request = {
         source: parsed.data.source,
@@ -446,8 +462,10 @@ export class SkillsShRpcHandlers {
       }
 
       this.invalidateCaches();
-      const pass = await this.propagate('skillsSh:install');
+      const harnessRoot = this.getHarnessRoot(workspaceRoot);
+      const pass = await this.propagate('skillsSh:install', harnessRoot);
       const kept = await this.keptForInstall(
+        harnessRoot,
         result.rootId,
         result.slugs,
         pass.health,
@@ -671,8 +689,10 @@ export class SkillsShRpcHandlers {
    * helper `PluginRpcHandlers` uses for the same purpose, including the
    * harness root (8.1): a sub-folder workspace propagates its repository.
    */
-  private async propagate(reason: string): Promise<PropagationOutcome> {
-    const harnessRoot = this.getHarnessRoot();
+  private async propagate(
+    reason: string,
+    harnessRoot = this.getHarnessRoot(),
+  ): Promise<PropagationOutcome> {
     if (harnessRoot === '') {
       return { health: null, libraryPass: 'not-applicable' };
     }
@@ -705,11 +725,11 @@ export class SkillsShRpcHandlers {
    * and every kept item simply stays.
    */
   private async keptForInstall(
+    harnessRoot: string,
     rootId: string,
     slugs: readonly string[],
     health: HarnessHealth | null,
   ): Promise<KeptItem[]> {
-    const harnessRoot = this.getHarnessRoot();
     if (harnessRoot === '') return [];
     try {
       return await this.localItems.keptReport({
@@ -738,10 +758,10 @@ export class SkillsShRpcHandlers {
    * runs when the user is already acting on skills.sh, it is idempotent, and it
    * never blocks the action it precedes.
    */
-  private async adoptLegacyInstalls(): Promise<void> {
+  private async adoptLegacyInstalls(workspaceRoot: string): Promise<void> {
     try {
       const adopted = await this.sourceRoots.adoptLegacyInstalls(
-        this.getWorkspaceRoot() || undefined,
+        workspaceRoot || undefined,
       );
       if (adopted > 0) {
         this.logger.info('RPC: skillsSh adopted legacy installs', { adopted });
@@ -793,14 +813,17 @@ export class SkillsShRpcHandlers {
           );
         }
 
-        this.popularCache = { data: skills, timestamp: Date.now() };
-        return { skills };
+        const sorted = [...skills].sort(compareSkillsByInstallsDesc);
+        this.popularCache = { data: sorted, timestamp: Date.now() };
+        return { skills: sorted };
       } catch (error) {
         this.logger.error(
           'RPC: skillsSh:getPopular failed',
           error instanceof Error ? error : new Error(String(error)),
         );
-        return { skills: CURATED_POPULAR_SKILLS };
+        return {
+          skills: [...CURATED_POPULAR_SKILLS].sort(compareSkillsByInstallsDesc),
+        };
       }
     });
   }
@@ -827,8 +850,9 @@ export class SkillsShRpcHandlers {
           const detected = await this.detectTechnologies(workspaceRoot);
 
           const recommendedSkills = this.matchSkillsToTechnologies(detected);
-          const enriched =
-            await this.enrichWithInstallStatus(recommendedSkills);
+          const enriched = [
+            ...(await this.enrichWithInstallStatus(recommendedSkills)),
+          ].sort(compareSkillsByInstallsDesc);
 
           this.logger.debug('RPC: skillsSh:detectRecommended success', {
             frameworks: detected.frameworks,
@@ -1030,11 +1054,11 @@ export class SkillsShRpcHandlers {
     skills: SkillShEntry[],
   ): Promise<SkillShEntry[]> {
     const installed = await this.getInstalledSkillNames();
-    for (const skill of skills) {
-      skill.isInstalled =
-        installed.has(skill.skillId) || installed.has(skill.name.toLowerCase());
-    }
-    return skills;
+    return skills.map((skill) => ({
+      ...skill,
+      isInstalled:
+        installed.has(skill.skillId) || installed.has(skill.name.toLowerCase()),
+    }));
   }
 
   /**
@@ -1063,8 +1087,7 @@ export class SkillsShRpcHandlers {
   }
 
   /** Harness root of the open folder, or an empty string with none open. */
-  private getHarnessRoot(): string {
-    const workspaceRoot = this.getWorkspaceRoot();
+  private getHarnessRoot(workspaceRoot = this.getWorkspaceRoot()): string {
     return workspaceRoot === ''
       ? ''
       : resolveHarnessWorkspaceRoot(workspaceRoot);

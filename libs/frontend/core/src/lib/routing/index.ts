@@ -29,7 +29,6 @@ export {
   ONBOARDING_READY_QUERY,
   isOnboardingIdentityValue,
   onboardingGenerationBinding,
-  onboardingGenerationTarget,
   onboardingHarnessTarget,
   onboardingReadyTarget,
   parseOnboardingReadyArea,
@@ -39,6 +38,8 @@ export {
   type OnboardingReadyOpen,
   type OnboardingTarget,
 } from './onboarding-routes';
+
+export { SETUP_RUN_ENTRY, type SetupRunEntry } from './setup-run-entry';
 
 export { SURFACE_ACTIVE, surfaceActiveFor } from './surface-active';
 export { isReviewSurfaceAvailable } from './review-surface-availability';

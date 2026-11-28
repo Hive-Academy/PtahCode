@@ -174,20 +174,19 @@ describe.each(['system-one', 'structured'] as const)(
         maxRequestBytes: 10_000,
         signal: AbortSignal.abort(),
       },
-    ])('suppresses dispatch and onProviderSubmit on $requestCause', async ({
-      requestCause,
-      maxRequestBytes,
-      signal,
-    }) => {
-      const { input, decide, complete, onProviderSubmit } = setup();
+    ])(
+      'suppresses dispatch and onProviderSubmit on $requestCause',
+      async ({ requestCause, maxRequestBytes, signal }) => {
+        const { input, decide, complete, onProviderSubmit } = setup();
 
-      await expect(
-        runFixedRequest({ ...input, maxRequestBytes, signal }),
-      ).resolves.toMatchObject({ sent: false, requestCause });
-      expect(onProviderSubmit).not.toHaveBeenCalled();
-      expect(decide).not.toHaveBeenCalled();
-      expect(complete).not.toHaveBeenCalled();
-    });
+        await expect(
+          runFixedRequest({ ...input, maxRequestBytes, signal }),
+        ).resolves.toMatchObject({ sent: false, requestCause });
+        expect(onProviderSubmit).not.toHaveBeenCalled();
+        expect(decide).not.toHaveBeenCalled();
+        expect(complete).not.toHaveBeenCalled();
+      },
+    );
 
     it('checks cancellation again at the provider call boundary', async () => {
       const { input, decide, complete, onProviderSubmit } = setup();
@@ -195,10 +194,17 @@ describe.each(['system-one', 'structured'] as const)(
       const submission = { signal: AbortSignal.abort(), onProviderSubmit };
       const outcome =
         dispatch.kind === 'system-one'
-          ? await callSystemOne(dispatch.caller, PAYLOAD, new Map(), [], undefined, {
-              ...submission,
-              pair: { provider: dispatch.provider, model: dispatch.model },
-            })
+          ? await callSystemOne(
+              dispatch.caller,
+              PAYLOAD,
+              new Map(),
+              [],
+              undefined,
+              {
+                ...submission,
+                pair: { provider: dispatch.provider, model: dispatch.model },
+              },
+            )
           : await callStructured(
               dispatch,
               'prompt',
@@ -252,6 +258,42 @@ describe('callStructured deadline', () => {
     expect(clear).toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
     clear.mockRestore();
+  });
+
+  it('extends the structured deadline when dispatch.timeoutMs is provided', async () => {
+    jest.useFakeTimers();
+    const settled = jest.fn();
+    const pending = callStructured(
+      {
+        kind: 'structured',
+        completer: completer(() => new Promise(() => undefined)),
+        providerId: 'openrouter',
+        model: 'claude-haiku',
+        signal: new AbortController().signal,
+        timeoutMs: 10_000,
+      },
+      'prompt',
+      { type: 'object' },
+      new Map(),
+      [],
+      quietLogger(),
+    ).then(settled);
+
+    await jest.advanceTimersByTimeAsync(BUDGET + 1);
+    expect(settled).not.toHaveBeenCalled();
+
+    await jest.advanceTimersByTimeAsync(
+      10_000 + DECISION_RETURN_MARGIN_MS - BUDGET,
+    );
+    await pending;
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sent: true,
+        succeeded: false,
+        requestCause: 'timeout',
+      }),
+    );
+    expect(jest.getTimerCount()).toBe(0);
   });
 });
 
@@ -359,7 +401,6 @@ async function budgetsFor(
   }
 }
 
-
 describe('System One admission and token measurement', () => {
   const reply: SystemOneCallResult = {
     ok: true,
@@ -374,9 +415,24 @@ describe('System One admission and token measurement', () => {
     const metrics = {
       promptTokens: 100,
       logger,
-      admission: { targetKey: 'target', rates, maxTimeoutMs: 3000, remainingMs: () => remainingMs, now: () => now, signal: abort.signal },
+      admission: {
+        targetKey: 'target',
+        rates,
+        maxTimeoutMs: 3000,
+        remainingMs: () => remainingMs,
+        now: () => now,
+        signal: abort.signal,
+      },
     };
-    return { metrics, rates, abort, logger, advance: (ms: number) => { now += ms; } };
+    return {
+      metrics,
+      rates,
+      abort,
+      logger,
+      advance: (ms: number) => {
+        now += ms;
+      },
+    };
   }
 
   it('skips over-budget estimates and dispatches at the cost boundary', async () => {
@@ -390,10 +446,19 @@ describe('System One admission and token measurement', () => {
       return reply;
     });
     rates.recordCompleted('target', 99, 1000);
-    const skipped = await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics, submission);
+    const skipped = await callSystemOne(
+      { decide },
+      PAYLOAD,
+      new Map(),
+      [],
+      metrics,
+      submission,
+    );
     expect(skipped).toMatchObject({
-      sent: false, requestCause: 'deadline',
-      requestReason: 'estimated decision model cost 1261 ms exceeds 1250 ms remaining',
+      sent: false,
+      requestCause: 'deadline',
+      requestReason:
+        'estimated decision model cost 1261 ms exceeds 1250 ms remaining',
     });
     expect(decide).not.toHaveBeenCalled();
     expect(submission.onProviderSubmit).not.toHaveBeenCalled();
@@ -404,17 +469,27 @@ describe('System One admission and token measurement', () => {
       ...metrics,
       admission: { ...metrics.admission, configuredRate: 100 },
     };
-    const sent = await callSystemOne({ decide }, PAYLOAD, new Map(), [], atBoundary, submission);
+    const sent = await callSystemOne(
+      { decide },
+      PAYLOAD,
+      new Map(),
+      [],
+      atBoundary,
+      submission,
+    );
     expect(sent).toMatchObject({ sent: true, inputTokens: 80 });
     expect(decide).toHaveBeenCalledWith(PAYLOAD, 1250);
     expect(submission.onProviderSubmit).toHaveBeenCalledTimes(1);
     expect(submission.onProviderSubmit).toHaveBeenCalledWith(submission.pair);
-    expect(submission.onProviderSubmit.mock.invocationCallOrder[0]).toBeLessThan(
-      decide.mock.invocationCallOrder[0],
-    );
+    expect(
+      submission.onProviderSubmit.mock.invocationCallOrder[0],
+    ).toBeLessThan(decide.mock.invocationCallOrder[0]);
     expect(rates.rate('target')).toBeCloseTo(93.3);
     expect(logger.debug).toHaveBeenCalledTimes(1);
-    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 80, inputTokensSource: 'usage' });
+    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), {
+      inputTokens: 80,
+      inputTokensSource: 'usage',
+    });
   });
 
   it('skips estimates that fit the route deadline but exceed the target timeout', async () => {
@@ -425,11 +500,14 @@ describe('System One admission and token measurement', () => {
       admission: { ...metrics.admission, configuredRate: 25 },
     };
 
-    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], configured))
-      .resolves.toMatchObject({
-        sent: false, requestCause: 'deadline',
-        requestReason: 'estimated decision model cost 4250 ms exceeds 3000 ms remaining',
-      });
+    await expect(
+      callSystemOne({ decide }, PAYLOAD, new Map(), [], configured),
+    ).resolves.toMatchObject({
+      sent: false,
+      requestCause: 'deadline',
+      requestReason:
+        'estimated decision model cost 4250 ms exceeds 3000 ms remaining',
+    });
     expect(decide).not.toHaveBeenCalled();
   });
 
@@ -438,12 +516,21 @@ describe('System One admission and token measurement', () => {
     const decide = jest.fn(async () => reply);
     const broken = {
       ...metrics,
-      admission: { ...metrics.admission, now: () => { throw new Error('clock failed'); } },
+      admission: {
+        ...metrics.admission,
+        now: () => {
+          throw new Error('clock failed');
+        },
+      },
     };
 
-    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], broken)).rejects.toThrow('clock failed');
+    await expect(
+      callSystemOne({ decide }, PAYLOAD, new Map(), [], broken),
+    ).rejects.toThrow('clock failed');
     expect(decide).not.toHaveBeenCalled();
-    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics)).resolves.toMatchObject({ sent: true });
+    await expect(
+      callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics),
+    ).resolves.toMatchObject({ sent: true });
   });
 
   it('releases the target when the caller cancels after admission', async () => {
@@ -462,11 +549,13 @@ describe('System One admission and token measurement', () => {
       },
     };
 
-    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], admitted, {
-      pair: { provider: 'jev', model: 'nimble' },
-      signal: caller.signal,
-      onProviderSubmit,
-    })).resolves.toMatchObject({ sent: false, requestCause: 'cancelled' });
+    await expect(
+      callSystemOne({ decide }, PAYLOAD, new Map(), [], admitted, {
+        pair: { provider: 'jev', model: 'nimble' },
+        signal: caller.signal,
+        onProviderSubmit,
+      }),
+    ).resolves.toMatchObject({ sent: false, requestCause: 'cancelled' });
     expect(decide).not.toHaveBeenCalled();
     expect(onProviderSubmit).not.toHaveBeenCalled();
     expect(logger.debug).not.toHaveBeenCalled();
@@ -476,9 +565,18 @@ describe('System One admission and token measurement', () => {
   it('releases an aborted target before transport settles and preserves the next reservation', async () => {
     const { metrics, abort, rates, advance } = admissionTest(3000);
     let finishFirst: (value: SystemOneCallResult) => void = () => undefined;
-    const first = callSystemOne({
-      decide: () => new Promise<SystemOneCallResult>((resolve) => { finishFirst = resolve; }),
-    }, PAYLOAD, new Map(), [], metrics);
+    const first = callSystemOne(
+      {
+        decide: () =>
+          new Promise<SystemOneCallResult>((resolve) => {
+            finishFirst = resolve;
+          }),
+      },
+      PAYLOAD,
+      new Map(),
+      [],
+      metrics,
+    );
 
     advance(1000);
     abort.abort();
@@ -487,14 +585,20 @@ describe('System One admission and token measurement', () => {
       admission: { ...metrics.admission, signal: new AbortController().signal },
     };
     let finishSecond: (value: SystemOneCallResult) => void = () => undefined;
-    const decide = jest.fn(() => new Promise<SystemOneCallResult>((resolve) => { finishSecond = resolve; }));
+    const decide = jest.fn(
+      () =>
+        new Promise<SystemOneCallResult>((resolve) => {
+          finishSecond = resolve;
+        }),
+    );
     const second = callSystemOne({ decide }, PAYLOAD, new Map(), [], next);
     expect(decide).toHaveBeenCalledTimes(1);
 
     finishFirst(reply);
     await first;
-    await expect(callSystemOne({ decide }, PAYLOAD, new Map(), [], next))
-      .resolves.toMatchObject({ sent: false, requestCause: 'model-busy' });
+    await expect(
+      callSystemOne({ decide }, PAYLOAD, new Map(), [], next),
+    ).resolves.toMatchObject({ sent: false, requestCause: 'model-busy' });
 
     finishSecond(reply);
     await second;
@@ -509,7 +613,12 @@ describe('System One admission and token measurement', () => {
     const logger = { ...quietLogger(), warn: jest.fn() };
     const seen: SystemOneClientOptions[] = [];
     const caller = new DecisionCaller({
-      config: new DecisionModelConfig(workspace, createMockSecretStorage(), createMockStateStorage(), logger),
+      config: new DecisionModelConfig(
+        workspace,
+        createMockSecretStorage(),
+        createMockStateStorage(),
+        logger,
+      ),
       logger,
       readPrefillTokensPerSecond: readRate,
       seams: {
@@ -519,22 +628,34 @@ describe('System One admission and token measurement', () => {
           return {
             decide: async () => {
               now += 1000;
-              return { ok: true, result: { model: 'nimble', answers: {}, usage: { input_tokens: 1 } } };
+              return {
+                ok: true,
+                result: {
+                  model: 'nimble',
+                  answers: {},
+                  usage: { input_tokens: 1 },
+                },
+              };
             },
           };
         },
       },
     });
     const run = () => {
-      const dispatch = caller.dispatchFor({
-        kind: 'system-one',
-        selection: { kind: 'ollama-cloud', model: REMOTE_TARGET.model },
-        provider: 'ollama',
-        target: { ...REMOTE_TARGET, timeoutMs: 15000, timeoutExplicit: true },
-      }, { remainingMs: () => remaining, signal: new AbortController().signal });
+      const dispatch = caller.dispatchFor(
+        {
+          kind: 'system-one',
+          selection: { kind: 'ollama-cloud', model: REMOTE_TARGET.model },
+          provider: 'ollama',
+          target: { ...REMOTE_TARGET, timeoutMs: 15000, timeoutExplicit: true },
+        },
+        { remainingMs: () => remaining, signal: new AbortController().signal },
+      );
       return runFixedRequest({
         request: 'classify',
-        questions: [{ key: 'q', instructions: 'Choose', criteria: { o1: 'A', o2: 'B' } }],
+        questions: [
+          { key: 'q', instructions: 'Choose', criteria: { o1: 'A', o2: 'B' } },
+        ],
         maxRequestBytes: 100_000,
         dispatch,
         logger,
@@ -544,12 +665,16 @@ describe('System One admission and token measurement', () => {
     expect((await run()).sent).toBe(true);
     expect(seen[0].timeoutMs).toBe(3000);
     expect(await run()).toMatchObject({
-      sent: false, requestCause: 'deadline', requestReason: expect.stringContaining('estimated decision model cost'),
+      sent: false,
+      requestCause: 'deadline',
+      requestReason: expect.stringContaining('estimated decision model cost'),
     });
     expect(seen).toHaveLength(1);
     readRate.mockReturnValueOnce(0);
     expect((await run()).sent).toBe(false);
-    readRate.mockImplementationOnce(() => { throw new Error('private details'); });
+    readRate.mockImplementationOnce(() => {
+      throw new Error('private details');
+    });
     expect((await run()).sent).toBe(false);
     readRate.mockReturnValue(1000);
     remaining = 1500;
@@ -557,39 +682,80 @@ describe('System One admission and token measurement', () => {
     expect(seen[1].timeoutMs).toBe(1500);
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(
-      '[lane-routing] decision model prefill setting could not be read', { name: 'Error' },
+      '[lane-routing] decision model prefill setting could not be read',
+      { name: 'Error' },
     );
   });
 
   it('skips overlapping requests for the same target and keeps other targets independent', async () => {
     const { metrics, advance } = admissionTest();
     let finish: (value: SystemOneCallResult) => void = () => undefined;
-    const decide = jest.fn(() => new Promise<SystemOneCallResult>((resolve) => { finish = resolve; }));
+    const decide = jest.fn(
+      () =>
+        new Promise<SystemOneCallResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const first = callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics);
-    expect(await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics))
-      .toMatchObject({ sent: false, requestCause: 'model-busy' });
-    const other = { ...metrics, admission: { ...metrics.admission, targetKey: 'other' } };
-    expect((await callSystemOne({ decide: async () => reply }, PAYLOAD, new Map(), [], other)).sent).toBe(true);
+    expect(
+      await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics),
+    ).toMatchObject({ sent: false, requestCause: 'model-busy' });
+    const other = {
+      ...metrics,
+      admission: { ...metrics.admission, targetKey: 'other' },
+    };
+    expect(
+      (
+        await callSystemOne(
+          { decide: async () => reply },
+          PAYLOAD,
+          new Map(),
+          [],
+          other,
+        )
+      ).sent,
+    ).toBe(true);
     expect(decide).toHaveBeenCalledTimes(1);
     advance(100);
     finish(reply);
     await first;
-    expect((await callSystemOne({ decide: async () => reply }, PAYLOAD, new Map(), [], metrics)).sent)
-      .toBe(true);
+    expect(
+      (
+        await callSystemOne(
+          { decide: async () => reply },
+          PAYLOAD,
+          new Map(),
+          [],
+          metrics,
+        )
+      ).sent,
+    ).toBe(true);
   });
 
   it('lowers the rate and logs the estimated input once if the route aborts before transport settles', async () => {
     const { metrics, rates, abort, advance, logger } = admissionTest(2000);
     rates.recordCompleted('target', 200, 1000);
     let finish: (value: SystemOneCallResult) => void = () => undefined;
-    const pending = callSystemOne({
-      decide: () => new Promise<SystemOneCallResult>((resolve) => { finish = resolve; }),
-    }, PAYLOAD, new Map(), [], metrics);
+    const pending = callSystemOne(
+      {
+        decide: () =>
+          new Promise<SystemOneCallResult>((resolve) => {
+            finish = resolve;
+          }),
+      },
+      PAYLOAD,
+      new Map(),
+      [],
+      metrics,
+    );
 
     advance(1500);
     abort.abort();
     expect(rates.rate('target')).toBeCloseTo(100 / 1.5);
-    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 100, inputTokensSource: 'bytes/4' });
+    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), {
+      inputTokens: 100,
+      inputTokensSource: 'bytes/4',
+    });
     finish(reply);
     await pending;
     expect(logger.debug).toHaveBeenCalledTimes(1);

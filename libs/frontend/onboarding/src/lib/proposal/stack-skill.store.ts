@@ -22,6 +22,7 @@ import {
   buildProposalFallbackEvidenceBody,
   canonicalCandidateId,
   cloneSkillJudgeResult,
+  compareSkillsByInstallsDesc,
   computeHiddenPoolCandidateCount,
   computeJudgeResidualCandidates,
   freezeModelPair,
@@ -44,12 +45,12 @@ import type {
   SkillVerdictFilterOption,
   SkillVerdictFilterValue,
 } from './skill-verdict-filter.component';
-import { normalizeSkillDraft, type SkillDraftMode } from './skill-draft-preview.component';
+import {
+  normalizeSkillDraft,
+  type SkillDraftMode,
+} from './skill-draft-preview.component';
 
-export {
-  buildManualDraftEvidenceBody,
-  buildProposalFallbackEvidenceBody,
-};
+export { buildManualDraftEvidenceBody, buildProposalFallbackEvidenceBody };
 export type {
   DraftReplaceTrigger,
   DraftTransitionResult,
@@ -68,11 +69,7 @@ export type {
 };
 
 export type StackSkillStage =
-  | 'intent'
-  | 'review'
-  | 'consent'
-  | 'installing'
-  | 'launching';
+  'intent' | 'review' | 'consent' | 'installing' | 'launching';
 
 /** Alias kept for store consumers; canonical type is SkillVerdictFilterValue. */
 export type SkillVerdictFilter = SkillVerdictFilterValue;
@@ -301,7 +298,8 @@ export class StackSkillStore {
       : [];
   });
   public readonly coveredItemCount = computed(
-    () => this.stackCoverage().filter((item) => item.state === 'covered').length,
+    () =>
+      this.stackCoverage().filter((item) => item.state === 'covered').length,
   );
 
   // --- R16 item rows, verdict counts, residual pool & F28 hidden count ---
@@ -353,10 +351,16 @@ export class StackSkillStore {
     const c = this.verdictCounts();
     return [
       { value: 'all', count: c.all },
-      ...(c.install > 0 ? [{ value: 'install' as const, count: c.install }] : []),
+      ...(c.install > 0
+        ? [{ value: 'install' as const, count: c.install }]
+        : []),
       ...(c.build > 0 ? [{ value: 'build' as const, count: c.build }] : []),
-      ...(c.noSkill > 0 ? [{ value: 'no-skill' as const, count: c.noSkill }] : []),
-      ...(c.notJudged > 0 ? [{ value: 'not-judged' as const, count: c.notJudged }] : []),
+      ...(c.noSkill > 0
+        ? [{ value: 'no-skill' as const, count: c.noSkill }]
+        : []),
+      ...(c.notJudged > 0
+        ? [{ value: 'not-judged' as const, count: c.notJudged }]
+        : []),
     ];
   });
 
@@ -381,19 +385,21 @@ export class StackSkillStore {
       : [];
   });
 
-  public readonly visibleItemRows = computed<readonly JudgeItemRowView[]>(() => {
-    const judge = this.judge();
-    if (!judge) return [];
-    const filter = this.verdictFilter();
-    const activeItemId = this.activeItemId();
-    const itemById = new Map(judge.items.map((item) => [item.itemId, item]));
-    return this.itemRows().filter((row) => {
-      if (row.pinned) return true;
-      if (activeItemId && row.itemId !== activeItemId) return false;
-      const source = itemById.get(row.itemId);
-      return source ? itemMatchesVerdictFilter(source, filter) : false;
-    });
-  });
+  public readonly visibleItemRows = computed<readonly JudgeItemRowView[]>(
+    () => {
+      const judge = this.judge();
+      if (!judge) return [];
+      const filter = this.verdictFilter();
+      const activeItemId = this.activeItemId();
+      const itemById = new Map(judge.items.map((item) => [item.itemId, item]));
+      return this.itemRows().filter((row) => {
+        if (row.pinned) return true;
+        if (activeItemId && row.itemId !== activeItemId) return false;
+        const source = itemById.get(row.itemId);
+        return source ? itemMatchesVerdictFilter(source, filter) : false;
+      });
+    },
+  );
 
   public readonly visibleProposals = computed<readonly SkillBuildProposal[]>(
     () => {
@@ -424,10 +430,12 @@ export class StackSkillStore {
         item.judgedBy === 'none' ||
         item.outcomes.length === 0
       ) {
-        for (const cid of item.candidateIds) shown.add(canonicalCandidateId(cid));
+        for (const cid of item.candidateIds)
+          shown.add(canonicalCandidateId(cid));
       } else {
         for (const o of item.outcomes) {
-          if (o.verdict === 'install') shown.add(canonicalCandidateId(o.candidateId));
+          if (o.verdict === 'install')
+            shown.add(canonicalCandidateId(o.candidateId));
         }
       }
     }
@@ -477,7 +485,9 @@ export class StackSkillStore {
     if (value && this.draftOpen()) return;
     this.previewingState.set(value);
   }
-  public setIntent(value: string): void { this.intentState.set(value); }
+  public setIntent(value: string): void {
+    this.intentState.set(value);
+  }
   public setStage(value: StackSkillStage): void {
     if (value === 'consent' && this.draftOpen()) return;
     this.stageState.set(value);
@@ -503,8 +513,12 @@ export class StackSkillStore {
   ): boolean {
     return this.selectedCandidateIds().has(canonicalCandidateId(keyOrSkill));
   }
-  public setLoading(value: boolean): void { this.loadingState.set(value); }
-  public setError(value: string | null): void { this.errorState.set(value); }
+  public setLoading(value: boolean): void {
+    this.loadingState.set(value);
+  }
+  public setError(value: string | null): void {
+    this.errorState.set(value);
+  }
   public setRecommendations(value: SkillRecommendation[]): void {
     this.recommendationsState.set([...value]);
   }
@@ -514,12 +528,14 @@ export class StackSkillStore {
       ...this.retainedSearchResults(),
       ...this.searchResults(),
     ].filter((skill) => selected.has(canonicalCandidateId(skill)));
-    this.retainedSearchResultsState.set([
-      ...new Map(
-        retained.map((skill) => [canonicalCandidateId(skill), skill]),
-      ).values(),
-    ]);
-    this.searchResultsState.set([...value]);
+    this.retainedSearchResultsState.set(
+      [
+        ...new Map(
+          retained.map((skill) => [canonicalCandidateId(skill), skill]),
+        ).values(),
+      ].sort(compareSkillsByInstallsDesc),
+    );
+    this.searchResultsState.set([...value].sort(compareSkillsByInstallsDesc));
   }
   public setItemSearchResults(
     itemId: string,
@@ -535,13 +551,13 @@ export class StackSkillStore {
           .filter((skill) => selected.has(canonicalCandidateId(skill)))
           .map((skill) => [canonicalCandidateId(skill), skill]),
       ).values(),
-    ];
+    ].sort(compareSkillsByInstallsDesc);
     const nextRetained = new Map(this.retainedItemSearchResultsState());
     if (deduped.length > 0) nextRetained.set(itemId, deduped);
     else nextRetained.delete(itemId);
     this.retainedItemSearchResultsState.set(nextRetained);
     const nextResults = new Map(this.itemSearchResultsState());
-    nextResults.set(itemId, [...value]);
+    nextResults.set(itemId, [...value].sort(compareSkillsByInstallsDesc));
     this.itemSearchResultsState.set(nextResults);
   }
   public clearItemSearchResults(itemId?: string): void {
@@ -553,24 +569,49 @@ export class StackSkillStore {
     next.delete(itemId);
     this.itemSearchResultsState.set(next);
   }
-  public setSearchQuery(value: string): void { this.searchQueryState.set(value); }
-  public setSearching(value: boolean): void { this.searchingState.set(value); }
-  public setSearchError(value: string | null): void { this.searchErrorState.set(value); }
-  public setGuidanceFacts(value: ProjectGuidance[]): void { this.guidanceFactsState.set([...value]); }
-  public setOwnerDecisionPrompt(value: string): void { this.ownerDecisionPromptState.set(value); }
-  public setOwnerDecision(value: 'match' | 'raise' | null): void { this.ownerDecisionState.set(value); }
-  public setGuidanceNote(value: string): void { this.guidanceNoteState.set(value); }
-  public setPreview(value: WizardSkillConsentPreview[]): void { this.previewState.set([...value]); }
-  public setApprovedIds(value: ReadonlySet<string>): void { this.approvedIdsState.set(new Set(value)); }
-  public setInstalled(value: string[]): void { this.installedState.set([...value]); }
-  public setAnalysisPair(pair: ModelPair | null): void { this.analysisPairState.set(freezeModelPair(pair)); }
+  public setSearchQuery(value: string): void {
+    this.searchQueryState.set(value);
+  }
+  public setSearching(value: boolean): void {
+    this.searchingState.set(value);
+  }
+  public setSearchError(value: string | null): void {
+    this.searchErrorState.set(value);
+  }
+  public setGuidanceFacts(value: ProjectGuidance[]): void {
+    this.guidanceFactsState.set([...value]);
+  }
+  public setOwnerDecisionPrompt(value: string): void {
+    this.ownerDecisionPromptState.set(value);
+  }
+  public setOwnerDecision(value: 'match' | 'raise' | null): void {
+    this.ownerDecisionState.set(value);
+  }
+  public setGuidanceNote(value: string): void {
+    this.guidanceNoteState.set(value);
+  }
+  public setPreview(value: WizardSkillConsentPreview[]): void {
+    this.previewState.set([...value]);
+  }
+  public setApprovedIds(value: ReadonlySet<string>): void {
+    this.approvedIdsState.set(new Set(value));
+  }
+  public setInstalled(value: string[]): void {
+    this.installedState.set([...value]);
+  }
+  public setAnalysisPair(pair: ModelPair | null): void {
+    this.analysisPairState.set(freezeModelPair(pair));
+  }
   public setJudge(judge: SkillJudgeResult | null): void {
     this.judgeState.set(judge ? cloneSkillJudgeResult(judge) : null);
   }
 
   public applyRecommendationResult(
     result: WizardRecommendAnalysisSkillsResult,
-    options?: { discardDirtyDraft?: boolean },
+    options?: {
+      discardDirtyDraft?: boolean;
+      selection?: readonly string[];
+    },
   ): RecommendationApplyResult {
     const openDraft = this.openDraftState();
     if (openDraft?.busy || openDraft?.previewLoading) {
@@ -587,24 +628,35 @@ export class StackSkillStore {
     this.judgeState.set(clonedJudge);
     this.recommendationsState.set([...result.skills]);
     const candidateById = new Map(
-      clonedJudge.candidates.map((c) => [canonicalCandidateId(c.candidateId), c]),
+      clonedJudge.candidates.map((c) => [
+        canonicalCandidateId(c.candidateId),
+        c,
+      ]),
     );
-    const preselected = new Set<string>();
+    const preselectedCandidates = new Map<string, SkillJudgeCandidate>();
     if (clonedJudge.method !== 'none') {
       for (const item of clonedJudge.items) {
         for (const outcome of item.outcomes) {
           if (outcome.verdict !== 'install') continue;
           const cid = canonicalCandidateId(outcome.candidateId);
           const candidate = candidateById.get(cid);
-          if (candidate && !candidate.deprecated) preselected.add(cid);
+          if (candidate && !candidate.deprecated) {
+            preselectedCandidates.set(cid, candidate);
+          }
         }
       }
     }
+    const preselected = new Set(
+      [...preselectedCandidates.entries()]
+        .sort(([, a], [, b]) => compareSkillsByInstallsDesc(a.skill, b.skill))
+        .map(([cid]) => cid),
+    );
     this.selectedCandidateIdsState.set(preselected);
     this.itemSearchResultsState.set(new Map());
     this.retainedItemSearchResultsState.set(new Map());
     this.retainedSearchResultsState.set([]);
     this.customSelectionKeysState.set(new Map());
+    if (options?.selection) this.setSelectedIds(new Set(options.selection));
     this.previewState.set([]);
     this.approvedIdsState.set(new Set());
     if (this.stageState() === 'consent') this.stageState.set('review');
@@ -617,9 +669,15 @@ export class StackSkillStore {
     return { status: 'ok' };
   }
 
-  public setVerdictFilter(filter: SkillVerdictFilterValue): void { this.verdictFilterState.set(filter); }
-  public setActiveItemId(itemId: string | null): void { this.activeItemIdState.set(itemId); }
-  public resetVerdictFilter(): void { this.verdictFilterState.set('all'); }
+  public setVerdictFilter(filter: SkillVerdictFilterValue): void {
+    this.verdictFilterState.set(filter);
+  }
+  public setActiveItemId(itemId: string | null): void {
+    this.activeItemIdState.set(itemId);
+  }
+  public resetVerdictFilter(): void {
+    this.verdictFilterState.set('all');
+  }
   public resetFilters(): void {
     this.verdictFilterState.set('all');
     this.activeItemIdState.set(null);
@@ -683,7 +741,10 @@ export class StackSkillStore {
     forceDiscardDirty: boolean,
   ):
     | { readonly status: 'busy' }
-    | { readonly status: 'confirm-dirty'; readonly trigger: DraftReplaceTrigger }
+    | {
+        readonly status: 'confirm-dirty';
+        readonly trigger: DraftReplaceTrigger;
+      }
     | null {
     const current = this.openDraftState();
     if (!current) return null;
@@ -724,7 +785,8 @@ export class StackSkillStore {
     const proposal = this.judge()?.proposals.find(
       (p) => p.proposalId === proposalId,
     );
-    if (!proposal) return { status: 'blocked', reason: 'Build proposal not found.' };
+    if (!proposal)
+      return { status: 'blocked', reason: 'Build proposal not found.' };
     const draft: OpenSkillDraft = {
       key,
       kind: 'proposal',
@@ -775,9 +837,10 @@ export class StackSkillStore {
     if (!this.canOpenDraft()) {
       return { status: 'blocked', reason: DRAFT_BLOCKED_BY_CONSENT_REASON };
     }
-    const key = itemId === null
-      ? `manual-blank:${this.draftRevision + 1}`
-      : `manual:${itemId}`;
+    const key =
+      itemId === null
+        ? `manual-blank:${this.draftRevision + 1}`
+        : `manual:${itemId}`;
     const existingPath = this.createdPathsByKeyState().get(key);
     if (existingPath) return { status: 'already-created', path: existingPath };
     const guard = this.checkDraftGuard(
@@ -848,7 +911,8 @@ export class StackSkillStore {
     const proposal = this.judge()?.proposals.find(
       (p) => p.proposalId === current.proposalId,
     );
-    if (!proposal) return { status: 'blocked', reason: 'Build proposal not found.' };
+    if (!proposal)
+      return { status: 'blocked', reason: 'Build proposal not found.' };
     const next: OpenSkillDraft = {
       ...current,
       mode: 'preview',

@@ -10,6 +10,7 @@
  * - generation checkpoint create / load / update, including the root fallback
  * - resumable-run discovery
  * - enhanced-prompt trace writes with a slug and with the fallback root
+ * - skill-review round-trip, schema rejection and unknown run IDs
  */
 
 import 'reflect-metadata';
@@ -38,6 +39,7 @@ import {
   type MultiPhaseManifestV4,
 } from '../types/multi-phase.types';
 import type { GenerationCheckpointManifest } from '../types/generation-checkpoint.types';
+import type { WizardRecommendAnalysisSkillsResult } from '@ptah-extension/shared';
 
 const WORKSPACE = resolve('/ws/demo');
 const ANALYSIS_ROOT = join(WORKSPACE, '.ptah', 'analysis');
@@ -143,6 +145,48 @@ function generationManifest(
   };
 }
 
+function skillReview(): WizardRecommendAnalysisSkillsResult {
+  return {
+    skills: [
+      {
+        skill: {
+          source: 'acme/skills',
+          skillId: 'nestjs',
+          name: 'NestJS',
+          description: 'NestJS patterns',
+          installs: 10,
+          isInstalled: false,
+        },
+        evidence: 'package.json lists @nestjs/core',
+        score: 0.9,
+        rankedBy: 'decision-model',
+        rank: 1,
+      },
+    ],
+    judge: {
+      method: 'decision',
+      counts: { decision: 1, normal: 0, notJudged: 0 },
+      items: [],
+      candidates: [],
+      proposals: [],
+      stages: [],
+    },
+    analysisPair: { provider: 'anthropic', model: 'test-model' },
+    rankedBy: 'decision-model',
+    detectedItems: [
+      {
+        kind: 'framework',
+        name: 'NestJS',
+        evidence: 'package.json',
+        sourcePhase: 'project-profile',
+      },
+    ],
+    unmatchedItems: [],
+    searchFailures: [],
+    summarySource: 'structured',
+  };
+}
+
 describe('AnalysisStorageService', () => {
   let fs: MockFileSystemProvider;
   let service: AnalysisStorageService;
@@ -172,6 +216,9 @@ describe('AnalysisStorageService', () => {
     await service.ensureSharingFiles(WORKSPACE);
     expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain(
       '*/generation-manifest.json',
+    );
+    expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitignore'))).toContain(
+      '*/skill-review.json\n',
     );
     expect(await fs.readFile(join(ANALYSIS_ROOT, '.gitattributes'))).toBe(
       'manifest.json text eol=lf\n*.md text eol=lf\n',
@@ -499,7 +546,9 @@ describe('AnalysisStorageService', () => {
     it('accepts legacy pair-less v4 manifests without mutating disk bytes', async () => {
       const legacyV4 = manifestV4();
       expect(legacyV4.analysisPair).toBeUndefined();
-      expect(legacyV4.phases['project-profile'].input?.provider).toBeUndefined();
+      expect(
+        legacyV4.phases['project-profile'].input?.provider,
+      ).toBeUndefined();
       const raw = JSON.stringify(legacyV4, null, 2);
       await fs.writeFile(join(slugDir, 'manifest.json'), raw);
 
@@ -994,6 +1043,110 @@ describe('AnalysisStorageService', () => {
     });
   });
 
+  describe('skill review', () => {
+    const reviewPath = join(ANALYSIS_ROOT, 'target', 'skill-review.json');
+
+    beforeEach(async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'other'),
+        manifestV3({ slug: 'other', runId: 'RUN-OTHER' }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'target'),
+        manifestV3({ slug: 'target' }),
+      );
+    });
+
+    it('writes the review into the run slug directory and reads it back', async () => {
+      const review = skillReview();
+
+      const written = await service.writeSkillReview(
+        WORKSPACE,
+        'RUN-1',
+        review,
+      );
+
+      expect(written).toBe(reviewPath);
+      const file = JSON.parse(await fs.readFile(reviewPath)) as {
+        version: number;
+        analysisRunId: string;
+        reviewedAt: string;
+      };
+      expect(file.version).toBe(1);
+      expect(file.analysisRunId).toBe('RUN-1');
+      const stored = await service.readSkillReview(WORKSPACE, 'RUN-1');
+      expect(stored?.review).toEqual(review);
+      expect(stored?.reviewedAt).toBe(file.reviewedAt);
+      expect(Number.isNaN(Date.parse(stored?.reviewedAt ?? ''))).toBe(false);
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-OTHER')).toBeNull();
+    });
+
+    it('returns null for an unknown run ID and writes nothing', async () => {
+      expect(
+        await service.writeSkillReview(WORKSPACE, 'RUN-MISSING', skillReview()),
+      ).toBeNull();
+      expect(
+        await service.readSkillReview(WORKSPACE, 'RUN-MISSING'),
+      ).toBeNull();
+      expect(
+        await service.writeSkillReview(WORKSPACE, '../target', skillReview()),
+      ).toBeNull();
+      expect(fs.writeFile).not.toHaveBeenCalledWith(
+        expect.stringContaining('skill-review.json'),
+        expect.anything(),
+      );
+    });
+
+    it('returns null when no review has been stored for the run', async () => {
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+    });
+
+    it('returns null and keeps the file for invalid JSON', async () => {
+      await fs.writeFile(reviewPath, '{not json');
+
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+      expect(await fs.readFile(reviewPath)).toBe('{not json');
+    });
+
+    it('returns null for a file that fails the schema', async () => {
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 2,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-1',
+          review: skillReview(),
+        }),
+      );
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 1,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-1',
+          review: { ...skillReview(), skills: 'none' },
+        }),
+      );
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+    });
+
+    it('returns null for a review recorded under another run ID', async () => {
+      await fs.writeFile(
+        reviewPath,
+        JSON.stringify({
+          version: 1,
+          reviewedAt: '2026-08-30T10:00:00.000Z',
+          analysisRunId: 'RUN-OTHER',
+          review: skillReview(),
+        }),
+      );
+
+      expect(await service.readSkillReview(WORKSPACE, 'RUN-1')).toBeNull();
+    });
+  });
+
   describe('list / loadMultiPhase', () => {
     it('loads the run matching its manifest run ID', async () => {
       await service.writeManifest(
@@ -1066,7 +1219,59 @@ describe('AnalysisStorageService', () => {
       const items = await service.list(WORKSPACE);
 
       expect(items.map((i) => i.filename)).toEqual(['full', 'partial']);
-      expect(items[1].phaseCount).toBe(3);
+      expect(items[0].lifecycle).toBe('completed');
+      expect(items[1]).toMatchObject({
+        phaseCount: 3,
+        runId: partial.runId,
+        updatedAt: partial.updatedAt,
+      });
+      expect(items[1].lifecycle).toBe('failed');
+    });
+
+    it('populates lifecycle on listed v4 runs for running, paused, completed, and failed states', async () => {
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-running'),
+        manifestV4({
+          slug: 'run-running',
+          analyzedAt: '2026-08-29T00:00:00.000Z',
+          lifecycle: 'running',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-paused'),
+        manifestV4({
+          slug: 'run-paused',
+          analyzedAt: '2026-08-28T00:00:00.000Z',
+          lifecycle: 'paused',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-completed'),
+        manifestV4({
+          slug: 'run-completed',
+          analyzedAt: '2026-08-27T00:00:00.000Z',
+          lifecycle: 'completed',
+        }),
+      );
+      await service.writeManifest(
+        join(ANALYSIS_ROOT, 'run-failed'),
+        manifestV4({
+          slug: 'run-failed',
+          analyzedAt: '2026-08-26T00:00:00.000Z',
+          lifecycle: 'failed',
+        }),
+      );
+
+      const items = await service.list(WORKSPACE);
+
+      expect(
+        items.map((i) => ({ filename: i.filename, lifecycle: i.lifecycle })),
+      ).toEqual([
+        { filename: 'run-running', lifecycle: 'running' },
+        { filename: 'run-paused', lifecycle: 'paused' },
+        { filename: 'run-completed', lifecycle: 'completed' },
+        { filename: 'run-failed', lifecycle: 'failed' },
+      ]);
     });
 
     it('loads only completed phase contents and exposes v3 manifest fields', async () => {

@@ -1,7 +1,7 @@
-import { inject, Injector } from '@angular/core';
-import { toObservable } from '@angular/core/rxjs-interop';
-import { PRIMARY_OUTLET, Router } from '@angular/router';
-import { firstValueFrom, filter } from 'rxjs';
+import { DestroyRef, inject, Injector } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { NavigationStart, PRIMARY_OUTLET, Router } from '@angular/router';
+import { filter, firstValueFrom, map, merge } from 'rxjs';
 import {
   AppStateManager,
   ElectronLayoutService,
@@ -57,6 +57,7 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
   const routePersistence = inject(SurfaceRoutePersistence);
   const layout = inject(ElectronLayoutService);
   const injector = inject(Injector);
+  const destroyRef = inject(DestroyRef);
 
   const router = inject(Router);
 
@@ -113,15 +114,44 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
       return navigateToHostSurface(plan.rawView);
     }
 
+    const savedUrl = router.parseUrl(plan.route);
+    const savedSegments = savedUrl.root.children[PRIMARY_OUTLET]?.segments ?? [];
+    const isGuidanceEntry =
+      savedSegments.length === 2 && savedSegments[1].path === 'guidance';
     if (
-      firstSegmentPath(router, plan.route) === 'onboarding' &&
-      router.parseUrl(plan.route).queryParams['tab'] !== undefined
+      savedSegments[0]?.path === 'onboarding' &&
+      (savedUrl.queryParams['tab'] !== undefined || isGuidanceEntry)
     ) {
-      // The saved tab can only be validated after Electron restores its workspace.
-      await firstValueFrom(
-        toObservable(layout.workspaceResolved, { injector }).pipe(filter(Boolean)),
+      // Bound routes need workspace validation. The guidance entry also reads
+      // the workspace on mount to decide whether Start is available.
+      // Layout settles after its bounded RPCs, including a persisted-folder
+      // fallback, so the route can still restore if the first RPC times out.
+      if (
+        destroyRef.destroyed ||
+        router.navigated ||
+        router.currentNavigation()
+      )
+        return 'cancelled';
+      const workspaceWait = await firstValueFrom(
+        merge(
+          router.events.pipe(
+            filter((event) => event instanceof NavigationStart),
+            map(() => 'cancelled' as const),
+          ),
+          toObservable(layout.workspaceResolved, { injector }).pipe(
+            filter(Boolean),
+            map(() => 'resolved' as const),
+          ),
+        ).pipe(takeUntilDestroyed(destroyRef)),
+        { defaultValue: 'cancelled' as const },
       );
-      if (router.navigated || supersededByNewerNavigation()) return 'cancelled';
+      if (
+        workspaceWait === 'cancelled' ||
+        destroyRef.destroyed ||
+        router.navigated ||
+        router.currentNavigation()
+      )
+        return 'cancelled';
     }
 
     // SurfaceRouterService normalizes legacy setup URLs before navigating.

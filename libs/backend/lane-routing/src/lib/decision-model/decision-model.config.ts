@@ -5,6 +5,9 @@ import type {
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
+  DECISION_MODEL_TIMEOUT_MAX_MS,
+  DECISION_MODEL_TIMEOUT_MIN_MS,
+  DECISION_MODEL_TIMEOUT_SETTING_KEY,
   loggableErrorName,
   OLLAMA_PROVIDER_ENTRY,
 } from '@ptah-extension/shared';
@@ -252,6 +255,20 @@ export class DecisionModelConfig {
       this.endpointDeps(),
     );
     return isBlockedDecisionEndpoint(resolution) ? null : resolution;
+  }
+
+  /** Configured `agentOrchestration.decisionModelTimeoutMs`, clamped, or `null`. */
+  getConfiguredTimeoutMs(): number | null {
+    const raw = this.workspace.getConfiguration<unknown>(
+      DECISION_MODEL_CONFIG_SECTION,
+      DECISION_MODEL_TIMEOUT_SETTING_KEY,
+    );
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0)
+      return null;
+    return Math.min(
+      DECISION_MODEL_TIMEOUT_MAX_MS,
+      Math.max(DECISION_MODEL_TIMEOUT_MIN_MS, Math.round(raw)),
+    );
   }
 
   // ------------------------------------------------------------- locality

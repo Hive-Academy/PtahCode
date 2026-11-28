@@ -93,6 +93,7 @@ function resultMessage(fields: {
   readonly subtype: 'success' | 'error_during_execution';
   readonly isError: boolean;
   readonly structuredOutput?: unknown;
+  readonly result?: string;
   readonly apiErrorStatus?: number;
 }): SDKMessage {
   const message: Record<string, unknown> = {
@@ -103,6 +104,9 @@ function resultMessage(fields: {
   };
   if (fields.structuredOutput !== undefined) {
     message['structured_output'] = fields.structuredOutput;
+  }
+  if (fields.result !== undefined) {
+    message['result'] = fields.result;
   }
   if (!isSdkMessage(message)) {
     throw new Error('test result is not an SDK message');
@@ -162,7 +166,7 @@ describe('StructuredDecisionAdapter', () => {
     expect(call.toolAccess).toBe('none');
     expect(call.lane).toBe(USER_ACTION_QUERY_LANE);
     expect(call.mcpServerRunning).toBe(false);
-    expect(call.maxTurns).toBe(1);
+    expect(call.maxTurns).toBe(3);
     expect(call.cwd).toBe(os.tmpdir());
   });
 
@@ -260,6 +264,113 @@ describe('StructuredDecisionAdapter', () => {
     expect(error).toBeInstanceOf(StructuredDecisionError);
     if (!(error instanceof StructuredDecisionError)) return;
     expect(error.kind).toBe('bad-output');
+  });
+
+  it('falls back to parsing raw JSON from result text when structured_output is omitted', async () => {
+    const query = new FakeQuery();
+    query.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        result: '{"choice":"o1"}',
+      }),
+    );
+    const adapter = adapterFor(query, new FakeResolver(async () => AUTH));
+
+    await expect(adapter.complete(request())).resolves.toEqual({
+      choice: 'o1',
+    });
+  });
+
+  it('falls back to parsing fenced JSON or balanced object from result text when structured_output is null', async () => {
+    const fencedQuery = new FakeQuery();
+    fencedQuery.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        structuredOutput: null,
+        result: 'Here is the answer:\n```json\n{"choice":"o2"}\n```',
+      }),
+    );
+    const fencedAdapter = adapterFor(
+      fencedQuery,
+      new FakeResolver(async () => AUTH),
+    );
+    await expect(fencedAdapter.complete(request())).resolves.toEqual({
+      choice: 'o2',
+    });
+
+    const proseQuery = new FakeQuery();
+    proseQuery.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        result:
+          'Selected option: {"choice":"o1","meta":{"note":"brace } inside string"}} done.',
+      }),
+    );
+    const proseAdapter = adapterFor(
+      proseQuery,
+      new FakeResolver(async () => AUTH),
+    );
+    await expect(proseAdapter.complete(request())).resolves.toEqual({
+      choice: 'o1',
+      meta: { note: 'brace } inside string' },
+    });
+
+    const strayBraceQuery = new FakeQuery();
+    strayBraceQuery.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        result: 'For {section A: here is the JSON {"choice":"o2"}',
+      }),
+    );
+    const strayBraceAdapter = adapterFor(
+      strayBraceQuery,
+      new FakeResolver(async () => AUTH),
+    );
+    await expect(strayBraceAdapter.complete(request())).resolves.toEqual({
+      choice: 'o2',
+    });
+  });
+
+  it('prefers structured_output over result text and rejects non-object or invalid text as bad-output', async () => {
+    const primaryQuery = new FakeQuery();
+    primaryQuery.stream = messages(
+      resultMessage({
+        subtype: 'success',
+        isError: false,
+        structuredOutput: { choice: 'o1' },
+        result: '{"choice":"o2"}',
+      }),
+    );
+    const primaryAdapter = adapterFor(
+      primaryQuery,
+      new FakeResolver(async () => AUTH),
+    );
+    await expect(primaryAdapter.complete(request())).resolves.toEqual({
+      choice: 'o1',
+    });
+
+    for (const badResult of ['not json at all', '["o1"]', 'null', '{broken']) {
+      const badQuery = new FakeQuery();
+      badQuery.stream = messages(
+        resultMessage({
+          subtype: 'success',
+          isError: false,
+          result: badResult,
+        }),
+      );
+      const badAdapter = adapterFor(
+        badQuery,
+        new FakeResolver(async () => AUTH),
+      );
+      const error = await settle(badAdapter.complete(request()));
+      expect(error).toBeInstanceOf(StructuredDecisionError);
+      if (!(error instanceof StructuredDecisionError)) return;
+      expect(error.kind).toBe('bad-output');
+    }
   });
 
   it('does not call the query when the signal is already aborted', async () => {

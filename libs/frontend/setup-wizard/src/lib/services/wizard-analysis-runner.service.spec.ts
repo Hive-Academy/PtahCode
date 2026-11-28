@@ -394,4 +394,489 @@ describe('WizardAnalysisRunner', () => {
       ]);
     });
   });
+
+  describe('startedAt, workspace tracking, and backend-active hydration', () => {
+    it('tracks startedAt and activeWorkspacePath while a run is in flight and clears them on finish', async () => {
+      let resolveDeepAnalyze!: (value: MultiPhaseAnalysisResponse) => void;
+      (mockRpcService.deepAnalyze as jest.Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveDeepAnalyze = resolve;
+        }),
+      );
+
+      expect(runner.startedAt()).toBeNull();
+      expect(runner.activeWorkspacePath()).toBeNull();
+      expect(runner.isRunningForWorkspace('/repo/a')).toBe(false);
+
+      const beforeStart = Date.now();
+      const run = runner.ensureStarted('/repo/a///');
+      await new Promise<void>((resolve) => setTimeout(resolve));
+
+      expect(runner.isRunning()).toBe(true);
+      const startedAt = runner.startedAt();
+      expect(startedAt).not.toBeNull();
+      expect(startedAt ?? 0).toBeGreaterThanOrEqual(beforeStart);
+      expect(runner.activeWorkspacePath()).toBe('/repo/a');
+      expect(runner.isRunningForWorkspace('/repo/a')).toBe(true);
+      expect(runner.isRunningForWorkspace('/repo/a/')).toBe(true);
+      expect(runner.isRunningForWorkspace('/repo/b')).toBe(false);
+      expect(runner.isRunningForWorkspace(null)).toBe(false);
+
+      resolveDeepAnalyze(mockMultiPhase);
+      await run;
+
+      expect(runner.isRunning()).toBe(false);
+      expect(runner.startedAt()).toBeNull();
+      expect(runner.activeWorkspacePath()).toBeNull();
+      expect(runner.isRunningForWorkspace('/repo/a')).toBe(false);
+    });
+
+    it('keeps activeWorkspacePath null and matches any workspace for legacy callers without workspacePath', async () => {
+      let resolveDeepAnalyze!: (value: MultiPhaseAnalysisResponse) => void;
+      (mockRpcService.deepAnalyze as jest.Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveDeepAnalyze = resolve;
+        }),
+      );
+
+      const run = runner.startFreshAnalysis();
+      expect(runner.isRunning()).toBe(true);
+      expect(runner.activeWorkspacePath()).toBeNull();
+      expect(runner.isRunningForWorkspace('/any/workspace')).toBe(true);
+      expect(runner.isRunningForWorkspace(undefined)).toBe(true);
+
+      resolveDeepAnalyze(mockMultiPhase);
+      await run;
+      expect(runner.isRunningForWorkspace('/any/workspace')).toBe(false);
+    });
+
+    it('records workspacePath when resuming or starting fresh', async () => {
+      let resolveDeepAnalyze!: (value: MultiPhaseAnalysisResponse) => void;
+      (mockRpcService.deepAnalyze as jest.Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveDeepAnalyze = resolve;
+        }),
+      );
+
+      const resumeRun = runner.resumeAnalysis('/repo/resume/');
+      expect(runner.activeWorkspacePath()).toBe('/repo/resume');
+      expect(runner.isRunningForWorkspace('/repo/resume')).toBe(true);
+      expect(runner.isRunningForWorkspace('/repo/other')).toBe(false);
+
+      resolveDeepAnalyze(mockMultiPhase);
+      await resumeRun;
+      expect(runner.activeWorkspacePath()).toBeNull();
+    });
+
+    it('syncBackendActive hydrates isRunning, startedAt, and workspacePath and clears resumableAnalysis', () => {
+      const isoStart = '2026-11-26T17:00:00.000Z';
+      runner.syncBackendActive(true, {
+        startedAt: isoStart,
+        workspacePath: '/repo/reloaded/',
+      });
+
+      expect(runner.backendActive()).toBe(true);
+      expect(runner.isRunning()).toBe(true);
+      expect(runner.startedAt()).toBe(Date.parse(isoStart));
+      expect(runner.activeWorkspacePath()).toBe('/repo/reloaded');
+      expect(runner.isRunningForWorkspace('/repo/reloaded')).toBe(true);
+      expect(runner.isRunningForWorkspace('/repo/other')).toBe(false);
+
+      // Does not overwrite an existing startedAt
+      runner.syncBackendActive(true, {
+        startedAt: '2026-11-26T17:05:00.000Z',
+      });
+      expect(runner.startedAt()).toBe(Date.parse(isoStart));
+
+      // Clearing backendActive resets hydrated fields when no frontend run is active
+      runner.syncBackendActive(false);
+      expect(runner.backendActive()).toBe(false);
+      expect(runner.isRunning()).toBe(false);
+      expect(runner.startedAt()).toBeNull();
+      expect(runner.activeWorkspacePath()).toBeNull();
+    });
+
+    it('does not overwrite a live in-flight run workspacePath during syncBackendActive', async () => {
+      let resolveDeepAnalyze!: (value: MultiPhaseAnalysisResponse) => void;
+      (mockRpcService.deepAnalyze as jest.Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveDeepAnalyze = resolve;
+        }),
+      );
+
+      const run = runner.startFreshAnalysis('/repo/live');
+      const liveStartedAt = runner.startedAt();
+
+      runner.syncBackendActive(true, {
+        startedAt: '2026-11-26T17:00:00.000Z',
+        workspacePath: '/repo/different',
+      });
+      expect(runner.activeWorkspacePath()).toBe('/repo/live');
+      expect(runner.startedAt()).toBe(liveStartedAt);
+
+      // Clearing backendActive while live run is in flight preserves live state
+      runner.syncBackendActive(false);
+      expect(runner.isRunning()).toBe(true);
+      expect(runner.activeWorkspacePath()).toBe('/repo/live');
+      expect(runner.startedAt()).toBe(liveStartedAt);
+
+      resolveDeepAnalyze(mockMultiPhase);
+      await run;
+    });
+
+    it('hydrates backendActive on discoverResumableRun when analysisActive is true and skips deepAnalyze', async () => {
+      const startedAtIso = '2026-11-26T16:55:00.000Z';
+      (mockRpcService.getResumableRun as jest.Mock).mockResolvedValue({
+        analysis: pausedAnalysis,
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: startedAtIso,
+      });
+
+      await runner.ensureStarted('/repo/active/');
+
+      expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
+      expect(runner.backendActive()).toBe(true);
+      expect(runner.isRunning()).toBe(true);
+      expect(runner.resumableAnalysis()).toBeNull();
+      expect(runner.startedAt()).toBe(Date.parse(startedAtIso));
+      expect(runner.activeWorkspacePath()).toBe('/repo/active');
+
+      // Calling ensureStarted again while backendActive still does not start a fresh run
+      await runner.ensureStarted('/repo/active');
+      expect(mockRpcService.deepAnalyze).not.toHaveBeenCalled();
+    });
+
+    it('clears backendActive, startedAt, and activeWorkspacePath on reset and cancel', async () => {
+      runner.syncBackendActive(true, {
+        startedAt: '2026-11-26T17:00:00.000Z',
+        workspacePath: '/repo/a',
+      });
+      runner.reset();
+
+      expect(runner.backendActive()).toBe(false);
+      expect(runner.isRunning()).toBe(false);
+      expect(runner.startedAt()).toBeNull();
+      expect(runner.activeWorkspacePath()).toBeNull();
+
+      runner.syncBackendActive(true, {
+        startedAt: '2026-11-26T17:00:00.000Z',
+        workspacePath: '/repo/a',
+      });
+      await runner.cancel();
+
+      expect(mockRpcService.cancelAnalysis).toHaveBeenCalled();
+      expect(runner.backendActive()).toBe(false);
+      expect(runner.isRunning()).toBe(false);
+      expect(runner.startedAt()).toBeNull();
+      expect(runner.activeWorkspacePath()).toBeNull();
+    });
+
+    it('[B1] does not latch backendActive when syncBackendActive(true) is called during an active local run', async () => {
+      let resolveDeepAnalyze!: (value: MultiPhaseAnalysisResponse) => void;
+      (mockRpcService.deepAnalyze as jest.Mock).mockReturnValue(
+        new Promise((resolve) => {
+          resolveDeepAnalyze = resolve;
+        }),
+      );
+
+      const run = runner.startFreshAnalysis('/repo/a');
+      runner.syncBackendActive(true, {
+        startedAt: '2026-11-26T17:00:00.000Z',
+        workspacePath: '/repo/a',
+      });
+
+      expect(runner.backendActive()).toBe(false);
+      expect(runner.isRunning()).toBe(true);
+
+      resolveDeepAnalyze(completedAnalysis);
+      await run;
+
+      expect(runner.isRunning()).toBe(false);
+      expect(runner.backendActive()).toBe(false);
+      expect(runner.isRunningForWorkspace('/repo/a')).toBe(false);
+      expect(runner.isRunningForWorkspace('/other')).toBe(false);
+    });
+
+    it('[B2] polls getResumableRun while backendActive, adopts completed analysis, clears isRunning, and stops timers', async () => {
+      jest.useFakeTimers();
+      try {
+        const reloadedCompleted = {
+          ...completedAnalysis,
+          analysisDir: '/repo/reloaded/.ptah/analysis/demo',
+        } as unknown as MultiPhaseAnalysisResponse;
+        (mockRpcService.getResumableRun as jest.Mock)
+          .mockResolvedValueOnce({
+            analysis: pausedAnalysis,
+            generation: null,
+            analysisActive: true,
+          })
+          .mockResolvedValueOnce({
+            analysis: reloadedCompleted,
+            generation: null,
+            analysisActive: false,
+          });
+
+        runner.syncBackendActive(true, {
+          startedAt: '2026-11-26T17:00:00.000Z',
+          workspacePath: '/repo/reloaded',
+        });
+        expect(runner.backendActive()).toBe(true);
+        expect(runner.isRunning()).toBe(true);
+
+        // First poll: still active
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(1);
+        expect(runner.backendActive()).toBe(true);
+        expect(runner.isRunning()).toBe(true);
+
+        // Second poll: backend finished with completed analysis
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(2);
+        expect(runner.backendActive()).toBe(false);
+        expect(runner.isRunning()).toBe(false);
+        expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+          reloadedCompleted,
+        );
+        expect(runner.resultWorkspacePath()).toBe('/repo/reloaded');
+        expect(runner.isResultForWorkspace('/repo/reloaded')).toBe(true);
+        expect(runner.isResultForWorkspace('/repo/other')).toBe(false);
+
+        // No further polls after stopping
+        await jest.advanceTimersByTimeAsync(10_000);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[B2] stops backend watcher on reset and bounds repeated poll errors', async () => {
+      jest.useFakeTimers();
+      try {
+        (mockRpcService.getResumableRun as jest.Mock).mockRejectedValue(
+          new Error('ipc offline'),
+        );
+
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+        runner.reset();
+        await jest.advanceTimersByTimeAsync(10_000);
+        expect(mockRpcService.getResumableRun).not.toHaveBeenCalled();
+
+        // Bounded poll errors stop watcher cleanly after 5 failures
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+        for (let i = 0; i < 8; i++) {
+          await jest.advanceTimersByTimeAsync(2500);
+        }
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(5);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[N1] pauses backend watcher on workspace switch, ignores in-flight cross-workspace replies, and resumes when switching back', async () => {
+      jest.useFakeTimers();
+      try {
+        const wsACompleted = {
+          ...completedAnalysis,
+          analysisDir: '/repo/a/.ptah/analysis/demo-a',
+        } as unknown as MultiPhaseAnalysisResponse;
+        const wsBCompleted = {
+          ...completedAnalysis,
+          analysisDir: '/repo/b/.ptah/analysis/demo-b',
+        } as unknown as MultiPhaseAnalysisResponse;
+
+        let resolveInFlight!: (value: {
+          analysis: MultiPhaseAnalysisResponse | null;
+          generation: null;
+          analysisActive: boolean;
+        }) => void;
+        (mockRpcService.getResumableRun as jest.Mock)
+          .mockReturnValueOnce(
+            new Promise((resolve) => {
+              resolveInFlight = resolve;
+            }),
+          )
+          .mockResolvedValueOnce({
+            analysis: wsACompleted,
+            generation: null,
+            analysisActive: false,
+          });
+
+        runner.setCurrentWorkspacePath('/repo/a');
+        runner.syncBackendActive(true, {
+          startedAt: '2026-11-26T17:00:00.000Z',
+          workspacePath: '/repo/a',
+        });
+
+        // First tick starts an in-flight RPC while on /repo/a
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(1);
+
+        // User switches to /repo/b while poll #1 is still in flight
+        runner.setCurrentWorkspacePath('/repo/b');
+
+        // Stale in-flight poll resolves with /repo/b's completed analysis and analysisActive: false
+        resolveInFlight({
+          analysis: wsBCompleted,
+          generation: null,
+          analysisActive: false,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        // /repo/a's backendActive must stay intact and /repo/b's analysis must NOT be adopted
+        expect(runner.backendActive()).toBe(true);
+        expect(runner.isRunningForWorkspace('/repo/a')).toBe(true);
+        expect(runner.isRunningForWorkspace('/repo/b')).toBe(false);
+        expect(mockStateService.setMultiPhaseResult).not.toHaveBeenCalled();
+
+        // Staying on /repo/b keeps the watcher paused (no further RPC polls)
+        await jest.advanceTimersByTimeAsync(10_000);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(1);
+        expect(runner.backendActive()).toBe(true);
+
+        // Switching back to /repo/a resumes polling and completes cleanly
+        runner.setCurrentWorkspacePath('/repo/a');
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(2);
+        expect(runner.backendActive()).toBe(false);
+        expect(runner.isRunning()).toBe(false);
+        expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+          wsACompleted,
+        );
+        expect(runner.resultWorkspacePath()).toBe('/repo/a');
+
+        // No further timers remain after completion
+        await jest.advanceTimersByTimeAsync(10_000);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[N1] refuses to adopt a completed analysis whose analysisDir belongs to another workspace (defense-in-depth)', async () => {
+      jest.useFakeTimers();
+      try {
+        const foreignAnalysis = {
+          ...completedAnalysis,
+          analysisDir: '/repo/ab/.ptah/analysis/wrong-workspace',
+        } as unknown as MultiPhaseAnalysisResponse;
+        (mockRpcService.getResumableRun as jest.Mock).mockResolvedValueOnce({
+          analysis: foreignAnalysis,
+          generation: null,
+          analysisActive: false,
+        });
+
+        runner.setCurrentWorkspacePath('/repo/a');
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(1);
+        expect(mockStateService.setMultiPhaseResult).not.toHaveBeenCalled();
+        expect(runner.backendActive()).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[N2] treats analysisActive undefined (RPC error fallback) as a transient poll error and bounds retries to 5', async () => {
+      jest.useFakeTimers();
+      try {
+        const wsACompleted = {
+          ...completedAnalysis,
+          analysisDir: '/repo/a/.ptah/analysis/demo-a',
+        } as unknown as MultiPhaseAnalysisResponse;
+
+        // Single transient fallback followed by active then completed recovers cleanly
+        (mockRpcService.getResumableRun as jest.Mock)
+          .mockResolvedValueOnce({ analysis: null, generation: null })
+          .mockResolvedValueOnce({
+            analysis: pausedAnalysis,
+            generation: null,
+            analysisActive: true,
+          })
+          .mockResolvedValueOnce({
+            analysis: wsACompleted,
+            generation: null,
+            analysisActive: false,
+          });
+
+        runner.setCurrentWorkspacePath('/repo/a');
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(runner.backendActive()).toBe(true);
+        expect(runner.isRunning()).toBe(true);
+
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(runner.backendActive()).toBe(true);
+
+        await jest.advanceTimersByTimeAsync(2500);
+        expect(runner.backendActive()).toBe(false);
+        expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+          wsACompleted,
+        );
+
+        // 5 consecutive undefined responses stop the watcher cleanly without clearing backendActive
+        (mockRpcService.getResumableRun as jest.Mock).mockClear();
+        (mockRpcService.getResumableRun as jest.Mock).mockResolvedValue({
+          analysis: null,
+          generation: null,
+        });
+
+        runner.syncBackendActive(true, { workspacePath: '/repo/a' });
+        for (let i = 0; i < 8; i++) {
+          await jest.advanceTimersByTimeAsync(2500);
+        }
+        expect(mockRpcService.getResumableRun).toHaveBeenCalledTimes(5);
+        expect(runner.backendActive()).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('[S1] scopes stored results and errors to the workspace that ran them and clears on reset', async () => {
+      jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      await runner.startFreshAnalysis('/repo/a/');
+      expect(runner.resultWorkspacePath()).toBe('/repo/a');
+      expect(runner.isResultForWorkspace('/repo/a')).toBe(true);
+      expect(runner.isResultForWorkspace('/repo/a/')).toBe(true);
+      expect(runner.isResultForWorkspace('/repo/b')).toBe(false);
+      expect(runner.isResultForWorkspace(null)).toBe(false);
+
+      runner.reset();
+      expect(runner.resultWorkspacePath()).toBeNull();
+      expect(runner.isResultForWorkspace('/repo/b')).toBe(true);
+
+      (mockRpcService.deepAnalyze as jest.Mock).mockRejectedValueOnce(
+        new Error('boom'),
+      );
+      await runner.startFreshAnalysis('/repo/a');
+      expect(runner.errorMessage()).toBe('boom');
+      expect(runner.resultWorkspacePath()).toBe('/repo/a');
+      expect(runner.isResultForWorkspace('/repo/a')).toBe(true);
+      expect(runner.isResultForWorkspace('/repo/b')).toBe(false);
+    });
+
+    it('[S2] resumeAnalysis and startFreshAnalysis call deepAnalyze even when multiPhaseResult holds a paused manifest', async () => {
+      multiPhaseResult.set(pausedAnalysis);
+      (mockRpcService.deepAnalyze as jest.Mock).mockResolvedValue(
+        completedAnalysis,
+      );
+
+      await runner.resumeAnalysis('/repo/a');
+      expect(mockRpcService.deepAnalyze).toHaveBeenCalledWith({ resume: true });
+      expect(mockStateService.setMultiPhaseResult).toHaveBeenCalledWith(
+        completedAnalysis,
+      );
+
+      (mockRpcService.deepAnalyze as jest.Mock).mockClear();
+      multiPhaseResult.set(pausedAnalysis);
+
+      await runner.startFreshAnalysis('/repo/a');
+      expect(mockRpcService.deepAnalyze).toHaveBeenCalledWith({
+        resume: false,
+      });
+    });
+  });
 });

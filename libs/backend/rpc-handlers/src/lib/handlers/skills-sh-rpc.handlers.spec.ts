@@ -313,7 +313,14 @@ describe('SkillsShRpcHandlers — search', () => {
   it('falls back to the CLI path when the API throws', async () => {
     const h = makeHarness();
     h.api.search.mockRejectedValue(new Error('429 rate limited'));
-    mockSpawnOnce('anthropics/skills@react-pro  100 installs\n');
+    mockSpawnOnce(
+      [
+        'anthropics/skills@low-skill  10 installs',
+        'anthropics/skills@top-skill  2.5k installs',
+        'anthropics/skills@mid-b  500 installs',
+        'anthropics/skills@mid-a  500 installs',
+      ].join('\n') + '\n',
+    );
 
     const result = await h.rpc.call<{ skills: SkillShEntry[] }>(
       'skillsSh:search',
@@ -321,25 +328,88 @@ describe('SkillsShRpcHandlers — search', () => {
     );
 
     expect(spawn).toHaveBeenCalledTimes(1);
-    expect(result.skills.length).toBeGreaterThan(0);
+    expect(result.skills.map((s) => s.skillId)).toEqual([
+      'top-skill',
+      'mid-a',
+      'mid-b',
+      'low-skill',
+    ]);
     expect(h.logger.warn).toHaveBeenCalled();
+  });
+
+  it('sorts API search results by installs descending with deterministic tie-breakers', async () => {
+    const h = makeHarness();
+    h.api.search.mockResolvedValue([
+      apiSkill({ skillId: 'bad-neg', installs: -5 }),
+      apiSkill({ skillId: 'mid-b', source: 'org/b', installs: 200 }),
+      apiSkill({ skillId: 'mid-a', source: 'org/a', installs: 200 }),
+      apiSkill({ skillId: 'bad-nan', installs: Number.NaN }),
+      apiSkill({ skillId: 'top', installs: 1500 }),
+    ]);
+
+    const result = await h.rpc.call<{ skills: SkillShEntry[] }>(
+      'skillsSh:search',
+      { query: 'react' },
+    );
+
+    expect(result.skills.map((s) => s.skillId)).toEqual([
+      'top',
+      'mid-a',
+      'mid-b',
+      'bad-nan',
+      'bad-neg',
+    ]);
+  });
+
+  it('does not mutate cached SkillShEntry objects when enriching install status', async () => {
+    const h = makeHarness();
+    const cachedEntry = apiSkill({
+      skillId: 'frontend-design',
+      isInstalled: false,
+    });
+    h.api.search.mockResolvedValue([cachedEntry]);
+    h.sourceRoots.installedSlugs.mockResolvedValue(
+      new Set(['frontend-design']),
+    );
+
+    const result = await h.rpc.call<{ skills: SkillShEntry[] }>(
+      'skillsSh:search',
+      { query: 'frontend' },
+    );
+
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills[0].isInstalled).toBe(true);
+    expect(result.skills[0]).not.toBe(cachedEntry);
+    expect(cachedEntry.isInstalled).toBe(false);
   });
 });
 
 describe('SkillsShRpcHandlers — getPopular', () => {
-  it('uses the CLI path first', async () => {
+  it('uses the CLI path first and sorts by installs descending', async () => {
     const h = makeHarness();
-    mockSpawnOnce('anthropics/skills@webapp-testing  82000 installs\n');
+    mockSpawnOnce(
+      [
+        'anthropics/skills@smaller-skill  12k installs',
+        'anthropics/skills@webapp-testing  82000 installs',
+        'anthropics/skills@mid-b  40k installs',
+        'anthropics/skills@mid-a  40k installs',
+      ].join('\n') + '\n',
+    );
 
     const result = await h.rpc.call<{ skills: SkillShEntry[] }>(
       'skillsSh:getPopular',
     );
 
     expect(spawn).toHaveBeenCalledTimes(1);
-    expect(result.skills.length).toBeGreaterThan(0);
+    expect(result.skills.map((s) => s.skillId)).toEqual([
+      'webapp-testing',
+      'mid-a',
+      'mid-b',
+      'smaller-skill',
+    ]);
   });
 
-  it('falls back to curated constants when the CLI fails', async () => {
+  it('falls back to curated constants sorted by installs descending when the CLI fails', async () => {
     const h = makeHarness();
     mockSpawnOnce('', '', 1);
 
@@ -348,6 +418,11 @@ describe('SkillsShRpcHandlers — getPopular', () => {
     );
 
     expect(result.skills.length).toBeGreaterThan(0);
+    for (let i = 1; i < result.skills.length; i++) {
+      expect(result.skills[i - 1].installs).toBeGreaterThanOrEqual(
+        result.skills[i].installs,
+      );
+    }
   });
 });
 
@@ -358,6 +433,32 @@ describe('SkillsShRpcHandlers — detectRecommended', () => {
       recommendedSkills: SkillShEntry[];
     }>('skillsSh:detectRecommended');
     expect(result.recommendedSkills).toEqual([]);
+  });
+
+  it('returns detected recommended skills sorted by installs descending', async () => {
+    const tmpDir = await fs.mkdtemp(
+      path.join(os.tmpdir(), 'ptah-skillssh-detect-'),
+    );
+    try {
+      await fs.writeFile(
+        path.join(tmpDir, 'package.json'),
+        JSON.stringify({
+          dependencies: { react: '^19.0.0', express: '^5.0.0' },
+        }),
+      );
+      const h = makeHarness({ workspaceRoot: tmpDir });
+      const result = await h.rpc.call<{
+        recommendedSkills: SkillShEntry[];
+      }>('skillsSh:detectRecommended');
+      expect(result.recommendedSkills.length).toBeGreaterThan(1);
+      for (let i = 1; i < result.recommendedSkills.length; i++) {
+        expect(result.recommendedSkills[i - 1].installs).toBeGreaterThanOrEqual(
+          result.recommendedSkills[i].installs,
+        );
+      }
+    } finally {
+      await fs.rm(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -384,6 +485,37 @@ describe('SkillsShRpcHandlers — install lands in the source root and propagate
     expect(h.api.invalidateInstallCaches).toHaveBeenCalled();
     expect(h.propagation.propagateWithReport).toHaveBeenCalled();
   });
+
+  it('uses the pinned root for adoption, install, propagation and kept items', async () => {
+    const h = makeHarness({ workspaceRoot: '/active' });
+    const pinnedRoot = '/pinned';
+    const verifyStaged = jest.fn();
+    await h.handlers.install(
+      {
+        source: 'anthropics/skills',
+        skillId: 'frontend-design',
+        scope: 'workspace',
+      },
+      verifyStaged,
+      pinnedRoot,
+    );
+
+    expect(h.sourceRoots.adoptLegacyInstalls).toHaveBeenCalledWith(pinnedRoot);
+    expect(h.sourceRoots.install).toHaveBeenCalledWith(
+      { source: 'anthropics/skills', skillId: 'frontend-design' },
+      { scope: 'workspace', workspaceRoot: pinnedRoot },
+      { verifyStaged },
+    );
+    const harnessRoot = resolveHarnessWorkspaceRoot(pinnedRoot);
+    expect(h.propagation.propagateWithReport).toHaveBeenCalledWith(
+      harnessRoot,
+      'skillsSh:install',
+    );
+    expect(h.localItems.keptReport).toHaveBeenCalledWith(
+      expect.objectContaining({ harnessRoot }),
+    );
+  });
+
   it('installs through the source-root service, never the CLI directly', async () => {
     const h = makeHarness({ workspaceRoot: '/repo' });
 

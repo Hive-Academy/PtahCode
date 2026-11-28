@@ -127,6 +127,8 @@ export interface SetupGenerationRunState {
   source: GenerationContextSource;
   effectiveProvider: string;
   effectiveModel: string;
+  /** Written outcomes already recorded by the agent generation checkpoint. */
+  agentsWritten?: number;
   result?: SetupGenerationResultFacts;
 }
 
@@ -178,9 +180,17 @@ export interface AnalysisStatus {
   analysisDir: string | null;
   checkedAt: string;
   analyzedAt: string | null;
+  /** Identity of the manifest qualified by this status, when readable. */
+  savedRun?: {
+    runId: string;
+    lifecycle: MultiPhaseManifestV4['lifecycle'];
+    updatedAt: string;
+  };
 }
 
-export type WizardAnalysisStatusParams = Record<string, never>;
+export interface WizardAnalysisStatusParams {
+  workspacePath?: string;
+}
 export type WizardAnalysisStatusResponse = AnalysisStatus;
 
 export interface PhaseResultV4 {
@@ -219,7 +229,8 @@ export interface MultiPhaseManifestV4 {
   phases: Record<string, PhaseResultV4>;
 }
 
-export type StackItemKind = 'language' | 'framework' | 'library' | 'test-tool' | 'pattern';
+export type StackItemKind =
+  'language' | 'framework' | 'library' | 'test-tool' | 'pattern';
 export interface StackSummaryItem {
   kind: StackItemKind;
   name: string;
@@ -244,6 +255,14 @@ export interface WizardRecommendAnalysisSkillsResult {
   searchFailures: { item: string; reason: string }[];
   summarySource: 'structured' | 'legacy' | 'none';
   warning?: string;
+}
+export interface WizardGetSkillReviewParams {
+  runId: string;
+}
+/** Persisted judged skill review for one analysis run; both fields null when none is stored. */
+export interface WizardGetSkillReviewResult {
+  review: WizardRecommendAnalysisSkillsResult | null;
+  reviewedAt: string | null;
 }
 
 /**
@@ -348,7 +367,9 @@ export interface WizardSubmitSelectionParams {
 }
 
 /** Parameters for the read-only resumable-run discovery RPC method. */
-export type WizardGetResumableRunParams = Record<string, never>;
+export interface WizardGetResumableRunParams {
+  workspacePath?: string;
+}
 
 /** A checkpoint agent record returned to the UI for generation recovery. */
 export interface ResumableGenerationAgent {
@@ -363,6 +384,8 @@ export interface ResumableGenerationAgent {
 /** Read-only DTO for a persisted generation checkpoint. */
 export interface ResumableGenerationRun {
   runId: string;
+  /** The tab identity required to reopen a bound checkpoint. */
+  ownerTabId?: string;
   /** `null` when the checkpoint carries no analysis directory. */
   analysisDirectory: string | null;
   outputDirectory: string;
@@ -375,6 +398,10 @@ export interface ResumableGenerationRun {
 export interface WizardGetResumableRunResponse {
   analysis: MultiPhaseAnalysisResponse | null;
   generation: ResumableGenerationRun | null;
+  /** True when an analysis run is currently executing in-process for this workspace. */
+  analysisActive?: boolean;
+  /** ISO 8601 timestamp when the active in-process analysis run started. */
+  activeAnalysisStartedAt?: string;
 }
 
 /** Response from wizard:submit-selection RPC method */

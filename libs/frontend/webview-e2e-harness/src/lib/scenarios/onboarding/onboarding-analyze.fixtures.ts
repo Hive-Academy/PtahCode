@@ -14,6 +14,7 @@ import type {
   SkillJudgeResult,
   SkillShEntry,
   StackSummaryItem,
+  WizardGetSkillReviewResult,
   WizardGetSetupModelResult,
   WizardRecommendAnalysisSkillsResult,
   WizardSetSetupModelResult,
@@ -258,7 +259,10 @@ const SKILL_JUDGE_RESULT: SkillJudgeResult = {
       itemId: 'item-guardrails',
       item: GUARDRAILS_ITEM,
       registry: 'search-failed',
-      registryFailure: { kind: 'timed-out', reason: 'skills.sh search timed out' },
+      registryFailure: {
+        kind: 'timed-out',
+        reason: 'skills.sh search timed out',
+      },
       candidateIds: [],
       candidateAssessments: [],
       outcomes: [],
@@ -351,6 +355,10 @@ export function onboardingAnalyzeFixtures(
       state: { kind: 'set', pair: SETUP_PAIR },
       commitSeq: 1,
     } satisfies WizardSetSetupModelResult,
+    'wizard:get-skill-review': {
+      review: null,
+      reviewedAt: null,
+    } satisfies WizardGetSkillReviewResult,
     'wizard:recommend-analysis-skills': {
       skills: [
         {

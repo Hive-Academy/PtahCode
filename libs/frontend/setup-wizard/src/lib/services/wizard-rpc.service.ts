@@ -18,6 +18,8 @@ import type {
   WizardSubmitSelectionResponse,
   WizardCancelResponse,
   EnhancedPromptsCancelResponse,
+  WizardGetSkillReviewResult,
+  WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { AgentSelection } from './setup-wizard-state.service';
 
@@ -34,6 +36,7 @@ import { AgentSelection } from './setup-wizard-state.service';
 const WIZARD_RPC_TIMEOUTS = {
   LIST_MS: 10_000,
   SHORT_LLM_MS: 60_000,
+  SKILL_REVIEW_MS: 75_000,
   GENERATION_MS: 300_000,
   DEEP_ANALYSIS_MS: 3_660_000,
 } as const;
@@ -70,7 +73,8 @@ function guidanceFailure(
   fallback: string,
 ): WizardRpcError {
   const text = message || fallback;
-  const setup = code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
+  const setup =
+    code === 'SETUP_MODEL_INVALID' ? SETUP_REFUSAL.exec(text) : null;
   const reason = setup?.[1].toLowerCase();
   const provider = setup?.[2];
   const detail = reason
@@ -390,13 +394,17 @@ export class WizardRpcService {
    * Calls the read-only wizard:get-resumable-run handler.
    *
    * Discovery is best-effort: a failure returns an empty response so wizard
-   * startup never breaks on it.
+   * startup never breaks on it. Callers that need a confirmed snapshot can
+   * request an error instead.
    */
-  public async getResumableRun(): Promise<WizardGetResumableRunResponse> {
+  public async getResumableRun(
+    workspacePath?: string,
+    options?: { throwOnError?: boolean },
+  ): Promise<WizardGetResumableRunResponse> {
     try {
       const result = await this.rpcService.call(
         'wizard:get-resumable-run',
-        {},
+        workspacePath ? { workspacePath } : {},
         { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
       );
       if (result.isSuccess() && result.data) {
@@ -414,6 +422,8 @@ export class WizardRpcService {
         error instanceof Error ? error.message : String(error),
       );
     }
+    if (options?.throwOnError)
+      throw new Error('Resumable runs could not be loaded.');
     return { analysis: null, generation: null };
   }
 
@@ -595,6 +605,52 @@ export class WizardRpcService {
   }
 
   /**
+   * Read the skill review stored with an analysis run
+   * (`wizard:get-skill-review`). Both fields are `null` when none is stored.
+   *
+   * Throws when the lookup fails, so a caller can tell "no review" from
+   * "could not check".
+   */
+  public async getSkillReview(
+    runId: string,
+  ): Promise<WizardGetSkillReviewResult> {
+    const result = await this.rpcService.call(
+      'wizard:get-skill-review',
+      { runId },
+      { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
+    );
+    if (result.isSuccess() && result.data) return result.data;
+    throw new WizardRpcError(
+      'The saved skill review could not be read.',
+      result.errorCode,
+    );
+  }
+
+  /**
+   * Run the judged skill review for an analysis run
+   * (`wizard:recommend-analysis-skills`). The backend stores a successful
+   * review with the analysis.
+   *
+   * Throws a {@link WizardRpcError} carrying the RPC error code
+   * (`SETUP_MODEL_INVALID`, `ANALYSIS_LOAD_FAILED`, ...) so the view can pick
+   * its fixed copy.
+   */
+  public async recommendAnalysisSkills(
+    runId: string,
+  ): Promise<WizardRecommendAnalysisSkillsResult> {
+    const result = await this.rpcService.call(
+      'wizard:recommend-analysis-skills',
+      { runId },
+      { timeout: WIZARD_RPC_TIMEOUTS.SKILL_REVIEW_MS },
+    );
+    if (result.isSuccess() && result.data) return result.data;
+    throw new WizardRpcError(
+      'Could not load skill recommendations.',
+      result.errorCode,
+    );
+  }
+
+  /**
    * List all saved analyses from .ptah/analysis/ directory.
    * Returns metadata only (lightweight, for listing cards).
    *
@@ -602,10 +658,11 @@ export class WizardRpcService {
    */
   public async listAnalyses(options?: {
     throwOnError?: boolean;
+    workspacePath?: string;
   }): Promise<SavedAnalysisMetadata[]> {
     const result = await this.rpcService.call(
       'wizard:list-analyses',
-      {},
+      options?.workspacePath ? { workspacePath: options.workspacePath } : {},
       { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
     );
 
@@ -620,30 +677,30 @@ export class WizardRpcService {
   }
 
   /**
-   * Load a specific saved analysis by slug directory name.
-   * Returns the full multi-phase analysis response.
-   *
-   * @param filename - Slug directory name from .ptah/analysis/
-   * @returns Multi-phase analysis response with manifest and phase contents
+   * Read the status of workspace analysis.
    */
-  public async getAnalysisStatus(): Promise<AnalysisStatus> {
+  public async getAnalysisStatus(
+    workspacePath?: string,
+  ): Promise<AnalysisStatus> {
     const result = await this.rpcService.call(
       'wizard:analysis-status',
-      {},
+      workspacePath ? { workspacePath } : {},
       { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
     );
     if (result.isSuccess() && result.data) return result.data;
     throw new Error(result.error || 'Failed to check analysis status');
   }
 
+  /** Load the manifest and phase contents by directory slug or run ID. */
   public async loadAnalysis(
     filename: string,
+    workspacePath?: string,
   ): Promise<MultiPhaseAnalysisResponse> {
-    const result = await this.rpcService.call(
-      'wizard:load-analysis',
-      { filename },
-      { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
-    );
+    // The handler also accepts a workspace to pin recovery lookups.
+    const params = workspacePath ? { filename, workspacePath } : { filename };
+    const result = await this.rpcService.call('wizard:load-analysis', params, {
+      timeout: WIZARD_RPC_TIMEOUTS.LIST_MS,
+    });
 
     if (result.isSuccess() && result.data) {
       return result.data as MultiPhaseAnalysisResponse;
@@ -651,5 +708,4 @@ export class WizardRpcService {
 
     throw new Error(result.error || 'Failed to load analysis');
   }
-
 }

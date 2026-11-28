@@ -47,24 +47,33 @@ describe('wizard skill installation', () => {
   const propagate = jest.fn();
   const keepSelected = jest.fn();
   const loggerError = jest.fn();
+  const getWorkspaceRoot = jest.fn<string, []>();
   let workspaceRoot: string;
+  let otherWorkspace: string;
 
   beforeEach(async () => {
     workspaceRoot = await fs.mkdtemp(
       path.join(os.tmpdir(), 'ptah-consent-test-'),
     );
     jest.clearAllMocks();
+    otherWorkspace = path.join(workspaceRoot, 'other-workspace');
+    getWorkspaceRoot.mockReturnValue(workspaceRoot);
     consent.computeContentHash.mockReturnValue('a'.repeat(64));
     methods.clear();
     keepSelected.mockReturnValue(true);
-    staged.mockImplementation(async (_request, root) => {
-      const skill = path.join(root, '.claude', 'skills', 'example');
+    staged.mockImplementation(async (request, root) => {
+      const skill = path.join(
+        root,
+        '.claude',
+        'skills',
+        request.skillId ?? 'example',
+      );
       await fs.mkdir(skill, { recursive: true });
       await fs.writeFile(path.join(skill, 'SKILL.md'), '# Example');
       await fs.writeFile(path.join(skill, 'run.sh'), 'echo example');
       return { success: true };
     });
-    install.mockImplementation(async (params, verifyStaged) => {
+    install.mockImplementation(async (params, verifyStaged, pinnedRoot) => {
       const stagingDir = await fs.mkdtemp(
         path.join(os.tmpdir(), 'ptah-install-stage-'),
       );
@@ -73,7 +82,9 @@ describe('wizard skill installation', () => {
         if (!result.success) return { success: false };
         const dir = path.join(stagingDir, '.claude', 'skills', params.skillId);
         await verifyStaged([{ slug: params.skillId, dir }]);
-        const root = workspacePluginsDir(workspaceRoot) as string;
+        const root = workspacePluginsDir(
+          pinnedRoot ?? getWorkspaceRoot(),
+        ) as string;
         const skill = path.join(
           root,
           'ptah-skillssh-owner-repo',
@@ -104,7 +115,11 @@ describe('wizard skill installation', () => {
           fn: (params: unknown) => Promise<unknown>,
         ) => methods.set(name, fn),
       },
-      workspaceProvider: { getWorkspaceRoot: () => workspaceRoot },
+      workspaceProvider: {
+        getWorkspaceRoot,
+        getWorkspaceFolders: () => [workspaceRoot, otherWorkspace],
+      },
+      skillInstallRuns: new Map<string, AbortController>(),
       skillsShApi: { invalidateInstallCaches: jest.fn() },
       container: {
         resolve: (token: unknown) => {
@@ -139,7 +154,12 @@ describe('wizard skill installation', () => {
           },
         ],
       }),
-    ).resolves.toEqual({ success: true, installed: ['owner/repo/example'] });
+    ).resolves.toEqual({
+      success: true,
+      installed: ['owner/repo/example'],
+      workspacePath: workspaceRoot,
+      cancelled: false,
+    });
     expect(consent.recordConsent).toHaveBeenCalledWith(
       'owner/repo/example',
       'a'.repeat(64),
@@ -147,10 +167,221 @@ describe('wizard skill installation', () => {
     expect(install).toHaveBeenCalledWith(
       { source: 'owner/repo', skillId: 'example', scope: 'workspace' },
       expect.any(Function),
+      workspaceRoot,
     );
     expect(keepSelected).toHaveBeenCalledWith(workspaceRoot, ['example']);
     expect(propagate).toHaveBeenCalledTimes(1);
   });
+
+  function pauseNextStage() {
+    const stage = staged.getMockImplementation();
+    if (!stage) throw new Error('The stage mock has no implementation.');
+    let markStarted!: () => void;
+    let resume!: () => void;
+    const started = new Promise<void>((resolve) => (markStarted = resolve));
+    const paused = new Promise<void>((resolve) => (resume = resolve));
+    staged.mockImplementationOnce(async (...args) => {
+      markStarted();
+      await paused;
+      return stage(...args);
+    });
+    return { started, resume };
+  }
+
+  it.each([true, false])(
+    'pins both writes through a workspace switch (explicit path: %s)',
+    async (explicitPath) => {
+      consent.hasScripts.mockReturnValue(false);
+      const { started, resume } = pauseNextStage();
+      const result = method()({
+        skills: ['owner/repo/example', 'owner/repo/second'],
+        consentRecords: [],
+        workspacePath: explicitPath ? workspaceRoot : undefined,
+      });
+
+      await started;
+      getWorkspaceRoot.mockReturnValue(otherWorkspace);
+      resume();
+
+      await expect(result).resolves.toEqual({
+        success: true,
+        workspacePath: workspaceRoot,
+        installed: ['owner/repo/example', 'owner/repo/second'],
+        cancelled: false,
+      });
+      expect(install.mock.calls.map(([, , root]) => root)).toEqual([
+        workspaceRoot,
+        workspaceRoot,
+      ]);
+      expect(getWorkspaceRoot).toHaveBeenCalledTimes(explicitPath ? 0 : 1);
+      expect(keepSelected).toHaveBeenCalledWith(workspaceRoot, [
+        'example',
+        'second',
+      ]);
+      expect(propagate).toHaveBeenCalledWith(
+        workspaceRoot,
+        'wizard:install-skills-with-consent',
+      );
+      for (const slug of ['example', 'second']) {
+        const skillFile = ['ptah-skillssh-owner-repo', 'skills', slug, 'SKILL.md'];
+        await expect(
+          fs.readFile(
+            path.join(workspacePluginsDir(workspaceRoot) as string, ...skillFile),
+            'utf8',
+          ),
+        ).resolves.toBe('# Example');
+        await expect(
+          fs.access(
+            path.join(workspacePluginsDir(otherWorkspace) as string, ...skillFile),
+          ),
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    },
+  );
+
+  it('rejects duplicate IDs and keeps the original run cancellable after its in-flight write', async () => {
+    consent.hasScripts.mockReturnValue(false);
+    getWorkspaceRoot.mockReturnValue(otherWorkspace);
+    const { started, resume } = pauseNextStage();
+    const installRunId = 'install-1';
+    const installSkills = method();
+    const cancel = methods.get('wizard:cancel-skill-install');
+    if (!cancel) throw new Error('The cancel RPC was not registered.');
+    const params = {
+      skills: ['owner/repo/example', 'owner/repo/second'],
+      consentRecords: [],
+      workspacePath: workspaceRoot,
+      installRunId,
+    };
+    const result = installSkills(params);
+    await started;
+    try {
+      await expect(installSkills(params)).rejects.toMatchObject({
+        errorCode: 'INVALID_PARAMS',
+      });
+      await expect(
+        installSkills({ ...params, skills: [] }),
+      ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
+      await expect(cancel({ installRunId: 'other-run' })).resolves.toEqual({
+        cancelled: false,
+      });
+      await expect(cancel({ installRunId })).resolves.toEqual({
+        cancelled: true,
+      });
+    } finally {
+      resume();
+    }
+
+    await expect(result).resolves.toEqual({
+      success: false,
+      workspacePath: workspaceRoot,
+      installed: ['owner/repo/example'],
+      cancelled: true,
+    });
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(keepSelected).toHaveBeenCalledWith(workspaceRoot, ['example']);
+    expect(propagate).toHaveBeenCalledWith(
+      workspaceRoot,
+      'wizard:install-skills-with-consent',
+    );
+    await expect(cancel({ installRunId })).resolves.toEqual({
+      cancelled: false,
+    });
+  });
+
+  it.each([
+    ['an unregistered child', (root: string) => path.join(root, 'unregistered-child')],
+    ['a traversal outside the workspace', (root: string) => `${root}/../unregistered-sibling`],
+  ])('rejects %s as the install root', async (_description, requestedRoot) => {
+    await expect(
+      method()({
+        skills: ['owner/repo/example'],
+        consentRecords: [],
+        workspacePath: requestedRoot(workspaceRoot),
+      }),
+    ).rejects.toMatchObject({
+      message: 'Access denied: workspace path is not an open folder.',
+      errorCode: 'UNAUTHORIZED_WORKSPACE',
+    });
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('requires an open workspace for a non-empty install', async () => {
+    getWorkspaceRoot.mockReturnValue('');
+    const installSkills = method();
+
+    await expect(
+      installSkills({ skills: ['owner/repo/example'], consentRecords: [] }),
+    ).rejects.toMatchObject({ errorCode: 'WORKSPACE_NOT_OPEN' });
+    await expect(
+      installSkills({ skills: [], consentRecords: [] }),
+    ).resolves.toEqual({ success: true, installed: [], cancelled: false });
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('clears the run registration when the installer throws', async () => {
+    const installSkills = method();
+    const cancel = methods.get('wizard:cancel-skill-install');
+    if (!cancel) throw new Error('The cancel RPC was not registered.');
+    const installRunId = 'failed-run';
+    install.mockRejectedValueOnce(new Error('Installer failed'));
+
+    await expect(
+      installSkills({
+        skills: ['owner/repo/example'],
+        consentRecords: [],
+        installRunId,
+      }),
+    ).resolves.toMatchObject({ success: false, installed: [] });
+    await expect(cancel({ installRunId })).resolves.toEqual({
+      cancelled: false,
+    });
+  });
+
+  it('clears the run registration when install settlement rejects', async () => {
+    consent.hasScripts.mockReturnValue(false);
+    propagate.mockRejectedValueOnce(new Error('Propagation failed'));
+    const installSkills = method();
+    const cancel = methods.get('wizard:cancel-skill-install');
+    if (!cancel) throw new Error('The cancel RPC was not registered.');
+    const installRunId = 'rejected-run';
+    const params = {
+      skills: ['owner/repo/example'],
+      consentRecords: [],
+      installRunId,
+    };
+
+    await expect(installSkills(params)).rejects.toThrow('Propagation failed');
+    await expect(cancel({ installRunId })).resolves.toEqual({
+      cancelled: false,
+    });
+    await expect(installSkills(params)).resolves.toMatchObject({ success: true });
+  });
+
+  it.each(['returns false', 'throws'])(
+    'reports confirmed writes when saving selection %s',
+    async (outcome) => {
+      consent.hasScripts.mockReturnValue(false);
+      if (outcome === 'throws') {
+        keepSelected.mockImplementationOnce(() => {
+          throw new Error('Selection storage failed');
+        });
+      } else {
+        keepSelected.mockReturnValueOnce(false);
+      }
+
+      await expect(
+        method()({ skills: ['owner/repo/example'], consentRecords: [] }),
+      ).resolves.toEqual({
+        success: false,
+        workspacePath: workspaceRoot,
+        installed: ['owner/repo/example'],
+        cancelled: false,
+        reason: 'Could not save the skill selection.',
+      });
+      expect(propagate).not.toHaveBeenCalled();
+    },
+  );
 
   it('refuses unapproved scripts before install or propagation', async () => {
     consent.hasScripts.mockReturnValue(true);
@@ -159,6 +390,8 @@ describe('wizard skill installation', () => {
     ).resolves.toEqual({
       success: false,
       installed: [],
+      workspacePath: workspaceRoot,
+      cancelled: false,
       failedSkill: 'owner/repo/example',
       reason: expect.stringContaining('requires consent'),
     });
@@ -182,6 +415,8 @@ describe('wizard skill installation', () => {
     ).resolves.toEqual({
       success: false,
       installed: [],
+      workspacePath: workspaceRoot,
+      cancelled: false,
       failedSkill: 'owner/repo/example',
       reason: expect.stringContaining('changed since preview'),
     });
@@ -214,6 +449,8 @@ describe('wizard skill installation', () => {
     ).resolves.toEqual({
       success: false,
       installed: [],
+      workspacePath: workspaceRoot,
+      cancelled: false,
       failedSkill: 'owner/repo/example',
       reason: expect.stringContaining('changed since preview'),
     });
@@ -253,6 +490,8 @@ describe('wizard skill installation', () => {
     ).resolves.toEqual({
       success: false,
       installed: [],
+      workspacePath: workspaceRoot,
+      cancelled: false,
       failedSkill: 'owner/repo/example',
       reason: 'Skill install failed.',
     });
@@ -266,6 +505,8 @@ describe('wizard skill installation', () => {
       await expect(method()({ skills: [name], consentRecords: [] })).resolves.toEqual({
         success: false,
         installed: [],
+        workspacePath: workspaceRoot,
+        cancelled: false,
         failedSkill: name,
         reason: 'Invalid skill name. Expected owner/repo/skill.',
       });
@@ -343,6 +584,8 @@ describe('wizard skill installation', () => {
     ).resolves.toEqual({
       success: false,
       installed: ['owner/repo/example'],
+      workspacePath: workspaceRoot,
+      cancelled: false,
       failedSkill: 'owner/repo/second',
       reason: 'Skill install failed.',
     });

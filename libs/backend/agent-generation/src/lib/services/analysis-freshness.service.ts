@@ -9,7 +9,13 @@ import type { AnalysisStatus } from '@ptah-extension/shared';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { AGENT_GENERATION_TOKENS } from '../di/tokens';
 import { PHASE_CONFIGS } from '../types/multi-phase.types';
-import { computeWorkspaceFingerprint, isRootGitignored, normalizeEolBytes, readRootGitignore, sha256Hex } from './analysis-fingerprint';
+import {
+  computeWorkspaceFingerprint,
+  isRootGitignored,
+  normalizeEolBytes,
+  readRootGitignore,
+  sha256Hex,
+} from './analysis-fingerprint';
 import {
   AnalysisStorageService,
   isLegacyArchiveDirName,
@@ -17,6 +23,13 @@ import {
 } from './analysis-storage.service';
 
 const SERVICE_TAG = '[AnalysisFreshness]';
+
+/** Optional filters for excluding an actively executing run from freshness checks. */
+export interface AnalysisFreshnessOptions {
+  excludeRunId?: string | null;
+  excludeSlug?: string | null;
+}
+
 type LatestRun = {
   dir: string;
   analyzedAtMs: number;
@@ -45,7 +58,10 @@ export class AnalysisFreshnessService {
   ) {}
 
   /** Report status with workspace-relative analysisDir and '/' separators. */
-  async getStatus(workspaceRoot: string | null): Promise<AnalysisStatus> {
+  async getStatus(
+    workspaceRoot: string | null,
+    options?: AnalysisFreshnessOptions,
+  ): Promise<AnalysisStatus> {
     const checkedAt = new Date().toISOString();
     let sharing: AnalysisStatus['sharing'];
     const status = (
@@ -53,6 +69,7 @@ export class AnalysisFreshnessService {
       reason: AnalysisStatus['reason'],
       analysisDir: string | null = null,
       analyzedAt: string | null = null,
+      savedRun?: AnalysisStatus['savedRun'],
     ): AnalysisStatus => ({
       state,
       reason,
@@ -60,6 +77,7 @@ export class AnalysisFreshnessService {
       checkedAt,
       analyzedAt,
       ...(sharing ? { sharing } : {}),
+      ...(savedRun ? { savedRun } : {}),
     });
     if (!workspaceRoot) return status('missing', 'no-analysis');
 
@@ -68,9 +86,19 @@ export class AnalysisFreshnessService {
         sharing = 'shareable';
       } else {
         const rules = await readRootGitignore(workspaceRoot, this.fs);
-        sharing = isRootGitignored('.ptah/analysis/ptah-analysis-probe/manifest.json', false, rules) ||
-          isRootGitignored('.ptah/analysis/ptah-analysis-probe/01-project-profile.md', false, rules)
-          ? 'ignored-by-gitignore' : 'shareable';
+        sharing =
+          isRootGitignored(
+            '.ptah/analysis/ptah-analysis-probe/manifest.json',
+            false,
+            rules,
+          ) ||
+          isRootGitignored(
+            '.ptah/analysis/ptah-analysis-probe/01-project-profile.md',
+            false,
+            rules,
+          )
+            ? 'ignored-by-gitignore'
+            : 'shareable';
       }
     } catch (error) {
       // degradation-audit: reported — an unreadable ignore file cannot prove
@@ -78,7 +106,10 @@ export class AnalysisFreshnessService {
       if (isMissing(error)) sharing = 'shareable';
       else {
         sharing = 'unknown';
-        this.logger.warn(`${SERVICE_TAG} Could not inspect root .gitignore`, error);
+        this.logger.warn(
+          `${SERVICE_TAG} Could not inspect root .gitignore`,
+          error,
+        );
       }
     }
 
@@ -86,16 +117,22 @@ export class AnalysisFreshnessService {
     const relativeDir = (dir: string): string =>
       relative(workspaceRoot, dir).replace(/\\/g, '/');
     try {
-      const latest = await this.findLatestRun(analysisRoot);
+      const latest = await this.findLatestRun(analysisRoot, options);
       if (!latest) return status('missing', 'no-analysis');
       if ('rejectedDir' in latest)
         return status('stale', 'unreadable', relativeDir(latest.rejectedDir));
       const result = await this.qualify(latest, workspaceRoot);
+      const { manifest } = latest.read;
       return status(
         result.state,
         result.reason,
         relativeDir(latest.dir),
-        latest.read.manifest.analyzedAt,
+        manifest.analyzedAt,
+        {
+          runId: manifest.runId,
+          lifecycle: manifest.lifecycle,
+          updatedAt: manifest.updatedAt,
+        },
       );
     } catch (error) {
       this.logger.warn(
@@ -112,6 +149,7 @@ export class AnalysisFreshnessService {
 
   private async findLatestRun(
     analysisRoot: string,
+    options?: AnalysisFreshnessOptions,
   ): Promise<LatestRun | RejectedRun | null> {
     let entries;
     try {
@@ -120,6 +158,8 @@ export class AnalysisFreshnessService {
       if (isMissing(error)) return null;
       throw error;
     }
+    const excludeRunId = options?.excludeRunId || null;
+    const excludeSlug = options?.excludeSlug || null;
     let latest: LatestRun | null = null;
     let rejectedDir: string | null = null;
     for (const entry of entries) {
@@ -128,6 +168,7 @@ export class AnalysisFreshnessService {
         isLegacyArchiveDirName(entry.name)
       )
         continue;
+      if (excludeSlug && entry.name === excludeSlug) continue;
       const dir = join(analysisRoot, entry.name);
       const manifestPath = join(dir, 'manifest.json');
       try {
@@ -146,6 +187,12 @@ export class AnalysisFreshnessService {
         }
         rejectedDir ??= dir;
         this.logger.debug(`${SERVICE_TAG} Manifest rejected`, { dir });
+        continue;
+      }
+      if (
+        (excludeRunId && read.manifest.runId === excludeRunId) ||
+        (excludeSlug && read.manifest.slug === excludeSlug)
+      ) {
         continue;
       }
       const analyzedAtMs = Date.parse(read.manifest.analyzedAt);
@@ -213,8 +260,10 @@ export class AnalysisFreshnessService {
           return { state: 'stale', reason: 'output-mismatch' };
         throw error;
       }
-      if (sha256Hex(bytes) !== phase.verification.outputSha256 &&
-          sha256Hex(normalizeEolBytes(bytes)) !== phase.verification.outputSha256) {
+      if (
+        sha256Hex(bytes) !== phase.verification.outputSha256 &&
+        sha256Hex(normalizeEolBytes(bytes)) !== phase.verification.outputSha256
+      ) {
         return { state: 'stale', reason: 'output-mismatch' };
       }
     }

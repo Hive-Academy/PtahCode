@@ -1,10 +1,33 @@
 export { SetupWizardStateService } from './lib/services/setup-wizard-state.service';
-export { WizardRpcService } from './lib/services/wizard-rpc.service';
+export {
+  WizardRpcError,
+  WizardRpcService,
+} from './lib/services/wizard-rpc.service';
 export type { BoundAgentDecisions } from './lib/services/wizard-rpc.service';
 export { GenerationPreviewStore } from './lib/services/generation-preview.store';
 export type { PreviewConfirmation } from './lib/services/generation-preview.store';
 export { WizardAnalysisRunner } from './lib/services/wizard-analysis-runner.service';
-export { findBoundGenerationTab } from './lib/services/bound-generation-tab';
+export { SetupRunStore } from './lib/services/setup-run.store';
+export {
+  normalizeSetupWorkspacePath,
+  sameSetupWorkspacePath,
+} from './lib/services/setup-run-persistence';
+export type {
+  SetupRunStartOptions,
+  SetupRunReport,
+} from './lib/services/setup-run.store';
+export {
+  SETUP_RUN_STEPS,
+  isTerminalSetupRunStatus,
+} from './lib/services/setup-run.types';
+export type {
+  SetupRunRecord,
+  SetupRunStatus,
+  SetupRunStep,
+  SetupRunStepOf,
+  SetupRunWorkflow,
+} from './lib/services/setup-run.types';
+export { stepTarget, nextStep } from './lib/services/setup-run-steps';
 export { ToolOutputFormatterService } from './lib/services/tool-output-formatter.service';
 
 export {

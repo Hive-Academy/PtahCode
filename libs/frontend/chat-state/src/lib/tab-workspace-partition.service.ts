@@ -644,9 +644,14 @@ export class TabWorkspacePartitionService {
         return null;
       }
 
+      // The workspace path lets dropped legacy Setup tabs be handed off (D6).
+      const tabs = sanitizeRestoredTabs(state.tabs as TabState[], workspacePath);
+      const activeTabId: string | null = state.activeTabId ?? null;
       return {
-        tabs: sanitizeRestoredTabs(state.tabs as TabState[]),
-        activeTabId: state.activeTabId ?? null,
+        tabs,
+        activeTabId: tabs.some((tab) => tab.id === activeTabId)
+          ? activeTabId
+          : null,
       };
     } catch (error: unknown) {
       // degradation-audit: reported - logged at warn here; the caller gets

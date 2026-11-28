@@ -110,12 +110,24 @@ export interface WizardPreviewSkillsForConsentResponse {
 export interface WizardInstallSkillsWithConsentParams {
   skills: string[];
   consentRecords: SkillConsentRecord[];
+  workspacePath?: string;
+  installRunId?: string;
 }
 export interface WizardInstallSkillsWithConsentResponse {
   success: boolean;
+  /** Confirmed installed skill names in workspacePath, including partial progress. */
   installed: string[];
+  workspacePath?: string;
+  cancelled?: boolean;
   failedSkill?: string;
   reason?: string;
+}
+export interface WizardCancelSkillInstallParams {
+  installRunId: string;
+}
+export interface WizardCancelSkillInstallResponse {
+  /** Whether the cancellation request matched an in-flight install. */
+  cancelled: boolean;
 }
 import type { CliLaneDefaults } from './cli-lane-defaults.types';
 import type { CodexSandboxMode } from './advanced-settings.types';
@@ -463,6 +475,8 @@ import type {
   MultiPhaseAnalysisResponse,
   WizardRecommendAnalysisSkillsParams,
   WizardRecommendAnalysisSkillsResult,
+  WizardGetSkillReviewParams,
+  WizardGetSkillReviewResult,
   EnhancedPromptsGetStatusParams,
   EnhancedPromptsGetStatusResponse,
   EnhancedPromptsRunWizardParams,
@@ -1603,6 +1617,10 @@ export interface RpcMethodRegistry
     params: WizardRecommendAnalysisSkillsParams;
     result: WizardRecommendAnalysisSkillsResult;
   };
+  'wizard:get-skill-review': {
+    params: WizardGetSkillReviewParams;
+    result: WizardGetSkillReviewResult;
+  };
   'wizard:get-setup-model': {
     params: WizardGetSetupModelParams;
     result: WizardGetSetupModelResult;
@@ -1631,6 +1649,10 @@ export interface RpcMethodRegistry
     params: WizardInstallSkillsWithConsentParams;
     result: WizardInstallSkillsWithConsentResponse;
   };
+  'wizard:cancel-skill-install': {
+    params: WizardCancelSkillInstallParams;
+    result: WizardCancelSkillInstallResponse;
+  };
   'wizard:cancel-analysis': {
     params: WizardCancelAnalysisParams;
     result: WizardCancelAnalysisResponse;
@@ -1656,11 +1678,11 @@ export interface RpcMethodRegistry
     result: WizardPreviewGenerationResponse;
   };
   'wizard:list-analyses': {
-    params: Record<string, never>;
+    params: { workspacePath?: string };
     result: { analyses: SavedAnalysisMetadata[] };
   };
   'wizard:load-analysis': {
-    params: { filename: string };
+    params: { filename: string; workspacePath?: string };
     result: MultiPhaseAnalysisResponse;
   };
   'license:getStatus': {
@@ -3891,6 +3913,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:analysis-status': true,
   'wizard:recommend-skills': true,
   'wizard:recommend-analysis-skills': true,
+  'wizard:get-skill-review': true,
   'wizard:get-setup-model': true,
   'wizard:set-setup-model': true,
   'wizard:generate-skill-draft': true,
@@ -3898,6 +3921,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:get-project-guidance': true,
   'wizard:preview-skills-for-consent': true,
   'wizard:install-skills-with-consent': true,
+  'wizard:cancel-skill-install': true,
   'wizard:cancel-analysis': true,
   'wizard:submit-selection': true,
   'wizard:cancel': true,

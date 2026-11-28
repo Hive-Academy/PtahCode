@@ -141,6 +141,7 @@ import type {
   ModelPair,
   WizardGetSetupModelResult,
   WizardRecommendAnalysisSkillsResult,
+  WizardGetSkillReviewResult,
   WizardSetSetupModelResult,
 } from '@ptah-extension/shared';
 import type {
@@ -416,6 +417,7 @@ describe('SetupRpcHandlers', () => {
         [
           'setup-status:get-status',
           'wizard:cancel-analysis',
+          'wizard:cancel-skill-install',
           'wizard:deep-analyze',
           'wizard:get-setup-model',
           'wizard:set-setup-model',
@@ -429,6 +431,7 @@ describe('SetupRpcHandlers', () => {
           'wizard:load-analysis',
           'wizard:recommend-skills',
           'wizard:recommend-analysis-skills',
+          'wizard:get-skill-review',
           'wizard:search-skills',
         ].sort(),
       );
@@ -437,6 +440,8 @@ describe('SetupRpcHandlers', () => {
     it('exposes wizard:get-resumable-run in the static METHODS manifest', () => {
       expect(SetupRpcHandlers.METHODS).toContain('wizard:get-resumable-run');
       expect(SetupRpcHandlers.METHODS).toContain('wizard:analysis-status');
+      expect(SetupRpcHandlers.METHODS).toContain('wizard:get-skill-review');
+      expect(SetupRpcHandlers.METHODS).toContain('wizard:cancel-skill-install');
     });
   });
 
@@ -463,6 +468,95 @@ describe('SetupRpcHandlers', () => {
       expect(await call(h, 'wizard:analysis-status')).toEqual(missing);
       expect(getStatus).toHaveBeenCalledWith(null);
     });
+
+    it('reads the explicitly selected open workspace', async () => {
+      const selected = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'setup-pinned-'),
+      );
+      try {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE, selected] });
+        const getStatus = jest.fn().mockResolvedValue(missing);
+        const findLatestResumableRun = jest.fn().mockResolvedValue(null);
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
+          {
+            getStatus,
+          },
+        );
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            findLatestResumableRun,
+          },
+        );
+        h.handlers.register();
+
+        await callRaw(h, 'wizard:analysis-status', { workspacePath: selected });
+        await callRaw(h, 'wizard:get-resumable-run', {
+          workspacePath: selected,
+        });
+        expect(getStatus).toHaveBeenCalledWith(selected);
+        expect(findLatestResumableRun).toHaveBeenCalledWith(selected);
+      } finally {
+        await fs.rm(selected, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'wizard:analysis-status',
+      'wizard:get-resumable-run',
+      'wizard:list-analyses',
+      'wizard:load-analysis',
+    ] as const)('requires an exact open directory on %s', async (method) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-pinned-'));
+      const root = path.join(dir, 'open');
+      const outside = path.join(dir, 'outside');
+      const link = path.join(root, 'link');
+      try {
+        await fs.mkdir(path.join(root, 'sub'), { recursive: true });
+        await fs.mkdir(path.join(outside, 'sub'), { recursive: true });
+        await fs.symlink(path.join(outside, 'sub'), link, 'junction');
+        const h = makeHarness({ workspaceFolders: [root] });
+        h.handlers.register();
+        for (const workspacePath of [
+          path.join(root, 'sub'),
+          `${root}${path.sep}..${path.sep}outside`,
+          link,
+          `${link}${path.sep}..`,
+        ]) {
+          const response = await callRaw(h, method, {
+            workspacePath,
+            filename: 'analysis',
+          });
+          expect(response).toMatchObject({
+            success: false,
+            errorCode: 'UNAUTHORIZED_WORKSPACE',
+          });
+        }
+        expect(
+          await callRaw(h, method, {
+            workspacePath: '   ',
+            filename: 'analysis',
+          }),
+        ).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it.each(['wizard:analysis-status', 'wizard:get-resumable-run'] as const)(
+      'rejects an out-of-workspace path on %s',
+      async (method) => {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE] });
+        h.handlers.register();
+
+        const response = await callRaw(h, method, {
+          workspacePath: '/not-open',
+        });
+        expect(response.success).toBe(false);
+        expect(response.errorCode).toBe('UNAUTHORIZED_WORKSPACE');
+      },
+    );
 
     it('returns the service result unchanged and does not mutate storage', async () => {
       const h = makeHarness();
@@ -494,6 +588,40 @@ describe('SetupRpcHandlers', () => {
       expect(h.container.resolve).not.toHaveBeenCalledWith(
         AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
       );
+    });
+
+    it('passes excludeRunId and excludeSlug to freshness when an analysis run is active', async () => {
+      const h = makeHarness();
+      const status = {
+        state: 'fresh',
+        reason: 'ok',
+        analysisDir: '/fake/workspace/.ptah/analysis/prev',
+        checkedAt: '2026-10-14T00:00:00.000Z',
+        analyzedAt: '2026-10-13T00:00:00.000Z',
+      };
+      const getStatus = jest.fn().mockResolvedValue(status);
+      const getActiveRun = jest.fn().mockReturnValue({
+        workspacePath: WORKSPACE,
+        runId: 'run-active-1',
+        slug: 'active-slug',
+        startedAt: '2026-10-14T00:05:00.000Z',
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
+        { getStatus },
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      expect(await call(h, 'wizard:analysis-status')).toBe(status);
+      expect(getActiveRun).toHaveBeenCalledWith(WORKSPACE);
+      expect(getStatus).toHaveBeenCalledWith(WORKSPACE, {
+        excludeRunId: 'run-active-1',
+        excludeSlug: 'active-slug',
+      });
     });
 
     it('rejects non-object params before resolving the service', async () => {
@@ -633,11 +761,16 @@ describe('SetupRpcHandlers', () => {
       const h = makeHarness({ workspaceFolders: [] });
       h.handlers.register();
 
-      const result = await call<{ analysis: unknown; generation: unknown }>(
-        h,
-        'wizard:get-resumable-run',
-      );
-      expect(result).toEqual({ analysis: null, generation: null });
+      const result = await call<{
+        analysis: unknown;
+        generation: unknown;
+        analysisActive?: boolean;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
       expect(h.container.resolve).not.toHaveBeenCalled();
     });
 
@@ -649,11 +782,16 @@ describe('SetupRpcHandlers', () => {
       );
       h.handlers.register();
 
-      const result = await call<{ analysis: unknown; generation: unknown }>(
-        h,
-        'wizard:get-resumable-run',
-      );
-      expect(result).toEqual({ analysis: null, generation: null });
+      const result = await call<{
+        analysis: unknown;
+        generation: unknown;
+        analysisActive?: boolean;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
     });
 
     it('does not offer a legacy v3 run for resume', async () => {
@@ -668,6 +806,7 @@ describe('SetupRpcHandlers', () => {
       expect(await call(h, 'wizard:get-resumable-run')).toEqual({
         analysis: null,
         generation: null,
+        analysisActive: false,
       });
       expect(storage.findLatestResumableRun).toHaveBeenCalledWith(WORKSPACE);
       expect(storage.readPhaseFile).not.toHaveBeenCalled();
@@ -678,7 +817,14 @@ describe('SetupRpcHandlers', () => {
       const storage = storageWith({
         slugDir: '/fake/workspace/.ptah/analysis/acme',
         manifest: V4_MANIFEST,
-        generation: GENERATION,
+        generation: {
+          ...GENERATION,
+          tabBinding: {
+            tabId: 'setup-owner',
+            workspacePath: WORKSPACE,
+            workflow: 'setup-agent-generation',
+          },
+        },
       });
       h.container.__register(
         AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
@@ -713,6 +859,7 @@ describe('SetupRpcHandlers', () => {
 
       expect(result.generation).toEqual({
         runId: 'run-gen-1',
+        ownerTabId: 'setup-owner',
         analysisDirectory: '/fake/workspace/.ptah/analysis/acme',
         outputDirectory: '/fake/workspace/.claude/agents',
         lifecycle: 'timed-out',
@@ -760,6 +907,196 @@ describe('SetupRpcHandlers', () => {
 
       expect(result.analysis).toBeNull();
       expect(result.generation?.analysisDirectory).toBeNull();
+    });
+
+    it('reports analysisActive even when no manifest exists on disk yet', async () => {
+      const h = makeHarness();
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageWith(null),
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        {
+          getActiveRun: jest.fn().mockReturnValue({
+            workspacePath: WORKSPACE,
+            runId: 'run-live',
+            slug: null,
+            startedAt: '2026-10-14T01:00:00.000Z',
+          }),
+        },
+      );
+      h.handlers.register();
+
+      const result = await call(h, 'wizard:get-resumable-run');
+      expect(result).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: '2026-10-14T01:00:00.000Z',
+      });
+    });
+
+    it('reports analysisActive accurately alongside a discovered resumable run', async () => {
+      const h = makeHarness();
+      const getActiveRun = jest.fn().mockReturnValue({
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T02:00:00.000Z',
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageWith({
+          slugDir: '/fake/workspace/.ptah/analysis/acme',
+          manifest: V4_MANIFEST,
+          generation: null,
+        }),
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      const activeResult = await call<{
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(activeResult.analysisActive).toBe(true);
+      expect(activeResult.activeAnalysisStartedAt).toBe(
+        '2026-10-14T02:00:00.000Z',
+      );
+
+      getActiveRun.mockReturnValue(null);
+      const inactiveResult = await call<{
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(inactiveResult.analysisActive).toBe(false);
+      expect(inactiveResult.activeAnalysisStartedAt).toBeUndefined();
+    });
+
+    it('reports analysisActive: true when a run starts during the disk read (Race 1)', async () => {
+      const h = makeHarness();
+      let activeRun: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = null;
+      const getActiveRun = jest.fn(() => activeRun);
+      const runningManifest = { ...V4_MANIFEST, lifecycle: 'running' as const };
+      const storage = storageWith(null);
+      storage.findLatestResumableRun.mockImplementation(async () => {
+        activeRun = {
+          workspacePath: WORKSPACE,
+          runId: runningManifest.runId,
+          slug: runningManifest.slug,
+          startedAt: '2026-10-14T03:00:00.000Z',
+        };
+        return {
+          slugDir: '/fake/workspace/.ptah/analysis/acme',
+          manifest: runningManifest,
+          generation: null,
+        };
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storage,
+      );
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun },
+      );
+      h.handlers.register();
+
+      const result = await call<{
+        analysis: { manifest: { lifecycle: string } } | null;
+        analysisActive?: boolean;
+        activeAnalysisStartedAt?: string;
+      }>(h, 'wizard:get-resumable-run');
+      expect(result.analysis?.manifest.lifecycle).toBe('running');
+      expect(result.analysisActive).toBe(true);
+      expect(result.activeAnalysisStartedAt).toBe('2026-10-14T03:00:00.000Z');
+    });
+
+    it('reports analysisActive: false and re-queries when a run finishes during the disk read (Race 2)', async () => {
+      // Subcase A: run completes and disk already returns null.
+      const hNull = makeHarness();
+      let activeA: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = {
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T04:00:00.000Z',
+      };
+      const storageA = storageWith(null);
+      storageA.findLatestResumableRun.mockImplementation(async () => {
+        activeA = null;
+        return null;
+      });
+      hNull.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageA,
+      );
+      hNull.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun: jest.fn(() => activeA) },
+      );
+      hNull.handlers.register();
+
+      expect(await call(hNull, 'wizard:get-resumable-run')).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
+
+      // Subcase B: disk read saw stale `running` manifest just as run completed -> re-queries and returns inactive null.
+      const hStale = makeHarness();
+      let activeB: {
+        workspacePath: string;
+        runId: string;
+        slug: string;
+        startedAt: string;
+      } | null = {
+        workspacePath: WORKSPACE,
+        runId: 'run-analysis-1',
+        slug: 'acme',
+        startedAt: '2026-10-14T04:00:00.000Z',
+      };
+      const runningManifest = { ...V4_MANIFEST, lifecycle: 'running' as const };
+      const storageB = storageWith(null);
+      storageB.findLatestResumableRun
+        .mockImplementationOnce(async () => {
+          activeB = null;
+          return {
+            slugDir: '/fake/workspace/.ptah/analysis/acme',
+            manifest: runningManifest,
+            generation: null,
+          };
+        })
+        .mockResolvedValueOnce(null);
+      hStale.container.__register(
+        AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+        storageB,
+      );
+      hStale.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        { getActiveRun: jest.fn(() => activeB) },
+      );
+      hStale.handlers.register();
+
+      expect(await call(hStale, 'wizard:get-resumable-run')).toEqual({
+        analysis: null,
+        generation: null,
+        analysisActive: false,
+      });
+      expect(storageB.findLatestResumableRun).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -993,6 +1330,42 @@ describe('SetupRpcHandlers', () => {
       );
       expect(result.analyses).toEqual(analyses);
     });
+
+    it('marks the active in-process analysis entry with isActive: true', async () => {
+      const h = makeHarness();
+      const analyses = [
+        { filename: 'prev-slug', analyzedAt: 1, lifecycle: 'completed' },
+        { filename: 'live-slug', analyzedAt: 2, lifecycle: 'running' },
+      ];
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        list: jest.fn().mockResolvedValue(analyses),
+      });
+      h.container.__register(
+        AGENT_GENERATION_TOKENS.MULTI_PHASE_ANALYSIS_SERVICE,
+        {
+          getActiveRun: jest.fn().mockReturnValue({
+            workspacePath: WORKSPACE,
+            runId: 'run-live',
+            slug: 'live-slug',
+            startedAt: '2026-10-14T03:00:00.000Z',
+          }),
+        },
+      );
+      h.handlers.register();
+
+      const result = await call<{
+        analyses: Array<{ filename: string; isActive?: boolean }>;
+      }>(h, 'wizard:list-analyses');
+      expect(result.analyses).toEqual([
+        { filename: 'prev-slug', analyzedAt: 1, lifecycle: 'completed' },
+        {
+          filename: 'live-slug',
+          analyzedAt: 2,
+          lifecycle: 'running',
+          isActive: true,
+        },
+      ]);
+    });
   });
 
   describe('wizard Setup model', () => {
@@ -1140,7 +1513,9 @@ describe('SetupRpcHandlers', () => {
         success: false,
         errorCode: 'SETUP_MODEL_INVALID',
       });
-      expect(setupNamed.error).toContain('Setup provider anthropic: model-stale');
+      expect(setupNamed.error).toContain(
+        'Setup provider anthropic: model-stale',
+      );
 
       const providerMissing = await callRaw(h, 'wizard:set-setup-model', {
         provider: 'anthropic',
@@ -1431,12 +1806,18 @@ describe('SetupRpcHandlers', () => {
         searchFailures: [],
         summarySource: 'structured',
       });
+      const writeSkillReview = jest
+        .fn()
+        .mockResolvedValue(
+          '/fake/workspace/.ptah/analysis/demo/skill-review.json',
+        );
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadByRunId: jest.fn().mockResolvedValue({
           manifest: { runId: 'run-1' },
           analysisPair,
           stackSummary: { source: 'structured', items: [item] },
         }),
+        writeSkillReview,
       });
       h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
         recommendAnalysis,
@@ -1466,12 +1847,48 @@ describe('SetupRpcHandlers', () => {
       expect(h.resolveSetup.mock.invocationCallOrder[0]).toBeLessThan(
         recommendAnalysis.mock.invocationCallOrder[0],
       );
+      expect(writeSkillReview).toHaveBeenCalledWith(WORKSPACE, 'run-1', result);
+    });
+
+    it('still returns the review when storing it fails', async () => {
+      const h = makeHarness();
+      const review = {
+        analysisPair: null,
+        judge: { method: 'none', counts: {}, items: [] },
+        skills: [],
+        detectedItems: [],
+        unmatchedItems: [],
+        searchFailures: [],
+        summarySource: 'structured',
+      };
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadByRunId: jest.fn().mockResolvedValue({
+          stackSummary: { source: 'structured', items: [{ name: 'Angular' }] },
+        }),
+        writeSkillReview: jest.fn().mockRejectedValue(new Error('EACCES')),
+      });
+      h.container.__register(SKILL_RECOMMENDATION_SERVICE, {
+        recommendAnalysis: jest.fn().mockResolvedValue(review),
+      });
+      h.handlers.register();
+      const result = await call<WizardRecommendAnalysisSkillsResult>(
+        h,
+        'wizard:recommend-analysis-skills',
+        { runId: 'run-1' },
+      );
+      expect(result).toEqual(review);
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        'Could not store the skill review.',
+        expect.any(Error),
+      );
     });
 
     it('returns an empty explanation when the run is missing', async () => {
       const h = makeHarness();
+      const writeSkillReview = jest.fn();
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadByRunId: jest.fn().mockResolvedValue(null),
+        writeSkillReview,
       });
       h.handlers.register();
       const result = await call<{ skills: unknown[]; warning: string }>(
@@ -1485,6 +1902,7 @@ describe('SetupRpcHandlers', () => {
         analysisPair: null,
         judge: { method: 'none', items: [] },
       });
+      expect(writeSkillReview).not.toHaveBeenCalled();
     });
 
     it('returns an empty result when the saved run has no stack summary', async () => {
@@ -1652,6 +2070,67 @@ describe('SetupRpcHandlers', () => {
     });
   });
 
+  describe('wizard:get-skill-review', () => {
+    it('returns the stored review of the run in the active workspace', async () => {
+      const h = makeHarness();
+      const review = { skills: [], judge: { method: 'none' } };
+      const readSkillReview = jest.fn().mockResolvedValue({
+        review,
+        reviewedAt: '2026-11-27T10:00:00.000Z',
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        readSkillReview,
+      });
+      h.handlers.register();
+      const result = await call<WizardGetSkillReviewResult>(
+        h,
+        'wizard:get-skill-review',
+        { runId: 'run-1' },
+      );
+      expect(result).toEqual({
+        review,
+        reviewedAt: '2026-11-27T10:00:00.000Z',
+      });
+      expect(readSkillReview).toHaveBeenCalledWith(WORKSPACE, 'run-1');
+    });
+
+    it('returns null fields for an unknown run', async () => {
+      const h = makeHarness();
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        readSkillReview: jest.fn().mockResolvedValue(null),
+      });
+      h.handlers.register();
+      expect(
+        await call<WizardGetSkillReviewResult>(h, 'wizard:get-skill-review', {
+          runId: 'unknown',
+        }),
+      ).toEqual({ review: null, reviewedAt: null });
+    });
+
+    it('returns null fields without reading when no workspace is open', async () => {
+      const h = makeHarness({ workspaceFolders: [] });
+      h.handlers.register();
+      expect(
+        await call<WizardGetSkillReviewResult>(h, 'wizard:get-skill-review', {
+          runId: 'run-1',
+        }),
+      ).toEqual({ review: null, reviewedAt: null });
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+
+    it.each([{ runId: '' }, { runId: 'run-1', workspacePath: '/other' }, {}])(
+      'rejects invalid params %j before reading storage',
+      async (params) => {
+        const h = makeHarness();
+        h.handlers.register();
+        expect(
+          await callRaw(h, 'wizard:get-skill-review', params),
+        ).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+        expect(h.container.resolve).not.toHaveBeenCalled();
+      },
+    );
+  });
+
   describe('wizard:load-analysis', () => {
     it('links a completed loaded analysis without changing the load result', async () => {
       const h = makeHarness();
@@ -1665,9 +2144,11 @@ describe('SetupRpcHandlers', () => {
         analysisDir: '/fake/workspace/.ptah/analysis/demo',
       };
       const loadMultiPhase = jest.fn().mockResolvedValue(loaded);
+      const loadByRunId = jest.fn();
       const link = jest.fn().mockResolvedValue({ written: true });
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadMultiPhase,
+        loadByRunId,
       });
       h.container.__register(
         AGENT_GENERATION_TOKENS.ANALYSIS_CLAUDE_MD_LINKER,
@@ -1677,12 +2158,112 @@ describe('SetupRpcHandlers', () => {
       expect(
         await call(h, 'wizard:load-analysis', { filename: 'demo' }),
       ).toEqual(loaded);
+      expect(loadMultiPhase).toHaveBeenCalledWith(WORKSPACE, 'demo');
+      expect(loadByRunId).not.toHaveBeenCalled();
       expect(link).toHaveBeenCalledWith(WORKSPACE);
     });
-    it('maps a saved-analysis read failure to ANALYSIS_LOAD_FAILED', async () => {
+
+    it('falls back to the exact manifest ID in the requested open workspace', async () => {
+      const workspacePath = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'setup-load-'),
+      );
+      try {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE, workspacePath] });
+        const loaded = {
+          isMultiPhase: true,
+          manifest: { runId: 'run-1', slug: 'demo', lifecycle: 'paused' },
+          phaseContents: {},
+          analysisDir: workspacePath + '/.ptah/analysis/demo',
+        };
+        const loadMultiPhase = jest
+          .fn()
+          .mockRejectedValue(new Error('Missing slug'));
+        const loadByRunId = jest.fn().mockResolvedValue(loaded);
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            loadMultiPhase,
+            loadByRunId,
+          },
+        );
+        h.handlers.register();
+
+        expect(
+          await call(h, 'wizard:load-analysis', {
+            filename: 'run-1',
+            workspacePath,
+          }),
+        ).toEqual(loaded);
+        expect(loadMultiPhase).toHaveBeenCalledWith(workspacePath, 'run-1');
+        expect(loadByRunId).toHaveBeenCalledTimes(1);
+        expect(loadByRunId).toHaveBeenCalledWith(workspacePath, 'run-1');
+      } finally {
+        await fs.rm(workspacePath, { recursive: true, force: true });
+      }
+    });
+
+    it.each(['dir/run-1', 'run.1', '../run-1'])(
+      'keeps %s out of the manifest-ID lookup',
+      async (filename) => {
+        const h = makeHarness();
+        const loadByRunId = jest.fn();
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            loadMultiPhase: jest
+              .fn()
+              .mockRejectedValue(new Error('Missing slug')),
+            loadByRunId,
+          },
+        );
+        h.handlers.register();
+
+        expect(
+          await callRaw(h, 'wizard:load-analysis', { filename }),
+        ).toMatchObject({
+          success: false,
+          errorCode: 'ANALYSIS_LOAD_FAILED',
+        });
+        expect(loadByRunId).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a workspace that is outside the open folders before reading storage', async () => {
       const h = makeHarness();
+      h.handlers.register();
+
+      expect(
+        await callRaw(h, 'wizard:load-analysis', {
+          filename: 'run-1',
+          workspacePath: '/fake/closed-workspace',
+        }),
+      ).toMatchObject({ success: false, errorCode: 'UNAUTHORIZED_WORKSPACE' });
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+
+    it('rejects a fallback result with a different manifest ID', async () => {
+      const h = makeHarness();
+      const loadByRunId = jest.fn().mockResolvedValue({
+        manifest: { runId: 'run-10', lifecycle: 'paused' },
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadMultiPhase: jest.fn().mockRejectedValue(new Error('Missing slug')),
+        loadByRunId,
+      });
+      h.handlers.register();
+
+      expect(
+        await callRaw(h, 'wizard:load-analysis', { filename: 'run-1' }),
+      ).toMatchObject({ success: false, errorCode: 'ANALYSIS_LOAD_FAILED' });
+      expect(loadByRunId).toHaveBeenCalledWith(WORKSPACE, 'run-1');
+    });
+
+    it('maps a missing slug and manifest ID to ANALYSIS_LOAD_FAILED', async () => {
+      const h = makeHarness();
+      const loadByRunId = jest.fn().mockResolvedValue(null);
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadMultiPhase: jest.fn().mockRejectedValue(new Error('private path')),
+        loadByRunId,
       });
       h.handlers.register();
       expect(
@@ -1692,6 +2273,7 @@ describe('SetupRpcHandlers', () => {
         errorCode: 'ANALYSIS_LOAD_FAILED',
         error: 'Could not read the saved analysis.',
       });
+      expect(loadByRunId).toHaveBeenCalledWith(WORKSPACE, 'demo');
     });
 
     it('throws when no workspace is open', async () => {

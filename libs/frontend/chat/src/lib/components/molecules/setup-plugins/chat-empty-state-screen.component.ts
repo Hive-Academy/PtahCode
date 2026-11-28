@@ -20,7 +20,11 @@ import {
   planRingCaption,
   type ReadinessCheck,
 } from '@ptah-extension/chat-ui/vitals';
-import { AppStateManager, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  PluginCatalogService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   CircleDollarSign,
   Gauge,
@@ -116,7 +120,9 @@ import {
             [action]="readinessAction()"
             (actionRequested)="runReadinessAction($event)"
           />
-          @if (setup.error() || setup.scanError()) {
+          @if (
+            setup.scanError() || setup.workspaceNotOpen() || catalog.error()
+          ) {
             <div role="status" class="empty-chat__notice">
               Readiness unavailable
               <button type="button" (click)="setup.retry()">Retry</button>
@@ -137,6 +143,7 @@ export class ChatEmptyStateViewComponent {
   private readonly appState = inject(AppStateManager);
   protected readonly vitals = inject(ChatVitalsStore);
   protected readonly setup = inject(SetupStatusStore);
+  protected readonly catalog = inject(PluginCatalogService);
   private readonly vscodeService = inject(VSCodeService);
   protected readonly isElectron = this.vscodeService.isElectron;
   protected readonly ptahIconUri = this.vscodeService.getPtahIconUri();
@@ -186,7 +193,6 @@ export class ChatEmptyStateViewComponent {
   protected readonly checks = computed<readonly ReadinessCheck[]>(() => [
     { id: 'skills', label: 'Skills', ready: this.setup.skillsReady() },
     { id: 'scan', label: 'Project scan', ready: this.setup.scanReady() },
-    { id: 'agents', label: 'Agents', ready: this.setup.agentsReady() },
   ]);
   protected readonly readinessAction = computed(() => {
     const id = this.setup.nextAction();
@@ -194,7 +200,6 @@ export class ChatEmptyStateViewComponent {
     const labels = {
       'open-library': 'Enable skills',
       'run-setup': 'Set up workspace',
-      'generate-agents': 'Generate agents',
     };
     return { id, label: labels[id] };
   });
@@ -215,7 +220,5 @@ export class ChatEmptyStateViewComponent {
     if (id === 'open-library')
       this.appState.openMarketplace({ page: 'skills', source: 'ptah-plugins' });
     else if (id === 'run-setup') await this.setup.launchWizard();
-    else if (id === 'generate-agents')
-      await this.setup.launchGeneration('setup-agent-generation');
   }
 }

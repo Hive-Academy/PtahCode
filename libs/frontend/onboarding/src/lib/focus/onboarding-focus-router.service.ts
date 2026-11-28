@@ -1,62 +1,51 @@
 import { Injectable, inject } from '@angular/core';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   SurfaceRouterService,
   WORKSPACE_COORDINATOR,
-  onboardingGenerationTarget,
   surfaceNavigationLanded,
   type NotificationFocusResult,
-  type OnboardingTarget,
   type SurfaceFocusRouter,
 } from '@ptah-extension/core';
+import {
+  SetupRunStore,
+  stepTarget,
+  type SetupRunRecord,
+} from '@ptah-extension/setup-wizard';
 
-/** Routes a notification to the onboarding step that owns its session. */
+/** Routes a notification to the onboarding step that owns its Setup run. */
 @Injectable({ providedIn: 'root' })
 export class OnboardingFocusRouter implements SurfaceFocusRouter {
   readonly kind = 'onboarding' as const;
-  private readonly tabs = inject(TabManagerService);
+  private readonly runs = inject(SetupRunStore);
   private readonly router = inject(SurfaceRouterService);
   private readonly workspaceCoordinator = inject(WORKSPACE_COORDINATOR);
 
   canFocus(sessionId: string): boolean {
-    const found = this.tabs.findTabBySessionIdAcrossWorkspaces(sessionId);
-    return (
-      !!found?.workspacePath &&
-      this.targetFor(found.tab.workflow, found.tab.id) !== null
-    );
+    return this.generationRun(sessionId) !== null;
   }
 
   async focus(sessionId: string): Promise<NotificationFocusResult> {
-    const found = this.tabs.findTabBySessionIdAcrossWorkspaces(sessionId);
-    if (!found?.workspacePath) return { success: false, outcome: 'missing' };
-    const target = this.targetFor(found.tab.workflow, found.tab.id);
-    if (!target) return { success: false, outcome: 'missing' };
-    if (found.workspacePath !== this.tabs.activeWorkspacePath) {
-      await this.workspaceCoordinator.switchWorkspace(found.workspacePath);
+    const record = this.generationRun(sessionId);
+    if (!record) return { success: false, outcome: 'missing' };
+    if (record.workspacePath !== this.runs.workspacePath()) {
+      await this.workspaceCoordinator.switchWorkspace(record.workspacePath);
     }
+    const target = stepTarget(record);
     const result = await this.router.navigateToSurface(
       'onboarding',
       target.subPath,
-      {
-        queryParams: target.queryParams,
-      },
+      { queryParams: target.queryParams },
     );
-    if (!surfaceNavigationLanded(result))
-      return { success: false, outcome: 'missing' };
-    this.tabs.switchTab(found.tab.id);
-    return { success: true, outcome: 'focused' };
+    return surfaceNavigationLanded(result)
+      ? { success: true, outcome: 'focused' }
+      : { success: false, outcome: 'missing' };
   }
 
-  private targetFor(
-    workflow: string | undefined,
-    tabId: string,
-  ): OnboardingTarget | null {
-    if (
-      workflow === 'setup-agent-generation' ||
-      workflow === 'setup-project-prompt'
-    ) {
-      return onboardingGenerationTarget(workflow, tabId);
-    }
-    return null;
+  private generationRun(id: string): SetupRunRecord | null {
+    const record = this.runs.get(id);
+    return record?.workflow === 'agent-generation' ||
+      record?.workflow === 'project-guidance'
+      ? record
+      : null;
   }
 }

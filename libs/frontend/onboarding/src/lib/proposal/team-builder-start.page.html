@@ -23,7 +23,7 @@
     </div>
   </header>
   <ptah-workspace-header [canSwitch]="true" />
-  @if (state.stage() === 'intent') {
+  @if (viewStage() === 'intent') {
   <form
     class="space-y-4 rounded-[22px] border border-base-300 p-4"
     data-glass-surface="content"
@@ -45,7 +45,7 @@
         class="min-h-[140px] w-full"
         placeholder="Describe the work for your team"
         [ngModel]="intent()"
-        (ngModelChange)="state.setIntent($event)"
+        (ngModelChange)="onIntentChange($event)"
         (blur)="touched.set(true)"
         (paste)="attachments.onPaste($event)"
         (dragover)="$event.preventDefault()"
@@ -77,7 +77,7 @@
         type="submit"
         [disabled]="attachments.pendingReads() > 0"
       >
-        Review skills
+        {{ skillsInstalled() ? 'Continue' : 'Review skills' }}
       </button>
     </div>
   </form>
@@ -86,33 +86,222 @@
     class="space-y-4 rounded-[22px] border border-base-300 p-4"
     data-glass-surface="content"
   >
-    @if (state.stage() === 'launching') {
-    <button ptahButton variant="ghost" type="button" (click)="back()">
-      Back
-    </button>
-    <p role="status" aria-live="polite">{{ launchStatus() }}</p>
-    @if (state.guidanceNote()) {
-    <p role="status" class="text-sm text-base-content-muted">
-      {{ state.guidanceNote() }}
-    </p>
-    } } @else if (skillsInstalled()) {
-    <p role="alert">{{ actionError() }}</p>
-    <button ptahButton variant="ghost" type="button" (click)="backToIntent()">
-      Back
-    </button>
-    <button
-      #recoveryContinue
-      ptahButton
-      variant="primary"
-      type="button"
-      (click)="launchChat()"
+    @if (missingAttachments() && viewStage() !== 'handed-off') {
+    <div
+      role="alert"
+      class="space-y-2 rounded-[14px] border border-state-err p-3 text-sm"
+      data-testid="team-builder-attachments-unavailable"
     >
-      Continue to team builder
-    </button>
-    } @else { @if (state.stage() === 'installing') {
-    <p role="status" aria-live="polite">Installing skills...</p>
+      <p class="text-state-err">
+        Previous attachments are no longer available after reload. Return to
+        intent to re-attach them, or continue without attachments.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          ptahButton
+          variant="ghost"
+          type="button"
+          (click)="backToIntent()"
+        >
+          Re-attach files
+        </button>
+        <button
+          ptahButton
+          variant="secondary"
+          type="button"
+          data-testid="team-builder-continue-without-attachments"
+          (click)="continueWithoutAttachments()"
+        >
+          Continue without attachments
+        </button>
+      </div>
+    </div>
+    } @if (viewStage() === 'handed-off') {
+    <div class="space-y-3" data-testid="team-builder-handed-off">
+      <p role="status" aria-live="polite" class="font-medium">
+        Conversation opened
+      </p>
+      @if (handoffTabExists()) {
+      <div class="flex flex-wrap gap-2">
+        <button
+          ptahButton
+          variant="primary"
+          type="button"
+          data-testid="team-builder-open-conversation"
+          (click)="openConversation()"
+        >
+          Open conversation
+        </button>
+        <button ptahButton variant="ghost" type="button" (click)="back()">
+          Back
+        </button>
+      </div>
+      } @else {
+      <p
+        class="text-sm text-base-content-muted"
+        data-testid="team-builder-conversation-closed"
+      >
+        The conversation was closed
+      </p>
+      <button ptahButton variant="ghost" type="button" (click)="back()">
+        Back
+      </button>
+      } @if (guidanceNote()) {
+      <p role="status" class="text-sm text-base-content-muted">
+        {{ guidanceNote() }}
+      </p>
+      }
+    </div>
+    } @else if (viewStage() === 'launching') {
+    <div class="flex flex-wrap gap-2">
+      <button ptahButton variant="ghost" type="button" (click)="back()">
+        Back
+      </button>
+      <button
+        ptahButton
+        variant="ghost"
+        type="button"
+        data-testid="team-builder-cancel"
+        (click)="cancelRun()"
+      >
+        Cancel
+      </button>
+    </div>
+    <p role="status" aria-live="polite">{{ launchStatus() }}</p>
+    @if (guidanceNote()) {
+    <p role="status" class="text-sm text-base-content-muted">
+      {{ guidanceNote() }}
+    </p>
+    } } @else if (interrupted()) {
+    <div class="space-y-3" data-testid="team-builder-interrupted">
+      <p role="status">
+        This team builder run was interrupted. Continue to re-check your skills
+        and launch the conversation.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          ptahButton
+          variant="ghost"
+          type="button"
+          (click)="backToIntent()"
+        >
+          Back
+        </button>
+        <button
+          ptahButton
+          variant="primary"
+          type="button"
+          data-testid="team-builder-continue-interrupted"
+          (click)="continueInterrupted()"
+        >
+          Continue
+        </button>
+      </div>
+    </div>
+    } @else if (skillsInstalled()) { @if (actionError()) {
+    <p role="alert">{{ actionError() }}</p>
+    } @if (ownerDecisionRequired()) { @if (state.guidanceFacts().length) {
+    <section aria-labelledby="recovery-guidance-title" class="space-y-2">
+      <h3 id="recovery-guidance-title" class="font-semibold">
+        Project guidance
+      </h3>
+      @for ( fact of state.guidanceFacts(); track fact.category + fact.label +
+      fact.fact + fact.evidence ) {
+      <div
+        class="rounded-[14px] border border-base-300 p-3"
+        data-glass-surface="tile"
+      >
+        <span class="text-xs font-semibold"
+          >{{ fact.category }} · {{ guidanceLabel(fact.label) }}</span
+        >
+        <p class="text-sm">{{ fact.fact }}</p>
+        @if (fact.evidence) {
+        <p class="text-xs text-base-content-muted">{{ fact.evidence }}</p>
+        }
+      </div>
+      }
+    </section>
     }
-    <div [attr.inert]="state.stage() === 'installing' ? '' : null">
+    <fieldset
+      class="space-y-2"
+      [disabled]="state.loading() || starting()"
+      data-testid="team-builder-recovery-owner-decision"
+    >
+      <legend class="font-semibold">
+        {{ state.ownerDecisionPrompt() || 'How should the team handle existing
+        practices?' }}
+      </legend>
+      <label class="flex items-center gap-2"
+        ><input
+          type="radio"
+          ptahCheckbox
+          name="owner-decision"
+          value="match"
+          [checked]="state.ownerDecision() === 'match'"
+          (change)="onOwnerDecisionChange('match')"
+        />Match the repository</label
+      >
+      <label class="flex items-center gap-2"
+        ><input
+          type="radio"
+          ptahCheckbox
+          name="owner-decision"
+          value="raise"
+          [checked]="state.ownerDecision() === 'raise'"
+          (change)="onOwnerDecisionChange('raise')"
+        />Raise the standard</label
+      >
+    </fieldset>
+    @if (ownerDecisionError()) {
+    <p role="alert" class="text-sm text-state-err">
+      Choose how to handle existing practices before continuing.
+    </p>
+    } }
+    <div class="flex flex-wrap gap-2">
+      <button ptahButton variant="ghost" type="button" (click)="backToIntent()">
+        Back
+      </button>
+      <button
+        #recoveryContinue
+        ptahButton
+        variant="primary"
+        type="button"
+        [disabled]="missingAttachments() || state.loading()"
+        (click)="launchChat()"
+      >
+        Continue to team builder
+      </button>
+    </div>
+    } @else { @if (viewStage() === 'installing') {
+    <div
+      class="flex flex-wrap items-center justify-between gap-2"
+      data-testid="team-builder-installing"
+    >
+      <p role="status" aria-live="polite">Installing skills...</p>
+      <div class="flex flex-wrap gap-2">
+        <button
+          ptahButton
+          variant="ghost"
+          type="button"
+          data-testid="team-builder-installing-back"
+          (click)="back()"
+        >
+          Back
+        </button>
+        <button
+          #installingCancel
+          ptahButton
+          variant="ghost"
+          type="button"
+          data-testid="team-builder-cancel"
+          (click)="cancelRun()"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+    }
+    <div [attr.inert]="viewStage() === 'installing' ? '' : null">
       <ptah-stack-skill-review
         [recommendations]="state.recommendations()"
         [searchResults]="state.searchResults()"
@@ -122,23 +311,21 @@
         [decisionRequired]="ownerDecisionRequired()"
         [ownerDecision]="state.ownerDecision()"
         [ownerDecisionError]="ownerDecisionError()"
-        [guidanceNote]="state.guidanceNote()"
+        [guidanceNote]="guidanceNote()"
         [busy]="starting()"
         [selectedIds]="state.selectedIds()"
         [loading]="state.loading()"
         [previewing]="state.previewing()"
         [previewScriptCount]="state.previewScriptCount()"
-        (retryRequested)="loadReview()"
+        (retryRequested)="loadReview({ preserveSelection: true })"
         [searching]="searching()"
         [error]="actionError()"
         [loadError]="loadError()"
         [searchError]="searchError()"
         [query]="state.searchQuery()"
         (queryChange)="state.setSearchQuery($event)"
-        (ownerDecisionChange)="
-              state.setOwnerDecision($event); ownerDecisionError.set(false)
-            "
-        (selectionToggled)="state.toggle($event)"
+        (ownerDecisionChange)="onOwnerDecisionChange($event)"
+        (selectionToggled)="onSelectionToggled($event)"
         (searchRequested)="search($event)"
         (searchCleared)="search('')"
         (continueRequested)="reviewSelection()"
@@ -150,12 +337,12 @@
   </div>
   }
   <ptah-stack-skill-consent
-    [open]="state.stage() === 'consent' || state.stage() === 'installing'"
+    [open]="viewStage() === 'consent'"
     [previews]="state.preview()"
     [approvedIds]="state.approvedIds()"
-    [busy]="state.stage() === 'installing'"
+    [busy]="viewStage() === 'installing'"
     [error]="actionError()"
-    (approve)="state.approve($event)"
+    (approve)="onApproveSkill($event)"
     (install)="install()"
     (cancelRequested)="closeConsent()"
   />

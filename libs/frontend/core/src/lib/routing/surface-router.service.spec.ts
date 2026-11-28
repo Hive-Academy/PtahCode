@@ -671,6 +671,45 @@ describe('SurfaceRouterService', () => {
       ).resolves.toBe('failed');
       expect(TestBed.inject(Router).url).toBe('/');
     });
+
+    it('validates a restored skills tab as an agent-generation identity', async () => {
+      const validateRun = jest.fn((id: string) => id === 'saved-agent-run');
+      TestBed.configureTestingModule({
+        providers: [
+          ...provideSurfaceRouterTesting(),
+          { provide: GENERATION_ROUTE_TAB_VALIDATOR, useValue: validateRun },
+        ],
+      });
+      const service = TestBed.inject(SurfaceRouterService);
+      const router = TestBed.inject(Router);
+      router.resetConfig([{ path: 'onboarding/analyze/skills', children: [] }]);
+      const skills = '/onboarding/analyze/skills';
+
+      await expect(
+        service.navigateToUrl(skills + '?tab=stale-run'),
+      ).resolves.toBe('failed');
+      expect(validateRun).toHaveBeenCalledWith(
+        'stale-run',
+        'setup-agent-generation',
+      );
+      expect(router.url).toBe('/');
+
+      const savedRoute = skills + '?tab=saved-agent-run';
+      await expect(service.navigateToUrl(savedRoute)).resolves.toBe('navigated');
+      expect(validateRun).toHaveBeenLastCalledWith(
+        'saved-agent-run',
+        'setup-agent-generation',
+      );
+      expect(router.url).toBe(savedRoute);
+
+      validateRun.mockClear();
+      await expect(
+        service.navigateToUrl(savedRoute + '&tab=duplicate'),
+      ).resolves.toBe('failed');
+      await expect(service.navigateToUrl(skills)).resolves.toBe('navigated');
+      expect(validateRun).not.toHaveBeenCalled();
+    });
+
     it('lands on a restored chat tab URL and reports chat', async () => {
       const service = createService();
 

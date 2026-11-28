@@ -429,7 +429,11 @@ describe('SkillJudgeService', () => {
         },
       },
     ]);
-    expect(result.items[2].candidateAssessments[0]).toMatchObject({
+    expect(
+      result.items[2].candidateAssessments.find(
+        ({ candidateId }) => candidateId === 'org/repo/old',
+      ),
+    ).toMatchObject({
       eligible: false,
       rejection: { reason: 'Marked deprecated by its description' },
     });
@@ -449,21 +453,24 @@ describe('SkillJudgeService', () => {
     ['This skill was officially deprecated in 2025.', false],
     ['This skill has been marked deprecated.', false],
     ['This skill is not deprecated and supports React 19.', true],
-  ])('classifies a deprecation description in the judge path: %s', async (description, eligible) => {
-    const { service, execute } = fixture();
-    const item = stackItem('React', [candidate('modern', description)]);
-    respond(execute, success({ items: [noSkill(item)] }));
+  ])(
+    'classifies a deprecation description in the judge path: %s',
+    async (description, eligible) => {
+      const { service, execute } = fixture();
+      const item = stackItem('React', [candidate('modern', description)]);
+      respond(execute, success({ items: [noSkill(item)] }));
 
-    const result = await service.judge(request([item]));
+      const result = await service.judge(request([item]));
 
-    expect(result.items[0].candidateAssessments[0]).toMatchObject({
-      candidateId: 'org/repo/modern',
-      eligible,
-      ...(!eligible && {
-        rejection: { reason: 'Marked deprecated by its description' },
-      }),
-    });
-  });
+      expect(result.items[0].candidateAssessments[0]).toMatchObject({
+        candidateId: 'org/repo/modern',
+        eligible,
+        ...(!eligible && {
+          rejection: { reason: 'Marked deprecated by its description' },
+        }),
+      });
+    },
+  );
 
   function malformedSiblingCase(textOnly: boolean) {
     return async () => {
@@ -780,6 +787,113 @@ describe('SkillJudgeService', () => {
       status: 'skipped',
       category: 'unavailable',
       pairConfigured: SETUP_PAIR,
+    });
+  });
+
+  it('orders per-item candidateIds, candidateAssessments, and global judge.candidates by installs descending', async () => {
+    const { service, execute } = fixture();
+    const low: SkillShEntry = { ...candidate('low'), installs: 5 };
+    const high: SkillShEntry = { ...candidate('high'), installs: 5000 };
+    const midB: SkillShEntry = {
+      ...candidate('mid-b'),
+      source: 'Org/B',
+      installs: 200,
+    };
+    const midA: SkillShEntry = {
+      ...candidate('mid-a'),
+      source: 'Org/A',
+      installs: 200,
+    };
+    const secondTop: SkillShEntry = {
+      ...candidate('vue-top'),
+      installs: 1200,
+    };
+    const reactItem = stackItem('React', [low, midB, high, midA]);
+    const vueItem = stackItem('Vue', [low, secondTop]);
+    respond(
+      execute,
+      success({ items: [noSkill(reactItem), noSkill(vueItem)] }),
+    );
+
+    const result = await service.judge(request([reactItem, vueItem]));
+
+    expect(result.items[0].candidateIds).toEqual([
+      'org/repo/high',
+      'org/a/mid-a',
+      'org/b/mid-b',
+      'org/repo/low',
+    ]);
+    expect(
+      result.items[0].candidateAssessments.map(
+        ({ candidateId }) => candidateId,
+      ),
+    ).toEqual(['org/repo/high', 'org/a/mid-a', 'org/b/mid-b', 'org/repo/low']);
+    expect(result.items[1].candidateIds).toEqual([
+      'org/repo/vue-top',
+      'org/repo/low',
+    ]);
+    expect(result.candidates.map(({ candidateId }) => candidateId)).toEqual([
+      'org/repo/high',
+      'org/repo/vue-top',
+      'org/a/mid-a',
+      'org/b/mid-b',
+      'org/repo/low',
+    ]);
+  });
+
+  it('accepts a System One status: used Decision response and attributes outcomes to stage: decision', async () => {
+    const { service, execute, rankSkillCandidates } = fixture();
+    const reactCandidate: SkillShEntry = {
+      ...candidate('react-best-practices'),
+      installs: 15000,
+    };
+    const item = stackItem('React', [reactCandidate]);
+    const systemOnePair = {
+      provider: 'ollama',
+      model: 'qwen3:1.7b',
+    };
+    rankSkillCandidates.mockResolvedValue({
+      status: 'used',
+      pairConfigured: systemOnePair,
+      pairAttempted: systemOnePair,
+      pairUsed: systemOnePair,
+      items: {
+        [item.itemId]: decisionInstall(
+          'org/repo/react-best-practices',
+          'Evidence confirms React in package.json; top-installed matching skill.',
+        ),
+      },
+      itemRejections: {},
+    });
+
+    const result = await service.judge(request([item]));
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.method).toBe('decision');
+    expect(result.counts).toEqual({ decision: 1, normal: 0, notJudged: 0 });
+    expect(result.items[0].judgedBy).toBe('decision');
+    expect(result.items[0].outcomes).toEqual([
+      {
+        verdict: 'install',
+        candidateId: 'org/repo/react-best-practices',
+        reason:
+          'Evidence confirms React in package.json; top-installed matching skill.',
+        stage: 'decision',
+      },
+    ]);
+    expect(result.stages[0]).toEqual({
+      stage: 'decision',
+      status: 'used',
+      pairConfigured: systemOnePair,
+      pairAttempted: systemOnePair,
+      pairUsed: systemOnePair,
+      itemsJudged: 1,
+      invalidItemIds: [],
+    });
+    expect(result.stages[1]).toMatchObject({
+      stage: 'normal',
+      status: 'skipped',
+      category: 'no-work',
     });
   });
 });

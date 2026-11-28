@@ -1,15 +1,15 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   ClaudeRpcService,
   ElectronLayoutService,
   PluginCatalogService,
+  SETUP_RUN_ENTRY,
+  SurfaceRouterService,
   VSCodeService,
   WorkspaceScopeService,
 } from '@ptah-extension/core';
-import { GenerationWorkflowLauncherService } from '../../services/generation-workflow-launcher.service';
 import { SetupStatusStore } from './setup-status.store';
 
 describe('SetupStatusStore', () => {
@@ -52,26 +52,17 @@ describe('SetupStatusStore', () => {
   const rpc = {
     call: jest.fn<Promise<unknown>, [string, ...unknown[]]>(reply),
   };
-  const tabs = { activeWorkspacePath: '/workspace' as string | null };
-  const launcher = { open: jest.fn().mockResolvedValue({ outcome: 'landed' }) };
+  const entry = { openWorkflow: jest.fn().mockResolvedValue('navigated') };
+  const surfaceRouter = {
+    navigateToSurface: jest.fn().mockResolvedValue('navigated'),
+  };
   const navigate = jest.fn().mockResolvedValue(true);
   let store: SetupStatusStore;
   let electron = false;
+  let withEntry = true;
   const addFolder = jest.fn().mockResolvedValue('cancelled');
 
-  beforeEach(() => {
-    electron = false;
-    jest.clearAllMocks();
-    scopeKey.set('first');
-    loaded.set(false);
-    enabled.set(false);
-    catalogError.set(null);
-    tabs.activeWorkspacePath = '/workspace';
-    analyses = [analysis];
-    statusData = status;
-    rpc.call.mockImplementation(reply);
-    launcher.open.mockResolvedValue({ outcome: 'landed' });
-    navigate.mockResolvedValue(true);
+  function mount(): void {
     TestBed.configureTestingModule({
       providers: [
         SetupStatusStore,
@@ -79,31 +70,56 @@ describe('SetupStatusStore', () => {
         { provide: PluginCatalogService, useValue: catalog },
         { provide: ClaudeRpcService, useValue: rpc },
         { provide: ElectronLayoutService, useValue: { addFolder } },
-        { provide: TabManagerService, useValue: tabs },
         {
           provide: VSCodeService,
           useValue: {
-            config: () => ({ workspaceRoot: '/workspace', isVSCode: !electron, isElectron: electron }),
+            config: () => ({
+              workspaceRoot: '/workspace',
+              isVSCode: !electron,
+              isElectron: electron,
+            }),
           },
         },
-        { provide: GenerationWorkflowLauncherService, useValue: launcher },
+        ...(withEntry
+          ? [{ provide: SETUP_RUN_ENTRY, useValue: entry }]
+          : []),
+        { provide: SurfaceRouterService, useValue: surfaceRouter },
         { provide: Router, useValue: { navigate } },
       ],
     });
     store = TestBed.inject(SetupStatusStore);
+  }
+
+  beforeEach(() => {
+    electron = false;
+    withEntry = true;
+    jest.clearAllMocks();
+    scopeKey.set('first');
+    loaded.set(false);
+    enabled.set(false);
+    catalogError.set(null);
+    analyses = [analysis];
+    statusData = status;
+    rpc.call.mockImplementation(reply);
+    entry.openWorkflow.mockResolvedValue('navigated');
+    navigate.mockResolvedValue(true);
+    mount();
   });
 
-  it('counts only confirmed skills, scan and agents over three', async () => {
+  it('excludes agent configuration from readiness', async () => {
     TestBed.flushEffects();
     expect(store.readyCount()).toBeNull();
     await store.refresh();
     loaded.set(true);
     enabled.set(true);
     expect(store.readyCount()).toBe(2);
-    expect(store.allReady()).toBe(false);
+    expect(store.allReady()).toBe(true);
+    expect(store.agentsReady()).toBe(false);
+    expect(store.nextAction()).toBeNull();
     statusData = { ...status, isConfigured: true, agentCount: 2 };
     await store.refresh();
-    expect(store.readyCount()).toBe(3);
+    expect(store.agentsReady()).toBe(true);
+    expect(store.readyCount()).toBe(2);
     expect(store.allReady()).toBe(true);
     expect(store.nextAction()).toBeNull();
   });
@@ -122,6 +138,53 @@ describe('SetupStatusStore', () => {
     await store.refresh();
     expect(store.scanReady()).toBe(false);
     expect(store.scanProjectType()).toBeNull();
+  });
+
+  it('ignores active, running, paused, and failed analyses for scanReady while accepting completed and legacy ones', async () => {
+    TestBed.flushEffects();
+    await store.refresh();
+
+    // Active running analysis must not flip scanReady to true
+    analyses = [{ ...analysis, lifecycle: 'running', isActive: true }];
+    await store.refresh();
+    expect(store.scanReady()).toBe(false);
+    expect(store.scanProjectType()).toBeNull();
+
+    // Non-active running, paused, failed, or isActive-only entries are ignored
+    analyses = [
+      { ...analysis, lifecycle: 'running', isActive: false },
+      { ...analysis, lifecycle: 'paused', isActive: false },
+      { ...analysis, lifecycle: 'failed', isActive: false },
+      { ...analysis, lifecycle: 'completed', isActive: true },
+    ];
+    await store.refresh();
+    expect(store.scanReady()).toBe(false);
+    expect(store.scanProjectType()).toBeNull();
+
+    // Completed analysis (even behind an active running one) sets scanReady and its projectType
+    analyses = [
+      {
+        ...analysis,
+        projectType: 'In-flight run',
+        lifecycle: 'running',
+        isActive: true,
+      },
+      {
+        ...analysis,
+        projectType: ' Completed Nx workspace ',
+        lifecycle: 'completed',
+        isActive: false,
+      },
+    ];
+    await store.refresh();
+    expect(store.scanReady()).toBe(true);
+    expect(store.scanProjectType()).toBe('Completed Nx workspace');
+
+    // Legacy analysis without lifecycle or isActive remains valid
+    analyses = [{ ...analysis, projectType: 'Legacy app' }];
+    await store.refresh();
+    expect(store.scanReady()).toBe(true);
+    expect(store.scanProjectType()).toBe('Legacy app');
   });
 
   it('keeps the scan check unknown until the first answer and after a failed first read', async () => {
@@ -193,7 +256,7 @@ describe('SetupStatusStore', () => {
     expect(store.scanReady()).toBe(false);
   });
 
-  it('maps the next action: first run, then Skills, Scan, Agents in order', async () => {
+  it('offers only actionable Skills and Scan steps', async () => {
     // Settle the mount read first, so each row below starts its own read.
     TestBed.flushEffects();
     await store.refresh();
@@ -202,10 +265,10 @@ describe('SetupStatusStore', () => {
       [false, false, false, 'run-setup'],
       [false, true, false, 'open-library'],
       [false, true, true, 'open-library'],
-      [false, false, true, 'open-library'],
+      [false, false, true, 'run-setup'],
       [true, false, false, 'run-setup'],
       [true, false, true, 'run-setup'],
-      [true, true, false, 'generate-agents'],
+      [true, true, false, null],
       [true, true, true, null],
     ];
     for (const [skills, scan, agents, expected] of matrix) {
@@ -220,7 +283,7 @@ describe('SetupStatusStore', () => {
         expected,
       ]);
       expect(store.readyCount()).toBe(
-        [skills, scan, agents].filter(Boolean).length,
+        [skills, scan].filter(Boolean).length,
       );
     }
   });
@@ -282,29 +345,95 @@ describe('SetupStatusStore', () => {
     await store.launchWizard();
     expect(navigate).toHaveBeenCalledWith(['/onboarding']);
     await store.launchGeneration('setup-agent-generation');
-    expect(launcher.open).toHaveBeenCalledWith({
-      workspacePath: '/workspace',
-      workflow: 'setup-agent-generation',
-      origin: 'independent-start',
-    });
-    launcher.open.mockResolvedValue({ outcome: 'failed' });
+    expect(entry.openWorkflow).toHaveBeenCalledWith(
+      'setup-agent-generation',
+      'independent-start',
+    );
+    entry.openWorkflow.mockResolvedValueOnce('failed');
     await store.launchGeneration('setup-project-prompt');
     expect(store.launchError()).toContain('Could not open generation');
+  });
+
+  it('falls back to the bare onboarding surface without the entry token', async () => {
+    TestBed.resetTestingModule();
+    withEntry = false;
+    mount();
+    TestBed.flushEffects();
+    await store.launchGeneration('setup-agent-generation');
+    expect(surfaceRouter.navigateToSurface).not.toHaveBeenCalled();
+    await store.launchGeneration('setup-project-prompt');
+    expect(entry.openWorkflow).not.toHaveBeenCalled();
+    expect(surfaceRouter.navigateToSurface).toHaveBeenCalledWith('onboarding');
+    expect(store.launchError()).toBeNull();
+  });
+
+  it('reports no error and releases the busy flag when a newer navigation supersedes the launch', async () => {
+    let resolveLaunch: (outcome: 'navigated' | 'cancelled') => void =
+      () => undefined;
+    entry.openWorkflow.mockReturnValueOnce(
+      new Promise<'navigated' | 'cancelled'>((done) => {
+        resolveLaunch = done;
+      }),
+    );
+    const launch = store.launchGeneration('setup-agent-generation');
+    expect(store.launching()).toBe(true);
+    resolveLaunch('cancelled');
+    await launch;
+    expect(store.launching()).toBe(false);
+    expect(store.launchError()).toBeNull();
+  });
+
+  it('reports the exact failure copy when the port fails and releases the busy flag', async () => {
+    let resolveLaunch: (outcome: 'navigated' | 'failed') => void =
+      () => undefined;
+    entry.openWorkflow.mockReturnValueOnce(
+      new Promise<'navigated' | 'failed'>((done) => {
+        resolveLaunch = done;
+      }),
+    );
+    const launch = store.launchGeneration('setup-agent-generation');
+    expect(store.launching()).toBe(true);
+    resolveLaunch('failed');
+    await launch;
+    expect(store.launching()).toBe(false);
+    expect(store.launchError()).toBe(
+      'Could not open generation. Please try again.',
+    );
+  });
+
+  it('reports the failure copy when the port rejects', async () => {
+    entry.openWorkflow.mockRejectedValueOnce(new Error('secret'));
+    await store.launchGeneration('setup-agent-generation');
+    expect(store.launchError()).toBe(
+      'Could not open generation. Please try again.',
+    );
+    expect(store.launchError()).not.toContain('secret');
+    expect(store.launching()).toBe(false);
   });
 
   it('uses the Electron folder picker instead of a VS Code command', async () => {
     electron = true;
     await store.openFolder();
     expect(addFolder).toHaveBeenCalledTimes(1);
-    expect(rpc.call).not.toHaveBeenCalledWith('command:execute', expect.anything(), expect.anything());
+    expect(rpc.call).not.toHaveBeenCalledWith(
+      'command:execute',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('reports an Electron picker failure without exposing its raw error', async () => {
     electron = true;
     addFolder.mockResolvedValueOnce('failed');
     await store.openFolder();
-    expect(store.folderError()).toBe('Could not open a folder. Please try again.');
-    expect(rpc.call).not.toHaveBeenCalledWith('command:execute', expect.anything(), expect.anything());
+    expect(store.folderError()).toBe(
+      'Could not open a folder. Please try again.',
+    );
+    expect(rpc.call).not.toHaveBeenCalledWith(
+      'command:execute',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('does not track catalog state in the scope effect or duplicate status reads on retry', async () => {
@@ -353,7 +482,8 @@ describe('SetupStatusStore', () => {
       data: { ...status, isConfigured: true, agentCount: 1 },
     });
     await pending;
-    expect(store.readyCount()).toBe(3);
+    expect(store.agentsReady()).toBe(true);
+    expect(store.readyCount()).toBe(2);
   });
 
   it('dedupes simultaneous remount refreshes', async () => {

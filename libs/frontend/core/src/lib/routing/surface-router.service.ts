@@ -17,7 +17,11 @@ import {
   surfaceIdFromSegment,
   type ViewType,
 } from './surface-routes';
-import { onboardingGenerationBinding } from './onboarding-routes';
+import {
+  generationWorkflowForPath,
+  onboardingGenerationBinding,
+  ONBOARDING_QUERY,
+} from './onboarding-routes';
 
 /**
  * What happened to a requested surface navigation.
@@ -203,11 +207,8 @@ export class SurfaceRouterService {
           (segment) => segment.path,
         ) ?? [];
       if (
-        segments[0] === 'onboarding' &&
-        (segments[1] === 'guidance' ||
-          (segments[1] === 'analyze' &&
-            ['agents', 'generate', 'guidance'].includes(segments[2] ?? ''))) &&
-        targetTree.queryParams['tab'] !== undefined
+        targetTree.queryParams[ONBOARDING_QUERY.tab] !== undefined &&
+        generationWorkflowForPath(segments)
       ) {
         const binding = onboardingGenerationBinding(
           segments,

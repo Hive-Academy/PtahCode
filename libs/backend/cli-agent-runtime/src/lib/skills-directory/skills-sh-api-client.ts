@@ -80,6 +80,29 @@ function isRetryableStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+function normalizeInstalls(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+/**
+ * Order marketplace entries by download count descending, treating non-finite
+ * or negative install counts as `0`, with deterministic lexicographical
+ * tie-breakers.
+ */
+export function compareSkillShEntriesByInstallsDesc(
+  a: SkillShEntry,
+  b: SkillShEntry,
+): number {
+  const installDiff =
+    normalizeInstalls(b.installs) - normalizeInstalls(a.installs);
+  if (installDiff !== 0) return installDiff;
+  return (
+    a.skillId.localeCompare(b.skillId) ||
+    a.source.localeCompare(b.source) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 @injectable()
 export class SkillsShApiClient {
   private readonly searchCache = new Map<string, CacheEntry<SkillShEntry[]>>();
@@ -178,7 +201,9 @@ export class SkillsShApiClient {
 
     const path = `/search?q=${encodeURIComponent(query)}&limit=${count}`;
     const response = await this.request(path, SkillsApiSearchResponseSchema);
-    const skills = response.skills.map((s) => this.toSkillShEntry(s));
+    const skills = response.skills
+      .map((s) => this.toSkillShEntry(s))
+      .sort(compareSkillShEntriesByInstallsDesc);
 
     // Best-effort and never fatal: the search result stands on its own if the
     // frontmatter probe finds nothing.
@@ -189,6 +214,8 @@ export class SkillsShApiClient {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    skills.sort(compareSkillShEntriesByInstallsDesc);
 
     this.searchCache.set(cacheKey, {
       data: skills,

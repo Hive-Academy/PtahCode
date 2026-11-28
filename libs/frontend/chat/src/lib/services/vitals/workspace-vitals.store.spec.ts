@@ -177,8 +177,8 @@ describe('WorkspaceVitalsStore', () => {
       skillsReady: signal<boolean | null>(true),
       scanReady: signal<boolean | null>(true),
       agentsReady: signal<boolean | null>(false),
-      allReady: signal(false),
-      nextAction: signal<SetupNextAction | null>('generate-agents'),
+      allReady: signal(true),
+      nextAction: signal<SetupNextAction | null>(null),
       scanProjectType: signal<string | null>('Angular monorepo'),
       error: signal<string | null>(null),
       scanError: signal<string | null>(null),
@@ -503,20 +503,20 @@ describe('WorkspaceVitalsStore', () => {
   });
 
   describe('readiness', () => {
-    it('lists the three checks with the next action', async () => {
+    it('excludes agent generation from workspace readiness', async () => {
       const store = await create();
       expect(store.readiness()).toEqual({
         checks: [
           { id: 'skills', label: 'Skills', ready: true },
           { id: 'scan', label: 'Project scan', ready: true },
-          { id: 'agents', label: 'Agents', ready: false },
         ],
-        action: { id: 'generate-agents', label: 'Generate agents' },
-        allReady: false,
+        action: null,
+        allReady: true,
         unavailable: false,
       });
-      setup.nextAction.set(null);
-      expect(store.readiness().action).toBeNull();
+      setup.scanReady.set(false);
+      setup.nextAction.set('run-setup');
+      expect(store.readiness().action?.id).toBe('run-setup');
     });
 
     it('is unavailable when a check failed or the host has no open folder', async () => {
@@ -528,7 +528,16 @@ describe('WorkspaceVitalsStore', () => {
       expect(store.readiness().unavailable).toBe(true);
       catalogError.set(null);
       setup.error.set('x');
-      expect(store.readiness().unavailable).toBe(true);
+      expect(store.readiness()).toMatchObject({
+        allReady: true,
+        unavailable: false,
+      });
+      setup.scanReady.set(false);
+      setup.allReady.set(false);
+      expect(store.readiness()).toMatchObject({
+        allReady: false,
+        unavailable: false,
+      });
       setup.error.set(null);
       setup.workspaceNotOpen.set(true);
       setup.agentsReady.set(null);
@@ -547,9 +556,7 @@ describe('WorkspaceVitalsStore', () => {
       await store.runReadinessAction('run-setup');
       expect(setup.launchWizard).toHaveBeenCalled();
       await store.runReadinessAction('generate-agents');
-      expect(setup.launchGeneration).toHaveBeenCalledWith(
-        'setup-agent-generation',
-      );
+      expect(setup.launchGeneration).not.toHaveBeenCalled();
       await store.runReadinessAction('toString');
       expect(openMarketplace).toHaveBeenCalledTimes(1);
     });

@@ -39,6 +39,14 @@ const phaseStatuses: readonly PhaseStatus[] = [
   'skipped',
 ];
 
+function isSelectableSavedAnalysis(item: SavedAnalysisMetadata): boolean {
+  if (item.isActive === true) return false;
+  if (item.lifecycle !== undefined && item.lifecycle !== 'completed') {
+    return false;
+  }
+  return true;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AnalysisStepStore {
   private readonly rpc = inject(WizardRpcService);
@@ -51,6 +59,7 @@ export class AnalysisStepStore {
     null,
   );
   private readonly attachedValue = signal(false);
+  private readonly workspacePathValue = signal<string | null>(null);
   private workspaceRevision = 0;
   private listRevision = 0;
   private selectionRevision = 0;
@@ -114,7 +123,20 @@ export class AnalysisStepStore {
 
   private completedLiveResult(): MultiPhaseAnalysisResponse | null {
     const result = this.wizard.multiPhaseResult();
-    return result?.manifest.lifecycle === 'completed' ? result : null;
+    if (result?.manifest.lifecycle !== 'completed') {
+      return null;
+    }
+    if (
+      typeof this.runner.isResultForWorkspace === 'function' &&
+      !this.runner.isResultForWorkspace(this.workspacePathValue())
+    ) {
+      return null;
+    }
+    return result;
+  }
+
+  setWorkspacePath(path: string | null): void {
+    this.workspacePathValue.set(path);
   }
 
   async listAnalyses(): Promise<void> {
@@ -125,7 +147,7 @@ export class AnalysisStepStore {
       revision === this.workspaceRevision &&
       listRevision === this.listRevision
     ) {
-      this.savedValue.set(saved);
+      this.savedValue.set(saved.filter(isSelectableSavedAnalysis));
     }
   }
   attachStream(): void {
@@ -146,7 +168,11 @@ export class AnalysisStepStore {
     const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(filename);
-      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
+      if (
+        revision !== this.workspaceRevision ||
+        selectionRevision !== this.selectionRevision
+      )
+        return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
       this.selectedValue.set(filename);
       this.loadedValue.set(result);
@@ -156,15 +182,21 @@ export class AnalysisStepStore {
       return 'failed';
     }
   }
-  async useAnalysis(slug: string): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
+  async useAnalysis(
+    slug: string,
+  ): Promise<'loaded' | 'not-found' | 'failed' | 'superseded'> {
     if (!slug || slug.includes('/') || slug.includes('\\')) return 'not-found';
     const revision = this.workspaceRevision;
     const selectionRevision = ++this.selectionRevision;
     try {
       const result = await this.rpc.loadAnalysis(slug);
-      if (revision !== this.workspaceRevision || selectionRevision !== this.selectionRevision) return 'superseded';
+      if (
+        revision !== this.workspaceRevision ||
+        selectionRevision !== this.selectionRevision
+      )
+        return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
-      this.selectedValue.set(slug);
+      this.selectedValue.set(result.manifest.slug ?? slug);
       this.loadedValue.set(result);
       return 'loaded';
     } catch {
@@ -188,5 +220,3 @@ export class AnalysisStepStore {
     this.loadedValue.set(null);
   }
 }
-
-

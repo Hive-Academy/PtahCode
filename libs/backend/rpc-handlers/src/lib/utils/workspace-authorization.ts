@@ -27,9 +27,9 @@ export function findOpenWorkspaceRoot(
   requestedRoot: string,
   workspaceProvider: IWorkspaceProvider,
 ): string | undefined {
-  return workspaceProvider
-    .getWorkspaceFolders()
-    .find((folder) => sameWorkspaceRoot(folder, requestedRoot));
+  const folders = workspaceProvider.getWorkspaceFolders();
+  if (!Array.isArray(folders)) return undefined;
+  return folders.find((folder) => sameWorkspaceRoot(folder, requestedRoot));
 }
 
 /**

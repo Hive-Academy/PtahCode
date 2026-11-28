@@ -57,7 +57,10 @@ const encoder = new TextEncoder();
 
 /** What the pipeline needs from a System One client. Tests stub this. */
 export interface SystemOneCaller {
-  decide(payload: DecisionPayload, timeoutCapMs?: number): Promise<SystemOneCallResult>;
+  decide(
+    payload: DecisionPayload,
+    timeoutCapMs?: number,
+  ): Promise<SystemOneCallResult>;
 }
 
 export interface LaneQuestion {
@@ -121,6 +124,7 @@ export type ModelDispatch =
       readonly providerId: string;
       readonly model: string;
       readonly signal: AbortSignal;
+      readonly timeoutMs?: number;
     };
 
 /**
@@ -184,13 +188,19 @@ export async function runLaneRequest(input: {
   readonly dispatch: ModelDispatch;
   readonly logger: LaneRoutingLogger;
 }): Promise<ModelRequestOutcome> {
-  const sendable = input.dispatch.kind === 'system-one'
-    ? input.phases.filter((phase) => phase.options.length >= MIN_OPTIONS_PER_PHASE)
-    : input.phases;
-  const phases = input.dispatch.kind === 'system-one'
-    ? sendable.slice(0, DECISION_QUESTIONS_PER_CALL)
-    : sendable;
-  const questionCap = new Set(sendable.slice(phases.length).map((phase) => phase.phaseId));
+  const sendable =
+    input.dispatch.kind === 'system-one'
+      ? input.phases.filter(
+          (phase) => phase.options.length >= MIN_OPTIONS_PER_PHASE,
+        )
+      : input.phases;
+  const phases =
+    input.dispatch.kind === 'system-one'
+      ? sendable.slice(0, DECISION_QUESTIONS_PER_CALL)
+      : sendable;
+  const questionCap = new Set(
+    sendable.slice(phases.length).map((phase) => phase.phaseId),
+  );
   const fitted = fitLane({ ...input, phases });
   if (fitted === null) {
     return { ...emptyOutcome('payload-too-large'), questionCap };
@@ -467,7 +477,12 @@ function offeredFigures(
     for (const option of offered.get(phase.phaseId) ?? []) {
       if (option.laneId === SUBAGENT_LANE_ID) continue;
       const model = decisionOutcomeModel(option.model);
-      const figure = outcomes(option.laneId, phase.taskKind, model, option.effort);
+      const figure = outcomes(
+        option.laneId,
+        phase.taskKind,
+        model,
+        option.effort,
+      );
       if (figure === null) continue;
       const key = outcomeFigureLabel(figure);
       if (seen.has(key)) continue;

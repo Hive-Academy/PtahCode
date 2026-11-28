@@ -1,8 +1,10 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
 import {
-  QueuedFollowUpStore,
-  TabManagerService,
-} from '@ptah-extension/chat-state';
+  DestroyRef,
+  Injectable,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import type {
   SetupGenerationAccepted,
   SetupGenerationRejection,
@@ -10,12 +12,22 @@ import type {
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import {
+  FOREIGN_WORKSPACE_COPY,
+  isFinalizationCorrection,
+  isTerminalLifecycle,
+  matchesBinding,
+} from './setup-run/setup-run-binding';
+import { SetupRunStore } from './setup-run.store';
+import type { SetupRunRecord } from './setup-run.types';
+import {
+  WizardRpcError,
   WizardRpcService,
   type BoundAgentDecisions,
 } from './wizard-rpc.service';
-import { findBoundGenerationTab } from './bound-generation-tab';
 
 const LOOKUP_FAILED = Symbol('lookup-failed');
+
+/** Record copy for a start the backend refused for this workspace. */
 
 export type GenerationViewState =
   | 'idle'
@@ -30,12 +42,16 @@ export type GenerationViewState =
   | 'failed'
   | 'timed-out';
 
+/**
+ * The view state of one agent-generation or guidance run, bound to a Setup
+ * run record (`binding.tabId` is the record id). Initial starts with user
+ * input happen here; retry, re-run and cancel belong to `SetupRunStore`,
+ * and every verified run state is reported to it.
+ */
 @Injectable({ providedIn: 'root' })
 export class GenerationWorkflowStore {
   private readonly rpc = inject(WizardRpcService);
-  private readonly tabs = inject(TabManagerService);
-  /** Follow-ups waiting for the bound tab (TASK_2026_884). */
-  private readonly followUps = inject(QueuedFollowUpStore);
+  private readonly runs = inject(SetupRunStore);
   private readonly bindingValue = signal<SetupGenerationTabBinding | null>(
     null,
   );
@@ -49,18 +65,18 @@ export class GenerationWorkflowStore {
   private lookupFailures = 0;
   private expectedRunId: string | undefined;
   private bindingRevision = 0;
-  readonly runMismatch = signal(false);
-  readonly lookupExhausted = signal(false);
-  readonly acceptedRun = signal<{ runId: string; revision: number } | null>(
-    null,
-  );
-  readonly binding = this.bindingValue.asReadonly();
-  readonly run = this.runValue.asReadonly();
-  readonly state = this.stateValue.asReadonly();
-  readonly rejection = this.rejectionValue.asReadonly();
-  readonly chatTurnRejection = signal<string | null>(null);
-  readonly startError = signal<string | null>(null);
-  readonly isBound = computed(() =>
+  public readonly runMismatch = signal(false);
+  public readonly lookupExhausted = signal(false);
+  public readonly acceptedRun = signal<{
+    runId: string;
+    revision: number;
+  } | null>(null);
+  public readonly binding = this.bindingValue.asReadonly();
+  public readonly run = this.runValue.asReadonly();
+  public readonly state = this.stateValue.asReadonly();
+  public readonly rejection = this.rejectionValue.asReadonly();
+  public readonly startError = signal<string | null>(null);
+  public readonly isBound = computed(() =>
     [
       'starting',
       'running',
@@ -70,24 +86,31 @@ export class GenerationWorkflowStore {
       'stop-unknown',
     ].includes(this.stateValue()),
   );
-  readonly provider = computed(() => {
+  public readonly provider = computed(() => {
     const value = this.runValue()?.effectiveProvider;
     return value && value !== 'unknown' ? value : null;
   });
-  readonly model = computed(() => {
+  public readonly model = computed(() => {
     const value = this.runValue()?.effectiveModel;
     return value && value !== 'unknown' ? value : null;
   });
 
-  bind(binding: SetupGenerationTabBinding, expectedRunId?: string): void {
+  public constructor() {
+    // The watchdog is a fallback timer; release it with the store.
+    inject(DestroyRef).onDestroy(() => this.clearWatchdog());
+  }
+
+  public bind(
+    binding: SetupGenerationTabBinding,
+    expectedRunId?: string,
+  ): void {
     this.lookupExhausted.set(false);
     const old = this.bindingValue();
     if (
-      old?.tabId === binding.tabId &&
-      old.workspacePath === binding.workspacePath &&
-      old.workflow === binding.workflow &&
+      matchesBinding(old, binding) &&
       (this.expectedRunId === expectedRunId ||
-        (expectedRunId !== undefined && this.runValue()?.binding.runId === expectedRunId))
+        (expectedRunId !== undefined &&
+          this.runValue()?.binding.runId === expectedRunId))
     )
       return;
     this.pendingStop = false;
@@ -105,7 +128,15 @@ export class GenerationWorkflowStore {
     void this.refresh();
   }
 
-  unbind(): void {
+  /** Show a Setup run record: its binding and its latest run. */
+  public bindRecord(record: SetupRunRecord): boolean {
+    const binding = this.runs.bindingFor(record);
+    if (!binding) return false;
+    this.bind(binding);
+    return true;
+  }
+
+  public unbind(): void {
     this.pendingStop = false;
     this.bindingRevision++;
     this.expectedRunId = undefined;
@@ -123,7 +154,7 @@ export class GenerationWorkflowStore {
    * preview's token, replace entries and target; without it the server keeps
    * every existing file and writes to the harness root.
    */
-  async startAgents(
+  public async startAgents(
     selectedAgentIds: string[],
     decisions?: BoundAgentDecisions,
   ): Promise<void> {
@@ -135,22 +166,25 @@ export class GenerationWorkflowStore {
       this.isBound()
     )
       return;
-    if (!this.canStartInChat(binding)) return;
     this.stateValue.set('starting');
     this.rejectionValue.set(null);
     this.startError.set(null);
     try {
-      const response = decisions
-        ? await this.rpc.startBoundAgents(
-            binding,
-            selectedAgentIds,
-            false,
-            decisions,
-          )
-        : await this.rpc.startBoundAgents(binding, selectedAgentIds);
-      if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
+      const response = await this.runs.startInitial(binding, () =>
+        decisions
+          ? this.rpc.startBoundAgents(
+              binding,
+              selectedAgentIds,
+              false,
+              decisions,
+            )
+          : this.rpc.startBoundAgents(binding, selectedAgentIds),
+      );
+      if (!this.sameBinding(binding) || revision !== this.bindingRevision)
+        return;
       if (response.accepted) await this.accept(binding, response.accepted);
-      else if (response.rejection) this.reject(response.rejection);
+      else if (response.rejection)
+        await this.reject(binding, response.rejection);
       else if (response.success === false) this.failStart(response.error);
       else await this.refresh();
     } catch (error: unknown) {
@@ -166,15 +200,7 @@ export class GenerationWorkflowStore {
     }
   }
 
-  async startGuidance(): Promise<void> {
-    await this.submitGuidance(false);
-  }
-
-  async regenerateGuidance(): Promise<void> {
-    await this.submitGuidance(true);
-  }
-
-  private async submitGuidance(force: boolean): Promise<void> {
+  public async startGuidance(): Promise<void> {
     const binding = this.bindingValue();
     const revision = this.bindingRevision;
     if (
@@ -183,23 +209,27 @@ export class GenerationWorkflowStore {
       this.isBound()
     )
       return;
-    if (!this.canStartInChat(binding)) return;
     this.stateValue.set('starting');
     this.rejectionValue.set(null);
     this.startError.set(null);
     try {
-      const response = force
-        ? await this.rpc.regenerateBoundGuidance(binding)
-        : await this.rpc.startBoundGuidance(binding);
-      if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
+      const response = await this.runs.startInitial(binding, () =>
+        this.rpc.startBoundGuidance(binding),
+      );
+      if (!this.sameBinding(binding) || revision !== this.bindingRevision)
+        return;
       if (response.accepted) await this.accept(binding, response.accepted);
-      else if (response.rejection) this.reject(response.rejection);
+      else if (response.rejection)
+        await this.reject(binding, response.rejection);
       else if (response.success === false) this.failStart(response.error);
       else await this.refresh();
     } catch (error: unknown) {
       if (this.sameBinding(binding) && revision === this.bindingRevision) {
+        const coded =
+          error instanceof WizardRpcError && !!error.code?.startsWith('SETUP_');
         const message = error instanceof Error ? error.message : '';
         if (
+          coded ||
           message.startsWith('SETUP_') ||
           message.includes('Update Background models and retry.')
         ) {
@@ -211,42 +241,129 @@ export class GenerationWorkflowStore {
     }
   }
 
-  async resumeBoundAgents(): Promise<void> {
-    await this.resumeAgents(true);
-  }
-
-  async resumeCheckpoint(): Promise<void> {
-    await this.resumeAgents(false);
-  }
-
-  private async resumeAgents(requireInterruptedRun: boolean): Promise<void> {
+  /**
+   * Run guidance again for the shown record: `SetupRunStore.retry` for a
+   * failed or interrupted record, `rerun` (a new record) for a completed or
+   * cancelled one.
+   */
+  public async regenerateGuidance(): Promise<void> {
     const binding = this.bindingValue();
     if (
       !binding ||
-      binding.workflow !== 'setup-agent-generation' ||
-      (requireInterruptedRun
-        ? !this.runValue()?.interrupted
-        : this.runValue() !== null || this.isBound())
+      binding.workflow !== 'setup-project-prompt' ||
+      this.isBound()
     )
       return;
-    if (!this.canStartInChat(binding)) return;
+    // Interim gap until Batch 8 binds onboarding pages to records: a binding
+    // with no Setup run record has no owner to retry or re-run it, so nothing
+    // happens.
+    const record = this.runs.get(binding.tabId);
+    if (!record) return;
+    if (record.status === 'failed' || record.status === 'interrupted') {
+      await this.retry();
+      return;
+    }
+    if (record.status !== 'completed' && record.status !== 'cancelled') return;
+    const revision = this.bindingRevision;
+    this.beginStart();
+    const next = this.runs.rerun(record.id);
+    const started = next ? await this.runs.whenStarted(next.id) : null;
+    if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
+    await this.follow(binding, next?.id ?? null, started);
+  }
+
+  /**
+   * Retry the shown record when it failed or was interrupted. Agent
+   * generation resumes from its checkpoint. A run that already owns the
+   * workflow is attached instead.
+   */
+  public async retry(): Promise<void> {
+    const binding = this.bindingValue();
+    const record = binding ? this.runs.get(binding.tabId) : null;
+    if (
+      !binding ||
+      !record ||
+      this.isBound() ||
+      (record.status !== 'failed' && record.status !== 'interrupted')
+    )
+      return;
+    const revision = this.bindingRevision;
+    this.beginStart();
+    const started = await this.runs.retry(record.id);
+    if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
+    await this.follow(binding, record.id, started);
+  }
+
+  private beginStart(): void {
     this.stateValue.set('starting');
     this.rejectionValue.set(null);
     this.startError.set(null);
-    try {
-      const response = await this.rpc.startBoundAgents(binding, [], true);
-      if (!this.sameBinding(binding)) return;
-      if (response.accepted) await this.accept(binding, response.accepted);
-      else if (response.rejection) this.reject(response.rejection);
-      else if (response.success === false) this.failStart(response.error);
-      else await this.refresh();
-    } catch {
-      if (this.sameBinding(binding)) await this.refresh();
-    }
   }
 
-  private reject(rejection: SetupGenerationRejection): void {
+  /**
+   * Show what a `SetupRunStore` retry or re-run of record `startedId`
+   * resolved: another record (attach), a refused start, or the new run.
+   */
+  private async follow(
+    binding: SetupGenerationTabBinding,
+    startedId: string | null,
+    started: SetupRunRecord | null,
+  ): Promise<void> {
+    if (!started || !startedId) {
+      this.failStart();
+      return;
+    }
+    if (started.id !== startedId) {
+      // `blocked`: another run owns the workflow; show it.
+      this.bindRecord(started);
+      return;
+    }
+    if (started.status !== 'running' || !started.backendRunId) {
+      this.startError.set(started.error ?? null);
+      this.failStart();
+      return;
+    }
+    if (started.id !== binding.tabId) {
+      // A re-run is a new record.
+      const next = this.runs.bindingFor(started);
+      if (next) this.bind(next, started.backendRunId);
+      return;
+    }
+    this.runValue.set(null);
+    await this.track(binding, started.backendRunId);
+  }
+
+  private async reject(
+    binding: SetupGenerationTabBinding,
+    rejection: SetupGenerationRejection,
+  ): Promise<void> {
     this.pendingStop = false;
+    if (rejection.reason === 'blocked' && rejection.ownerTabId) {
+      const revision = ++this.bindingRevision;
+      const { owner, run } = await this.runs.resolveBlockedStart(
+        binding,
+        rejection.ownerTabId,
+      );
+      if (!this.sameBinding(binding) || revision !== this.bindingRevision)
+        return;
+      if (owner?.id === binding.tabId) {
+        this.stateValue.set('idle');
+        this.runValue.set(null);
+        this.runMismatch.set(false);
+        this.expectedRunId = undefined;
+        if (run) this.applyRun(run);
+        return;
+      }
+      if (owner && this.bindRecord(owner)) return;
+    }
+    if (
+      rejection.reason === 'invalid-binding' ||
+      rejection.reason === 'workspace-mismatch'
+    )
+      this.runs.report(binding.tabId, {
+        status: 'failed',
+        error: FOREIGN_WORKSPACE_COPY,
+      });
     this.rejectionValue.set(rejection);
     this.stateValue.set('idle');
   }
@@ -264,24 +381,27 @@ export class GenerationWorkflowStore {
     );
   }
 
-  private canStartInChat(binding: SetupGenerationTabBinding): boolean {
-    const tab = findBoundGenerationTab(this.tabs, binding);
-    const busy =
-      !tab ||
-      tab.status === 'streaming' ||
-      tab.status === 'resuming' ||
-      this.tabs.isTabStreaming(binding.tabId) ||
-      (tab.streamingState?.currentMessageId != null &&
-        tab.status !== 'awaiting-background' &&
-        tab.status !== 'sleeping') ||
-      this.followUps.forTab(tab.id).length > 0;
-    this.chatTurnRejection.set(busy ? 'Finish this chat reply first' : null);
-    return !busy;
-  }
-
   private async accept(
     binding: SetupGenerationTabBinding,
     accepted: SetupGenerationAccepted,
+  ): Promise<void> {
+    const placeholder: SetupGenerationRunState = {
+      binding: { ...binding, runId: accepted.runId },
+      status: 'starting',
+      source: accepted.source,
+      effectiveProvider: accepted.effectiveProvider,
+      effectiveModel: accepted.effectiveModel,
+    };
+    const record = this.runs.get(binding.tabId) ?? this.runs.adopt(binding);
+    if (record) this.runs.reportRun(record.id, placeholder);
+    this.runValue.set(placeholder);
+    await this.track(binding, accepted.runId);
+  }
+
+  /** Follow backend run `runId` of the shown binding until a lookup sees it. */
+  private async track(
+    binding: SetupGenerationTabBinding,
+    runId: string,
   ): Promise<void> {
     this.bindingRevision++;
     this.expectedRunId = undefined;
@@ -290,37 +410,36 @@ export class GenerationWorkflowStore {
     this.lookupFailures = 0;
     this.rejectionValue.set(null);
     this.acceptedRun.update((previous) => ({
-      runId: accepted.runId,
+      runId,
       revision: (previous?.revision ?? 0) + 1,
     }));
-    this.runValue.set({
-      binding: { ...binding, runId: accepted.runId },
-      status: 'starting',
-      source: accepted.source,
-      effectiveProvider: accepted.effectiveProvider,
-      effectiveModel: accepted.effectiveModel,
-    });
-    const run = await this.safeLookup(binding, accepted.runId);
+    if (!this.runValue()) this.stateValue.set('starting');
+    const report = this.runs.reporterFor(binding.tabId);
+    const run = await this.safeLookup(binding, runId);
     if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
-    if (run !== LOOKUP_FAILED && run?.binding.runId === accepted.runId)
-      this.applyRun(run);
+    if (run !== LOOKUP_FAILED && run?.binding.runId === runId)
+      this.applyRun(run, report);
     else this.stateValue.set('quiet');
-    if (this.pendingStop) await this.flushStop(binding, accepted.runId);
+    if (this.pendingStop) await this.flushStop(binding);
   }
 
-  stop(): void {
+  public stop(): void {
     if (!this.bindingValue() || !this.isBound()) return;
     this.pendingStop = true;
     this.stateValue.set('cancelling');
     void this.refresh();
   }
 
-  async refresh(): Promise<void> {
+  public async refresh(): Promise<void> {
     const binding = this.bindingValue();
     if (!binding || this.runMismatch()) return;
     const revision = this.bindingRevision;
     const expectedRunId = this.expectedRunId;
-    const lookup = await this.safeLookup(binding, expectedRunId ? undefined : this.runValue()?.binding.runId);
+    const report = this.runs.reporterFor(binding.tabId);
+    const lookup = await this.safeLookup(
+      binding,
+      expectedRunId ? undefined : this.runValue()?.binding.runId,
+    );
     if (!this.sameBinding(binding) || revision !== this.bindingRevision) return;
     if (lookup === LOOKUP_FAILED && expectedRunId) {
       if (this.expectedRunId !== expectedRunId) return;
@@ -348,7 +467,7 @@ export class GenerationWorkflowStore {
     this.runMismatch.set(false);
     if (!run) {
       const lastRun = this.runValue();
-      if (lastRun && this.isTerminal(lastRun.status)) return;
+      if (lastRun && isTerminalLifecycle(lastRun.status)) return;
       if (this.stateValue() !== 'idle' && this.lookupFailures < 3) {
         const delay = 1000 * 2 ** this.lookupFailures++;
         this.clearWatchdog();
@@ -370,29 +489,29 @@ export class GenerationWorkflowStore {
     this.clearWatchdog();
     const heldRunId = this.runValue()?.binding.runId;
     if (heldRunId && run.binding.runId !== heldRunId) return;
-    this.applyRun(run);
-    if (this.pendingStop && !this.isTerminal(run.status))
-      await this.flushStop(binding, run.binding.runId);
+    this.applyRun(run, report);
+    if (this.pendingStop && !isTerminalLifecycle(run.status))
+      await this.flushStop(binding);
   }
 
-  private async flushStop(
-    binding: SetupGenerationTabBinding,
-    runId: string,
-  ): Promise<void> {
-    if (!this.pendingStop || !runId) return;
+  /**
+   * Send a queued Stop through `SetupRunStore.cancel`, which cancels the
+   * record's backend run (the run `applyRun` last reported).
+   */
+  private async flushStop(binding: SetupGenerationTabBinding): Promise<void> {
+    if (!this.pendingStop) return;
     this.pendingStop = false;
+    const record = this.runs.get(binding.tabId) ?? this.runs.adopt(binding);
+    let cancelled: boolean;
     try {
-      const cancelled = await this.rpc.cancelBoundRun({ ...binding, runId });
-      if (this.sameBinding(binding)) {
-        this.stateValue.set(cancelled ? 'cancelling' : 'stop-unconfirmed');
-        await this.refresh();
-      }
+      cancelled = record ? await this.runs.cancel(record.id) : false;
     } catch {
-      if (this.sameBinding(binding)) {
-        this.stateValue.set('stop-unconfirmed');
-        void this.refresh();
-      }
+      // degradation-audit: reported - an unconfirmed stop shows stop-unconfirmed and rereads the run.
+      cancelled = false;
     }
+    if (!this.sameBinding(binding)) return;
+    this.stateValue.set(cancelled ? 'cancelling' : 'stop-unconfirmed');
+    await this.refresh();
   }
 
   private async safeLookup(
@@ -407,35 +526,33 @@ export class GenerationWorkflowStore {
     }
   }
 
-  private applyRun(run: SetupGenerationRunState): void {
+  private applyRun(
+    run: SetupGenerationRunState,
+    report?: (run: SetupGenerationRunState) => void,
+  ): void {
     const binding = this.bindingValue();
-    if (
-      !binding ||
-      run.binding.tabId !== binding.tabId ||
-      run.binding.workspacePath !== binding.workspacePath ||
-      run.binding.workflow !== binding.workflow
-    )
-      return;
+    if (!binding || !matchesBinding(binding, run.binding)) return;
     const previous = this.runValue();
     if (
       previous?.binding.runId === run.binding.runId &&
-      this.isTerminal(previous.status)
+      isTerminalLifecycle(previous.status)
     ) {
-      const verifiedCorrection =
-        previous.status === 'failed' &&
-        previous.result?.finalizationFailed === true &&
-        run.status === 'completed' &&
-        run.result?.counts !== undefined &&
-        run.result.agentOutcomes !== undefined;
+      const verifiedCorrection = isFinalizationCorrection(previous, run);
       if (
         !verifiedCorrection &&
-        (!this.isTerminal(run.status) || previous.result || !run.result)
+        (!isTerminalLifecycle(run.status) || previous.result || !run.result)
       )
         return;
     }
     this.runValue.set(run);
+    if (
+      report &&
+      (this.runs.get(binding.tabId) ||
+        (!isTerminalLifecycle(run.status) && this.runs.adopt(binding)))
+    )
+      report(run);
     this.stateValue.set(
-      this.isTerminal(run.status)
+      isTerminalLifecycle(run.status)
         ? run.status
         : run.status === 'starting'
           ? 'starting'
@@ -445,7 +562,7 @@ export class GenerationWorkflowStore {
               ? 'cancelling'
               : run.status,
     );
-    if (this.isTerminal(run.status)) {
+    if (isTerminalLifecycle(run.status)) {
       this.pendingStop = false;
       this.clearWatchdog();
     }
@@ -457,17 +574,6 @@ export class GenerationWorkflowStore {
   }
 
   private sameBinding(binding: SetupGenerationTabBinding): boolean {
-    const current = this.bindingValue();
-    return (
-      current?.tabId === binding.tabId &&
-      current.workflow === binding.workflow &&
-      current.workspacePath === binding.workspacePath
-    );
-  }
-
-  private isTerminal(
-    status: string,
-  ): status is 'completed' | 'cancelled' | 'failed' | 'timed-out' {
-    return ['completed', 'cancelled', 'failed', 'timed-out'].includes(status);
+    return matchesBinding(this.bindingValue(), binding);
   }
 }

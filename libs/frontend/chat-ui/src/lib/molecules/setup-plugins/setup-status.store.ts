@@ -1,17 +1,32 @@
-import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  Injectable,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { Router } from '@angular/router';
-import { isActiveWorkspaceTabSet, TabManagerService } from '@ptah-extension/chat-state';
-import { ClaudeRpcService, ElectronLayoutService, PluginCatalogService, VSCodeService, WorkspaceScopeService } from '@ptah-extension/core';
-import type { SetupGenerationWorkflow, SetupStatusGetResponse } from '@ptah-extension/shared';
+import {
+  ClaudeRpcService,
+  ElectronLayoutService,
+  PluginCatalogService,
+  SETUP_RUN_ENTRY,
+  SurfaceRouterService,
+  VSCodeService,
+  WorkspaceScopeService,
+} from '@ptah-extension/core';
+import type {
+  SetupGenerationWorkflow,
+  SetupStatusGetResponse,
+} from '@ptah-extension/shared';
 import { z } from 'zod';
-import { GenerationWorkflowLauncherService } from '../../services/generation-workflow-launcher.service';
 
 /**
  * The one next step the readiness ring offers. The screen maps it to the
- * Marketplace skills page, `launchWizard()` or
- * `launchGeneration('setup-agent-generation')`.
+ * Marketplace skills page or `launchWizard()`.
  */
-export type SetupNextAction = 'open-library' | 'run-setup' | 'generate-agents';
+export type SetupNextAction = 'open-library' | 'run-setup';
 
 /** What the scan check needs from one `wizard:list-analyses` answer. */
 interface ScanSnapshot {
@@ -26,26 +41,39 @@ const SCAN_ERROR = 'Could not check the project scan. Please try again.';
 /**
  * The part of a `wizard:list-analyses` answer the scan check reads. The RPC
  * result is typed, but the data crosses the host boundary unchecked, so it is
- * validated here. Each listed analysis needs only its project type; other
- * fields are ignored, and a missing type is allowed (older saved analyses).
+ * validated here. Each listed analysis carries an optional project type plus
+ * optional lifecycle/active flags (omitted on older saved analyses); other
+ * fields are ignored.
  */
 const ListAnalysesScanSchema = z.object({
-  analyses: z.array(z.object({ projectType: z.string().optional() })),
+  analyses: z.array(
+    z.object({
+      projectType: z.string().optional(),
+      lifecycle: z.string().optional(),
+      isActive: z.boolean().optional(),
+    }),
+  ),
 });
 
 /** The scan check's facts from one answer (newest first); `null` when malformed. */
 function toScanFacts(data: unknown): Omit<ScanSnapshot, 'key'> | null {
   const parsed = ListAnalysesScanSchema.safeParse(data);
   if (!parsed.success) return null;
-  const { analyses } = parsed.data;
-  const type = analyses[0]?.projectType?.trim() ?? '';
-  return { analysisCount: analyses.length, projectType: type === '' ? null : type };
+  const completed = parsed.data.analyses.filter(
+    (item) =>
+      !item.isActive &&
+      (item.lifecycle === undefined || item.lifecycle === 'completed'),
+  );
+  const type = completed[0]?.projectType?.trim() ?? '';
+  return {
+    analysisCount: completed.length,
+    projectType: type === '' ? null : type,
+  };
 }
 
 /**
- * One workspace-scoped source of readiness for canvas and single-chat: three
- * checks (Skills, Scan, Agents). A check is `null` while unknown, and every
- * count over the checks is `null` until all three are known.
+ * Workspace readiness for canvas and single-chat counts Skills and Scan.
+ * Agent configuration is reported separately for Setup Home.
  *
  * The scan check is `wizard:list-analyses` (any saved analysis). This lib must
  * not reach the indexing lib, so the scan caption here is the project type
@@ -55,14 +83,18 @@ function toScanFacts(data: unknown): Omit<ScanSnapshot, 'key'> | null {
 export class SetupStatusStore {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly router = inject(Router);
+  private readonly surfaceRouter = inject(SurfaceRouterService);
   private readonly catalog = inject(PluginCatalogService);
   private readonly scope = inject(WorkspaceScopeService);
-  private readonly tabs = inject(TabManagerService);
   private readonly vscode = inject(VSCodeService);
   private readonly electronLayout = inject(ElectronLayoutService);
-  private readonly generationLauncher = inject(GenerationWorkflowLauncherService);
+  // Hosts without the entry provider can still open Setup Home for guidance.
+  private readonly setupEntry = inject(SETUP_RUN_ENTRY, { optional: true });
 
-  private readonly snapshot = signal<{ key: string; value: SetupStatusGetResponse } | null>(null);
+  private readonly snapshot = signal<{
+    key: string;
+    value: SetupStatusGetResponse;
+  } | null>(null);
   private readonly pendingKey = signal<string | null>(null);
   private readonly scanSnapshot = signal<ScanSnapshot | null>(null);
   private requestId = 0;
@@ -79,9 +111,13 @@ export class SetupStatusStore {
     const snapshot = this.snapshot();
     return snapshot?.key === this.scope.scopeKey() ? snapshot.value : null;
   });
-  readonly isLoading = computed(() => this.pendingKey() === this.scope.scopeKey());
+  readonly isLoading = computed(
+    () => this.pendingKey() === this.scope.scopeKey(),
+  );
   readonly skillsReady = computed<boolean | null>(() =>
-    !this.catalog.isLoaded() || this.catalog.error() ? null : this.catalog.hasEnabledPlugins(),
+    !this.catalog.isLoaded() || this.catalog.error()
+      ? null
+      : this.catalog.hasEnabledPlugins(),
   );
   readonly agentsReady = computed<boolean | null>(() =>
     this.workspaceNotOpen() || !this.status()
@@ -90,7 +126,9 @@ export class SetupStatusStore {
   );
   private readonly scan = computed(() => {
     const snapshot = this.scanSnapshot();
-    return snapshot?.key === this.scope.scopeKey() && !this.workspaceNotOpen() ? snapshot : null;
+    return snapshot?.key === this.scope.scopeKey() && !this.workspaceNotOpen()
+      ? snapshot
+      : null;
   });
   /** True when this workspace has a saved project analysis. */
   readonly scanReady = computed<boolean | null>(() => {
@@ -98,29 +136,23 @@ export class SetupStatusStore {
     return scan === null ? null : scan.analysisCount > 0;
   });
   /** The scan caption's project type (newest analysis); `null` when none is known. */
-  readonly scanProjectType = computed<string | null>(() => this.scan()?.projectType ?? null);
+  readonly scanProjectType = computed<string | null>(
+    () => this.scan()?.projectType ?? null,
+  );
   readonly readyCount = computed<number | null>(() => {
-    const checks = [this.skillsReady(), this.scanReady(), this.agentsReady()];
+    const checks = [this.skillsReady(), this.scanReady()];
     return checks.some((ready) => ready === null)
       ? null
       : checks.filter((ready) => ready === true).length;
   });
-  readonly allReady = computed(() => this.readyCount() === 3);
-  /**
-   * The next step, once all three checks are known. Nothing ready at all is a
-   * first run, which starts with setup; otherwise the first incomplete check
-   * in the order Skills, Scan, Agents. `null` when all are ready or any is
-   * unknown.
-   */
+  readonly allReady = computed(() => this.readyCount() === 2);
+  /** Workspace setup comes first on a fresh workspace. */
   readonly nextAction = computed<SetupNextAction | null>(() => {
     const skills = this.skillsReady();
     const scan = this.scanReady();
-    const agents = this.agentsReady();
-    if (skills === null || scan === null || agents === null) return null;
-    if (!skills && !scan && !agents) return 'run-setup';
-    if (!skills) return 'open-library';
+    if (skills === null || scan === null) return null;
+    if (!skills && scan) return 'open-library';
     if (!scan) return 'run-setup';
-    if (!agents) return 'generate-agents';
     return null;
   });
 
@@ -161,7 +193,11 @@ export class SetupStatusStore {
     this.scanError.set(null);
     let facts: Omit<ScanSnapshot, 'key'> | null = null;
     try {
-      const result = await this.rpc.call('wizard:list-analyses', {}, { timeout: 10000 });
+      const result = await this.rpc.call(
+        'wizard:list-analyses',
+        {},
+        { timeout: 10000 },
+      );
       if (result.isSuccess()) facts = toScanFacts(result.data);
     } catch {
       // degradation-audit: reported - the failure is published on scanError() as fixed copy; the scan check stays unknown (null) so it is never counted as not ready. The thrown detail is withheld.
@@ -181,7 +217,11 @@ export class SetupStatusStore {
     this.error.set(null);
     this.workspaceNotOpen.set(false);
     try {
-      const result = await this.rpc.call('setup-status:get-status', {}, { timeout: 10000 });
+      const result = await this.rpc.call(
+        'setup-status:get-status',
+        {},
+        { timeout: 10000 },
+      );
       if (id !== this.requestId || key !== this.scope.scopeKey()) return;
       if (result.isSuccess() && result.data) {
         this.snapshot.set({ key, value: result.data });
@@ -199,7 +239,8 @@ export class SetupStatusStore {
       this.snapshot.set(null);
       this.error.set('Could not check agent setup. Please try again.');
     } finally {
-      if (id === this.requestId && key === this.scope.scopeKey()) this.pendingKey.set(null);
+      if (id === this.requestId && key === this.scope.scopeKey())
+        this.pendingKey.set(null);
     }
   }
 
@@ -212,11 +253,17 @@ export class SetupStatusStore {
     try {
       if (this.vscode.config().isElectron) {
         const outcome = await this.electronLayout.addFolder();
-        if (outcome === 'failed') this.folderError.set('Could not open a folder. Please try again.');
+        if (outcome === 'failed')
+          this.folderError.set('Could not open a folder. Please try again.');
         return;
       }
-      const result = await this.rpc.call('command:execute', { command: 'workbench.action.files.openFolder' }, { timeout: 10000 });
-      if (!result.isSuccess()) this.folderError.set('Could not open a folder. Please try again.');
+      const result = await this.rpc.call(
+        'command:execute',
+        { command: 'workbench.action.files.openFolder' },
+        { timeout: 10000 },
+      );
+      if (!result.isSuccess())
+        this.folderError.set('Could not open a folder. Please try again.');
     } catch {
       // degradation-audit: reported — the folder error is shown in Home.
       this.folderError.set('Could not open a folder. Please try again.');
@@ -229,7 +276,8 @@ export class SetupStatusStore {
     this.launchError.set(null);
     try {
       const opened = await this.router.navigate(['/onboarding']);
-      if (!opened) this.launchError.set('Could not launch setup. Please try again.');
+      if (!opened)
+        this.launchError.set('Could not launch setup. Please try again.');
     } catch {
       this.launchError.set('Could not launch setup. Please try again.');
     } finally {
@@ -239,16 +287,23 @@ export class SetupStatusStore {
   }
 
   async launchGeneration(workflow: SetupGenerationWorkflow): Promise<void> {
-    if (this.launching()) return;
+    if (
+      this.launching() ||
+      (workflow === 'setup-agent-generation' && !this.setupEntry)
+    )
+      return;
     this.launching.set(true);
     this.launchError.set(null);
     try {
-      const config = this.vscode.config();
-      const workspacePath = this.tabs.activeWorkspacePath ?? config.workspaceRoot;
-      const result = isActiveWorkspaceTabSet(workspacePath, this.tabs.activeWorkspacePath, config.workspaceRoot, config.isVSCode)
-        ? await this.generationLauncher.open({ workspacePath, workflow, origin: 'independent-start' })
-        : { outcome: 'failed' as const };
-      if (result.outcome === 'failed') this.launchError.set('Could not open generation. Please try again.');
+      // The port reopens existing agent runs and handles the guidance entry.
+      // Guidance can still fall back to Setup Home on hosts without the port.
+      const outcome = this.setupEntry
+        ? await this.setupEntry.openWorkflow(workflow, 'independent-start')
+        : await this.surfaceRouter.navigateToSurface('onboarding');
+      // `cancelled` belongs to the newer navigation that superseded this
+      // click; only a typed `failed` outcome is this launch's failure.
+      if (outcome === 'failed')
+        this.launchError.set('Could not open generation. Please try again.');
     } catch {
       this.launchError.set('Could not open generation. Please try again.');
     } finally {

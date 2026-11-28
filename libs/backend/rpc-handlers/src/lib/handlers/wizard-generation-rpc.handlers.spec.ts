@@ -35,6 +35,7 @@
  */
 
 import 'reflect-metadata';
+import { toResumableGenerationRun } from './wizard-generation-checkpoint.service';
 
 // ---------------------------------------------------------------------------
 // Jest transitive-import guard.
@@ -794,7 +795,9 @@ describe('wizard generation tab ownership and recovery', () => {
     });
     const providerModels = {
       resolveActiveProviderId: jest.fn().mockReturnValue('picker-provider'),
-      getModelTiers: jest.fn().mockReturnValue({ sonnet: 'tab-override-model' }),
+      getModelTiers: jest
+        .fn()
+        .mockReturnValue({ sonnet: 'tab-override-model' }),
     };
     h.registry.set(Symbol.for('SdkProviderModels'), providerModels);
 
@@ -986,9 +989,14 @@ describe('wizard generation tab ownership and recovery', () => {
     await settle();
   });
 
-  it('blocks another tab from adopting a paused bound checkpoint', async () => {
+  it('reopens a paused checkpoint with its discovered owner and rejects a different tab', async () => {
     const h = makeHarness();
-    seedCheckpoint(h, { 'agent-a': 'failed' }, { tabBinding: tab });
+    seedCheckpoint(
+      h,
+      { 'agent-a': 'failed', 'agent-b': 'written' },
+      { tabBinding: tab },
+    );
+    h.storage.list.mockResolvedValue([{ filename: 'acme' }]);
     h.storage.resumable = {
       slugDir: ANALYSIS_DIR,
       manifest: {},
@@ -1006,6 +1014,25 @@ describe('wizard generation tab ownership and recovery', () => {
       ownerTabId: tab.tabId,
     });
     expect(manifestAt(h, ANALYSIS_DIR).tabBinding?.tabId).toBe(tab.tabId);
+
+    const saved = toResumableGenerationRun(manifestAt(h, ANALYSIS_DIR));
+    expect(saved.ownerTabId).toBe(tab.tabId);
+    const reopened = { ...tab, tabId: saved.ownerTabId ?? 'new-tab' };
+    const state = await call<{
+      run: { binding: { runId: string }; agentsWritten: number } | null;
+    }>(h, 'wizard:get-generation-run-state', { tabBinding: reopened });
+    expect(state.run).toMatchObject({
+      binding: { runId: saved.runId },
+      agentsWritten: 1,
+    });
+    const accepted = await call<{ accepted?: { runId: string } }>(
+      h,
+      'wizard:submit-selection',
+      { selectedAgentIds: [], resume: true, tabBinding: reopened },
+    );
+    expect(accepted.accepted?.runId).toBe(saved.runId);
+    await settle();
+    expect(h.orchestrator.generateAgents).toHaveBeenCalledTimes(1);
   });
 
   it('uses the authorized path for bound lookup and cancellation', async () => {
@@ -1112,7 +1139,8 @@ describe('wizard generation tab ownership and recovery', () => {
     });
 
     expect(retried.success).toBe(true);
-    const retryOptions = h.orchestrator.generateAgents.mock.calls[1][0] as OrchestratorGenerationOptions;
+    const retryOptions = h.orchestrator.generateAgents.mock
+      .calls[1][0] as OrchestratorGenerationOptions;
     expect(launchOptions.setupSnapshot).toBe(first);
     expect(retryOptions.setupSnapshot).toBe(second);
     expect(retryOptions.setupSnapshot).not.toBe(launchOptions.setupSnapshot);
@@ -1840,28 +1868,31 @@ describe('WizardGenerationRpcHandlers', () => {
           },
         },
       },
-    ])('returns SETUP_MODEL_INVALID before agent work for $name', async ({ method, params }) => {
-      const h = makeHarness();
-      h.workspaceLlm.resolveSetup.mockResolvedValue({
-        kind: 'invalid',
-        source: 'setup',
-        provider: 'openrouter',
-        model: 'stale-model',
-        cause: 'not-signed-in',
-      });
-      h.handlers.register();
+    ])(
+      'returns SETUP_MODEL_INVALID before agent work for $name',
+      async ({ method, params }) => {
+        const h = makeHarness();
+        h.workspaceLlm.resolveSetup.mockResolvedValue({
+          kind: 'invalid',
+          source: 'setup',
+          provider: 'openrouter',
+          model: 'stale-model',
+          cause: 'not-signed-in',
+        });
+        h.handlers.register();
 
-      const response = await callRaw(h, method, params);
+        const response = await callRaw(h, method, params);
 
-      expect(response).toMatchObject({
-        success: false,
-        errorCode: 'SETUP_MODEL_INVALID',
-      });
-      expect(response.error).toContain('Update Background models and retry');
-      expect(h.orchestrator.generateAgents).not.toHaveBeenCalled();
-      expect(h.storage.writeGenerationManifest).not.toHaveBeenCalled();
-      expect(h.sentry.captureException).not.toHaveBeenCalled();
-    });
+        expect(response).toMatchObject({
+          success: false,
+          errorCode: 'SETUP_MODEL_INVALID',
+        });
+        expect(response.error).toContain('Update Background models and retry');
+        expect(h.orchestrator.generateAgents).not.toHaveBeenCalled();
+        expect(h.storage.writeGenerationManifest).not.toHaveBeenCalled();
+        expect(h.sentry.captureException).not.toHaveBeenCalled();
+      },
+    );
   });
 
   // -------------------------------------------------------------------------
