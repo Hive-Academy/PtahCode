@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import * as chatState from '@ptah-extension/chat-state';
-import { VSCodeService } from '@ptah-extension/core';
+import { SurfaceRouterService, VSCodeService } from '@ptah-extension/core';
 import type {
   SetupGenerationRunLifecycle,
   SetupGenerationRunState,
@@ -20,6 +20,7 @@ import { SetupWizardStateService } from './setup-wizard-state.service';
 import { WizardAnalysisRunner } from './wizard-analysis-runner.service';
 import { WizardRpcError, WizardRpcService } from './wizard-rpc.service';
 import { GenerationWorkflowStore } from './generation-workflow.store';
+import { GenerationHandoffStore } from './generation-handoff.store';
 import { GuidanceGenerationStore } from './guidance-generation.store';
 
 jest.mock('@ptah-extension/chat-state', () => ({
@@ -157,10 +158,18 @@ describe('SetupRunStore', () => {
       cancel: jest.fn().mockResolvedValue(undefined),
     };
 
+    configureProviders();
+  });
+
+  function configureProviders(): void {
     TestBed.configureTestingModule({
       providers: [
         { provide: WizardRpcService, useValue: rpc },
         { provide: WizardAnalysisRunner, useValue: runner },
+        {
+          provide: SurfaceRouterService,
+          useValue: { navigateToSurface: jest.fn() },
+        },
         {
           provide: SetupWizardStateService,
           useValue: { multiPhaseResult: multiPhaseResult.asReadonly() },
@@ -179,7 +188,7 @@ describe('SetupRunStore', () => {
         },
       ],
     });
-  });
+  }
 
   afterEach(() => {
     jest.useRealTimers();
@@ -1214,6 +1223,228 @@ describe('SetupRunStore', () => {
       mockBoundStatus('running');
     });
 
+    function completeAgent(store: SetupRunStore, id: string): void {
+      store.adopt(binding(id));
+      store.reportRun(id, boundRun('completed', id));
+    }
+
+    function acceptGuidance(): void {
+      rpc['startBoundGuidance'].mockResolvedValue({
+        accepted: {
+          runId: 'guidance-1',
+          source: boundRun('completed').source,
+          effectiveProvider: 'p',
+          effectiveModel: 'm',
+        },
+      });
+    }
+
+    async function reload(): Promise<SetupRunStore> {
+      await flush();
+      TestBed.resetTestingModule();
+      configureProviders();
+      return create();
+    }
+
+    it('restores the remaining countdown after reload and starts guidance once', async () => {
+      acceptGuidance();
+      let store = await create();
+      completeAgent(store, 'setup-g1');
+      const deadline = TestBed.inject(GenerationHandoffStore).pendingFor(
+        'setup-g1',
+      )?.guidanceStartDeadline;
+      await jest.advanceTimersByTimeAsync(2_000);
+      store = await reload();
+      const restored = TestBed.inject(GenerationHandoffStore);
+      expect(restored.pendingFor('setup-g1')?.guidanceStartDeadline).toBe(
+        deadline,
+      );
+      expect(restored.remainingSeconds('setup-g1')).toBe(3);
+
+      await jest.advanceTimersByTimeAsync(2_999);
+      expect(rpc['startBoundGuidance']).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
+      expect(store.runsFor(WS)).toContainEqual(
+        expect.objectContaining({
+          workflow: 'project-guidance',
+          parentId: 'setup-g1',
+        }),
+      );
+      await reload();
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(rpc['startBoundGuidance']).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves a legacy completion without a deadline for manual guidance', async () => {
+      seed(record({ id: 'setup-g1', status: 'completed' }));
+      const handoff = TestBed.inject(GenerationHandoffStore);
+      const schedule = jest.spyOn(handoff, 'schedule');
+
+      const store = await create();
+      await jest.advanceTimersByTimeAsync(5_000);
+
+      expect(store.get('setup-g1')?.guidanceHandoff).toBeUndefined();
+      expect(schedule).not.toHaveBeenCalled();
+      expect(rpc['startBoundGuidance']).not.toHaveBeenCalled();
+    });
+
+    it('consumes a restored deadline when the parent already has a guidance child', async () => {
+      seed(
+        record({
+          id: 'setup-g1',
+          status: 'completed',
+          guidanceHandoff: Date.now() + 5_000,
+        }),
+        record({
+          id: 'guidance-child',
+          workflow: 'project-guidance',
+          status: 'completed',
+          parentId: 'setup-g1',
+        }),
+      );
+      const handoff = TestBed.inject(GenerationHandoffStore);
+      const schedule = jest.spyOn(handoff, 'schedule');
+      const store = await create();
+      expect(handoff.pendingFor('setup-g1')).toBeNull();
+      expect(store.get('setup-g1')?.guidanceHandoff).toBe('consumed');
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(schedule).not.toHaveBeenCalled();
+      expect(rpc['startBoundGuidance']).not.toHaveBeenCalled();
+    });
+
+    it('schedules a restored deadline without a guidance child exactly once', async () => {
+      acceptGuidance();
+      const deadline = Date.now() + 2_000;
+      seed(
+        record({
+          id: 'setup-g1',
+          status: 'completed',
+          guidanceHandoff: deadline,
+        }),
+      );
+      const handoff = TestBed.inject(GenerationHandoffStore);
+      const schedule = jest.spyOn(handoff, 'schedule');
+      await create();
+      expect(handoff.pendingFor('setup-g1')?.guidanceStartDeadline).toBe(
+        deadline,
+      );
+
+      workspace.set(OTHER_WS);
+      await flush();
+      workspace.set(WS);
+      await flush();
+      await jest.advanceTimersByTimeAsync(2_000);
+
+      expect(schedule).toHaveBeenCalledTimes(1);
+      expect(schedule).toHaveBeenCalledWith('setup-g1', WS);
+      expect(rpc['startBoundGuidance']).toHaveBeenCalledTimes(1);
+    });
+
+    it('persists Skip and never re-arms that agent on reload', async () => {
+      const store = await create();
+      completeAgent(store, 'setup-g1');
+      TestBed.inject(GenerationHandoffStore).skip('setup-g1');
+      const restored = await reload();
+      expect(restored.get('setup-g1')?.guidanceHandoff).toBe('skipped');
+      expect(
+        TestBed.inject(GenerationHandoffStore).pendingFor('setup-g1'),
+      ).toBeNull();
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(rpc['startBoundGuidance']).not.toHaveBeenCalled();
+    });
+
+    it('keeps both hand-offs when two agents finish inside the same countdown window', async () => {
+      acceptGuidance();
+      const store = await create();
+      completeAgent(store, 'setup-g1');
+      await jest.advanceTimersByTimeAsync(1_000);
+      completeAgent(store, 'setup-g2');
+      const handoff = TestBed.inject(GenerationHandoffStore);
+      expect(handoff.pendingFor('setup-g1')).not.toBeNull();
+      expect(handoff.pendingFor('setup-g2')).not.toBeNull();
+
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(rpc['startBoundGuidance']).toHaveBeenCalledTimes(1);
+      const first = store
+        .runsFor(WS)
+        .find(
+          (run) =>
+            run.workflow === 'project-guidance' && run.parentId === 'setup-g1',
+        );
+      if (!first) throw new Error('The first guidance child was not created');
+      expect(handoff.pendingFor('setup-g2')).not.toBeNull();
+      store.report(first.id, { status: 'completed' });
+      await flush();
+      await jest.advanceTimersByTimeAsync(1);
+
+      expect(store.runsFor(WS)).toContainEqual(
+        expect.objectContaining({
+          workflow: 'project-guidance',
+          parentId: 'setup-g2',
+        }),
+      );
+      expect(rpc['startBoundGuidance']).toHaveBeenCalledTimes(2);
+    });
+
+    it('schedules and starts guidance on verified completion after the view closes', async () => {
+      const store = await create();
+      store.adopt(binding('setup-g1'));
+      store.attach('setup-g1');
+      store.release('setup-g1');
+      const completed = boundRun('completed');
+      rpc['getBoundRunState'].mockResolvedValueOnce(completed);
+      rpc['startBoundGuidance'].mockResolvedValueOnce({
+        accepted: {
+          runId: 'guidance-1',
+          source: completed.source,
+          effectiveProvider: 'p',
+          effectiveModel: 'm',
+        },
+      });
+
+      await store.verifyTerminal(completed.binding);
+
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'completed',
+        unseen: true,
+      });
+      expect(TestBed.inject(GenerationHandoffStore).pending()).toMatchObject({
+        agentRunId: 'setup-g1',
+        workspacePath: WS,
+      });
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(store.runsFor(WS)).toContainEqual(
+        expect.objectContaining({
+          workflow: 'project-guidance',
+          parentId: 'setup-g1',
+          backendRunId: 'guidance-1',
+        }),
+      );
+      expect(rpc['startBoundGuidance']).toHaveBeenCalledTimes(1);
+    });
+
+    it('schedules a completed record only once across repeated reports and reconciliation', async () => {
+      const store = await create();
+      const schedule = jest.spyOn(
+        TestBed.inject(GenerationHandoffStore),
+        'schedule',
+      );
+      store.adopt(binding('setup-g1'));
+      const completed = boundRun('completed');
+      rpc['getBoundRunState'].mockResolvedValue(completed);
+
+      await Promise.all([
+        store.verifyTerminal(completed.binding),
+        store.verifyTerminal(completed.binding),
+      ]);
+      store.reportRun('setup-g1', completed);
+      store.report('setup-g1', { status: 'completed' });
+      await store.refresh();
+
+      expect(schedule).toHaveBeenCalledTimes(1);
+      expect(schedule).toHaveBeenCalledWith('setup-g1', WS);
+    });
+
     it('maps a verified run state onto the record and records its run id', async () => {
       seed(record({ id: 'setup-g1', step: 'preview', status: 'needs-input' }));
       const store = await create();
@@ -1352,7 +1583,9 @@ describe('SetupRunStore', () => {
           }),
         );
         const start =
-          kind === 'agents' ? view.startAgents(['agent']) : view.startGuidance();
+          kind === 'agents'
+            ? view.startAgents(['agent'])
+            : view.startGuidance();
 
         for (let poll = 1; poll <= 4; poll++) {
           await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);

@@ -1,4 +1,12 @@
-import { DestroyRef, Injectable, effect, inject, signal } from '@angular/core';
+import {
+  DestroyRef,
+  Injectable,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { SurfaceRouterService } from '@ptah-extension/core';
 import type {
   SetupGenerationRunBinding,
@@ -26,7 +34,10 @@ export class GenerationHandoffStore {
   private readonly runs = inject(SetupRunStore);
   private readonly router = inject(SurfaceRouterService);
   private readonly rpc = inject(WizardRpcService);
-  private readonly pendingValue = signal<GuidanceHandoff | null>(null);
+  private readonly pendingByParent = signal<
+    ReadonlyMap<string, GuidanceHandoff>
+  >(new Map());
+  private readonly now = signal(Date.now());
   private readonly startedValue = signal<SetupGenerationRunBinding | null>(
     null,
   );
@@ -37,16 +48,31 @@ export class GenerationHandoffStore {
   private readonly starts = new Map<string, Promise<SetupRunRecord | null>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private revision = 0;
+  private startingParentId: string | undefined;
 
-  public readonly pending = this.pendingValue.asReadonly();
+  /** The first pending hand-off in the workspace shown by the guidance page. */
+  public readonly pending = computed(
+    () =>
+      [...this.pendingByParent().values()].find(
+        (entry) =>
+          normalizeSetupWorkspacePath(entry.workspacePath) ===
+          this.runs.workspacePath(),
+      ) ?? null,
+  );
   public readonly started = this.startedValue.asReadonly();
   public readonly inFlight = this.inFlightValue.asReadonly();
   public readonly outcome = this.outcomeValue.asReadonly();
 
   public constructor() {
     effect(() => {
-      const pending = this.pendingValue();
-      if (pending && !this.parentFor(pending)) this.skip();
+      const invalid = [...this.pendingByParent().values()].filter(
+        (entry) => !this.parentFor(entry),
+      );
+      const next = this.nextPending();
+      untracked(() => {
+        for (const entry of invalid) this.skip(entry.agentRunId);
+        this.arm(invalid.length ? this.nextPending() : next);
+      });
     });
     inject(DestroyRef).onDestroy(() => {
       this.revision++;
@@ -54,36 +80,77 @@ export class GenerationHandoffStore {
     });
   }
 
+  public pendingFor(agentRunId: string): GuidanceHandoff | null {
+    return this.pendingByParent().get(agentRunId) ?? null;
+  }
+
+  public remainingSeconds(agentRunId: string): number {
+    const deadline =
+      this.pendingFor(agentRunId)?.guidanceStartDeadline ?? this.now();
+    return Math.max(0, Math.ceil((deadline - this.now()) / 1_000));
+  }
+
   public schedule(agentRunId: string, workspacePath: string): void {
-    this.reset('idle');
-    this.pendingValue.set({
-      agentRunId,
-      workspacePath,
-      guidanceStartDeadline: Date.now() + HANDOFF_DELAY_MS,
-    });
-    this.timer = setTimeout(() => void this.startNow(), HANDOFF_DELAY_MS);
+    const parent = this.runs.get(agentRunId);
+    if (!parent || this.pendingFor(agentRunId)) return;
+    const state = parent.guidanceHandoff;
+    if (state === 'skipped' || state === 'consumed') return;
+    const guidanceStartDeadline = state ?? Date.now() + HANDOFF_DELAY_MS;
+    this.runs.setGuidanceHandoff(agentRunId, guidanceStartDeadline);
+    this.pendingByParent.update((current) =>
+      new Map(current).set(agentRunId, {
+        agentRunId,
+        workspacePath,
+        guidanceStartDeadline,
+      }),
+    );
+    this.arm(this.nextPending());
   }
 
-  public skip(): void {
-    this.reset('skipped');
+  public skip(
+    agentRunId = this.pending()?.agentRunId ?? this.startingParentId,
+  ): void {
+    if (
+      !agentRunId ||
+      (!this.pendingFor(agentRunId) && this.startingParentId !== agentRunId)
+    )
+      return;
+    this.removePending(agentRunId);
+    this.runs.setGuidanceHandoff(agentRunId, 'skipped');
+    if (
+      this.startingParentId === agentRunId ||
+      (!this.inFlight() && !this.started())
+    )
+      this.reset('skipped');
+    this.arm(this.nextPending());
   }
 
-  public async startNow(): Promise<void> {
-    const pending = this.pendingValue();
+  public async startNow(
+    agentRunId = this.pending()?.agentRunId,
+  ): Promise<void> {
+    const pending = agentRunId && this.pendingFor(agentRunId);
     if (!pending) return;
     const parent = this.parentFor(pending);
     if (!parent) {
-      this.skip();
+      this.skip(pending.agentRunId);
       return;
     }
-    this.clearTimer();
-    this.pendingValue.set(null);
+    if (
+      parent.workspacePath !== this.runs.workspacePath() ||
+      this.waitsForGuidance(parent)
+    )
+      return;
+    this.removePending(parent.id);
+    this.runs.setGuidanceHandoff(parent.id, 'consumed');
+    if (this.hasGuidanceChild(parent)) return;
+    this.reset('idle');
     await this.openAndStart(parent.workspacePath, parent);
   }
 
-  public async manualContinue(workspacePath: string): Promise<void> {
-    const pending = this.pendingValue();
-    this.reset('idle');
+  public async manualContinue(
+    workspacePath: string,
+    agentRunId?: string,
+  ): Promise<void> {
     const activeWorkspace = this.runs.workspacePath();
     if (
       !activeWorkspace ||
@@ -92,27 +159,90 @@ export class GenerationHandoffStore {
       this.outcomeValue.set('manual-recovery');
       return;
     }
+    const pending = agentRunId ? this.pendingFor(agentRunId) : this.pending();
+    if (pending) return this.startNow(pending.agentRunId);
+    const parent = agentRunId ? this.runs.get(agentRunId) : null;
     if (
-      pending &&
-      normalizeSetupWorkspacePath(pending.workspacePath) === activeWorkspace
-    ) {
-      const parent = this.parentFor(pending);
-      if (!parent) {
-        this.skip();
-        return;
-      }
-      return this.openAndStart(parent.workspacePath, parent);
-    }
-    await this.openAndStart(workspacePath, null);
+      agentRunId &&
+      (parent?.workflow !== 'agent-generation' ||
+        parent.status !== 'completed' ||
+        parent.workspacePath !== activeWorkspace ||
+        this.waitsForGuidance(parent))
+    )
+      return;
+    if (parent) this.runs.setGuidanceHandoff(parent.id, 'consumed');
+    this.reset('idle');
+    await this.openAndStart(activeWorkspace, parent);
   }
 
   private reset(outcome: 'idle' | 'skipped'): void {
     this.revision++;
-    this.clearTimer();
-    this.pendingValue.set(null);
+    this.startingParentId = undefined;
     this.startedValue.set(null);
     this.inFlightValue.set(false);
     this.outcomeValue.set(outcome);
+  }
+
+  private removePending(id: string): void {
+    this.pendingByParent.update((current) => {
+      const next = new Map(current);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  private nextPending(): GuidanceHandoff | undefined {
+    const workspace = this.runs.workspacePath();
+    let next: GuidanceHandoff | undefined;
+    for (const entry of this.pendingByParent().values()) {
+      const parent = this.parentFor(entry);
+      if (
+        !parent ||
+        parent.workspacePath !== workspace ||
+        (entry.guidanceStartDeadline <= Date.now() &&
+          this.waitsForGuidance(parent))
+      )
+        continue;
+      if (!next || entry.guidanceStartDeadline < next.guidanceStartDeadline)
+        next = entry;
+    }
+    return next;
+  }
+
+  private waitsForGuidance(parent: SetupRunRecord): boolean {
+    return this.runs
+      .runsFor(parent.workspacePath)
+      .some(
+        (run) =>
+          run.workflow === 'project-guidance' &&
+          run.parentId !== null &&
+          run.parentId !== parent.id &&
+          !isTerminalSetupRunStatus(run.status),
+      );
+  }
+
+  private hasGuidanceChild(parent: SetupRunRecord): boolean {
+    return this.runs
+      .runsFor(parent.workspacePath)
+      .some(
+        (run) =>
+          run.workflow === 'project-guidance' && run.parentId === parent.id,
+      );
+  }
+
+  private arm(next: GuidanceHandoff | undefined): void {
+    this.clearTimer();
+    const now = Date.now();
+    this.now.set(now);
+    if (!next) return;
+    this.timer = setTimeout(
+      () => {
+        if (next.guidanceStartDeadline <= Date.now())
+          void this.startNow(next.agentRunId);
+        this.arm(this.nextPending());
+      },
+      Math.min(1_000, Math.max(0, next.guidanceStartDeadline - now)),
+    );
   }
 
   private clearTimer(): void {
@@ -136,6 +266,7 @@ export class GenerationHandoffStore {
     parent: SetupRunRecord | null,
   ): Promise<void> {
     const revision = this.revision;
+    this.startingParentId = parent?.id;
     this.inFlightValue.set(true);
     try {
       const record = await this.startGuidance(workspacePath, parent);
@@ -163,7 +294,10 @@ export class GenerationHandoffStore {
         }
       }
     } finally {
-      if (revision === this.revision) this.inFlightValue.set(false);
+      if (revision === this.revision) {
+        this.startingParentId = undefined;
+        this.inFlightValue.set(false);
+      }
     }
   }
 

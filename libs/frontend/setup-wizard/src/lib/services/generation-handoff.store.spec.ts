@@ -6,6 +6,10 @@ import type {
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import { GenerationHandoffStore } from './generation-handoff.store';
+import type {
+  GuidanceHandoffState,
+  StoredSetupRunRecord,
+} from './setup-run-persistence';
 import { SetupRunStore, type SetupRunReport } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';
@@ -46,7 +50,7 @@ const accepted = {
 };
 
 describe('GenerationHandoffStore', () => {
-  const agent = signal<SetupRunRecord | null>(parent);
+  const agent = signal<StoredSetupRunRecord | null>(parent);
   const cancellingIds = signal<ReadonlySet<string>>(new Set());
   const activeWorkspace = signal('/ws');
   const startBoundGuidance = jest.fn();
@@ -90,6 +94,14 @@ describe('GenerationHandoffStore', () => {
           provide: SetupRunStore,
           useValue: {
             get: (id: string) => (id === parent.id ? agent() : child),
+            setGuidanceHandoff: (
+              id: string,
+              guidanceHandoff: GuidanceHandoffState,
+            ) => {
+              agent.update((record) =>
+                record?.id === id ? { ...record, guidanceHandoff } : record,
+              );
+            },
             isCancelling: (id: string) => cancellingIds().has(id),
             runsFor: () => (child ? [child] : []),
             workspacePath: activeWorkspace,
@@ -197,13 +209,18 @@ describe('GenerationHandoffStore', () => {
     expect(startBoundGuidance).toHaveBeenCalledTimes(1);
   });
 
-  it('clears the countdown on skip and on service destruction', async () => {
+  it('cancels the pending start when skipped and rejects repeat scheduling', async () => {
     store.schedule(parent.id, '/ws');
     store.skip();
     expect(store.outcome()).toBe('skipped');
     await jest.advanceTimersByTimeAsync(5_000);
     expect(starts).not.toHaveBeenCalled();
 
+    store.schedule(parent.id, '/ws');
+    expect(store.pendingFor(parent.id)).toBeNull();
+  });
+
+  it('clears the countdown timer on service destruction', async () => {
     store.schedule(parent.id, '/ws');
     TestBed.resetTestingModule();
     await jest.advanceTimersByTimeAsync(5_000);

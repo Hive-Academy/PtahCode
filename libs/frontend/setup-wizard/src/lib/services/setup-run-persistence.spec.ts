@@ -93,6 +93,38 @@ describe('setup-run-persistence', () => {
   });
 
   describe('parseSetupRunRecord', () => {
+    it.each([5_000, 'skipped', 'consumed'] as const)(
+      'round-trips guidance hand-off state %s for completed agent generation',
+      (guidanceHandoff) => {
+        const agent = {
+          ...record({
+            workflow: 'agent-generation',
+            status: 'completed',
+            step: 'generating',
+          }),
+          guidanceHandoff,
+        };
+        const stored = serializeSetupRunIndex({ [WORKSPACE]: [agent] });
+        expect(
+          readSetupRunIndex({ getItem: () => stored }).index[WORKSPACE],
+        ).toEqual([agent]);
+      },
+    );
+
+    it('drops invalid hand-off metadata and metadata on unrelated records', () => {
+      expect(
+        parseSetupRunRecord({ ...record(), guidanceHandoff: 'skipped' }),
+      ).toEqual(record());
+      const agent = record({
+        workflow: 'agent-generation',
+        status: 'completed',
+        step: 'generating',
+      });
+      expect(parseSetupRunRecord({ ...agent, guidanceHandoff: -1 })).toEqual(
+        agent,
+      );
+    });
+
     it('round-trips a valid record and normalizes its workspace', () => {
       const parsed = parseSetupRunRecord({
         ...record(),

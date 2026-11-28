@@ -25,6 +25,7 @@
 import {
   DestroyRef,
   Injectable,
+  Injector,
   computed,
   effect,
   inject,
@@ -47,13 +48,16 @@ import type {
   WizardGetResumableRunResponse,
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
+import { GenerationHandoffStore } from './generation-handoff.store';
 import {
   isSetupRunStepOf,
   normalizeSetupWorkspacePath,
   readSetupRunIndex,
   capWorkspaceRuns,
   writeSetupRunIndex,
+  type GuidanceHandoffState,
   type SetupRunIndex,
+  type StoredSetupRunRecord,
 } from './setup-run-persistence';
 import {
   bindingOf,
@@ -69,7 +73,7 @@ import {
   workflowOfBinding,
   type SetupRunAttempt,
 } from './setup-run-attempt';
-import { stepTarget } from './setup-run-steps';
+import { entrySubPathFor, stepTarget } from './setup-run-steps';
 import {
   SETUP_RUN_STEPS,
   isTerminalSetupRunStatus,
@@ -149,6 +153,7 @@ export class SetupRunStore {
   private readonly wizardState = inject(SetupWizardStateService);
   private readonly tabs = inject(TabManagerService);
   private readonly vscode = inject(VSCodeService);
+  private readonly injector = inject(Injector);
   private readonly storage = browserStorage();
 
   private readonly _index = signal<SetupRunIndex>({});
@@ -250,7 +255,9 @@ export class SetupRunStore {
   // ---------------------------------------------------------------- reads
 
   /** A workspace's records, newest first. Reactive inside a computed. */
-  public runsFor(workspacePath: string | null | undefined): SetupRunRecord[] {
+  public runsFor(
+    workspacePath: string | null | undefined,
+  ): StoredSetupRunRecord[] {
     const workspace = normalizeSetupWorkspacePath(workspacePath);
     if (!workspace) return [];
     return [...(this._index()[workspace] ?? [])].sort(newestFirst);
@@ -264,7 +271,7 @@ export class SetupRunStore {
   }
 
   /** A record by id, in any workspace. */
-  public get(id: string): SetupRunRecord | null {
+  public get(id: string): StoredSetupRunRecord | null {
     for (const records of Object.values(this._index())) {
       const found = records.find((record) => record.id === id);
       if (found) return found;
@@ -273,8 +280,27 @@ export class SetupRunStore {
   }
 
   /** Where Setup opens `record` (plan section 3). */
-  public targetOf(record: SetupRunRecord): OnboardingTarget {
-    return stepTarget(record);
+  public targetOf(
+    record: SetupRunRecord,
+    destination?: 'entry',
+  ): OnboardingTarget {
+    const target = stepTarget(record);
+    return destination === 'entry'
+      ? {
+          ...target,
+          subPath: entrySubPathFor(record.workflow, record.parentId !== null),
+        }
+      : target;
+  }
+
+  public setGuidanceHandoff(id: string, state: GuidanceHandoffState): void {
+    this.patch(id, (record) =>
+      record.workflow === 'agent-generation' &&
+      record.status === 'completed' &&
+      record.guidanceHandoff !== state
+        ? { ...record, guidanceHandoff: state }
+        : record,
+    );
   }
 
   /** Whether a cancel of `id` waits for backend confirmation. */
@@ -661,7 +687,34 @@ export class SetupRunStore {
 
   private async activate(): Promise<void> {
     this.adoptLegacyTabs();
+    this.restoreGuidanceHandoffs();
     await this.reconcile();
+  }
+
+  private restoreGuidanceHandoffs(): void {
+    const records = this.runsFor(this.workspacePath());
+    const parents = new Set(
+      records
+        .filter((record) => record.workflow === 'project-guidance')
+        .map((record) => record.parentId),
+    );
+    for (const record of records) {
+      if (
+        record.workflow !== 'agent-generation' ||
+        record.status !== 'completed' ||
+        record.guidanceHandoff === 'skipped' ||
+        record.guidanceHandoff === 'consumed'
+      )
+        continue;
+      if (parents.has(record.id)) {
+        this.setGuidanceHandoff(record.id, 'consumed');
+        continue;
+      }
+      if (typeof record.guidanceHandoff !== 'number') continue;
+      const handoff = this.injector.get(GenerationHandoffStore);
+      if (!handoff.pendingFor(record.id))
+        handoff.schedule(record.id, record.workspacePath);
+    }
   }
 
   /** D6: restored chat tabs of a Setup workflow hand their binding over once. */
@@ -1159,7 +1212,7 @@ export class SetupRunStore {
 
   private patch(
     id: string,
-    change: (record: SetupRunRecord) => SetupRunRecord,
+    change: (record: StoredSetupRunRecord) => StoredSetupRunRecord,
   ): void {
     const record = this.get(id);
     if (!record) return;
@@ -1173,6 +1226,16 @@ export class SetupRunStore {
       ),
     }));
     this.scheduleWrite();
+    if (
+      updated.workflow === 'agent-generation' &&
+      record.status !== 'completed' &&
+      updated.status === 'completed'
+    ) {
+      // Resolve lazily because the hand-off opens its child through this store.
+      this.injector
+        .get(GenerationHandoffStore)
+        .schedule(updated.id, updated.workspacePath);
+    }
   }
 
   private insert(record: SetupRunRecord): void {

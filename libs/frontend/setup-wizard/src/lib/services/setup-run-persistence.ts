@@ -32,7 +32,16 @@ const MAX_INTENT_LENGTH = 4000;
 const MAX_LIST_LENGTH = 200;
 
 /** Records per normalized workspace path. */
-export type SetupRunIndex = Readonly<Record<string, readonly SetupRunRecord[]>>;
+export type GuidanceHandoffState = number | 'skipped' | 'consumed';
+
+export type StoredSetupRunRecord = SetupRunRecord & {
+  /** A pending deadline in epoch milliseconds, or the settled scheduling decision. */
+  guidanceHandoff?: GuidanceHandoffState;
+};
+
+export type SetupRunIndex = Readonly<
+  Record<string, readonly StoredSetupRunRecord[]>
+>;
 
 /** The result of reading the stored index. */
 export interface SetupRunIndexRead {
@@ -123,7 +132,9 @@ export function normalizeSetupWorkspacePath(
  * Validate one stored record. Unknown fields are dropped; a record with an
  * invalid required field is rejected (`null`).
  */
-export function parseSetupRunRecord(value: unknown): SetupRunRecord | null {
+export function parseSetupRunRecord(
+  value: unknown,
+): StoredSetupRunRecord | null {
   if (!isObject(value)) return null;
   const {
     id,
@@ -161,7 +172,7 @@ export function parseSetupRunRecord(value: unknown): SetupRunRecord | null {
   ) {
     return null;
   }
-  const record: SetupRunRecord = {
+  const record: StoredSetupRunRecord = {
     id,
     workspacePath: workspace,
     workflow,
@@ -178,6 +189,13 @@ export function parseSetupRunRecord(value: unknown): SetupRunRecord | null {
   if (origin !== null) record.origin = origin;
   const error = boundedText(value['error'], MAX_TEXT_LENGTH);
   if (error !== null) record.error = error;
+  if (workflow === 'agent-generation' && status === 'completed') {
+    const handoff = value['guidanceHandoff'];
+    const deadline = timestamp(handoff);
+    if (deadline !== null) record.guidanceHandoff = deadline;
+    else if (handoff === 'skipped' || handoff === 'consumed')
+      record.guidanceHandoff = handoff;
+  }
   if (workflow === 'skill-review' && isObject(value['selection'])) {
     const skillIds = stringList(value['selection']['skillIds']);
     if (skillIds !== null) record.selection = { skillIds };
@@ -207,9 +225,9 @@ export function parseSetupRunRecord(value: unknown): SetupRunRecord | null {
  * terminal records go first; a non-terminal record is never dropped, so a
  * workspace with more live runs than the cap keeps all of them.
  */
-export function capWorkspaceRuns(
-  records: readonly SetupRunRecord[],
-): SetupRunRecord[] {
+export function capWorkspaceRuns<T extends SetupRunRecord>(
+  records: readonly T[],
+): T[] {
   const excess = records.length - MAX_SETUP_RUNS_PER_WORKSPACE;
   if (excess <= 0) return [...records];
   const evicted = new Set(
@@ -255,7 +273,7 @@ export function readSetupRunIndex(
     console.warn('[setup-run-persistence] Discarded unknown Setup runs data.');
     return { index: {}, corrupt: true };
   }
-  const index: Record<string, SetupRunRecord[]> = {};
+  const index: Record<string, StoredSetupRunRecord[]> = {};
   const seen = new Set<string>();
   for (const [key, list] of Object.entries(parsed['byWorkspace'])) {
     const workspace = normalizeSetupWorkspacePath(key);
@@ -263,7 +281,7 @@ export function readSetupRunIndex(
       console.warn('[setup-run-persistence] Discarded an invalid workspace.');
       continue;
     }
-    const records: SetupRunRecord[] = index[workspace] ?? [];
+    const records: StoredSetupRunRecord[] = index[workspace] ?? [];
     for (const item of list) {
       const record = parseSetupRunRecord(item);
       if (
@@ -289,7 +307,7 @@ export function serializeSetupRunIndex(index: SetupRunIndex): string {
     const kept = capWorkspaceRuns(
       records
         .map((record) => parseSetupRunRecord(record))
-        .filter((record): record is SetupRunRecord => record !== null),
+        .filter((record): record is StoredSetupRunRecord => record !== null),
     );
     if (kept.length > 0) byWorkspace[workspace] = kept;
   }

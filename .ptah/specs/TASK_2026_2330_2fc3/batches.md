@@ -381,7 +381,7 @@ Edge cases:
 ### Task 8.1: `GenerationStepStore` and focus router on Setup records — PENDING
 ### Task 8.2: `ProjectGuidancePage` without tab lookup or launcher — PENDING
 
-## Batch 9: Agent-generation run page (D7, gated) — PENDING
+## Batch 9: Agent-generation run page (D7, gated) — IMPLEMENTED
 
 - Shape: logic
 - Estimated weight (tokens): ~22k
@@ -408,6 +408,13 @@ Edge cases:
 - Phase: C | Phase review: code-logic + visual
 
 ### Task 9.1: Real `analyze/generate` route and page — PENDING
+
+- Result: implementer codex; reviewers ollama-cloud 6/10 → antigravity 7/10 → antigravity 8/10
+  APPROVED (round 2). Done page hosts the hand-off countdown and Skip; the hand-off is saved on
+  the record (`guidanceHandoff`), per record, and re-armed only for a saved numeric deadline.
+  Checks: lint,typecheck and --related setup-wizard after round 2; onboarding lint/typecheck and
+  typecheck-templates passed before round 1 — re-run in the full gate before the push.
+  Electron visual review of the run page and Done page: pending (phase D).
 
 ## Batch 10: Persisted skill review in the skills page — IMPLEMENTED
 

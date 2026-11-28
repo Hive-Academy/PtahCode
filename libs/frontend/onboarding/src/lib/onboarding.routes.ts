@@ -2,6 +2,7 @@ import { inject } from '@angular/core';
 import { Router, type RedirectFunction, type Routes } from '@angular/router';
 import { AnalyzeWorkspacePage } from './analyze/analyze-workspace.page';
 import { AnalyzeSkillsPage } from './analyze/analyze-skills.page';
+import { AgentGenerationRunPage } from './analyze/agent-generation-run.page';
 
 import { ProjectGuidancePage } from './analyze/project-guidance.page';
 import { AnalyzeDonePage } from './analyze/analyze-done.page';
@@ -78,8 +79,8 @@ export const ONBOARDING_ROUTES: Routes = [
       },
       {
         path: 'analyze/generate',
-        redirectTo: retiredAgentRedirect,
-
+        component: AgentGenerationRunPage,
+        data: { crumb: 'Agent generation', layout: 'full' },
       },
       {
         path: 'analyze/guidance',
