@@ -409,7 +409,7 @@ Edge cases:
 
 ### Task 9.1: Real `analyze/generate` route and page — PENDING
 
-## Batch 10: Persisted skill review in the skills page — PENDING
+## Batch 10: Persisted skill review in the skills page — IMPLEMENTED
 
 - Shape: logic
 - Estimated weight (tokens): ~45k (analyze-skills.page.ts is large; read ranges only)
@@ -433,6 +433,11 @@ Edge cases:
 
 ### Task 10.1: Skill-review record drives load/review/selection; e2e fixture (P4) — PENDING
 ### Task 10.2: Remove per-visit guidance tab creation — PENDING
+
+- Result: implementer codex; reviewer ollama-cloud. Review 6/10 REVISE (degradation-audit sites,
+  routed run-id source in continueToGuidance/retry, attachReview order) → round 1 → 9/10 APPROVED.
+  Checks: lint,typecheck onboarding + webview-e2e-harness, --related onboarding,
+  typecheck-templates webview, degradation audit TOTAL 0.
 
 ## Batch 11: Setup runs list on Home and removals — PENDING
 

@@ -11,6 +11,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -19,14 +20,13 @@ import {
   ClaudeRpcService,
   VSCodeService,
 } from '@ptah-extension/core';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   getAnthropicProvider,
   type SetupPairState,
   type WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
-import { WizardRpcService } from '@ptah-extension/setup-wizard';
+import { SetupRunStore, WizardRpcService } from '@ptah-extension/setup-wizard';
 import { StackSkillStore } from '../proposal/stack-skill.store';
 import type { RecommendationApplyResult } from '../proposal/stack-coverage';
 import { StackSkillConsentComponent } from '../proposal/stack-skill-consent.component';
@@ -451,7 +451,6 @@ export class AnalyzeSkillsPage implements OnInit {
   private readonly router = inject(Router);
   private readonly rpc = inject(ClaudeRpcService);
   private readonly workspace = inject(VSCodeService);
-  private readonly tabs = inject(TabManagerService);
   private readonly analysis = inject(AnalysisStepStore);
   private readonly destroyRef = inject(DestroyRef);
   private readonly appState = inject(AppStateManager);
@@ -463,14 +462,19 @@ export class AnalyzeSkillsPage implements OnInit {
   );
   private readonly leavingState = signal(false);
   public readonly leaving = this.leavingState.asReadonly();
-  public readonly loadedRunId = computed(
-    () => this.analysis.loaded()?.manifest.runId ?? '',
-  );
+  private readonly routedReview = signal<{
+    workspaceRoot: string;
+    runId: string;
+  } | null>(null);
+  public readonly loadedRunId = computed(() => {
+    const target = this.routedReview();
+    return target &&
+      target.workspaceRoot === this.workspace.config().workspaceRoot
+      ? target.runId
+      : (this.analysis.loaded()?.manifest.runId ?? '');
+  });
   public readonly canRetry = computed(() =>
-    Boolean(
-      this.analysis.loaded()?.manifest.runId &&
-      this.workspace.config().workspaceRoot,
-    ),
+    Boolean(this.loadedRunId() && this.workspace.config().workspaceRoot),
   );
   public readonly draftBusy = computed(() => {
     const draft = this.state.openDraft();
@@ -514,14 +518,16 @@ export class AnalyzeSkillsPage implements OnInit {
   private version = 0;
   private searchVersion = 0;
   private identity = '\u0000';
-  private pendingGuidanceTab: { identity: string; tab: string } | null = null;
+  private readonly setupRuns = inject(SetupRunStore);
+  private readonly reviewRecordId = signal<string | null>(null);
 
   public constructor() {
     effect(() => {
-      const runId = this.analysis.loaded()?.manifest.runId ?? '';
+      const runId = this.loadedRunId();
       const root = this.workspace.config().workspaceRoot ?? '';
       const key = `${root}\u0000${runId}`;
       if (key === this.identity) return;
+      untracked(() => this.releaseReview());
       this.identity = key;
       this.version++;
       this.searchVersion++;
@@ -536,7 +542,8 @@ export class AnalyzeSkillsPage implements OnInit {
       this.backOnLoadErrorState.set(false);
       this.skillsInstalledState.set(false);
       if (!runId) this.state.setError('Choose a completed analysis first.');
-      else if (root) void this.load(runId, this.version);
+      else if (root)
+        untracked(() => void this.enterReview(runId, this.version));
       else this.state.setError('Open a workspace to find skills.');
     });
     effect(() => {
@@ -549,8 +556,15 @@ export class AnalyzeSkillsPage implements OnInit {
         this.pendingDirtyActionState.set(null);
       }
     });
+    effect(() => {
+      const id = this.reviewRecordId();
+      if (!id || !this.summary()) return;
+      const selection = this.state.selectedSelectionKeys();
+      untracked(() => this.saveSelection(id, selection));
+    });
     this.destroyRef.onDestroy(() => {
       this.version++;
+      this.releaseReview();
       this.runPill.clear();
     });
   }
@@ -561,6 +575,24 @@ export class AnalyzeSkillsPage implements OnInit {
       .subscribe((params) => {
         const slug = params.get('analysis');
         const runId = params.get('run');
+        const workspaceRoot = this.workspace.config().workspaceRoot;
+        const record = this.setupRuns
+          .runsFor(workspaceRoot)
+          .find((entry) => entry.id === params.get('tab'));
+        const recordedRunId =
+          record?.analysisRunId ??
+          (record?.workflow === 'analysis' ? record.backendRunId : null);
+        if (
+          workspaceRoot &&
+          recordedRunId &&
+          slug === recordedRunId &&
+          (record?.workflow === 'skill-review' ||
+            record?.workflow === 'analysis')
+        ) {
+          this.routedReview.set({ workspaceRoot, runId: recordedRunId });
+          return;
+        }
+        this.routedReview.set(null);
         if (slug && this.analysis.selected() !== slug)
           void this.loadSaved(slug);
         else if (!slug && !this.analysis.loaded() && runId)
@@ -601,6 +633,145 @@ export class AnalyzeSkillsPage implements OnInit {
       this.state.setError(
         'That analysis could not be loaded. Choose a completed analysis.',
       );
+  }
+
+  private findReview(runId: string) {
+    const records = this.setupRuns.runsFor(
+      this.workspace.config().workspaceRoot,
+    );
+    const routeId = this.route.snapshot.queryParamMap.get('tab');
+    const reviews = records.filter(
+      (record) =>
+        record.workflow === 'skill-review' && record.analysisRunId === runId,
+    );
+    return reviews.find((record) => record.id === routeId) ?? reviews[0];
+  }
+
+  private async enterReview(runId: string, version: number): Promise<void> {
+    const existing = this.findReview(runId);
+    const running = existing?.status === 'running';
+    this.state.setLoading(true);
+    try {
+      const attached = running ? this.attachReview(runId) : null;
+      if (running && !attached) return;
+      const review = attached
+        ? await this.setupRuns.reviewSkills(attached.id)
+        : (await this.wizardRpc.getSkillReview(runId)).review;
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      if (!review) {
+        if (
+          existing &&
+          ['failed', 'cancelled', 'interrupted'].includes(existing.status)
+        ) {
+          this.applyLoadFailure(
+            existing.error ?? 'Could not load skill recommendations.',
+          );
+          return;
+        }
+        this.state.setLoading(false);
+        await this.load(runId, version);
+        return;
+      }
+      const record = this.attachReview(runId);
+      if (!record) return;
+      if (record.status !== 'completed' && record.status !== 'needs-input') {
+        this.setupRuns.report(record.id, {
+          status: 'needs-input',
+          step: 'selecting',
+          error: null,
+        });
+      }
+      const result = this.state.applyRecommendationResult(review, {
+        selection: record.selection?.skillIds,
+      });
+      this.handleApplyRecommendationResult(result, review, false, version);
+    } catch (error: unknown) {
+      // degradation-audit: reported - applyReviewFailure shows the load error or setup block in the current view.
+      if (version !== this.version || this.destroyRef.destroyed) return;
+      await this.applyReviewFailure(error, version, false);
+    } finally {
+      if (version === this.version && !this.destroyRef.destroyed)
+        this.state.setLoading(false);
+    }
+  }
+
+  private async applyReviewFailure(
+    error: unknown,
+    version: number,
+    hasPriorResult: boolean,
+  ): Promise<void> {
+    const code =
+      error instanceof Error && 'code' in error ? error.code : undefined;
+    if (code === 'SETUP_MODEL_INVALID') {
+      await this.resolveSetupBlockFromRpc(version, hasPriorResult);
+      return;
+    }
+    const message =
+      code === 'ANALYSIS_LOAD_FAILED'
+        ? 'Could not read the saved analysis.'
+        : 'Could not load skill recommendations.';
+    this.applyLoadFailure(message);
+  }
+
+  private attachReview(runId: string) {
+    const workspace = this.workspace.config().workspaceRoot;
+    const records = this.setupRuns.runsFor(workspace);
+    const otherReviews = records.filter(
+      (record) =>
+        record.workflow === 'skill-review' && record.analysisRunId !== runId,
+    );
+    if (otherReviews.some((record) => record.status === 'running')) {
+      this.applyLoadFailure(
+        'Another skill review is running. Wait for it to finish before opening this review.',
+      );
+      return null;
+    }
+    for (const otherReview of otherReviews.filter(
+      (record) => record.status === 'needs-input',
+    )) {
+      this.setupRuns.report(otherReview.id, { status: 'interrupted' });
+      this.setupRuns.markSeen(otherReview.id);
+    }
+    const parent = records.find(
+      (record) =>
+        record.workflow === 'analysis' &&
+        (record.analysisRunId === runId || record.backendRunId === runId),
+    );
+    const record =
+      this.findReview(runId) ??
+      this.setupRuns.start('skill-review', workspace, {
+        parentId: parent?.id,
+        analysisRunId: runId,
+      });
+    if (!record || record.analysisRunId !== runId) {
+      this.applyLoadFailure('Could not open the skill review. Try again.');
+      return null;
+    }
+    if (this.reviewRecordId() !== record.id) {
+      this.releaseReview();
+      this.setupRuns.attach(record.id);
+      this.reviewRecordId.set(record.id);
+    }
+    return record;
+  }
+
+  private releaseReview(): void {
+    const id = this.reviewRecordId();
+    if (!id) return;
+    if (this.summary())
+      this.saveSelection(id, this.state.selectedSelectionKeys());
+    this.setupRuns.release(id);
+    this.reviewRecordId.set(null);
+  }
+
+  private saveSelection(id: string, selection: readonly string[]): void {
+    const saved = this.setupRuns.get(id)?.selection?.skillIds;
+    if (
+      saved?.length === selection.length &&
+      saved.every((key, index) => key === selection[index])
+    )
+      return;
+    this.setupRuns.setSelection(id, selection);
   }
 
   private applySetupBlock(block: SetupBlockView): void {
@@ -727,39 +898,44 @@ export class AnalyzeSkillsPage implements OnInit {
       this.state.setPreviewing(false);
       this.state.setPreview([]);
       this.state.setError(null);
-      const response = await this.rpc.call(
-        'wizard:recommend-analysis-skills',
-        { runId },
-        { timeout: 75_000 },
-      );
+      const record = this.attachReview(runId);
+      if (!record) return;
+      let review: WizardRecommendAnalysisSkillsResult | null;
+      try {
+        review = await this.setupRuns.reviewSkills(record.id, { force: rerun });
+      } catch (error: unknown) {
+        // degradation-audit: reported - applyReviewFailure shows the recommendation error or setup block in the current view.
+        if (version !== this.version || this.destroyRef.destroyed) return;
+        await this.applyReviewFailure(error, version, hasPriorResult);
+        return;
+      }
       if (version !== this.version || this.destroyRef.destroyed) return;
-      if (!response.isSuccess()) {
-        if (response.errorCode === 'SETUP_MODEL_INVALID') {
-          await this.resolveSetupBlockFromRpc(version, hasPriorResult);
-          return;
-        }
-        const message =
-          response.errorCode === 'ANALYSIS_LOAD_FAILED'
-            ? 'Could not read the saved analysis.'
-            : 'Could not load skill recommendations.';
-        this.applyLoadFailure(message);
+      if (!review) {
+        this.applyLoadFailure('Could not load skill recommendations.');
+        return;
+      }
+      if (
+        rerun &&
+        hasPriorResult &&
+        review.summarySource === 'none' &&
+        review.warning
+      ) {
+        this.applyLoadFailure('Could not load skill recommendations.');
         return;
       }
       if (this.state.consentOpen()) return;
       const discardDirtyDraft = Boolean(
         confirmedDirtyDraft && this.matchesDirtyDraft(confirmedDirtyDraft),
       );
-      const applyResult = this.state.applyRecommendationResult(
-        response.data,
-        discardDirtyDraft ? { discardDirtyDraft: true } : undefined,
-      );
-      this.handleApplyRecommendationResult(
-        applyResult,
-        response.data,
-        rerun,
-        version,
-      );
+      const applyResult = this.state.applyRecommendationResult(review, {
+        discardDirtyDraft,
+        selection: rerun
+          ? undefined
+          : this.setupRuns.get(record.id)?.selection?.skillIds,
+      });
+      this.handleApplyRecommendationResult(applyResult, review, rerun, version);
     } catch {
+      // degradation-audit: reported - applyLoadFailure shows a recommendation error in the current view.
       if (version === this.version && !this.destroyRef.destroyed) {
         this.applyLoadFailure('Could not load skill recommendations.');
       }
@@ -802,7 +978,7 @@ export class AnalyzeSkillsPage implements OnInit {
         this.pendingDirtyActionState.set(null);
         return;
       }
-      const runId = this.analysis.loaded()?.manifest.runId;
+      const runId = this.loadedRunId() || null;
       if (
         !runId ||
         runId !== pending.runId ||
@@ -866,7 +1042,7 @@ export class AnalyzeSkillsPage implements OnInit {
   }
 
   public retry(): void {
-    const runId = this.analysis.loaded()?.manifest.runId;
+    const runId = this.loadedRunId();
     if (!runId || !this.canRetry() || this.leaving()) return;
     if (this.draftBusy() || this.selectionBusy()) return;
     const openDraft = this.state.openDraft();
@@ -1101,20 +1277,31 @@ export class AnalyzeSkillsPage implements OnInit {
     this.leavingState.set(true);
     const identity = this.guidanceIdentity();
     try {
-      const tab =
-        this.pendingGuidanceTab?.identity === identity
-          ? this.pendingGuidanceTab.tab
-          : this.tabs.createTab('Project guidance');
-      this.pendingGuidanceTab = { identity, tab };
-      this.tabs.setWorkflow(tab, 'setup-project-prompt');
-      const navigated = await this.router.navigate(
-        ['/onboarding/analyze/guidance'],
+      const runId = this.loadedRunId() || null;
+      const parent = runId ? this.attachReview(runId) : null;
+      if (runId && !parent) return;
+      const record = this.setupRuns.start(
+        'project-guidance',
+        this.workspace.config().workspaceRoot,
         {
-          queryParams: {
-            analysis: this.route.snapshot.queryParamMap.get('analysis'),
-            tab,
-          },
+          parentId: parent?.id,
+          analysisRunId: runId,
+          origin: 'analysis-result-continue',
         },
+      );
+      if (!record) throw new Error('Workspace unavailable');
+      if (parent) {
+        this.saveSelection(parent.id, this.state.selectedSelectionKeys());
+        this.setupRuns.report(parent.id, {
+          status: 'completed',
+          step: 'selecting',
+          error: null,
+        });
+      }
+      const { subPath, queryParams } = this.setupRuns.targetOf(record);
+      const navigated = await this.router.navigate(
+        ['/onboarding', ...subPath],
+        { queryParams },
       );
       if (!navigated) throw new Error('Navigation cancelled');
     } catch {

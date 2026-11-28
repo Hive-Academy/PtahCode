@@ -608,7 +608,10 @@ export class StackSkillStore {
 
   public applyRecommendationResult(
     result: WizardRecommendAnalysisSkillsResult,
-    options?: { discardDirtyDraft?: boolean },
+    options?: {
+      discardDirtyDraft?: boolean;
+      selection?: readonly string[];
+    },
   ): RecommendationApplyResult {
     const openDraft = this.openDraftState();
     if (openDraft?.busy || openDraft?.previewLoading) {
@@ -653,6 +656,7 @@ export class StackSkillStore {
     this.retainedItemSearchResultsState.set(new Map());
     this.retainedSearchResultsState.set([]);
     this.customSelectionKeysState.set(new Map());
+    if (options?.selection) this.setSelectedIds(new Set(options.selection));
     this.previewState.set([]);
     this.approvedIdsState.set(new Set());
     if (this.stageState() === 'consent') this.stageState.set('review');

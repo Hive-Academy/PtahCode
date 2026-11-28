@@ -70,6 +70,27 @@ describe('StackSkillStore download-count ordering', () => {
     store.reset();
   });
 
+  it('restores saved keys, including manual selections and an explicitly empty selection', () => {
+    const result = makeRecommendResult({
+      method: 'none',
+      counts: { decision: 0, normal: 0, notJudged: 0 },
+      candidates: [],
+      items: [],
+      proposals: [],
+      stages: [],
+    });
+    const keys = ['Acme/Registry/manual'];
+    expect(
+      store.applyRecommendationResult(result, { selection: keys }),
+    ).toEqual({
+      status: 'ok',
+    });
+    expect(store.selectedSelectionKeys()).toEqual(keys);
+    expect([...store.selectedCandidateIds()]).toEqual(['acme/registry/manual']);
+    store.applyRecommendationResult(result, { selection: [] });
+    expect(store.selectedSelectionKeys()).toEqual([]);
+  });
+
   it('initializes selectedCandidateIds and selectedSelectionKeys ordered by installs descending regardless of stack-item order', () => {
     const low = makeCandidate(
       makeSkill('skill-low', 25, { source: 'Acme/Repo' }),
