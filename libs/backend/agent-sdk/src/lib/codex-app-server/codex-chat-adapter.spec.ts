@@ -448,6 +448,26 @@ describe('CodexChatAdapter', () => {
     }
   });
 
+  it('removes resolved profile defaults when resuming for skill lookup', async () => {
+    const h = setup();
+    const prepared = { profile: { ...profile, effort: 'medium' }, resume: identity };
+    jest.spyOn(h.ports, 'profile').mockResolvedValue(prepared);
+    await h.adapter.resumeSessionForSkillLookup(id, {
+      tabId,
+      model: 'requested',
+      effort: 'high',
+    });
+    expect(h.open).toHaveBeenCalledWith(
+      expect.objectContaining({ model: undefined, effort: undefined }),
+      expect.objectContaining({ threadId: id }),
+      undefined,
+      undefined,
+      { preserveTurnSettings: true },
+    );
+    expect(h.lifecycle.opened.mock.calls[0]?.[1]).toBe(prepared);
+    await h.adapter.closeSession(id);
+  });
+
   it('admits a resume before opening the native context', async () => {
     const h = setup();
     const order: string[] = [];
@@ -578,6 +598,26 @@ describe('CodexChatAdapter', () => {
     for await (const event of stream) void event;
     expect(h.resolveSkillCommand).toHaveBeenCalledWith(prompt);
     expect(h.context.startTurn).toHaveBeenCalledWith(expect.objectContaining({ text: prompt, skill }));
+    await h.adapter.dispose();
+  });
+
+  it('applies turn preparation only after a follow-up skill is resolved', async () => {
+    const h = setup();
+    await h.adapter.startChatSession({ tabId });
+    const command = '/orchestration';
+    const skill = { type: 'skill', name: 'orchestration', path: '/skills/orchestration/SKILL.md' } as const;
+    const beforeSend = jest.fn(async () => {
+      expect(h.resolveSkillCommand).toHaveBeenLastCalledWith(command);
+      expect(h.context.startTurn).not.toHaveBeenCalled();
+    });
+
+    await expect(h.adapter.invokeSkillCommand(id, command, undefined, beforeSend)).resolves.toBe(false);
+    expect(beforeSend).not.toHaveBeenCalled();
+
+    h.resolveSkillCommand.mockResolvedValueOnce(skill);
+    await expect(h.adapter.invokeSkillCommand(id, command, undefined, beforeSend)).resolves.toBe(true);
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+    expect(h.context.startTurn).toHaveBeenCalledWith(expect.objectContaining({ skill }));
     await h.adapter.dispose();
   });
 

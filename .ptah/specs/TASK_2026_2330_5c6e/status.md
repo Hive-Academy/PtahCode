@@ -1,6 +1,6 @@
 # Handoff status — 2026-11-26 (budget handoff)
 
-Cost mode: global rule in C:\Users\abdal\.claude\CLAUDE.md (CLI lanes first, CI verifies) until 2026-11-27 18:00.
+Cost mode: global rule in ~/.claude/CLAUDE.md (CLI lanes first, CI verifies) until 2026-11-27 18:00.
 
 ## TASK_2026_2330_5c6e — PR #1516 (fix/codex-slash-commands), head d48dbcba1
 - CI green on d48dbcba1. Merge BLOCKED: needs human approval.

@@ -20,7 +20,7 @@ function commandKey(name: string): string {
 /** The first `/token` of a text after leading whitespace, without its `/`; else undefined. */
 export function leadingLaneCommand(text: string): string | undefined {
   const token = text.trimStart().split(/\s/, 1)[0] ?? '';
-  if (!token.startsWith('/') || token.length < 2) return undefined;
+  if (!token.startsWith('/') || token.length < 2 || /[/\\]/.test(token.slice(1))) return undefined;
   return token.slice(1);
 }
 

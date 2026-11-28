@@ -407,23 +407,27 @@ export class ChatSlashCommandRouterService {
               this.nativeAdapter &&
               !isChatBuiltinCommand(interceptResult.commandName)
             ) {
-              if (!this.sdkAdapter.isSessionActive(sessionId)) {
-                await this.sdkAdapter.resumeSession(sessionId, {
-                  ...config,
-                  prompt: '',
-                  effort: params.effort,
-                });
-              } else {
-                await applyLiveTurnSettings(this.sdkAdapter, this.logger, sessionId, {
-                  model: params.model,
-                  effort: params.effort,
-                });
+              const active = this.sdkAdapter.isSessionActive(sessionId);
+              if (!active) {
+                await this.nativeAdapter.resumeSessionForSkillLookup(
+                  sessionId,
+                  config,
+                );
               }
-              if (await this.nativeAdapter.invokeSkillCommand(sessionId, command, {
-                clientMessageId: params.clientMessageId,
-                files: params.files,
-                images: params.images,
-              })) {
+              const invoked = await this.nativeAdapter.invokeSkillCommand(
+                sessionId,
+                command,
+                {
+                  clientMessageId: params.clientMessageId,
+                  files: params.files,
+                  images: params.images,
+                },
+                () => applyLiveTurnSettings(this.sdkAdapter, this.logger, sessionId, {
+                  model: active ? params.model : execution.seed.model,
+                  effort: params.effort,
+                }),
+              );
+              if (invoked) {
                 return { success: true, sessionId };
               }
             }

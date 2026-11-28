@@ -150,6 +150,7 @@ class RuntimeContext implements CodexContext {
   private reportedModel: string | null = null;
   private reportedEffort: string | null = null;
   private turnHistory = false;
+  private preserveTurnSettings = false;
   private settings: CodexTurnSettings;
   private levelPolicy: Pick<
     CodexExecutionProfile,
@@ -329,8 +330,12 @@ class RuntimeContext implements CodexContext {
     return this.settings.permissionLevel ?? this.profile.permissionLevel;
   }
 
-  async open(resume?: CodexThreadIdentity): Promise<void> {
+  async open(
+    resume?: CodexThreadIdentity,
+    preserveTurnSettings = false,
+  ): Promise<void> {
     this.turnHistory = resume !== undefined;
+    this.preserveTurnSettings = this.turnHistory && preserveTurnSettings;
     await this.process.start();
     if (this.process.verifiedCodexHome !== this.profile.normalizedHome)
       throw new CodexHomeMismatchError();
@@ -1068,7 +1073,10 @@ class RuntimeContext implements CodexContext {
       threadId: this.identity.threadId,
       input: this.wireInput(input, !this.sentInitialInput),
       ...(this.settings.model === undefined ? {} : { model: this.settings.model }),
-      effort: this.settings.effort ?? null,
+      // A lookup-only resume inherits thread effort until a turn selects one.
+      ...(this.preserveTurnSettings && this.settings.effort === undefined
+        ? {}
+        : { effort: this.settings.effort ?? null }),
       approvalPolicy: levelPolicy.approvalPolicy,
       approvalsReviewer: 'user',
       cwd: this.profile.cwd,

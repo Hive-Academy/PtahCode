@@ -694,6 +694,20 @@ describe('CodexAppServerLaneAdapter', () => {
     resumed.abort.abort();
   });
 
+  it.each(['/home/project inspect logs', 'C:/project inspect logs'])(
+    'starts a fresh lane without skill discovery for %s',
+    async (task) => {
+      const h = harness();
+      const handle = await h.adapter.runSdk(options({ task }));
+      expect(h.context.resolveSkillCommand).not.toHaveBeenCalled();
+      expect(h.context.listSkillCommands).not.toHaveBeenCalled();
+      expect(h.context.inputs[0]?.text).toContain(task);
+      await terminal(h.context);
+      await expect(handle.done).resolves.toBe(0);
+      handle.abort.abort();
+    },
+  );
+
   it('refuses a stale raw skill before starting the resumed turn', async () => {
     const h = harness();
     const first = await h.adapter.runSdk(options());

@@ -80,6 +80,7 @@ function harness(
   const closeSession = jest.fn().mockResolvedValue(undefined);
   const isSessionActive = jest.fn().mockReturnValue(true);
   const resumeSession = jest.fn().mockResolvedValue(undefined);
+  const resumeSessionForSkillLookup = jest.fn().mockResolvedValue(undefined);
   const setSessionModel = jest.fn().mockResolvedValue(undefined);
   const setSessionEffort = jest.fn().mockResolvedValue(undefined);
   const invokeSkillCommand = jest.fn().mockResolvedValue(false);
@@ -99,7 +100,7 @@ function harness(
       logger: { info: jest.fn(), warn: jest.fn() },
       modelSettings: { selectedModel: { get: () => 'default' } },
       sdkAdapter: { executeSlashCommand, interruptSession, setSessionModel, setSessionEffort, isSessionActive, resumeSession },
-      nativeAdapter: { owns: () => true, closeSession, invokeSkillCommand },
+      nativeAdapter: { owns: () => true, closeSession, invokeSkillCommand, resumeSessionForSkillLookup },
       webviewManager: { broadcastMessage },
       slashCommandInterceptor: {
         intercept: () => commandName === 'clear'
@@ -141,6 +142,7 @@ function harness(
     invokeSkillCommand,
     isSessionActive,
     resumeSession,
+    resumeSessionForSkillLookup,
     setSessionModel,
     setSessionEffort,
     broadcastMessage,
@@ -288,15 +290,17 @@ describe('native slash runtime routing', () => {
     expect(h.invokeSkillCommand).toHaveBeenCalledTimes(command === 'example:skill' ? 1 : 0);
   });
 
-  it('resumes an inactive Codex session with the selected effort before invoking a skill', async () => {
+  it('resumes an inactive Codex session before applying accepted skill settings', async () => {
     const h = harness(native, 'example:skill');
     h.isSessionActive.mockReturnValue(false);
-    h.invokeSkillCommand.mockImplementation(async () => {
-      expect(h.resumeSession).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+    h.invokeSkillCommand.mockImplementation(async (_id, _command, _options, beforeSend: () => Promise<void>) => {
+      expect(h.resumeSessionForSkillLookup).toHaveBeenCalledWith(sessionId, expect.objectContaining({
         model: 'gpt-5.4',
-        effort: 'high',
-        prompt: '',
       }));
+      expect(h.setSessionModel).not.toHaveBeenCalled();
+      await beforeSend();
+      expect(h.setSessionModel).toHaveBeenCalledWith(sessionId, 'gpt-5.4');
+      expect(h.setSessionEffort).toHaveBeenCalledWith(sessionId, 'high');
       return true;
     });
 
@@ -312,14 +316,42 @@ describe('native slash runtime routing', () => {
       const h = harness(native, command);
       h.invokeSkillCommand.mockResolvedValue(true);
       await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-      expect(h.invokeSkillCommand).toHaveBeenCalledWith(sessionId, '/' + command, expect.any(Object));
+      expect(h.invokeSkillCommand).toHaveBeenCalledWith(sessionId, '/' + command, expect.any(Object), expect.any(Function));
       expect(h.executeSlashCommand).not.toHaveBeenCalled();
     },
   );
 
-  it('applies the selected model and effort before invoking a skill on an open Codex session', async () => {
+  it.each([true, false])('preserves settings when Codex refuses a skill (active: %s)', async (active) => {
     const h = harness(native, 'example:skill');
-    h.invokeSkillCommand.mockImplementation(async () => {
+    h.isSessionActive.mockReturnValue(active);
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toMatchObject({
+      success: false, errorCode: 'CODEX_UNSUPPORTED_OPTION',
+    });
+    expect(h.setSessionModel).not.toHaveBeenCalled();
+    expect(h.setSessionEffort).not.toHaveBeenCalled();
+    expect(h.resumeSession).not.toHaveBeenCalled();
+    expect(h.resumeSessionForSkillLookup).toHaveBeenCalledTimes(active ? 0 : 1);
+  });
+
+  it('preserves settings when inactive Codex skill lookup throws', async () => {
+    const h = harness(native, 'example:skill');
+    h.isSessionActive.mockReturnValue(false);
+    h.invokeSkillCommand.mockRejectedValue(new Error('Skill lookup failed'));
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toMatchObject({
+      success: false, error: 'Skill lookup failed',
+    });
+    expect(h.resumeSessionForSkillLookup).toHaveBeenCalledTimes(1);
+    expect(h.setSessionModel).not.toHaveBeenCalled();
+    expect(h.setSessionEffort).not.toHaveBeenCalled();
+  });
+
+  it('applies model and effort after lookup accepts a skill on an open Codex session', async () => {
+    const h = harness(native, 'example:skill');
+    h.invokeSkillCommand.mockImplementation(async (_id, _command, _options, beforeSend: () => Promise<void>) => {
+      expect(h.setSessionModel).not.toHaveBeenCalled();
+      await beforeSend();
       expect(h.setSessionModel).toHaveBeenCalledWith(sessionId, 'gpt-5.4');
       expect(h.setSessionEffort).toHaveBeenCalledWith(sessionId, 'high');
       return true;

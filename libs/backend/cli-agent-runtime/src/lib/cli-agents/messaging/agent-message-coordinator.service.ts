@@ -534,10 +534,11 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * are bounded (D17). A stopped lane with no cached list takes the
    * adapter's effort levels for the record's model (`laneEfforts`), or the
    * models and efforts of one live catalog read (`stoppedLaneCatalog`), and
-   * says what appears once it runs (`unavailableReason`). A failure returns the cached lists with `error`
-   * set; it never throws. Hidden permission-policy commands are always dropped.
+   * says what appears once it runs (`unavailableReason`). A failure returns
+   * fallback models, efforts and built-in commands with `error` set.
+   * Hidden permission-policy commands are always dropped.
    */
-  async turnOptions(agentId: AgentId, refreshCommands = false): Promise<LaneTurnOptionsView> {
+  async turnOptions(agentId: AgentId): Promise<LaneTurnOptionsView> {
     const { agentId: laneId } = await this.deps.aliases.resolve(agentId);
     const lineage = await this.deps.aliases.rootOf(agentId);
     const info = this.deps.manager.findAgentInfo(laneId);
@@ -560,8 +561,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         this.remember(lineage, served);
         return served;
       }
-      if ((!cached || refreshCommands) && adapter?.stoppedLaneCatalog) {
-        // One catalog read serves the stopped lane's composer and dispatch.
+      if (adapter?.stoppedLaneCatalog) {
+        // Skills can change on disk while the lane is stopped.
+        this.catalogs.delete(lineage);
         const catalog = await bounded(adapter.stoppedLaneCatalog(info.workingDirectory), LANE_TURN_OPTIONS_TIMEOUT_MS);
         return stoppedLaneView(current, {
           ...catalog,
@@ -590,7 +592,7 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         ...current, models: cached?.models ?? [], efforts: cached?.efforts
           ?? (adapter?.stoppedLaneCatalog ? [] : [...(adapter?.laneEfforts?.(info.model) ?? [])]),
         ...(unsendableEfforts ? { unsendableEfforts } : {}),
-        commands: cached?.commands ?? filterLaneCommands(adapter?.builtinLaneCommands ?? [], blocked),
+        commands: filterLaneCommands(adapter?.builtinLaneCommands ?? [], blocked),
         error: TURN_OPTIONS_ERROR,
       };
     }
@@ -608,11 +610,13 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     const builtins = adapter?.builtinLaneCommands?.map((command) => command.name);
     if (builtins && matchesLaneCommand(body, builtins)) return builtins;
     const cached = this.catalogs.get(lineage);
-    if (cached && !refresh) return cached.commands.map((command) => command.name);
-    if (!this.liveHandle(laneId)?.listTurnOptions) {
-      if (!adapter?.stoppedLaneCatalog) return undefined;
+    if (this.liveHandle(laneId)?.listTurnOptions) {
+      if (cached && !refresh && !cached.commandsUnavailable)
+        return cached.commands.map((command) => command.name);
+    } else if (!adapter?.stoppedLaneCatalog) {
+      return refresh ? undefined : cached?.commands.map((command) => command.name) ?? [];
     }
-    const view = await this.turnOptions(laneId, refresh);
+    const view = await this.turnOptions(laneId);
     const names = view.commands.map((command) => command.name);
     return view.error || (view.commandsUnavailable && !matchesLaneCommand(body, names)) ? undefined : names;
   }

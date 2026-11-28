@@ -954,6 +954,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     const resumeCompact = resume && isCompactCommand(options.task);
     let initialSkill: CodexTurnInput['skill'];
     try {
+      // Path-prefixed task text can start immediately without skill discovery.
       if (!resumeCompact && leadingLaneCommand(options.task)) {
         initialSkill = resume
           ? await resolveRawSkill(options.task)

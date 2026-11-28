@@ -478,6 +478,44 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     });
   });
 
+  it('retries a first skill send after the live catalog recovers', async () => {
+    const { h, coordinator } = setupTurn();
+    const commands = [{ name: 'session-handoff', group: 'skill' as const }];
+    const listTurnOptions = jest.fn()
+      .mockResolvedValueOnce({ models: [], efforts: [], commands: [], commandsUnavailable: true })
+      .mockResolvedValueOnce({ models: [], efforts: [], commands });
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+
+    const first = await coordinator.send({ agentId: h.agentId, message: '/session-handoff' }, user);
+    expect(first).toMatchObject({ receipt: { state: 'blocked-retryable' } });
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+
+    await coordinator.retry(h.agentId, idOf(first), user);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/session-handoff', expect.anything(),
+      expect.any(String), false, expect.objectContaining({ noSteer: true }));
+  });
+
+  it('refreshes a stopped Codex catalog after skills change', async () => {
+    const { h, coordinator } = setupTurn();
+    const previous = { name: 'old-skill', group: 'skill' as const };
+    const current = { name: 'new-skill', group: 'skill' as const };
+    h.tracked.sdkHandle = {
+      ...handleOf(h), listTurnOptions: async () => ({ models: [], efforts: [], commands: [previous] }),
+    };
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({ commands: [previous] });
+
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'codex', displayName: 'Codex', status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => ({ models: [], efforts: [], commands: [current] }));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog });
+
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({ commands: [current] });
+    await coordinator.send({ agentId: h.agentId, message: '/new-skill' }, user);
+    expect(h.resume.resume).toHaveBeenCalledWith(expect.anything(), '/new-skill',
+      expect.objectContaining({ rawBody: '/new-skill' }), undefined);
+    expect(stoppedLaneCatalog).toHaveBeenCalledTimes(2);
+  });
+
   it('sends a built-in command when model discovery fails', async () => {
     const { h, coordinator } = setupTurn();
     h.setInfo({ cli: 'codex', displayName: 'Codex' });

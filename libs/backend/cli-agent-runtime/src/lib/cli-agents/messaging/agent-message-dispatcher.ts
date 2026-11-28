@@ -146,7 +146,7 @@ export class AgentMessageDispatcher {
       ...(images?.length ? { images } : {}),
     } : undefined;
     const raw = await this.deliversRaw(attempt);
-    if (raw === undefined && envelope.rawDelivery?.raw) return { catalogUnavailable: true };
+    if (raw === undefined) return { catalogUnavailable: true };
     if (!raw && envelope.rawDelivery?.raw) {
       return { refusal: 'turn-input-unsupported', lastError: 'This lane command is no longer advertised.' };
     }
@@ -157,17 +157,17 @@ export class AgentMessageDispatcher {
    * Raw command delivery (decisions.md 15): only a user's message whose first
    * token is an advertised `/command` or skill. Parent and lane senders always
    * keep the header, so an agent can never issue provider commands into a
-   * lane. With no known list nothing goes raw: the text keeps its header, so
-   * a message such as `/usr/bin is missing` is never run as a command.
+   * lane. An unavailable catalog holds a possible command for retry.
    */
   private async deliversRaw(attempt: DispatchAttempt): Promise<boolean | undefined> {
     const { envelope } = attempt;
     if (envelope.sender.kind !== 'user' || leadingLaneCommand(attempt.body) === undefined) return false;
     let names: readonly string[] | undefined;
     try {
-      names = await this.deps.advertisedCommands?.(attempt.laneId, envelope.laneLineageId, envelope.rawDelivery?.raw === true, attempt.body);
+      if (!this.deps.advertisedCommands) return false;
+      names = await this.deps.advertisedCommands(attempt.laneId, envelope.laneLineageId, envelope.rawDelivery?.raw === true, attempt.body);
     } catch (error: unknown) {
-      // degradation-audit: reported - logged; with no list the message keeps its header.
+      // degradation-audit: reported - the caller holds the delivery for retry.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane command list unavailable', {
         error: error instanceof Error ? error.name : 'unknown',
       });
