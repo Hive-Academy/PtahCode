@@ -38,7 +38,7 @@ function storedTab(id: string, workflow?: string): TabState {
     order: 0,
     status: 'loaded',
     isDirty: false,
-    lastActivityAt: 0,
+    lastActivityAt: 1000,
     claudeSessionId: `sess-${id}`,
     messages: [],
     streamingState: null,
@@ -75,11 +75,13 @@ describe('sanitizeRestoredTabs — legacy Setup tabs', () => {
         tabId: 'agents',
         workflow: 'setup-agent-generation',
         workspacePath: WORKSPACE_PATH,
+        lastActivityAt: 1000,
       },
       {
         tabId: 'guidance',
         workflow: 'setup-project-prompt',
         workspacePath: WORKSPACE_PATH,
+        lastActivityAt: 1000,
       },
     ]);
     expect(consumeLegacySetupTabs()).toEqual([]);

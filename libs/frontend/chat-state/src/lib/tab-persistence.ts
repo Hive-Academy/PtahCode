@@ -169,6 +169,7 @@ export interface LegacySetupTab {
   readonly tabId: string;
   readonly workflow: LegacySetupWorkflow;
   readonly workspacePath: string;
+  readonly lastActivityAt: number;
 }
 
 function isLegacySetupWorkflow(value: unknown): value is LegacySetupWorkflow {
@@ -221,6 +222,7 @@ function dropLegacySetupTabs(
         tabId: tab.id,
         workflow: tab.workflow,
         workspacePath: workspace,
+        lastActivityAt: tab.lastActivityAt,
       });
     }
   }

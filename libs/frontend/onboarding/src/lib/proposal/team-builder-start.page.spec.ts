@@ -279,8 +279,8 @@ describe('TeamBuilderStartPage', () => {
   });
 
   afterEach(() => {
-    localStorage.clear();
     TestBed.resetTestingModule();
+    localStorage.clear();
   });
 
   it('retries a failed launch after successful installation without reinstalling', async () => {
@@ -354,21 +354,10 @@ describe('TeamBuilderStartPage', () => {
 
     const fixture = TestBed.createComponent(TeamBuilderStartPage);
     fixture.detectChanges();
+    await fixture.whenStable();
     const root = fixture.nativeElement as HTMLElement;
-    const dialog = root.querySelector('dialog') as HTMLDialogElement;
-    let dialogOpen = false;
-    dialog.showModal = jest.fn(() => {
-      dialogOpen = true;
-    });
-    dialog.close = jest.fn(() => {
-      dialogOpen = false;
-    });
-    Object.defineProperty(dialog, 'open', {
-      get: () => dialogOpen,
-      configurable: true,
-    });
-
     const page = fixture.componentInstance;
+    expect(page.viewStage()).toBe('intent');
     page.state.setIntent('Build a team');
     page.state.setPreview([
       {
@@ -381,7 +370,12 @@ describe('TeamBuilderStartPage', () => {
     ]);
     page.state.setStage('consent');
     fixture.detectChanges();
-    expect(dialogOpen).toBe(true);
+    await fixture.whenStable();
+    const dialog = root.querySelector<HTMLDialogElement>(
+      'ptah-stack-skill-consent dialog',
+    );
+    if (!dialog) throw new Error('Expected the team builder consent dialog');
+    expect(dialog.open).toBe(true);
 
     // Click Install from inside the consent modal.
     const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
@@ -393,7 +387,7 @@ describe('TeamBuilderStartPage', () => {
     TestBed.tick();
 
     // Consent modal must be closed and inert; progress controls must be reachable.
-    expect(dialogOpen).toBe(false);
+    expect(dialog.open).toBe(false);
     expect(dialog.inert).toBe(true);
     const backBtn = root.querySelector<HTMLButtonElement>(
       '[data-testid="team-builder-installing-back"]',

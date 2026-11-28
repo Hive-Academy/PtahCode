@@ -1,4 +1,4 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal, untracked } from '@angular/core';
 import type {
   GenerationContextSource,
   SetupGenerationRunState,
@@ -109,21 +109,25 @@ export class GuidanceGenerationStore {
     run: SetupGenerationRunState,
     acceptedThisSession = false,
   ): void {
-    const binding = this.bindingValue();
-    if (!binding || !this.sameBinding(run.binding)) return;
-    const changedRun = this.snapshotValue()?.runId !== run.binding.runId;
-    const changedStatus = this.runValue()?.status !== run.status;
-    if (changedRun) {
-      this.runValue.set(null);
-      this.snapshotValue.set(null);
-      this.statusValue.set('starting');
-    }
-    if (acceptedThisSession || !isTerminalLifecycle(run.status))
-      this.restoring = false;
-    if (changedRun) this.accept(run);
-    this.applyRun(run);
-    if (changedRun || (changedStatus && isTerminalLifecycle(run.status)))
-      void this.refreshCommitted(binding);
+    // The page calls this from an effect. Reporting the run writes to the
+    // Setup index, so reads during adoption must stay out of that effect.
+    untracked(() => {
+      const binding = this.bindingValue();
+      if (!binding || !this.sameBinding(run.binding)) return;
+      const changedRun = this.snapshotValue()?.runId !== run.binding.runId;
+      const changedStatus = this.runValue()?.status !== run.status;
+      if (changedRun) {
+        this.runValue.set(null);
+        this.snapshotValue.set(null);
+        this.statusValue.set('starting');
+      }
+      if (acceptedThisSession || !isTerminalLifecycle(run.status))
+        this.restoring = false;
+      if (changedRun) this.accept(run);
+      this.applyRun(run);
+      if (changedRun || (changedStatus && isTerminalLifecycle(run.status)))
+        void this.refreshCommitted(binding);
+    });
   }
 
   private accept(accepted: SetupGenerationRunState): void {

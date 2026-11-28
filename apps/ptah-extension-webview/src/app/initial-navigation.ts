@@ -1,7 +1,7 @@
-import { inject, Injector } from '@angular/core';
-import { toObservable } from '@angular/core/rxjs-interop';
-import { PRIMARY_OUTLET, Router } from '@angular/router';
-import { firstValueFrom, filter } from 'rxjs';
+import { DestroyRef, inject, Injector } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { NavigationStart, PRIMARY_OUTLET, Router } from '@angular/router';
+import { filter, firstValueFrom, map, merge, timer } from 'rxjs';
 import {
   AppStateManager,
   ElectronLayoutService,
@@ -27,6 +27,8 @@ interface HostWindow {
   initialView?: string;
   ptahConfig?: { initialView?: string | null };
 }
+
+const WORKSPACE_RESTORE_TIMEOUT_MS = 30_000;
 
 /**
  * The application's ONE initial navigation (TASK_2026_524, decision D5).
@@ -57,6 +59,7 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
   const routePersistence = inject(SurfaceRoutePersistence);
   const layout = inject(ElectronLayoutService);
   const injector = inject(Injector);
+  const destroyRef = inject(DestroyRef);
 
   const router = inject(Router);
 
@@ -123,10 +126,41 @@ export function injectInitialNavigation(): () => Promise<SurfaceNavigationResult
     ) {
       // Bound routes need workspace validation. The guidance entry also reads
       // the workspace on mount to decide whether Start is available.
-      await firstValueFrom(
-        toObservable(layout.workspaceResolved, { injector }).pipe(filter(Boolean)),
+      if (
+        destroyRef.destroyed ||
+        router.navigated ||
+        router.currentNavigation()
+      )
+        return 'cancelled';
+      const workspaceWait = await firstValueFrom(
+        merge(
+          router.events.pipe(
+            filter((event) => event instanceof NavigationStart),
+            map(() => 'cancelled' as const),
+          ),
+          toObservable(layout.workspaceResolved, { injector }).pipe(
+            filter(Boolean),
+            map(() => 'resolved' as const),
+          ),
+          timer(WORKSPACE_RESTORE_TIMEOUT_MS).pipe(
+            map(() => 'timeout' as const),
+          ),
+        ).pipe(takeUntilDestroyed(destroyRef)),
+        { defaultValue: 'cancelled' as const },
       );
-      if (router.navigated || supersededByNewerNavigation()) return 'cancelled';
+      if (
+        workspaceWait === 'cancelled' ||
+        destroyRef.destroyed ||
+        router.navigated ||
+        router.currentNavigation()
+      )
+        return 'cancelled';
+      if (workspaceWait === 'timeout') {
+        console.warn(
+          '[App] Workspace resolution timed out during route restore.',
+        );
+        return navigateToBootSurface(DEFAULT_SURFACE_ID);
+      }
     }
 
     // SurfaceRouterService normalizes legacy setup URLs before navigating.

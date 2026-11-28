@@ -1,4 +1,4 @@
-import { computed, signal } from '@angular/core';
+import { computed, effect, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter, Router } from '@angular/router';
 import { TabManagerService } from '@ptah-extension/chat-state';
@@ -211,15 +211,24 @@ describe('SetupRunStore', () => {
     localStorage.clear();
   });
 
-  it('validates Windows Setup records for route restoration and persistence without chat tabs', async () => {
+  it('restores and reconciles a running Windows guidance route without chat tabs', async () => {
     workspace.set('c:/ptah-e2e-ws-a/');
+    const guidanceBinding = binding(
+      'e2e-guidance-tab',
+      'setup-project-prompt',
+      'C:\\ptah-e2e-ws-a',
+    );
+    const runId = 'e2e-guidance-run';
+    const running = runState('running', {
+      binding: { ...guidanceBinding, runId },
+    });
+    rpc['getBoundRunState'].mockResolvedValue(running);
     seed(
       record({
-        id: 'e2e-guidance-tab',
-        workspacePath: 'C:\\ptah-e2e-ws-a',
+        id: guidanceBinding.tabId,
+        workspacePath: guidanceBinding.workspacePath,
         workflow: 'project-guidance',
-        status: 'completed',
-        backendRunId: 'e2e-guidance-run',
+        backendRunId: runId,
       }),
       record({
         id: 'e2e-agent-tab',
@@ -260,6 +269,36 @@ describe('SetupRunStore', () => {
 
     expect(await surface.navigateToUrl(route)).toBe('navigated');
     expect(router.url).toBe(route);
+    const runs = TestBed.inject(SetupRunStore);
+    const workflow = TestBed.inject(GenerationWorkflowStore);
+    const guidance = TestBed.inject(GuidanceGenerationStore);
+    // Same projection as the mounted guidance page.
+    let adoptions = 0;
+    TestBed.runInInjectionContext(() =>
+      effect(() => {
+        const run = workflow.run();
+        if (run?.binding.tabId !== guidanceBinding.tabId) return;
+        if (++adoptions > 2) throw new Error('Guidance adoption did not settle');
+        guidance.adopt(run);
+      }),
+    );
+    workflow.bind(guidanceBinding, runId);
+    guidance.bind(guidanceBinding);
+    await flush();
+    expect(rpc['getBoundRunState']).toHaveBeenCalledWith(guidanceBinding, runId);
+    expect(guidance.status()).toBe('running');
+    expect(runs.get(guidanceBinding.tabId)?.status).toBe('running');
+
+    rpc['getBoundRunState'].mockResolvedValue({
+      ...running,
+      status: 'completed',
+      committedState: 'committed',
+    });
+    await workflow.refresh();
+    await flush();
+    expect(guidance.status()).toBe('completed');
+    expect(runs.get(guidanceBinding.tabId)?.status).toBe('completed');
+
     const standalone = '/onboarding/guidance?tab=e2e-guidance-tab';
     expect(await surface.navigateToUrl(standalone)).toBe('navigated');
     expect(router.url).toBe(standalone);
@@ -751,32 +790,40 @@ describe('SetupRunStore', () => {
       expect(store.runs()[0].status).toBe('interrupted');
     });
 
-    it('adopts a legacy guidance tab during reactive route validation and reconciles its saved output', async () => {
-      workspace.set('c:/ptah-e2e-ws-a/');
-      const legacy = binding(
-        'legacy-tab-1',
-        'setup-project-prompt',
-        'C:\\ptah-e2e-ws-a',
-      );
-      legacyTabs.mockReturnValueOnce([legacy]);
-      rpc['getEnhancedPromptsStatus'].mockResolvedValue({
-        generatedAt: new Date(Date.now() + 1_000).toISOString(),
-      });
-      const store = TestBed.inject(SetupRunStore);
-      const canRestore = computed(() =>
-        store.canRestoreGenerationRoute(legacy.tabId, legacy.workflow),
-      );
-      expect(canRestore()).toBe(true);
-      expect(store.get(legacy.tabId)).toMatchObject({
-        workflow: 'project-guidance',
-        status: 'running',
-      });
+    it.each([
+      [1_000, 'completed'],
+      [-1_000, 'interrupted'],
+    ])(
+      'reconciles legacy guidance with an output timestamp offset of %i ms',
+      async (offset, status) => {
+        workspace.set('c:/ptah-e2e-ws-a/');
+        const legacy = binding(
+          'legacy-tab-1',
+          'setup-project-prompt',
+          'C:\\ptah-e2e-ws-a',
+        );
+        const lastActivityAt = Date.now() - 2_000;
+        legacyTabs.mockReturnValueOnce([{ ...legacy, lastActivityAt }]);
+        rpc['getEnhancedPromptsStatus'].mockResolvedValue({
+          generatedAt: new Date(lastActivityAt + offset).toISOString(),
+        });
+        const store = TestBed.inject(SetupRunStore);
+        const canRestore = computed(() =>
+          store.canRestoreGenerationRoute(legacy.tabId, legacy.workflow),
+        );
+        expect(canRestore()).toBe(true);
+        expect(store.get(legacy.tabId)).toMatchObject({
+          workflow: 'project-guidance',
+          status: 'running',
+          createdAt: lastActivityAt,
+        });
 
-      await flush();
-      expect(store.get(legacy.tabId)?.status).toBe('completed');
-      workspace.set('C:\\other-workspace');
-      expect(canRestore()).toBe(false);
-    });
+        await flush();
+        expect(store.get(legacy.tabId)?.status).toBe(status);
+        workspace.set('C:\\other-workspace');
+        expect(canRestore()).toBe(false);
+      },
+    );
 
     it('adopts a push for an unknown id and returns the existing record', async () => {
       const store = await create();

@@ -344,13 +344,14 @@ export class SetupRunStore {
   private adoptBinding(
     binding: SetupGenerationTabBinding,
     live: boolean,
+    lastActivityAt?: number,
   ): SetupRunRecord | null {
     const existing = this.get(binding.tabId);
     if (existing)
       return matchesBinding(this.bindingFor(existing), binding)
         ? existing
         : null;
-    const record = createBoundRunRecord(binding);
+    const record = createBoundRunRecord(binding, lastActivityAt);
     if (!record) return null;
     if (live) this.liveThisSession.add(record.id);
     this.insert(record);
@@ -578,7 +579,8 @@ export class SetupRunStore {
 
   /** D6: restored chat tabs of a Setup workflow hand their binding over once. */
   private adoptLegacyTabs(): void {
-    for (const tab of consumeLegacySetupTabs()) this.adoptBinding(tab, false);
+    for (const tab of consumeLegacySetupTabs())
+      this.adoptBinding(tab, false, tab.lastActivityAt);
   }
 
   private async reconcile(): Promise<void> {

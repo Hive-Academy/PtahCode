@@ -573,7 +573,7 @@ describe('webview routing composition', () => {
       expect(validateRun).not.toHaveBeenCalled();
     });
 
-    it('keeps a newer host navigation that lands during the workspace wait', async () => {
+    it('ends the workspace wait when a newer host navigation starts', async () => {
       const workspaceResolved = signal(false);
       TestBed.configureTestingModule({
         providers: [
@@ -598,10 +598,67 @@ describe('webview routing composition', () => {
           ),
         ),
       ).toBe(true);
-      workspaceResolved.set(true);
+      expect(await boot).toBe('cancelled');
+      expect(workspaceResolved()).toBe(false);
+      expect(TestBed.inject(Router).url).toBe('/settings');
+    });
+
+    it('falls back to chat when the Electron workspace does not resolve', async () => {
+      const workspaceResolved = signal(false);
+      const validateRun = jest.fn(() => true);
+      TestBed.configureTestingModule({
+        providers: [
+          { provide: ElectronLayoutService, useValue: { workspaceResolved } },
+          {
+            provide: SurfaceRouterService.generationRouteTabValidatorToken,
+            useValue: validateRun,
+          },
+        ],
+      });
+      installHost(
+        savedRoute(`/onboarding/analyze/guidance?tab=${tabId}`, 'settings'),
+        'settings',
+      );
+      localStorage.setItem(
+        ONBOARDING_FLAG_KEY,
+        JSON.stringify({ shownAt: '2026-10-01T10:00:00.000Z' }),
+      );
+      hostIsElectron(true);
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+      const boot = TestBed.runInInjectionContext(injectInitialNavigation)();
+      try {
+        await jest.advanceTimersByTimeAsync(30_000);
+      } finally {
+        jest.useRealTimers();
+      }
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('timed out'));
+      expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(TestBed.inject(Router).url).toBe('/chat');
+      expect(validateRun).not.toHaveBeenCalled();
+    });
+
+    it('cancels the workspace wait when the injector is destroyed', async () => {
+      TestBed.configureTestingModule({
+        providers: [
+          {
+            provide: ElectronLayoutService,
+            useValue: { workspaceResolved: signal(false) },
+          },
+        ],
+      });
+      installHost(
+        savedRoute(`/onboarding/analyze/guidance?tab=${tabId}`, 'chat'),
+        'chat',
+      );
+      hostIsElectron(true);
+      const navigate = jest.spyOn(TestBed.inject(Router), 'navigateByUrl');
+
+      const boot = TestBed.runInInjectionContext(injectInitialNavigation)();
+      TestBed.resetTestingModule();
 
       expect(await boot).toBe('cancelled');
-      expect(TestBed.inject(Router).url).toBe('/settings');
+      expect(navigate).not.toHaveBeenCalled();
     });
 
     it('lets a new host deep link win over the saved route, and seeds it', async () => {

@@ -171,6 +171,7 @@ export function verifiedRunStatus(
 /** An unseen backend binding starts with its tab id as the record id. */
 export function createBoundRunRecord(
   binding: SetupGenerationTabBinding,
+  lastActivityAt = 0,
 ): SetupRunRecord | null {
   const workspace = setupWorkspacePath(binding.workspacePath);
   if (!workspace || !isOnboardingIdentityValue(binding.tabId)) return null;
@@ -185,7 +186,10 @@ export function createBoundRunRecord(
     analysisRunId: null,
     parentId: null,
     unseen: false,
-    createdAt: now,
+    createdAt:
+      Number.isFinite(lastActivityAt) && lastActivityAt > 0 && lastActivityAt <= now
+        ? lastActivityAt
+        : now,
     updatedAt: now,
   };
 }
