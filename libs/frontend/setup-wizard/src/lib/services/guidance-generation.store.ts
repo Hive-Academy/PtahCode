@@ -8,7 +8,7 @@ import {
   hasCommittedGuidance,
   isTerminalLifecycle,
   matchesBinding,
-} from './setup-run-attempt';
+} from './setup-run/setup-run-binding';
 import { SetupRunStore } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';

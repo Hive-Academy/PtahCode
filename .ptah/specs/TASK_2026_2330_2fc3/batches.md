@@ -542,12 +542,18 @@ Edge cases:
   --related chat-ui + chat; typecheck-templates passed after round 1 — re-run before the push
   (round 2 changed the back-button binding; onboarding was mid-edit by Batch 9 at commit time).
 
-## Batch 15: SetupRunStore split (behavior-preserving) — PENDING
+## Batch 15: SetupRunStore split (behavior-preserving) — IMPLEMENTED
 
 - Source: phase B style review findings 2 and 3 (`code-style-review-phase-b.md`, "Proposed Split").
 - Write set: `libs/frontend/setup-wizard/src/lib/services/setup-run.store.ts`, `setup-run-attempt.ts`,
   new collaborators under `services/setup-run/`; specs move with their code. Public API unchanged.
 - Gate: after Batches 9 and 12 are committed (both may touch the store). No behavior change.
+
+- Result: implementer codex; reviewer antigravity 9/10 APPROVED (0 Blocker, 0 Major, 4 Minor).
+  Store 694 lines; 8 plain-class collaborators under `services/setup-run/` (largest 434).
+  `setup-run.store.spec.ts` unchanged; 538 focused tests pass. Minor 1: put Batch 16 logic in
+  collaborators, not in the store facade. Minors 2–4 (method order, `@internal` marks, a widened
+  type) are open.
 
 ## Batch 16: SetupRunStore discovery, dismissal and disk adoption — PENDING
 

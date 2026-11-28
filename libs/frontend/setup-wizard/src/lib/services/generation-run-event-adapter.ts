@@ -30,7 +30,7 @@ import {
   isRunBinding,
   isRunLifecycle,
   isTerminalLifecycle,
-} from './setup-run-attempt';
+} from './setup-run/setup-run-binding';
 import { SetupRunStore } from './setup-run.store';
 
 function isStreamPayload(payload: Record<string, unknown>): boolean {

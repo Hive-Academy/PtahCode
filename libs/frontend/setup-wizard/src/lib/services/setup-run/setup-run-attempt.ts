@@ -1,176 +1,25 @@
 import { signal } from '@angular/core';
-import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type {
   EnhancedPromptsRunWizardResponse,
-  SetupGenerationResultFacts,
-  SetupGenerationRunBinding,
-  SetupGenerationRunLifecycle,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
-  SetupGenerationWorkflow,
   WizardSubmitSelectionResponse,
 } from '@ptah-extension/shared';
-import { WizardRpcError, type WizardRpcService } from './wizard-rpc.service';
-import { normalizeSetupWorkspacePath } from './setup-run-persistence';
+import { WizardRpcError, type WizardRpcService } from '../wizard-rpc.service';
 import {
   isTerminalSetupRunStatus,
   type SetupRunRecord,
   type SetupRunStatus,
-  type SetupRunWorkflow,
-} from './setup-run.types';
-
-const BOUND_WORKFLOW = {
-  'agent-generation': 'setup-agent-generation',
-  'project-guidance': 'setup-project-prompt',
-} satisfies Partial<Record<SetupRunWorkflow, SetupGenerationWorkflow>>;
-
-export function isBound(
-  workflow: SetupRunWorkflow,
-): workflow is keyof typeof BOUND_WORKFLOW {
-  return Object.hasOwn(BOUND_WORKFLOW, workflow);
-}
-
-export function bindingOf(
-  record: SetupRunRecord,
-): SetupGenerationTabBinding | null {
-  return isBound(record.workflow)
-    ? {
-        tabId: record.id,
-        workflow: BOUND_WORKFLOW[record.workflow],
-        workspacePath: record.workspacePath,
-      }
-    : null;
-}
-
-export function workflowOfBinding(
-  workflow: SetupGenerationWorkflow,
-): keyof typeof BOUND_WORKFLOW {
-  return workflow === 'setup-agent-generation'
-    ? 'agent-generation'
-    : 'project-guidance';
-}
-
-const RUN_FAILURE_COPY = {
-  'setup-agent-generation': 'Agent generation did not finish.',
-  'setup-project-prompt': 'Project guidance did not finish.',
-} satisfies Record<SetupGenerationWorkflow, string>;
-
-const LIFECYCLE_STATUS = {
-  starting: 'running',
-  running: 'running',
-  cancelling: 'running',
-  completed: 'completed',
-  failed: 'failed',
-  'timed-out': 'failed',
-  cancelled: 'cancelled',
-} satisfies Record<SetupGenerationRunLifecycle, SetupRunStatus>;
-
-export function isRunLifecycle(
-  value: unknown,
-): value is SetupGenerationRunLifecycle {
-  return typeof value === 'string' && Object.hasOwn(LIFECYCLE_STATUS, value);
-}
-
-export function isTerminalLifecycle(
-  value: SetupGenerationRunLifecycle,
-): boolean {
-  return isTerminalSetupRunStatus(LIFECYCLE_STATUS[value]);
-}
-
-export function matchesBinding(
-  expected: SetupGenerationTabBinding | null,
-  actual: SetupGenerationTabBinding,
-): boolean {
-  if (expected === null) return false;
-  const expectedPath = normalizeSetupWorkspacePath(expected.workspacePath);
-  return (
-    expectedPath !== null &&
-    expected.tabId === actual.tabId &&
-    expected.workflow === actual.workflow &&
-    expectedPath === normalizeSetupWorkspacePath(actual.workspacePath)
-  );
-}
-
-export function isRunBinding(
-  value: unknown,
-): value is SetupGenerationRunBinding {
-  if (!value || typeof value !== 'object') return false;
-  const { tabId, runId, workflow, workspacePath } = value as Record<
-    string,
-    unknown
-  >;
-  return (
-    isOnboardingIdentityValue(tabId) &&
-    isOnboardingIdentityValue(runId) &&
-    (workflow === 'setup-agent-generation' ||
-      workflow === 'setup-project-prompt') &&
-    typeof workspacePath === 'string' &&
-    !!normalizeSetupWorkspacePath(workspacePath)
-  );
-}
-
-export const FOREIGN_WORKSPACE_COPY = 'This run belongs to another workspace.';
-export const START_REFUSED_COPY = 'The run could not be started.';
-
-export function startRefusalCopy(reason?: string): string {
-  if (reason === 'invalid-binding' || reason === 'workspace-mismatch')
-    return FOREIGN_WORKSPACE_COPY;
-  if (reason === 'SETUP_MODEL_INVALID')
-    return 'The Setup model could not be resolved. Update Background models and retry.';
-  return START_REFUSED_COPY;
-}
-
-export function hasCommittedGuidance(run: SetupGenerationRunState): boolean {
-  const committed = run.committedState ?? run.result?.committedState;
-  return committed === 'committed' || committed === 'unchanged';
-}
-
-type FinalizationState = Pick<SetupGenerationRunState, 'status'> & {
-  result?: Pick<SetupGenerationResultFacts, 'finalizationFailed'>;
-};
-
-export function isFinalizationCorrection(
-  previous: FinalizationState,
-  run: SetupGenerationRunState,
-): boolean {
-  return (
-    previous.status === 'failed' &&
-    previous.result?.finalizationFailed === true &&
-    run.status === 'completed' &&
-    run.interrupted !== true &&
-    !!run.result?.counts &&
-    Array.isArray(run.result.agentOutcomes)
-  );
-}
-
-export function verifiedRunStatus(
-  run: SetupGenerationRunState | null,
-  binding: SetupGenerationTabBinding | null,
-): SetupRunStatus | null {
-  if (
-    !isRunBinding(run?.binding) ||
-    !matchesBinding(binding, run.binding) ||
-    !isRunLifecycle(run.status) ||
-    (run.source?.kind !== 'workspace-discovery' &&
-      !(
-        run.source?.kind === 'verified-analysis' &&
-        isOnboardingIdentityValue(run.source.analysisRunId)
-      ))
-  ) {
-    return null;
-  }
-  if (run.interrupted === true) return 'interrupted';
-  if (
-    run.binding.workflow === 'setup-project-prompt' &&
-    run.status === 'completed' &&
-    !hasCommittedGuidance(run)
-  )
-    return 'failed';
-  return LIFECYCLE_STATUS[run.status];
-}
+} from '../setup-run.types';
+import {
+  bindingOf,
+  isFinalizationCorrection,
+  RUN_FAILURE_COPY,
+  verifiedRunStatus,
+} from './setup-run-binding';
 
 /** A local start gets a new identity even when the host reuses its checkpoint id. */
-export interface SetupRunAttempt {
+interface AttemptState {
   pending: boolean;
   pendingInitialStarts?: number;
   start?: Promise<SetupRunRecord | null>;
@@ -178,8 +27,10 @@ export interface SetupRunAttempt {
   settled?: boolean;
 }
 
+export type SetupRunAttempt = Readonly<AttemptState>;
+
 export class SetupRunAttempts {
-  private readonly attempts = new Map<string, SetupRunAttempt>();
+  private readonly attempts = new Map<string, AttemptState>();
   private readonly missingSince = new Map<string, number>();
   private readonly finalizationFailures = new Map<string, string>();
   private readonly delivery = signal<ReadonlyMap<string, 'push' | 'fallback'>>(
@@ -190,9 +41,41 @@ export class SetupRunAttempts {
     return this.attempts.get(id);
   }
 
+  public clearPending(id: string, attempt: SetupRunAttempt): void {
+    const current = this.attempts.get(id);
+    if (current === attempt) current.pending = false;
+  }
+
+  public assignOwner(
+    id: string,
+    attempt: SetupRunAttempt,
+    ownerId: string,
+  ): void {
+    const current = this.attempts.get(id);
+    if (current === attempt) current.ownerId = ownerId;
+  }
+
+  public isPending(id: string): boolean {
+    return this.get(id)?.pending ?? false;
+  }
+
+  public hasPendingInitialStarts(
+    attempt: SetupRunAttempt | undefined,
+  ): boolean {
+    return !!attempt?.pendingInitialStarts;
+  }
+
+  public startPromise(id: string): Promise<SetupRunRecord | null> | undefined {
+    return this.get(id)?.start;
+  }
+
+  public resolveTargetId(id: string): string {
+    return this.get(id)?.ownerId ?? id;
+  }
+
   /** Initial starts can receive verified run evidence before the RPC returns. */
   public async startInitial<T>(id: string, send: () => Promise<T>): Promise<T> {
-    const attempt = this.get(id) ?? { pending: false };
+    const attempt = this.attempts.get(id) ?? { pending: false };
     this.attempts.set(id, attempt);
     attempt.pendingInitialStarts = (attempt.pendingInitialStarts ?? 0) + 1;
     this.evidence(id);
@@ -208,7 +91,7 @@ export class SetupRunAttempts {
     id: string,
     send: (attempt: SetupRunAttempt) => Promise<SetupRunRecord | null>,
   ): Promise<SetupRunRecord | null> {
-    const attempt: SetupRunAttempt = { pending: true };
+    const attempt: AttemptState = { pending: true };
     this.attempts.set(id, attempt);
     this.clearEvidence(id);
     const start = send(attempt);
@@ -222,7 +105,7 @@ export class SetupRunAttempts {
   }
 
   public hold(id: string): SetupRunAttempt {
-    const previous = this.get(id);
+    const previous = this.attempts.get(id);
     const attempt = previous?.start ? previous : { pending: true };
     this.clearEvidence(id);
     this.attempts.set(id, attempt);
@@ -249,7 +132,7 @@ export class SetupRunAttempts {
   public settle(id: string, finalizationRunId?: string): void {
     this.clearEvidence(id);
     if (finalizationRunId) this.finalizationFailures.set(id, finalizationRunId);
-    const attempt = this.get(id);
+    const attempt = this.attempts.get(id);
     if (attempt) {
       attempt.settled = true;
       this.prune(id, attempt);
@@ -440,40 +323,4 @@ export async function reconcileGuidanceOutput(
   }
   const generatedAt = status.generatedAt ? Date.parse(status.generatedAt) : NaN;
   return generatedAt > record.createdAt ? 'completed' : 'interrupted';
-}
-
-/** A workspace switch invalidates any in-flight tick before scheduling the next. */
-export class SetupRunPoll {
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  private revision = 0;
-
-  public constructor(
-    private readonly interval: number,
-    private readonly needed: () => boolean,
-    private readonly tick: () => Promise<unknown>,
-  ) {}
-
-  public ensure(): void {
-    if (this.timer !== null) return;
-    const revision = this.revision;
-    this.timer = setTimeout(() => void this.poll(revision), this.interval);
-  }
-
-  public stop(): void {
-    this.revision++;
-    if (this.timer !== null) clearTimeout(this.timer);
-    this.timer = null;
-  }
-
-  private async poll(revision: number): Promise<void> {
-    if (revision !== this.revision) return;
-    try {
-      await this.tick();
-    } finally {
-      if (revision === this.revision) {
-        this.timer = null;
-        if (this.needed()) this.ensure();
-      }
-    }
-  }
 }

@@ -5,7 +5,7 @@ import {
   type SurfaceNavigationResult,
 } from '@ptah-extension/core';
 import type { SetupGenerationWorkflow } from '@ptah-extension/shared';
-import { workflowOfBinding } from './setup-run-attempt';
+import { workflowOfBinding } from './setup-run/setup-run-binding';
 import { entrySubPathFor } from './setup-run-steps';
 import { SetupRunStore } from './setup-run.store';
 import {

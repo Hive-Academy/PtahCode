@@ -1,25 +1,8 @@
 /**
- * SetupRunStore (TASK_2026_2330, plan component 1).
- *
- * The single owner of Setup run records for every workspace: it creates,
- * attaches, reconciles, persists and derives lists and targets. A record is a
- * background workflow's identity in the webview, independent of any chat tab
- * (D1, D2): for generation and guidance the record id is the backend binding
- * `tabId`.
- *
- * The backend stays the source of truth. The persisted index holds ids,
- * statuses and steps; reconcile maps backend state onto them once per
- * workspace activation, on `refresh()`, on pushed reports and on one shared
- * 2.5 s poll while a bound run is running without push.
- *
- * Normative rules (plan "Cancel, retry and re-run rules"):
- * 1. One live run per workflow per workspace: `start` attaches.
- * 2. Cancel waits for backend confirmation (`isCancelling`).
- * 3. Retry reuses the record; generation resumes from its checkpoint.
- * 4. Re-run creates a new record and keeps the old one.
- * 5. Leaving Setup never cancels a run.
- * 6. Dismiss removes terminal records only.
- * 7. A completion without a view sets `unseen`.
+ * Owns Setup records and persistence across workspaces. For bound workflows,
+ * the record id is the backend binding's tab id, independent of any chat tab.
+ * Workflow coordinators reconcile with the backend on activation and refresh,
+ * from pushed reports, and through one shared poll when push is unavailable.
  */
 
 import {
@@ -36,16 +19,11 @@ import {
   TabManagerService,
   consumeLegacySetupTabs,
 } from '@ptah-extension/chat-state';
-import {
-  VSCodeService,
-  isOnboardingIdentityValue,
-  type OnboardingTarget,
-} from '@ptah-extension/core';
+import { VSCodeService, type OnboardingTarget } from '@ptah-extension/core';
 import type {
   SetupGenerationRunBinding,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
-  WizardGetResumableRunResponse,
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { GenerationHandoffStore } from './generation-handoff.store';
@@ -59,20 +37,22 @@ import {
   type SetupRunIndex,
   type StoredSetupRunRecord,
 } from './setup-run-persistence';
+import { SetupRunAnalysisCoordinator } from './setup-run/setup-run-analysis.coordinator';
+import { SetupRunAttempts } from './setup-run/setup-run-attempt';
 import {
   bindingOf,
-  isBound,
+  createBoundRunRecord,
   matchesBinding,
-  readBoundState,
-  reconcileGuidanceOutput,
-  requestBoundStart,
-  SetupRunAttempts,
-  SetupRunPoll,
-  startRefusalCopy,
-  verifiedRunStatus,
-  workflowOfBinding,
-  type SetupRunAttempt,
-} from './setup-run-attempt';
+} from './setup-run/setup-run-binding';
+import { SetupRunBoundCoordinator } from './setup-run/setup-run-bound.coordinator';
+import {
+  isLive,
+  newRunId,
+  type SetupRunRecordHost,
+  type SetupRunReport,
+} from './setup-run/setup-run-host';
+import { applyReportFields } from './setup-run/setup-run-record';
+import { SetupRunSkillReviewCoordinator } from './setup-run/setup-run-skill-review.coordinator';
 import { entrySubPathFor, stepTarget } from './setup-run-steps';
 import {
   SETUP_RUN_STEPS,
@@ -86,8 +66,8 @@ import { SetupWizardStateService } from './setup-wizard-state.service';
 import { WizardAnalysisRunner } from './wizard-analysis-runner.service';
 import { WizardRpcService } from './wizard-rpc.service';
 
-/** Matches the runner's `BACKEND_POLL_INTERVAL_MS`. */
-export const SETUP_RUN_POLL_INTERVAL_MS = 2500;
+export { SETUP_RUN_POLL_INTERVAL_MS } from './setup-run/setup-run-poll';
+export type { SetupRunReport } from './setup-run/setup-run-host';
 
 /** Options of {@link SetupRunStore.start}. */
 export interface SetupRunStartOptions {
@@ -100,41 +80,8 @@ export interface SetupRunStartOptions {
   status?: Extract<SetupRunStatus, 'running' | 'needs-input'>;
 }
 
-/** A state change reported by a workflow owner (event adapter, stores, pages). */
-export interface SetupRunReport {
-  status?: SetupRunStatus;
-  step?: SetupRunStep;
-  backendRunId?: string;
-  analysisRunId?: string;
-  /** User-facing text only; `null` clears it. */
-  error?: string | null;
-  handoffTabId?: string;
-  teamBuilder?: { intent: string; installed: string[] };
-}
-
-const LIVE_STATUSES: ReadonlySet<SetupRunStatus> = new Set([
-  'running',
-  'needs-input',
-]);
-
-/** Fixed user copy; raw backend text never reaches a record. */
-const FAILURE_COPY = {
-  analysis: 'The analysis did not finish.',
-  'skill-review': 'Could not load skill recommendations.',
-};
-
-const ORPHAN_GRACE_MS = 2 * SETUP_RUN_POLL_INTERVAL_MS;
-
-function isLive(record: SetupRunRecord): boolean {
-  return LIVE_STATUSES.has(record.status);
-}
-
 function newestFirst(a: SetupRunRecord, b: SetupRunRecord): number {
   return b.createdAt - a.createdAt || b.updatedAt - a.updatedAt;
-}
-
-function newRunId(): string {
-  return `setup-${crypto.randomUUID()}`;
 }
 
 function browserStorage(): Storage | null {
@@ -158,19 +105,11 @@ export class SetupRunStore {
 
   private readonly _index = signal<SetupRunIndex>({});
   private readonly _cancelling = signal<ReadonlySet<string>>(new Set());
-  private readonly attempts = new SetupRunAttempts();
 
   /** Records whose work started, was adopted live, or pushed in this session. */
   private readonly liveThisSession = new Set<string>();
-  /** Analysis records for which the runner was seen running. */
-  private readonly runnerSeen = new Set<string>();
   /** Records a view currently shows (rule 7). */
   private readonly viewing = new Set<string>();
-  /** The in-flight judged review per skill-review record. */
-  private readonly reviews = new Map<
-    string,
-    Promise<WizardRecommendAnalysisSkillsResult>
-  >();
   private writeQueued = false;
   private reconcileSequence = 0;
 
@@ -204,24 +143,44 @@ export class SetupRunStore {
   /** Ids whose cancel waits for backend confirmation. */
   public readonly cancellingIds = this._cancelling.asReadonly();
 
-  private readonly pollNeeded = computed(() =>
-    this.runs().some(
-      (record) => isBound(record.workflow) && this.attempts.shouldPoll(record),
-    ),
-  );
+  private readonly host: SetupRunRecordHost = {
+    get: (id) => this.get(id),
+    runsFor: (workspace) => this.runsFor(workspace),
+    workspacePath: this.workspacePath,
+    isCancelling: (id) => this.isCancelling(id),
+    setCancelling: (id, on) => this.setCancelling(id, on),
+    insert: (record) => this.insert(record),
+    apply: (id, update, correction, finalizationRunId) =>
+      this.apply(id, update, correction, finalizationRunId),
+    patch: (id, change) => this.patch(id, change),
+    adopt: (binding) => this.adopt(binding),
+    markLiveThisSession: (id) => this.liveThisSession.add(id),
+    isLiveThisSession: (id) => this.liveThisSession.has(id),
+    setGuidanceHandoff: (id, state) => this.setGuidanceHandoff(id, state),
+  };
 
-  private readonly poll = new SetupRunPoll(
-    SETUP_RUN_POLL_INTERVAL_MS,
-    () => this.pollNeeded(),
-    () =>
-      Promise.all(
-        this.runs()
-          .filter(
-            (record) =>
-              isBound(record.workflow) && this.attempts.shouldPoll(record),
-          )
-          .map((record) => this.reconcileBound(record)),
-      ),
+  private readonly attempts = new SetupRunAttempts();
+  private readonly bound = new SetupRunBoundCoordinator(
+    this.host,
+    this.rpc,
+    this.attempts,
+    this.runs,
+    (): boolean => this.pollNeeded(),
+    // Resolve lazily because the hand-off opens its child through this store.
+    () => this.injector.get(GenerationHandoffStore),
+  );
+  private readonly analysis = new SetupRunAnalysisCoordinator(
+    this.host,
+    this.runner,
+    this.wizardState,
+    this.rpc,
+  );
+  private readonly skillReview = new SetupRunSkillReviewCoordinator(
+    this.host,
+    this.rpc,
+  );
+  private readonly pollNeeded = computed(() =>
+    this.runs().some((record) => this.bound.shouldPoll(record)),
   );
 
   public constructor() {
@@ -234,8 +193,8 @@ export class SetupRunStore {
     effect(() => {
       const workspace = this.workspacePath();
       untracked(() => {
-        this.poll.stop();
-        if (this.pollNeeded()) this.poll.ensure();
+        this.bound.stopPoll();
+        if (this.pollNeeded()) this.bound.ensurePoll();
         if (workspace) void this.activate();
       });
     });
@@ -243,16 +202,16 @@ export class SetupRunStore {
       const running = this.runner.isRunning();
       const canceling = this.runner.isCanceling();
       this.runner.runGeneration();
-      untracked(() => this.syncAnalysisFromRunner(running, canceling));
+      untracked(() => this.analysis.syncFromRunner(running, canceling));
     });
     effect(() => {
       const needed = this.pollNeeded();
-      untracked(() => (needed ? this.poll.ensure() : this.poll.stop()));
+      untracked(() =>
+        needed ? this.bound.ensurePoll() : this.bound.stopPoll(),
+      );
     });
-    inject(DestroyRef).onDestroy(() => this.poll.stop());
+    inject(DestroyRef).onDestroy(() => this.bound.stopPoll());
   }
-
-  // ---------------------------------------------------------------- reads
 
   /** A workspace's records, newest first. Reactive inside a computed. */
   public runsFor(
@@ -308,8 +267,6 @@ export class SetupRunStore {
     return this._cancelling().has(id);
   }
 
-  // ------------------------------------------------------------ commands
-
   /**
    * Start a run, or attach to the live one of the same workflow and
    * workspace (rule 1). Records only: the caller starts the backend work
@@ -361,22 +318,8 @@ export class SetupRunStore {
       return matchesBinding(this.bindingFor(existing), binding)
         ? existing
         : null;
-    const workspace = normalizeSetupWorkspacePath(binding.workspacePath);
-    if (!workspace || !isOnboardingIdentityValue(binding.tabId)) return null;
-    const now = Date.now();
-    const record: SetupRunRecord = {
-      id: binding.tabId,
-      workspacePath: workspace,
-      workflow: workflowOfBinding(binding.workflow),
-      status: 'running',
-      step: 'generating',
-      backendRunId: null,
-      analysisRunId: null,
-      parentId: null,
-      unseen: false,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const record = createBoundRunRecord(binding);
+    if (!record) return null;
     this.liveThisSession.add(record.id);
     this.insert(record);
     return record;
@@ -415,83 +358,31 @@ export class SetupRunStore {
     id: string,
     run: SetupGenerationRunState,
   ): SetupRunRecord | null {
-    this.observeRun(id, run, this.attempts.get(id));
-    return this.get(id);
+    return this.bound.reportRun(id, run);
   }
 
   public startInitial<T>(
     binding: SetupGenerationTabBinding,
     send: () => Promise<T>,
   ): Promise<T> {
-    const record = this.get(binding.tabId);
-    if (
-      !record ||
-      !isLive(record) ||
-      !matchesBinding(this.bindingFor(record), binding)
-    )
-      return send();
-    this.liveThisSession.add(record.id);
-    return this.attempts.startInitial(record.id, send);
+    return this.bound.startInitial(binding, send);
   }
 
   public reporterFor(id: string): (run: SetupGenerationRunState) => void {
-    const attempt = this.attempts.get(id);
-    return (run) => this.observeRun(id, run, attempt);
+    return this.bound.reporterFor(id);
   }
 
   public reportStream(pushed: SetupGenerationRunBinding): boolean {
-    const record = this.get(pushed.tabId);
-    if (
-      !this.attempts.canObserve(
-        record,
-        this.attempts.get(pushed.tabId),
-        pushed.runId,
-      )
-    )
-      return false;
-    if (!matchesBinding(this.bindingFor(record), pushed)) return false;
-    this.liveThisSession.add(record.id);
-    this.attempts.evidence(record.id);
-    this.attempts.pushed(record.id);
-    this.apply(record.id, {
-      status: 'running',
-      step: 'generating',
-      backendRunId: pushed.runId,
-      error: null,
-    });
-    return true;
+    return this.bound.reportStream(pushed);
   }
 
-  public async verifyTerminal(
-    pushed: SetupGenerationRunBinding,
-  ): Promise<boolean> {
-    const { tabId: id, runId } = pushed;
-    const attempt = this.attempts.get(id);
-    const record = this.get(id);
-    if (
-      !this.attempts.canObserve(record, attempt, runId) &&
-      !this.attempts.hasFinalizationFailure(record, attempt, runId)
-    )
-      return false;
-    const binding = this.bindingFor(record);
-    if (!binding || !matchesBinding(binding, pushed)) return false;
-    this.liveThisSession.add(id);
-    const run = await readBoundState(this.rpc, binding, runId);
-    const observed =
-      run?.binding?.runId === runId && this.observeRun(id, run, attempt);
-    if (this.attempts.canObserve(this.get(id), attempt, runId))
-      this.attempts.fallback(id);
-    return (
-      observed ||
-      (this.attempts.get(id) === attempt &&
-        this.get(id)?.backendRunId === runId)
-    );
+  public verifyTerminal(pushed: SetupGenerationRunBinding): Promise<boolean> {
+    return this.bound.verifyTerminal(pushed);
   }
 
   /** Resolve the record carrying the run, including an owner reported by a settled start. */
   public whenStarted(id: string): Promise<SetupRunRecord | null> {
-    const attempt = this.attempts.get(id);
-    return attempt?.start ?? Promise.resolve(this.get(attempt?.ownerId ?? id));
+    return this.bound.whenStarted(id);
   }
 
   /** The backend binding of a generation or guidance record; else `null`. */
@@ -531,10 +422,10 @@ export class SetupRunStore {
     try {
       switch (record.workflow) {
         case 'analysis':
-          return await this.cancelAnalysis(record);
+          return await this.analysis.cancel(record);
         case 'agent-generation':
         case 'project-guidance':
-          return await this.cancelBound(record);
+          return await this.bound.cancel(record);
         case 'skill-review':
         case 'team-builder':
           // The work runs in this webview (the review call, the team-builder
@@ -564,7 +455,7 @@ export class SetupRunStore {
     switch (record.workflow) {
       case 'analysis':
         this.apply(id, { status: 'running', step: 'analyzing', error: null });
-        this.runAnalysis(record, this.runner.resumableAnalysis() !== null);
+        this.analysis.run(record, this.runner.resumableAnalysis() !== null);
         return this.get(id);
       case 'skill-review':
         this.reviewSkills(id, { force: true }).catch(() => {
@@ -573,7 +464,7 @@ export class SetupRunStore {
         return this.get(id);
       case 'agent-generation':
       case 'project-guidance':
-        return this.startBound(record, 'retry');
+        return this.bound.start(record, 'retry');
       case 'team-builder':
         this.apply(id, { status: 'needs-input', step: 'review', error: null });
         return this.get(id);
@@ -609,7 +500,7 @@ export class SetupRunStore {
     if (!record) return null;
     switch (record.workflow) {
       case 'analysis':
-        this.runAnalysis(record, false);
+        this.analysis.run(record, false);
         break;
       case 'skill-review':
         this.reviewSkills(record.id, { force: true }).catch(() => {
@@ -617,7 +508,7 @@ export class SetupRunStore {
         });
         break;
       case 'project-guidance':
-        void this.startBound(record, 'regenerate');
+        void this.bound.start(record, 'regenerate');
         break;
       case 'agent-generation':
       case 'team-builder':
@@ -634,48 +525,11 @@ export class SetupRunStore {
    *
    * Rejects with the RPC error (a `WizardRpcError` carrying its code).
    */
-  public async reviewSkills(
+  public reviewSkills(
     id: string,
     options: { force?: boolean } = {},
   ): Promise<WizardRecommendAnalysisSkillsResult | null> {
-    const inFlight = this.reviews.get(id);
-    if (inFlight) return inFlight;
-    const record = this.get(id);
-    const analysisRunId = record?.analysisRunId;
-    if (!record || record.workflow !== 'skill-review' || !analysisRunId) {
-      return null;
-    }
-    if (!options.force) {
-      const stored = await this.readStoredReview(analysisRunId);
-      if (stored) {
-        this.applyReviewed(id);
-        return stored;
-      }
-      const raced = this.reviews.get(id);
-      if (raced) return raced;
-    }
-    const hadReview =
-      record.status === 'needs-input' || record.status === 'completed';
-    const previousStatus = record.status;
-    this.liveThisSession.add(id);
-    this.apply(id, { status: 'running', step: 'reviewing', error: null });
-    const review = this.rpc.recommendAnalysisSkills(analysisRunId);
-    this.reviews.set(id, review);
-    try {
-      const result = await review;
-      this.applyReviewed(id);
-      return result;
-    } catch (error: unknown) {
-      this.apply(
-        id,
-        hadReview
-          ? { status: previousStatus, step: 'selecting' }
-          : { status: 'failed', error: FAILURE_COPY['skill-review'] },
-      );
-      throw error;
-    } finally {
-      if (this.reviews.get(id) === review) this.reviews.delete(id);
-    }
+    return this.skillReview.reviewSkills(id, options);
   }
 
   /** Reconcile the active workspace's records with the backend now. */
@@ -683,38 +537,10 @@ export class SetupRunStore {
     return this.reconcile();
   }
 
-  // --------------------------------------------------------- reconcile
-
   private async activate(): Promise<void> {
     this.adoptLegacyTabs();
-    this.restoreGuidanceHandoffs();
+    this.bound.restoreGuidanceHandoffs();
     await this.reconcile();
-  }
-
-  private restoreGuidanceHandoffs(): void {
-    const records = this.runsFor(this.workspacePath());
-    const parents = new Set(
-      records
-        .filter((record) => record.workflow === 'project-guidance')
-        .map((record) => record.parentId),
-    );
-    for (const record of records) {
-      if (
-        record.workflow !== 'agent-generation' ||
-        record.status !== 'completed' ||
-        record.guidanceHandoff === 'skipped' ||
-        record.guidanceHandoff === 'consumed'
-      )
-        continue;
-      if (parents.has(record.id)) {
-        this.setGuidanceHandoff(record.id, 'consumed');
-        continue;
-      }
-      if (typeof record.guidanceHandoff !== 'number') continue;
-      const handoff = this.injector.get(GenerationHandoffStore);
-      if (!handoff.pendingFor(record.id))
-        handoff.schedule(record.id, record.workspacePath);
-    }
   }
 
   /** D6: restored chat tabs of a Setup workflow hand their binding over once. */
@@ -729,8 +555,8 @@ export class SetupRunStore {
     const resumable = await this.rpc.getResumableRun();
     if (sequence !== this.reconcileSequence) return;
     if (this.workspacePath() !== workspace) return;
-    this.reconcileAnalysis(workspace, resumable);
-    this.adoptResumableGeneration(workspace, resumable);
+    this.analysis.reconcile(workspace, resumable);
+    this.bound.adoptResumableGeneration(workspace, resumable);
     await Promise.all(
       this.runsFor(workspace)
         .filter((record) => isLive(record))
@@ -742,10 +568,10 @@ export class SetupRunStore {
     switch (record.workflow) {
       case 'agent-generation':
       case 'project-guidance':
-        await this.reconcileBound(record);
+        await this.bound.reconcile(record);
         return;
       case 'skill-review':
-        return this.reconcileReview(record);
+        return this.skillReview.reconcile(record);
       case 'team-builder':
         // No backend run: an install or launch cut by a reload is interrupted.
         if (
@@ -760,403 +586,16 @@ export class SetupRunStore {
     }
   }
 
-  private reconcileAnalysis(
-    workspace: string,
-    resumable: WizardGetResumableRunResponse,
-  ): void {
-    const manifest = resumable.analysis?.manifest ?? null;
-    const active =
-      resumable.analysisActive === true ||
-      this.runner.isRunningForWorkspace(workspace);
-    const live = this.runsFor(workspace).filter(
-      (record) => record.workflow === 'analysis' && isLive(record),
-    );
-    if (active) {
-      if (live.length === 0) {
-        this.adoptAnalysis(workspace, 'running', manifest?.runId ?? null);
-      }
-      return;
-    }
-    for (const record of live) {
-      if (this.liveThisSession.has(record.id)) continue;
-      if (
-        !manifest ||
-        (record.backendRunId !== null && record.backendRunId !== manifest.runId)
-      ) {
-        // No evidence about this run: keep the last known status.
-        continue;
-      }
-      this.apply(record.id, {
-        status:
-          manifest.lifecycle === 'completed' ? 'completed' : 'interrupted',
-        backendRunId: manifest.runId,
-        analysisRunId: manifest.runId,
-      });
-    }
-    if (
-      manifest &&
-      manifest.lifecycle !== 'completed' &&
-      !this.runsFor(workspace).some(
-        (record) =>
-          record.workflow === 'analysis' &&
-          (record.backendRunId === manifest.runId || isLive(record)),
-      )
-    ) {
-      this.adoptAnalysis(workspace, 'interrupted', manifest.runId);
-    }
-  }
-
-  private adoptAnalysis(
-    workspace: string,
-    status: SetupRunStatus,
-    runId: string | null,
-  ): void {
-    const now = Date.now();
-    this.insert({
-      id: newRunId(),
-      workspacePath: workspace,
-      workflow: 'analysis',
-      status,
-      step: 'analyzing',
-      backendRunId: runId,
-      analysisRunId: runId,
-      parentId: null,
-      unseen: isTerminalSetupRunStatus(status),
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  /** 1.4: an unfinished checkpoint without a record becomes one record. */
-  private adoptResumableGeneration(
-    workspace: string,
-    resumable: WizardGetResumableRunResponse,
-  ): void {
-    const generation = resumable.generation;
-    if (
-      !generation ||
-      generation.lifecycle === 'completed' ||
-      !isOnboardingIdentityValue(generation.runId) ||
-      this.runsFor(workspace).some(
-        (record) =>
-          record.workflow === 'agent-generation' &&
-          (record.backendRunId === generation.runId || isLive(record)),
-      )
-    ) {
-      return;
-    }
-    const status: SetupRunStatus =
-      generation.lifecycle === 'running' ? 'running' : 'interrupted';
-    const now = Date.now();
-    this.insert({
-      id: newRunId(),
-      workspacePath: workspace,
-      workflow: 'agent-generation',
-      status,
-      step: 'generating',
-      backendRunId: generation.runId,
-      analysisRunId: null,
-      parentId: null,
-      unseen: status === 'interrupted',
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  private async reconcileBound(
-    record: SetupRunRecord,
-    ownerAttempt?: SetupRunAttempt,
-  ): Promise<SetupGenerationRunState | null> {
-    const binding = this.bindingFor(record);
-    const attempt = this.attempts.get(record.id);
-    if (
-      !binding ||
-      record.step === 'preview' ||
-      (attempt?.pending && attempt !== ownerAttempt)
-    )
-      return null;
-    const initialStartPending = !!attempt?.pendingInitialStarts;
-    const run = await readBoundState(
-      this.rpc,
-      binding,
-      record.backendRunId ?? undefined,
-    );
-    if (ownerAttempt) ownerAttempt.pending = false;
-    if (run) return this.observeRun(record.id, run, attempt) ? run : null;
-    const stillMissing = (): boolean =>
-      !initialStartPending &&
-      !attempt?.pendingInitialStarts &&
-      this.get(record.id) === record &&
-      this.attempts.canObserve(record, attempt);
-    if (run !== null || !stillMissing()) return null;
-    const live = this.liveThisSession.has(record.id);
-    if (live && !this.attempts.orphaned(record.id, ORPHAN_GRACE_MS))
-      return null;
-    const status =
-      !live && record.workflow === 'project-guidance'
-        ? await reconcileGuidanceOutput(this.rpc, record)
-        : 'interrupted';
-    if (status && stillMissing()) this.apply(record.id, { status });
-    return null;
-  }
-
-  private observeRun(
-    id: string,
-    run: SetupGenerationRunState,
-    attempt: SetupRunAttempt | undefined,
-  ): boolean {
-    const observation = this.attempts.observation(this.get(id), attempt, run);
-    if (!observation) return false;
-    this.attempts.evidence(id);
-    this.liveThisSession.add(id);
-    const { update, correction, finalizationRunId } = observation;
-    this.apply(id, update, correction, finalizationRunId);
-    return true;
-  }
-
-  private async reconcileReview(record: SetupRunRecord): Promise<void> {
-    if (
-      record.status !== 'running' ||
-      this.reviews.has(record.id) ||
-      this.liveThisSession.has(record.id) ||
-      !record.analysisRunId
-    ) {
-      return;
-    }
-    let stored: Awaited<ReturnType<WizardRpcService['getSkillReview']>>;
-    try {
-      stored = await this.rpc.getSkillReview(record.analysisRunId);
-    } catch {
-      // degradation-audit: optional-capability - an unreadable stored review keeps the last known status
-      return;
-    }
-    if (this.reviews.has(record.id)) return;
-    if (stored.review) this.applyReviewed(record.id);
-    // The judged call was cut by a reload before it stored a review.
-    else this.apply(record.id, { status: 'interrupted' });
-  }
-
-  private async readStoredReview(
-    analysisRunId: string,
-  ): Promise<WizardRecommendAnalysisSkillsResult | null> {
-    try {
-      return (await this.rpc.getSkillReview(analysisRunId)).review;
-    } catch {
-      // degradation-audit: optional-capability - an unreadable stored review falls back to a new judged review
-      return null;
-    }
-  }
-
-  private applyReviewed(id: string): void {
-    const record = this.get(id);
-    if (!record || record.status === 'completed') return;
-    this.apply(id, { status: 'needs-input', step: 'selecting', error: null });
-  }
-
-  /** Map the runner's signals onto the analysis records it ran here. */
-  private syncAnalysisFromRunner(running: boolean, canceling: boolean): void {
-    const workspace = this.workspacePath();
-    if (!workspace) return;
-    const live = this.runsFor(workspace).filter(
-      (record) => record.workflow === 'analysis' && isLive(record),
-    );
-    if (running && this.runner.isRunningForWorkspace(workspace)) {
-      for (const record of live) {
-        this.runnerSeen.add(record.id);
-        if (canceling) this.setCancelling(record.id, true);
-      }
-      return;
-    }
-    for (const record of live) {
-      if (!this.runnerSeen.has(record.id)) continue;
-      this.runnerSeen.delete(record.id);
-      const result = this.wizardState.multiPhaseResult();
-      const ownsResult = this.runner.isResultForWorkspace(workspace);
-      if (this.isCancelling(record.id)) {
-        this.setCancelling(record.id, false);
-        this.apply(record.id, { status: 'cancelled' });
-      } else if (ownsResult && this.runner.errorMessage()) {
-        this.apply(record.id, {
-          status: 'failed',
-          error: FAILURE_COPY.analysis,
-        });
-      } else if (
-        ownsResult &&
-        result &&
-        result.manifest.lifecycle === 'completed' &&
-        isOnboardingIdentityValue(result.manifest.runId)
-      ) {
-        this.apply(record.id, {
-          status: 'completed',
-          backendRunId: result.manifest.runId,
-          analysisRunId: result.manifest.runId,
-        });
-      } else {
-        this.apply(record.id, { status: 'interrupted' });
-      }
-    }
-  }
-
-  // ------------------------------------------------- backend commands
-
-  private runAnalysis(record: SetupRunRecord, resume: boolean): void {
-    this.liveThisSession.add(record.id);
-    const run = resume
-      ? this.runner.resumeAnalysis(record.workspacePath)
-      : this.runner.startFreshAnalysis(record.workspacePath);
-    // The runner effect maps the outcome; a rejection is already in its signals.
-    run.catch(() => {
-      // degradation-audit: optional-capability - the runner records the failure in errorMessage
-    });
-  }
-
-  private async cancelAnalysis(record: SetupRunRecord): Promise<boolean> {
-    if (this.runner.isRunningForWorkspace(record.workspacePath)) {
-      this.runnerSeen.delete(record.id);
-      await this.runner.cancel();
-    } else {
-      await this.rpc.cancelAnalysis();
-    }
-    const resumable = await this.rpc.getResumableRun();
-    if (resumable.analysisActive === true) return false;
-    this.apply(record.id, { status: 'cancelled' });
-    return true;
-  }
-
-  private async cancelBound(record: SetupRunRecord): Promise<boolean> {
-    const binding = this.bindingFor(record);
-    const attempt = this.attempts.get(record.id);
-    if (!binding || attempt?.pending) return false;
-    let runId = record.backendRunId;
-    try {
-      if (!runId) {
-        const run = await readBoundState(this.rpc, binding);
-        if (
-          !this.attempts.canObserve(
-            this.get(record.id),
-            attempt,
-            run?.binding?.runId,
-          )
-        )
-          return false;
-        if (run === null && this.get(record.id)?.backendRunId === null) {
-          this.apply(record.id, { status: 'cancelled' });
-          return true;
-        }
-        const status = verifiedRunStatus(run ?? null, binding);
-        if (!status || !run) return false;
-        if (isTerminalSetupRunStatus(status)) {
-          this.observeRun(record.id, run, attempt);
-          return this.get(record.id)?.status === 'cancelled';
-        }
-        runId = run.binding.runId;
-      }
-      if (await this.rpc.cancelBoundRun({ ...binding, runId })) {
-        if (this.attempts.canObserve(this.get(record.id), attempt, runId)) {
-          this.apply(record.id, { status: 'cancelled' });
-        }
-        return this.get(record.id)?.status === 'cancelled';
-      }
-    } catch {
-      // degradation-audit: optional-capability - an unconfirmed stop keeps the run's last known status
-      return false;
-    }
-    if (this.attempts.canObserve(this.get(record.id), attempt, runId)) {
-      await this.reconcileBound(this.get(record.id) ?? record);
-    }
-    return this.get(record.id)?.status === 'cancelled';
-  }
-
-  private startBound(
-    record: SetupRunRecord,
-    mode: 'retry' | 'regenerate',
-  ): Promise<SetupRunRecord | null> {
-    return this.attempts.start(record.id, (attempt) =>
-      this.sendBoundStart(record, mode, attempt),
-    );
-  }
-
-  private async sendBoundStart(
-    record: SetupRunRecord,
-    mode: 'retry' | 'regenerate',
-    attempt: SetupRunAttempt,
-  ): Promise<SetupRunRecord | null> {
-    const binding = this.bindingFor(record);
-    if (!binding) return null;
-    this.liveThisSession.add(record.id);
-    this.apply(record.id, {
-      status: 'running',
-      step: 'generating',
-      error: null,
-    });
-    const response = await requestBoundStart(this.rpc, binding, mode);
-    attempt.pending = false;
-    if (this.attempts.get(record.id) !== attempt) return null;
-    if (!response || 'refusalCode' in response) {
-      this.apply(record.id, {
-        status: mode === 'retry' ? record.status : 'failed',
-        error: startRefusalCopy(response?.refusalCode),
-      });
-      return this.get(record.id);
-    }
-    const { accepted, rejection } = response;
-    if (accepted && isOnboardingIdentityValue(accepted.runId)) {
-      this.apply(record.id, { backendRunId: accepted.runId });
-      // The backend can finish before its acceptance reaches us. Read after
-      // acceptance, especially when retry reused the previous checkpoint id.
-      const current = this.get(record.id);
-      if (current) void this.reconcileBound(current);
-      return current;
-    }
-    if (rejection?.reason === 'blocked' && rejection.ownerTabId) {
-      const { owner } = await this.resolveBlockedStart(
-        binding,
-        rejection.ownerTabId,
-      );
-      if (this.attempts.get(record.id) !== attempt) return this.get(record.id);
-      if (owner?.id === record.id) return owner;
-      if (owner) {
-        attempt.ownerId = owner.id;
-        this.apply(record.id, {
-          status: record.status === 'running' ? 'failed' : record.status,
-          error: record.error ?? null,
-        });
-        return owner;
-      }
-    }
-    this.apply(record.id, {
-      status: 'failed',
-      error: startRefusalCopy(rejection?.reason),
-    });
-    return this.get(record.id);
-  }
-
   /** Resolve both initial starts and repeats against the backend's owner. */
-  public async resolveBlockedStart(
+  public resolveBlockedStart(
     binding: SetupGenerationTabBinding,
     ownerTabId: string,
   ): Promise<{
     owner: SetupRunRecord | null;
     run: SetupGenerationRunState | null;
   }> {
-    const owner = this.adopt({ ...binding, tabId: ownerTabId });
-    if (owner?.id !== binding.tabId) return { owner, run: null };
-    const attempt = this.attempts.hold(owner.id);
-    this.liveThisSession.add(owner.id);
-    this.attempts.fallback(owner.id);
-    this.patch(owner.id, (record) => ({
-      ...record,
-      backendRunId: null,
-      step: 'generating',
-      status: 'running',
-      unseen: false,
-    }));
-    const current = this.get(owner.id);
-    const run = current && (await this.reconcileBound(current, attempt));
-    return { owner: this.get(owner.id), run };
+    return this.bound.resolveBlockedStart(binding, ownerTabId);
   }
-
-  // ------------------------------------------------------ index writes
 
   private apply(
     id: string,
@@ -1165,41 +604,12 @@ export class SetupRunStore {
     finalizationRunId?: string,
   ): void {
     this.patch(id, (record) => {
-      const next: SetupRunRecord = { ...record };
-      if (update.status !== undefined) next.status = update.status;
-      if (update.step !== undefined) {
-        if (isSetupRunStepOf(record.workflow, update.step)) {
-          next.step = update.step;
-        } else {
-          console.warn(
-            `[SetupRunStore] Ignored step "${update.step}" for ${record.workflow}.`,
-          );
-        }
-      }
-      if (update.backendRunId !== undefined) {
-        next.backendRunId = update.backendRunId;
-      }
-      if (update.analysisRunId !== undefined) {
-        next.analysisRunId = update.analysisRunId;
-      }
-      if (update.error === null) delete next.error;
-      else if (update.error !== undefined) next.error = update.error;
-      if (record.workflow === 'team-builder') {
-        if (update.handoffTabId !== undefined) {
-          next.handoffTabId = update.handoffTabId;
-        }
-        if (update.teamBuilder !== undefined) {
-          next.teamBuilder = {
-            intent: update.teamBuilder.intent,
-            installed: [...update.teamBuilder.installed],
-          };
-        }
-      }
+      const next = applyReportFields(record, update);
       const becameTerminal =
         isTerminalSetupRunStatus(next.status) &&
         !isTerminalSetupRunStatus(record.status);
       if (becameTerminal || correction) {
-        this.attempts.settle(id, finalizationRunId);
+        this.bound.settle(id, finalizationRunId);
         next.unseen = !this.viewing.has(id);
         this.liveThisSession.delete(id);
         this.setCancelling(id, false);
@@ -1226,16 +636,7 @@ export class SetupRunStore {
       ),
     }));
     this.scheduleWrite();
-    if (
-      updated.workflow === 'agent-generation' &&
-      record.status !== 'completed' &&
-      updated.status === 'completed'
-    ) {
-      // Resolve lazily because the hand-off opens its child through this store.
-      this.injector
-        .get(GenerationHandoffStore)
-        .schedule(updated.id, updated.workspacePath);
-    }
+    this.bound.scheduleGuidanceHandoff(record, updated);
   }
 
   private insert(record: SetupRunRecord): void {
@@ -1251,7 +652,7 @@ export class SetupRunStore {
 
   private forget(id: string): void {
     this.viewing.delete(id);
-    this.attempts.forget(id);
+    this.bound.forget(id);
     this.liveThisSession.delete(id);
     this.setCancelling(id, false);
   }

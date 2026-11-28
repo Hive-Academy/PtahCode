@@ -12,7 +12,7 @@ import type {
   SetupGenerationRunBinding,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
-import { startRefusalCopy } from './setup-run-attempt';
+import { startRefusalCopy } from './setup-run/setup-run-binding';
 import { normalizeSetupWorkspacePath } from './setup-run-persistence';
 import { SetupRunStore } from './setup-run.store';
 import {
