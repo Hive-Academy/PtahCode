@@ -279,6 +279,27 @@ describe('AgentGenerationRunPage', () => {
     expect(runs.retry).toHaveBeenCalledWith(binding.tabId);
   });
 
+  it('shows a refused resume on the same page without entering a running state', async () => {
+    const interrupted: SetupRunRecord = {
+      ...initialRecord,
+      status: 'interrupted',
+    };
+    record.set(interrupted);
+    runs.retry.mockResolvedValue({
+      ...interrupted,
+      error: 'Could not resume the saved agent generation.',
+    });
+    const { fixture, page } = await render();
+    click(page, 'Resume');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(page.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not resume the saved agent generation.',
+    );
+    expect(page.textContent).not.toContain('Generating agents…');
+    expect(TestBed.inject(Router).navigate).not.toHaveBeenCalled();
+  });
+
   it('links the preview-required state to the run entry with its analysis identity', async () => {
     record.set({
       ...initialRecord,

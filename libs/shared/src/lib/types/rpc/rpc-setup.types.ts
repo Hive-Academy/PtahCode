@@ -127,6 +127,8 @@ export interface SetupGenerationRunState {
   source: GenerationContextSource;
   effectiveProvider: string;
   effectiveModel: string;
+  /** Written outcomes already recorded by the agent generation checkpoint. */
+  agentsWritten?: number;
   result?: SetupGenerationResultFacts;
 }
 
@@ -382,6 +384,8 @@ export interface ResumableGenerationAgent {
 /** Read-only DTO for a persisted generation checkpoint. */
 export interface ResumableGenerationRun {
   runId: string;
+  /** The tab identity required to reopen a bound checkpoint. */
+  ownerTabId?: string;
   /** `null` when the checkpoint carries no analysis directory. */
   analysisDirectory: string | null;
   outputDirectory: string;

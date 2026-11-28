@@ -87,6 +87,7 @@ import {
   findOpenWorkspaceRoot,
   isAuthorizedWorkspace,
 } from '../utils/workspace-authorization';
+import { sameWorkspacePath } from './wizard-generation-binding';
 import { toResumableGenerationRun } from './wizard-generation-checkpoint.service';
 import {
   WizardDeepAnalyzeParamsSchema,
@@ -694,7 +695,9 @@ export class SetupRpcHandlers {
         analysisActive: false,
       };
 
-      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
+      const workspaceRoot = await this.analysisWorkspaceRoot(
+        params.workspacePath,
+      );
       if (!workspaceRoot) return none;
 
       const activeBefore = this.getActiveAnalysisRun(workspaceRoot);
@@ -804,7 +807,9 @@ export class SetupRpcHandlers {
       WizardAnalysisStatusResponse
     >('wizard:analysis-status', async (rawParams) => {
       const params = this.parse(WizardAnalysisStatusParamsSchema, rawParams);
-      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
+      const workspaceRoot = await this.analysisWorkspaceRoot(
+        params.workspacePath,
+      );
       const freshnessService = this.resolveService<AnalysisFreshnessService>(
         AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
         'AnalysisFreshnessService',
@@ -821,16 +826,24 @@ export class SetupRpcHandlers {
     });
   }
 
-  private analysisWorkspaceRoot(workspacePath?: string): string | null {
-    if (!workspacePath)
+  private async analysisWorkspaceRoot(
+    workspacePath?: string,
+  ): Promise<string | null> {
+    if (workspacePath === undefined)
       return this.workspaceProvider.getWorkspaceRoot() ?? null;
-    if (!isAuthorizedWorkspace(workspacePath, this.workspaceProvider)) {
-      throw new RpcUserError(
-        'Access denied: workspace path is not an open folder.',
-        'UNAUTHORIZED_WORKSPACE',
-      );
+
+    const openRoot = path.isAbsolute(workspacePath)
+      ? findOpenWorkspaceRoot(workspacePath, this.workspaceProvider)
+      : undefined;
+    if (openRoot) {
+      // Resolve the original spelling before comparing. A symlink followed by
+      // '..' can resolve outside the folder that the lexical path matched.
+      if (await sameWorkspacePath(workspacePath, openRoot)) return openRoot;
     }
-    return workspacePath;
+    throw new RpcUserError(
+      'Access denied: workspace path is not an open folder.',
+      'UNAUTHORIZED_WORKSPACE',
+    );
   }
 
   /** Contents of every `completed` phase file; failed partials stay excluded. */
@@ -918,7 +931,9 @@ export class SetupRpcHandlers {
       const params = this.parse(WizardListAnalysesParamsSchema, rawParams);
       this.logger.debug('RPC: wizard:list-analyses called');
 
-      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
+      const workspaceRoot = await this.analysisWorkspaceRoot(
+        params.workspacePath,
+      );
       if (!workspaceRoot) {
         return { analyses: [] };
       }
@@ -954,7 +969,9 @@ export class SetupRpcHandlers {
         filename: params.filename,
       });
 
-      const workspaceRoot = this.analysisWorkspaceRoot(params.workspacePath);
+      const workspaceRoot = await this.analysisWorkspaceRoot(
+        params.workspacePath,
+      );
       if (!workspaceRoot) {
         throw new RpcUserError(
           'No workspace folder open.',

@@ -111,12 +111,20 @@ describe('SetupGenerationOpenHandler', () => {
       if (outcome === 'rejected') openWorkflow.mockRejectedValue(new Error());
       else openWorkflow.mockResolvedValue(outcome);
       const handler = setup();
-      push(handler);
+      push(handler, { ...payload, workflow: 'setup-project-prompt' });
       await Promise.resolve();
 
       expect(handler.launchNotice()).toContain('Try Continue again');
     },
   );
+
+  it('points declined agent generation opens to Setup', async () => {
+    openWorkflow.mockResolvedValue('failed');
+    const handler = setup();
+    push(handler);
+    await Promise.resolve();
+    expect(handler.launchNotice()).toContain('Open Setup to find saved runs.');
+  });
 
   it.each(['cancelled', 'already-there'])(
     'leaves the retry notice clear when navigation is %s',

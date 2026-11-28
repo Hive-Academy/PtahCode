@@ -193,6 +193,7 @@ export class SetupRunAttempts {
       backendRunId: string;
       error: string | null;
       analysisRunId: string | undefined;
+      agentsWritten?: number;
     };
     correction: boolean;
     finalizationRunId: string | undefined;
@@ -213,6 +214,10 @@ export class SetupRunAttempts {
         status,
         ...(status === 'running' ? { step: 'generating' as const } : {}),
         backendRunId: runId,
+        agentsWritten:
+          run.binding.workflow === 'setup-agent-generation'
+            ? (run.result?.counts?.written ?? run.agentsWritten)
+            : undefined,
         error:
           status === 'failed' ? RUN_FAILURE_COPY[run.binding.workflow] : null,
         analysisRunId:

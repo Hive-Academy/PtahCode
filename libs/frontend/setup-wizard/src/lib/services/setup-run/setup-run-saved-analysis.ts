@@ -64,7 +64,7 @@ export class SetupRunSavedAnalysis {
     return request;
   }
 
-  public async discoverAfterCompletion(workspacePath: string): Promise<void> {
+  public async rediscover(workspacePath: string): Promise<void> {
     const key = normalizeSetupWorkspacePath(workspacePath);
     const pending = key && this.pending().get(key);
     if (pending) await pending;
@@ -98,8 +98,31 @@ export class SetupRunSavedAnalysis {
     });
     const completed = entries.find((entry) => entry.lifecycle === 'completed');
     if (!completed) return;
-    if (!isOnboardingIdentityValue(completed.runId))
-      throw new Error(DISCOVERY_ERROR);
+    if (!isOnboardingIdentityValue(completed.runId)) {
+      // Older hosts provide the filename but omit identity from the listing.
+      const { manifest } = await this.rpc.loadAnalysis(
+        completed.filename,
+        workspacePath,
+      );
+      if (
+        manifest.lifecycle === 'completed' &&
+        isOnboardingIdentityValue(manifest.runId)
+      ) {
+        this.observe(
+          workspacePath,
+          manifest.runId,
+          'completed',
+          manifest.analyzedAt,
+          manifest.updatedAt,
+          !saved &&
+            status.reason !== 'incomplete' &&
+            status.analyzedAt === manifest.analyzedAt
+            ? freshness
+            : undefined,
+        );
+      }
+      return;
+    }
     this.observe(
       workspacePath,
       completed.runId,

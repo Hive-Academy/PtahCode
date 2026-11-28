@@ -290,7 +290,6 @@ export class WorkspaceVitalsStore {
       // (`SetupStatusStore.skillsReady`), so its failure is the catalog's
       // error, not one the setup store republishes.
       unavailable:
-        this.setup.error() !== null ||
         this.setup.scanError() !== null ||
         this.setup.workspaceNotOpen() ||
         this.catalog.error() !== null,

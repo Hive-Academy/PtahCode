@@ -1,6 +1,7 @@
 import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type { SetupGenerationRunBinding } from '@ptah-extension/shared';
 import {
+  MAX_SETUP_RUN_DISMISSALS,
   normalizeSetupWorkspacePath,
   type SetupRunDismissal,
 } from '../setup-run-persistence';
@@ -25,10 +26,17 @@ export class SetupRunDismissals {
 
   public restore(dismissals: readonly SetupRunDismissal[] = []): void {
     for (const marker of dismissals) {
-      this.markers.set(
-        keyOf(marker.workspacePath, marker.workflow, marker.backendRunId),
-        marker,
+      const key = keyOf(
+        marker.workspacePath,
+        marker.workflow,
+        marker.backendRunId,
       );
+      this.markers.delete(key);
+      this.markers.set(key, marker);
+      if (this.markers.size > MAX_SETUP_RUN_DISMISSALS) {
+        const oldest = this.markers.keys().next();
+        if (!oldest.done) this.markers.delete(oldest.value);
+      }
     }
   }
 
@@ -48,6 +56,14 @@ export class SetupRunDismissals {
     runId: string,
   ): boolean {
     return this.markers.has(keyOf(workspace, workflow, runId));
+  }
+
+  public clear(
+    workspace: string,
+    workflow: SetupRunWorkflow,
+    runId: string,
+  ): boolean {
+    return this.markers.delete(keyOf(workspace, workflow, runId));
   }
 
   public hasPushedBinding(binding: SetupGenerationRunBinding): boolean {

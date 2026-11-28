@@ -528,7 +528,16 @@ describe('WorkspaceVitalsStore', () => {
       expect(store.readiness().unavailable).toBe(true);
       catalogError.set(null);
       setup.error.set('x');
-      expect(store.readiness().unavailable).toBe(true);
+      expect(store.readiness()).toMatchObject({
+        allReady: true,
+        unavailable: false,
+      });
+      setup.scanReady.set(false);
+      setup.allReady.set(false);
+      expect(store.readiness()).toMatchObject({
+        allReady: false,
+        unavailable: false,
+      });
       setup.error.set(null);
       setup.workspaceNotOpen.set(true);
       setup.agentsReady.set(null);

@@ -58,7 +58,13 @@ export class SetupGenerationOpenHandler implements MessageHandler {
       const result = await (this.entry
         ? this.entry.openWorkflow(workflow, 'host')
         : this.router.navigateToSurface('onboarding'));
-      if (result === 'failed') this.launchNotice.set(OPEN_FAILURE_NOTICE);
+      if (result === 'failed') {
+        this.launchNotice.set(
+          workflow === 'setup-agent-generation'
+            ? 'Could not open agent generation. Open Setup to find saved runs.'
+            : OPEN_FAILURE_NOTICE,
+        );
+      }
     } catch {
       this.launchNotice.set(OPEN_FAILURE_NOTICE);
     }

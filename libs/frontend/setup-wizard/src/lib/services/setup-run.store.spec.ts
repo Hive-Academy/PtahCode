@@ -852,6 +852,93 @@ describe('SetupRunStore', () => {
       });
     });
 
+    it('loads the latest completed manifest by filename on an older host', async () => {
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        state: 'fresh',
+        reason: 'ok',
+        analyzedAt: saved.analyzedAt,
+      });
+      rpc['listAnalyses'].mockResolvedValue([
+        { filename: 'old-project', lifecycle: 'completed' },
+      ]);
+      rpc['loadAnalysis'].mockResolvedValue({
+        manifest: {
+          runId: 'legacy-run',
+          lifecycle: 'completed',
+          analyzedAt: saved.analyzedAt,
+        },
+      });
+      const store = await create();
+      expect(store.savedAnalysisError(WS)).toBeNull();
+      expect(rpc['loadAnalysis']).toHaveBeenCalledWith('old-project', WS);
+      expect(store.runs()).toMatchObject([
+        {
+          analysisRunId: 'legacy-run',
+          status: 'completed',
+          analysisFreshness: { state: 'fresh', reason: 'ok' },
+        },
+      ]);
+    });
+
+    it('skips a legacy manifest with no stable identity without an error', async () => {
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        state: 'stale',
+        reason: 'legacy-v3',
+        analyzedAt: saved.analyzedAt,
+      });
+      rpc['listAnalyses'].mockResolvedValue([
+        { filename: 'legacy-project', lifecycle: 'completed' },
+      ]);
+      rpc['loadAnalysis'].mockResolvedValue({
+        manifest: {
+          runId: '',
+          lifecycle: 'completed',
+          analyzedAt: saved.analyzedAt,
+        },
+      });
+      const store = await create();
+      expect(store.savedAnalysisError(WS)).toBeNull();
+      expect(store.runs()).toEqual([]);
+    });
+
+    it('reattaches freshness when Retry reads status before reconcile inserts the checkpoint', async () => {
+      const store = await create();
+      let finishList!: (entries: unknown[]) => void;
+      rpc['listAnalyses'].mockReturnValueOnce(
+        new Promise((resolve) => {
+          finishList = resolve;
+        }),
+      );
+      rpc['getAnalysisStatus'].mockResolvedValue({
+        ...saved,
+        reason: 'incomplete',
+        savedRun: {
+          ...saved.savedRun,
+          runId: 'paused-analysis',
+          lifecycle: 'paused',
+        },
+      });
+      const retry = store.retrySavedAnalysis(WS);
+      await flush();
+      expect(rpc['listAnalyses']).toHaveBeenCalled();
+      rpc['getResumableRun'].mockResolvedValue({
+        analysis: {
+          manifest: { runId: 'paused-analysis', lifecycle: 'paused' },
+        },
+        analysisActive: false,
+        generation: null,
+      });
+      const refresh = store.refresh();
+      await flush();
+      expect(store.runs()[0]?.analysisFreshness).toBeUndefined();
+      finishList([]);
+      await Promise.all([retry, refresh]);
+      expect(store.runs()[0]?.analysisFreshness).toEqual({
+        state: 'stale',
+        reason: 'incomplete',
+      });
+    });
+
     it('attaches incomplete freshness to its checkpoint and discovers the older completed analysis', async () => {
       rpc['getResumableRun'].mockResolvedValue({
         analysis: {
@@ -898,12 +985,99 @@ describe('SetupRunStore', () => {
     });
   });
 
+  it('clears dismissal when an explicit analysis resume claims the saved identity', async () => {
+    seed(
+      record({
+        id: 'setup-analysis',
+        workflow: 'analysis',
+        step: 'analyzing',
+        status: 'interrupted',
+        backendRunId: 'saved-analysis',
+        analysisRunId: 'saved-analysis',
+      }),
+    );
+    const store = await create();
+    expect(store.dismiss('setup-analysis')).toBe(true);
+    const resumed = store.start('analysis', WS);
+    if (!resumed) throw new Error('Expected an analysis record');
+    store.report(resumed.id, {
+      backendRunId: 'saved-analysis',
+      analysisRunId: 'saved-analysis',
+    });
+    await flush();
+    expect(localStorage.getItem(SETUP_RUNS_STORAGE_KEY)).not.toContain(
+      '"dismissals"',
+    );
+    expect(store.get(resumed.id)?.backendRunId).toBe('saved-analysis');
+  });
+
+  it('keeps verified written counts through live and terminal generation state', async () => {
+    const store = await create();
+    store.adopt(binding('setup-g1'));
+    const counts = {
+      total: 2,
+      written: 1,
+      unchanged: 0,
+      failed: 0,
+      skipped: 0,
+      rejected: 0,
+    };
+    store.reportRun('setup-g1', runState('running', { agentsWritten: 1 }));
+    expect(store.get('setup-g1')?.agentsWritten).toBe(1);
+    store.reportRun(
+      'setup-g1',
+      runState('completed', {
+        result: {
+          status: 'completed',
+          success: true,
+          source: { kind: 'workspace-discovery', reason: 'missing' },
+          effectiveProvider: 'p',
+          effectiveModel: 'm',
+          counts: { ...counts, written: 2 },
+        },
+      }),
+    );
+    expect(store.get('setup-g1')).toMatchObject({
+      status: 'completed',
+      agentsWritten: 2,
+    });
+  });
+
+  it('clears previous metadata when report identities change', async () => {
+    seed(
+      record({
+        id: 'setup-generation',
+        status: 'interrupted',
+        backendRunId: 'old-gen',
+        agentsWritten: 2,
+      }),
+      record({
+        id: 'setup-analysis',
+        workflow: 'analysis',
+        step: 'analyzing',
+        status: 'interrupted',
+        analysisRunId: 'old-analysis',
+        analysisFreshness: { state: 'stale', reason: 'incomplete' },
+      }),
+    );
+    const store = await create();
+    expect(
+      store.report('setup-generation', { backendRunId: 'new-gen' })
+        ?.agentsWritten,
+    ).toBeUndefined();
+    expect(
+      store.report('setup-analysis', { analysisRunId: 'new-analysis' })
+        ?.analysisFreshness,
+    ).toBeUndefined();
+  });
+
   describe('checkpoint dismissal', () => {
     it('survives a workspace switch and reload, while explicit generation resume still works', async () => {
       const checkpoint = {
         analysis: null,
         generation: {
           runId: 'gen-1',
+          ownerTabId: 'setup-original',
           lifecycle: 'paused',
           agents: [
             { status: 'written' },
@@ -912,7 +1086,23 @@ describe('SetupRunStore', () => {
           ],
         },
       };
-      rpc['getResumableRun'].mockResolvedValue(checkpoint);
+      let discoveryFails = false;
+      rpc['getResumableRun'].mockImplementation(async (root: string) => {
+        if (root === OTHER_WS) return { analysis: null, generation: null };
+        if (discoveryFails) throw new Error('offline');
+        return checkpoint;
+      });
+      rpc['startBoundAgents'].mockImplementation(
+        async ({ tabId }: SetupGenerationTabBinding) =>
+          tabId === checkpoint.generation.ownerTabId
+            ? { accepted: { runId: checkpoint.generation.runId } }
+            : {
+                rejection: {
+                  reason: 'blocked',
+                  ownerTabId: checkpoint.generation.ownerTabId,
+                },
+              },
+      );
       let store = await create();
       const [adopted] = store.runs();
       const canReopen = computed(() => store.hasDismissedGeneration(WS));
@@ -925,11 +1115,16 @@ describe('SetupRunStore', () => {
       expect(canReopen()).toBe(true);
       workspace.set(OTHER_WS);
       await flush();
-      expect(store.runs()).toHaveLength(1);
+      expect(store.runs()).toEqual([]);
+      expect(store.hasDismissedGeneration(OTHER_WS)).toBe(false);
 
+      discoveryFails = true;
       workspace.set(WS);
       await flush();
+      await store.refresh();
       expect(store.runs()).toEqual([]);
+      expect(store.hasDismissedGeneration(WS)).toBe(true);
+      discoveryFails = false;
       TestBed.resetTestingModule();
       configureProviders();
       store = await create();
@@ -939,6 +1134,7 @@ describe('SetupRunStore', () => {
 
       const reopened = store.reopenDismissedGeneration(WS);
       expect(reopened).toMatchObject({
+        id: 'setup-original',
         backendRunId: 'gen-1',
         status: 'interrupted',
         unseen: false,
@@ -946,12 +1142,54 @@ describe('SetupRunStore', () => {
       });
       expect(store.hasDismissedGeneration(WS)).toBe(false);
       if (!reopened) throw new Error('Expected a reopened generation record');
-      await store.retry(reopened.id);
+      await expect(store.retry(reopened.id)).resolves.toMatchObject({
+        id: 'setup-original',
+        status: 'running',
+        backendRunId: 'gen-1',
+      });
+      expect(store.runs()).toHaveLength(1);
+      await flush();
+      expect(localStorage.getItem(SETUP_RUNS_STORAGE_KEY)).not.toContain(
+        '"dismissals"',
+      );
       expect(rpc['startBoundAgents']).toHaveBeenCalledWith(
         expect.objectContaining({ tabId: reopened.id, workspacePath: WS }),
         [],
         true,
       );
+    });
+    it('can reopen a locally interrupted run before discovery and shows a refusal without inventing a running owner', async () => {
+      seed(
+        record({
+          id: 'setup-local',
+          status: 'interrupted',
+          backendRunId: 'gen-local',
+          agentsWritten: 1,
+        }),
+      );
+      const store = await create();
+      expect(store.dismiss('setup-local')).toBe(true);
+      expect(store.hasDismissedGeneration(WS)).toBe(true);
+      expect(store.reopenDismissedGeneration(WS)).toMatchObject({
+        id: 'setup-local',
+        status: 'interrupted',
+        agentsWritten: 1,
+      });
+      rpc['startBoundAgents'].mockResolvedValue({
+        rejection: { reason: 'blocked', ownerTabId: 'different-owner' },
+      });
+      rpc['getBoundRunState'].mockResolvedValue(
+        runState('starting', {
+          binding: { ...binding('different-owner'), runId: 'gen-local' },
+        }),
+      );
+      await expect(store.retry('setup-local')).resolves.toMatchObject({
+        id: 'setup-local',
+        status: 'interrupted',
+        error: 'Could not resume the saved agent generation.',
+      });
+      expect(store.runs()).toHaveLength(1);
+      expect(store.runningCount()).toBe(0);
     });
   });
 
@@ -972,7 +1210,13 @@ describe('SetupRunStore', () => {
     });
     selectedIds.push('changed-after-report');
     store.report(run.id, {
-      teamBuilder: { intent: 'Build the team', installed: ['owner/agent'] },
+      teamBuilder: {
+        intent: 'Build the team',
+        installed: ['owner/agent'],
+        ownerDecision: undefined,
+        installCompleted: undefined,
+        hadAttachments: undefined,
+      },
     });
     await flush();
     TestBed.resetTestingModule();
@@ -1459,12 +1703,39 @@ describe('SetupRunStore', () => {
       expect(store.get('setup-a1')?.status).toBe('running');
     });
 
+    it('checks the cancelled analysis workspace even after a switch', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      let finishCancel!: () => void;
+      rpc['cancelAnalysis'].mockReturnValue(
+        new Promise<void>((resolve) => {
+          finishCancel = resolve;
+        }),
+      );
+      rpc['getResumableRun'].mockImplementation(async (root: string) => ({
+        analysis: null,
+        generation: null,
+        analysisActive: root === WS,
+      }));
+      const store = await create();
+      const cancel = store.cancel('setup-a1');
+      expect(rpc['cancelAnalysis']).toHaveBeenCalledTimes(1);
+      workspace.set(OTHER_WS);
+      await flush();
+      finishCancel();
+      expect(await cancel).toBe(false);
+      expect(rpc['getResumableRun']).toHaveBeenLastCalledWith(WS, {
+        throwOnError: true,
+      });
+      expect(store.get('setup-a1')?.status).toBe('running');
+    });
+
     it('cancels an analysis once the backend is no longer active', async () => {
       seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
       const store = await create();
       rpc['getResumableRun'].mockResolvedValue({
         analysis: null,
         generation: null,
+        analysisActive: false,
       });
       expect(await store.cancel('setup-a1')).toBe(true);
       expect(store.get('setup-a1')?.status).toBe('cancelled');
@@ -2590,6 +2861,11 @@ describe('SetupRunStore', () => {
       rpc['startBoundAgents'].mockResolvedValue({
         rejection: { reason: 'blocked', ownerTabId: 'setup-owner' },
       });
+      rpc['getBoundRunState'].mockResolvedValue(
+        runState('running', {
+          binding: { ...binding('setup-owner'), runId: 'run-active' },
+        }),
+      );
       await store.retry('setup-blocked');
       await expect(store.whenStarted('setup-blocked')).resolves.toMatchObject({
         id: 'setup-owner',

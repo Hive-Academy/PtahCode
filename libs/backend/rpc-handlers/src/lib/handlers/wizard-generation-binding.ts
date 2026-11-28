@@ -174,6 +174,9 @@ export function generationRunState(
       source,
       effectiveProvider,
       effectiveModel,
+      agentsWritten: Object.values(manifest.agents).filter(
+        (agent) => agent.status === 'written',
+      ).length,
       ...(status !== 'running' && status !== 'starting'
         ? {
             result: {
@@ -380,4 +383,3 @@ export function previewRequiredSubmit(): WizardSubmitSelectionResponse {
     error: 'Generation targets changed. Review the preview and confirm again.',
   };
 }
-

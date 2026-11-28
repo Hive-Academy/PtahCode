@@ -8,7 +8,11 @@ import { By } from '@angular/platform-browser';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { SetupStatusStore } from '@ptah-extension/chat-ui';
 import { buildLaunchers } from '@ptah-extension/chat-ui/vitals';
-import { AppStateManager, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  PluginCatalogService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   ChatVitalsStore,
   type ChatVitalsHost,
@@ -24,16 +28,16 @@ describe('empty chat', () => {
   const launchWizard = jest.fn();
   const launchGeneration = jest.fn();
   const openMarketplace = jest.fn();
-  const nextAction = signal<'open-library' | 'run-setup' | null>(
-    'run-setup',
-  );
+  const nextAction = signal<'open-library' | 'run-setup' | null>('run-setup');
   const setupError = signal<string | null>(null);
+  const scanError = signal<string | null>(null);
 
   beforeEach(async () => {
     ready.set(false);
     resume.set(null);
     nextAction.set('run-setup');
     setupError.set(null);
+    scanError.set(null);
     jest.clearAllMocks();
     await TestBed.configureTestingModule({
       imports: [ChatEmptyStateComponent, ChatEmptyStateViewComponent],
@@ -50,6 +54,7 @@ describe('empty chat', () => {
           },
         },
         { provide: AppStateManager, useValue: { openMarketplace } },
+        { provide: PluginCatalogService, useValue: { error: signal(null) } },
         {
           provide: VSCodeService,
           useValue: { isElectron: true, getPtahIconUri: () => 'ptah.svg' },
@@ -63,7 +68,8 @@ describe('empty chat', () => {
             agentsReady: signal(false),
             nextAction,
             error: setupError,
-            scanError: signal(null),
+            scanError,
+            workspaceNotOpen: signal(false),
             launchError: signal(null),
             retry,
             launchWizard,
@@ -174,6 +180,20 @@ describe('empty chat', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).not.toContain(
       'private host error',
+    );
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'Readiness unavailable',
+    );
+    ready.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'Readiness unavailable',
+    );
+    ready.set(false);
+    scanError.set('scan failed');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain(
+      'Readiness unavailable',
     );
     fixture.debugElement
       .query(By.css('.empty-chat__notice button'))

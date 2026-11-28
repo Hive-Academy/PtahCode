@@ -394,10 +394,12 @@ export class WizardRpcService {
    * Calls the read-only wizard:get-resumable-run handler.
    *
    * Discovery is best-effort: a failure returns an empty response so wizard
-   * startup never breaks on it.
+   * startup never breaks on it. Callers that need a confirmed snapshot can
+   * request an error instead.
    */
   public async getResumableRun(
     workspacePath?: string,
+    options?: { throwOnError?: boolean },
   ): Promise<WizardGetResumableRunResponse> {
     try {
       const result = await this.rpcService.call(
@@ -420,6 +422,8 @@ export class WizardRpcService {
         error instanceof Error ? error.message : String(error),
       );
     }
+    if (options?.throwOnError)
+      throw new Error('Resumable runs could not be loaded.');
     return { analysis: null, generation: null };
   }
 

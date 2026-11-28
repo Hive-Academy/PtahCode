@@ -397,7 +397,10 @@ export class AgentGenerationRunPage {
           resumed,
           'Could not open the active generation run.',
         );
-      else if (resumed?.status === 'interrupted') {
+      else if (
+        resumed?.status === 'interrupted' ||
+        (resumed?.status === 'failed' && resumed.error)
+      ) {
         this.actionError.set(
           resumed.error ?? 'Could not resume agent generation.',
         );
@@ -440,7 +443,10 @@ export class AgentGenerationRunPage {
         !result.interrupted &&
         result.binding.tabId === binding.tabId &&
         result.binding.workflow === binding.workflow &&
-        sameSetupWorkspacePath(result.binding.workspacePath, binding.workspacePath) &&
+        sameSetupWorkspacePath(
+          result.binding.workspacePath,
+          binding.workspacePath,
+        ) &&
         result.binding.runId === binding.runId
       ) {
         // Intermediate item results can still be failed. Reopen the record only once the whole checkpoint is complete.

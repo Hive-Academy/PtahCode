@@ -156,6 +156,10 @@ export class SetupRunStore {
     isCancelling: (id) => this.isCancelling(id),
     wasDismissed: (workspace, workflow, runId) =>
       this.dismissals.has(workspace, workflow, runId),
+    clearDismissal: (workspace, workflow, runId) => {
+      if (this.dismissals.clear(workspace, workflow, runId))
+        this.scheduleWrite();
+    },
     setCancelling: (id, on) => this.setCancelling(id, on),
     insert: (record) => this.insert(record),
     apply: (id, update, correction, finalizationRunId) =>
@@ -401,6 +405,17 @@ export class SetupRunStore {
   public report(id: string, update: SetupRunReport): SetupRunRecord | null {
     const record = this.get(id);
     if (!record) return null;
+    if (
+      record.workflow === 'analysis' &&
+      isLive(record) &&
+      update.backendRunId
+    ) {
+      this.host.clearDismissal(
+        record.workspacePath,
+        'analysis',
+        update.backendRunId,
+      );
+    }
     this.apply(id, update);
     return this.get(id);
   }
@@ -474,6 +489,7 @@ export class SetupRunStore {
     const record = this.get(id);
     if (!record || !isTerminalSetupRunStatus(record.status)) return false;
     this.dismissals.remember(record);
+    this.bound.rememberDismissedCheckpoint(record);
     this.remove(id);
     return true;
   }
@@ -646,18 +662,20 @@ export class SetupRunStore {
     const sequence = ++this.reconcileSequence;
     const workspace = this.workspacePath();
     if (!workspace) return;
-    const resumable = await this.rpc.getResumableRun(workspace);
+    const resumable = await this.rpc
+      .getResumableRun(workspace, { throwOnError: true })
+      .catch(() => null);
     if (sequence !== this.reconcileSequence) return;
     if (this.workspacePath() !== workspace) return;
-    await this.analysis.reconcile(workspace, resumable);
+    if (resumable) await this.analysis.reconcile(workspace, resumable);
     if (
       sequence !== this.reconcileSequence ||
       this.workspacePath() !== workspace
     )
       return;
-    this.bound.adoptResumableGeneration(workspace, resumable);
+    if (resumable) this.bound.adoptResumableGeneration(workspace, resumable);
     await Promise.all([
-      this.savedAnalysis.discover(workspace),
+      this.savedAnalysis.rediscover(workspace),
       ...this.runsFor(workspace)
         .filter((record) => isLive(record))
         .map((record) => this.reconcileRecord(record)),

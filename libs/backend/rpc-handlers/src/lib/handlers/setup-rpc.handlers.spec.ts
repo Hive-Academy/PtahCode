@@ -470,25 +470,78 @@ describe('SetupRpcHandlers', () => {
     });
 
     it('reads the explicitly selected open workspace', async () => {
-      const selected = '/selected/workspace';
-      const h = makeHarness({ workspaceFolders: [WORKSPACE, selected] });
-      const getStatus = jest.fn().mockResolvedValue(missing);
-      const findLatestResumableRun = jest.fn().mockResolvedValue(null);
-      h.container.__register(
-        AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
-        {
-          getStatus,
-        },
+      const selected = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'setup-pinned-'),
       );
-      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
-        findLatestResumableRun,
-      });
-      h.handlers.register();
+      try {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE, selected] });
+        const getStatus = jest.fn().mockResolvedValue(missing);
+        const findLatestResumableRun = jest.fn().mockResolvedValue(null);
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_FRESHNESS_SERVICE,
+          {
+            getStatus,
+          },
+        );
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            findLatestResumableRun,
+          },
+        );
+        h.handlers.register();
 
-      await callRaw(h, 'wizard:analysis-status', { workspacePath: selected });
-      await callRaw(h, 'wizard:get-resumable-run', { workspacePath: selected });
-      expect(getStatus).toHaveBeenCalledWith(selected);
-      expect(findLatestResumableRun).toHaveBeenCalledWith(selected);
+        await callRaw(h, 'wizard:analysis-status', { workspacePath: selected });
+        await callRaw(h, 'wizard:get-resumable-run', {
+          workspacePath: selected,
+        });
+        expect(getStatus).toHaveBeenCalledWith(selected);
+        expect(findLatestResumableRun).toHaveBeenCalledWith(selected);
+      } finally {
+        await fs.rm(selected, { recursive: true, force: true });
+      }
+    });
+
+    it.each([
+      'wizard:analysis-status',
+      'wizard:get-resumable-run',
+      'wizard:list-analyses',
+      'wizard:load-analysis',
+    ] as const)('requires an exact open directory on %s', async (method) => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'setup-pinned-'));
+      const root = path.join(dir, 'open');
+      const outside = path.join(dir, 'outside');
+      const link = path.join(root, 'link');
+      try {
+        await fs.mkdir(path.join(root, 'sub'), { recursive: true });
+        await fs.mkdir(path.join(outside, 'sub'), { recursive: true });
+        await fs.symlink(path.join(outside, 'sub'), link, 'junction');
+        const h = makeHarness({ workspaceFolders: [root] });
+        h.handlers.register();
+        for (const workspacePath of [
+          path.join(root, 'sub'),
+          `${root}${path.sep}..${path.sep}outside`,
+          link,
+          `${link}${path.sep}..`,
+        ]) {
+          const response = await callRaw(h, method, {
+            workspacePath,
+            filename: 'analysis',
+          });
+          expect(response).toMatchObject({
+            success: false,
+            errorCode: 'UNAUTHORIZED_WORKSPACE',
+          });
+        }
+        expect(
+          await callRaw(h, method, {
+            workspacePath: '   ',
+            filename: 'analysis',
+          }),
+        ).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
     });
 
     it.each(['wizard:analysis-status', 'wizard:get-resumable-run'] as const)(
@@ -764,7 +817,14 @@ describe('SetupRpcHandlers', () => {
       const storage = storageWith({
         slugDir: '/fake/workspace/.ptah/analysis/acme',
         manifest: V4_MANIFEST,
-        generation: GENERATION,
+        generation: {
+          ...GENERATION,
+          tabBinding: {
+            tabId: 'setup-owner',
+            workspacePath: WORKSPACE,
+            workflow: 'setup-agent-generation',
+          },
+        },
       });
       h.container.__register(
         AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
@@ -799,6 +859,7 @@ describe('SetupRpcHandlers', () => {
 
       expect(result.generation).toEqual({
         runId: 'run-gen-1',
+        ownerTabId: 'setup-owner',
         analysisDirectory: '/fake/workspace/.ptah/analysis/acme',
         outputDirectory: '/fake/workspace/.claude/agents',
         lifecycle: 'timed-out',
@@ -2103,33 +2164,42 @@ describe('SetupRpcHandlers', () => {
     });
 
     it('falls back to the exact manifest ID in the requested open workspace', async () => {
-      const workspacePath = '/fake/second-workspace';
-      const h = makeHarness({ workspaceFolders: [WORKSPACE, workspacePath] });
-      const loaded = {
-        isMultiPhase: true,
-        manifest: { runId: 'run-1', slug: 'demo', lifecycle: 'paused' },
-        phaseContents: {},
-        analysisDir: workspacePath + '/.ptah/analysis/demo',
-      };
-      const loadMultiPhase = jest
-        .fn()
-        .mockRejectedValue(new Error('Missing slug'));
-      const loadByRunId = jest.fn().mockResolvedValue(loaded);
-      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
-        loadMultiPhase,
-        loadByRunId,
-      });
-      h.handlers.register();
+      const workspacePath = await fs.mkdtemp(
+        path.join(os.tmpdir(), 'setup-load-'),
+      );
+      try {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE, workspacePath] });
+        const loaded = {
+          isMultiPhase: true,
+          manifest: { runId: 'run-1', slug: 'demo', lifecycle: 'paused' },
+          phaseContents: {},
+          analysisDir: workspacePath + '/.ptah/analysis/demo',
+        };
+        const loadMultiPhase = jest
+          .fn()
+          .mockRejectedValue(new Error('Missing slug'));
+        const loadByRunId = jest.fn().mockResolvedValue(loaded);
+        h.container.__register(
+          AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
+          {
+            loadMultiPhase,
+            loadByRunId,
+          },
+        );
+        h.handlers.register();
 
-      expect(
-        await call(h, 'wizard:load-analysis', {
-          filename: 'run-1',
-          workspacePath,
-        }),
-      ).toEqual(loaded);
-      expect(loadMultiPhase).toHaveBeenCalledWith(workspacePath, 'run-1');
-      expect(loadByRunId).toHaveBeenCalledTimes(1);
-      expect(loadByRunId).toHaveBeenCalledWith(workspacePath, 'run-1');
+        expect(
+          await call(h, 'wizard:load-analysis', {
+            filename: 'run-1',
+            workspacePath,
+          }),
+        ).toEqual(loaded);
+        expect(loadMultiPhase).toHaveBeenCalledWith(workspacePath, 'run-1');
+        expect(loadByRunId).toHaveBeenCalledTimes(1);
+        expect(loadByRunId).toHaveBeenCalledWith(workspacePath, 'run-1');
+      } finally {
+        await fs.rm(workspacePath, { recursive: true, force: true });
+      }
     });
 
     it.each(['dir/run-1', 'run.1', '../run-1'])(

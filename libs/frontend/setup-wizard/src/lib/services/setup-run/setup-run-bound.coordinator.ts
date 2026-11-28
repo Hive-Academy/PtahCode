@@ -12,7 +12,7 @@ import {
   type SetupRunRecord,
   type SetupRunStatus,
 } from '../setup-run.types';
-import { sameSetupWorkspacePath } from '../setup-run-persistence';
+import { normalizeSetupWorkspacePath } from '../setup-run-persistence';
 import type { WizardRpcService } from '../wizard-rpc.service';
 import {
   readBoundState,
@@ -36,6 +36,13 @@ import {
 } from './setup-run-host';
 import { SETUP_RUN_POLL_INTERVAL_MS, SetupRunPoll } from './setup-run-poll';
 
+interface GenerationCheckpoint {
+  runId: string;
+  ownerTabId?: string;
+  lifecycle: ResumableGenerationRun['lifecycle'];
+  agentsWritten?: number;
+}
+
 interface GuidanceHandoffScheduler {
   pendingFor(agentRunId: string): object | null;
   schedule(agentRunId: string, workspacePath: string): void;
@@ -44,10 +51,9 @@ interface GuidanceHandoffScheduler {
 export class SetupRunBoundCoordinator {
   private readonly poll: SetupRunPoll;
 
-  private readonly checkpoint = signal<{
-    workspace: string;
-    generation: ResumableGenerationRun;
-  } | null>(null);
+  private readonly checkpoints = signal<
+    ReadonlyMap<string, GenerationCheckpoint>
+  >(new Map());
 
   public constructor(
     private readonly host: SetupRunRecordHost,
@@ -217,11 +223,25 @@ export class SetupRunBoundCoordinator {
     resumable: WizardGetResumableRunResponse,
   ): void {
     const generation = resumable.generation;
-    if (!generation || !isOnboardingIdentityValue(generation.runId)) {
-      this.checkpoint.set(null);
+    if (!generation) {
+      this.setCheckpoint(workspace, null);
       return;
     }
-    this.checkpoint.set({ workspace, generation });
+    if (!isOnboardingIdentityValue(generation.runId)) return;
+    const previous = this.checkpointFor(workspace);
+    const checkpoint: GenerationCheckpoint = {
+      runId: generation.runId,
+      lifecycle: generation.lifecycle,
+      ownerTabId:
+        generation.ownerTabId ??
+        (previous?.runId === generation.runId
+          ? previous.ownerTabId
+          : undefined),
+      agentsWritten: generation.agents?.filter(
+        (agent) => agent.status === 'written',
+      ).length,
+    };
+    this.setCheckpoint(workspace, checkpoint);
 
     const records = this.host.runsFor(workspace);
     const existing = records.find(
@@ -229,7 +249,7 @@ export class SetupRunBoundCoordinator {
         record.workflow === 'agent-generation' &&
         record.backendRunId === generation.runId,
     );
-    const agentsWritten = this.agentsWritten(generation);
+    const { agentsWritten } = checkpoint;
     if (existing && agentsWritten !== undefined) {
       this.host.patch(existing.id, (record) =>
         record.agentsWritten === agentsWritten
@@ -247,57 +267,89 @@ export class SetupRunBoundCoordinator {
     )
       return;
 
-    this.insertCheckpoint(workspace, generation, false);
+    this.insertCheckpoint(workspace, checkpoint, false);
+  }
+
+  private checkpointFor(workspace: string): GenerationCheckpoint | undefined {
+    const key = normalizeSetupWorkspacePath(workspace);
+    return key ? this.checkpoints().get(key) : undefined;
+  }
+
+  private setCheckpoint(
+    workspace: string,
+    generation: GenerationCheckpoint | null,
+  ): void {
+    const key = normalizeSetupWorkspacePath(workspace);
+    if (!key) return;
+    this.checkpoints.update((checkpoints) => {
+      const next = new Map(checkpoints);
+      if (generation) next.set(key, generation);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  public rememberDismissedCheckpoint(record: SetupRunRecord): void {
+    const { workspacePath, backendRunId, agentsWritten } = record;
+    if (
+      record.workflow !== 'agent-generation' ||
+      (record.status !== 'interrupted' && record.status !== 'failed') ||
+      !isOnboardingIdentityValue(backendRunId)
+    )
+      return;
+    const existing = this.checkpointFor(workspacePath);
+    if (existing && existing.runId !== backendRunId) return;
+    this.setCheckpoint(workspacePath, {
+      runId: backendRunId,
+      ownerTabId: existing?.ownerTabId ?? record.id,
+      lifecycle: record.status === 'failed' ? 'failed' : 'paused',
+      agentsWritten: agentsWritten ?? existing?.agentsWritten,
+    });
   }
 
   public hasDismissedCheckpoint(workspace: string | null): boolean {
-    const checkpoint = this.checkpoint();
+    if (!workspace) return false;
+    const checkpoint = this.checkpointFor(workspace);
     return (
-      workspace !== null &&
-      checkpoint !== null &&
-      sameSetupWorkspacePath(workspace, checkpoint.workspace) &&
-      checkpoint.generation.lifecycle !== 'completed' &&
+      !!checkpoint &&
+      checkpoint.lifecycle !== 'completed' &&
+      (checkpoint.ownerTabId === undefined ||
+        (isOnboardingIdentityValue(checkpoint.ownerTabId) &&
+          !this.host.get(checkpoint.ownerTabId))) &&
       !this.host
         .runsFor(workspace)
         .some(
           (record) =>
             record.workflow === 'agent-generation' &&
-            (record.backendRunId === checkpoint.generation.runId ||
-              isLive(record)),
+            (record.backendRunId === checkpoint.runId || isLive(record)),
         ) &&
-      this.host.wasDismissed(
-        workspace,
-        'agent-generation',
-        checkpoint.generation.runId,
-      )
+      this.host.wasDismissed(workspace, 'agent-generation', checkpoint.runId)
     );
   }
 
   /** Explicitly reopen the saved checkpoint on its existing Resume page. */
   public reopenDismissedCheckpoint(workspace: string): SetupRunRecord | null {
-    const checkpoint = this.checkpoint();
+    const checkpoint = this.checkpointFor(workspace);
     if (!checkpoint || !this.hasDismissedCheckpoint(workspace)) return null;
-    return this.insertCheckpoint(workspace, checkpoint.generation, true);
-  }
-
-  private agentsWritten(
-    generation: ResumableGenerationRun,
-  ): number | undefined {
-    return generation.agents?.filter((agent) => agent.status === 'written')
-      .length;
+    const record = this.insertCheckpoint(workspace, checkpoint, true);
+    if (record)
+      this.host.clearDismissal(workspace, 'agent-generation', checkpoint.runId);
+    return record;
   }
 
   private insertCheckpoint(
     workspace: string,
-    generation: ResumableGenerationRun,
+    generation: GenerationCheckpoint,
     opened: boolean,
-  ): SetupRunRecord {
+  ): SetupRunRecord | null {
+    const id = generation.ownerTabId ?? newRunId();
+    if (!isOnboardingIdentityValue(id) || this.host.get(id)) return null;
     const status: SetupRunStatus =
       !opened && generation.lifecycle === 'running' ? 'running' : 'interrupted';
-    const agentsWritten = this.agentsWritten(generation);
+    const { agentsWritten } = generation;
     const now = Date.now();
     const record: SetupRunRecord = {
-      id: newRunId(),
+      id,
       workspacePath: workspace,
       workflow: 'agent-generation',
       status,
@@ -455,6 +507,45 @@ export class SetupRunBoundCoordinator {
       const current = this.host.get(record.id);
       if (current) void this.reconcile(current);
       return current;
+    }
+    if (
+      rejection?.reason === 'blocked' &&
+      mode === 'retry' &&
+      record.workflow === 'agent-generation'
+    ) {
+      // A refusal can identify a disk checkpoint with no live generation.
+      const ownerBinding = rejection.ownerTabId
+        ? { ...binding, tabId: rejection.ownerTabId }
+        : null;
+      const run =
+        ownerBinding && (await readBoundState(this.rpc, ownerBinding));
+      if (this.attempts.get(record.id) !== attempt)
+        return this.host.get(record.id);
+      if (
+        ownerBinding &&
+        run?.status === 'running' &&
+        verifiedRunStatus(run, ownerBinding) === 'running'
+      ) {
+        const owner = this.host.adopt(ownerBinding);
+        if (
+          owner &&
+          this.observeRun(owner.id, run, this.attempts.get(owner.id))
+        ) {
+          if (owner.id !== record.id) {
+            this.attempts.assignOwner(record.id, attempt, owner.id);
+            this.host.apply(record.id, {
+              status: record.status,
+              error: record.error ?? null,
+            });
+          }
+          return this.host.get(owner.id);
+        }
+      }
+      this.host.apply(record.id, {
+        status: record.status,
+        error: 'Could not resume the saved agent generation.',
+      });
+      return this.host.get(record.id);
     }
     if (rejection?.reason === 'blocked' && rejection.ownerTabId) {
       const { owner } = await this.resolveBlockedStart(

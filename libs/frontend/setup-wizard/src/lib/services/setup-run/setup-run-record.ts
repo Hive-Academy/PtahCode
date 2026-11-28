@@ -22,6 +22,13 @@ export function applyReportFields<T extends SetupRunRecord>(
     if (update.backendRunId !== record.backendRunId) delete next.agentsWritten;
     next.backendRunId = update.backendRunId;
   }
+  if (
+    record.workflow === 'agent-generation' &&
+    update.agentsWritten !== undefined &&
+    Number.isSafeInteger(update.agentsWritten) &&
+    update.agentsWritten >= 0
+  )
+    next.agentsWritten = update.agentsWritten;
   if (update.analysisRunId !== undefined) {
     if (update.analysisRunId !== record.analysisRunId)
       delete next.analysisFreshness;
@@ -34,13 +41,22 @@ export function applyReportFields<T extends SetupRunRecord>(
       next.handoffTabId = update.handoffTabId;
     }
     if (update.teamBuilder !== undefined) {
-      const selectedIds =
-        update.teamBuilder.selectedIds ?? record.teamBuilder?.selectedIds;
+      const {
+        intent,
+        installed,
+        selectedIds,
+        ownerDecision,
+        installCompleted,
+        hadAttachments,
+      } = update.teamBuilder;
       next.teamBuilder = {
         ...record.teamBuilder,
-        ...update.teamBuilder,
-        installed: [...update.teamBuilder.installed],
-        ...(selectedIds ? { selectedIds: [...selectedIds] } : {}),
+        intent,
+        installed: [...installed],
+        ...(selectedIds !== undefined ? { selectedIds: [...selectedIds] } : {}),
+        ...(ownerDecision !== undefined ? { ownerDecision } : {}),
+        ...(installCompleted !== undefined ? { installCompleted } : {}),
+        ...(hadAttachments !== undefined ? { hadAttachments } : {}),
       };
     }
   }

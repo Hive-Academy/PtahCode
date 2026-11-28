@@ -5,14 +5,13 @@
  * boundary.
  *
  * `workspacePath` stays optional everywhere it appears: the backend's own
- * active root is trusted, and a caller-supplied path is additionally checked
- * with `isAuthorizedWorkspace` in the handler.
+ * active root is trusted, and caller-supplied paths are checked in the handler.
  */
 
 import { z } from 'zod';
 import { ProjectAnalysisZodSchema } from '@ptah-extension/agent-generation';
 
-const workspacePath = z.string().min(1).max(4096).optional();
+const workspacePath = z.string().trim().min(1).max(4096).optional();
 
 export const WizardDeepAnalyzeParamsSchema = z.object({
   model: z.string().min(1).max(200).optional(),

@@ -562,6 +562,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
   private readonly destroyRef = inject(DestroyRef);
   private destroyed = false;
   private pendingAnalysis: string | null = null;
+  private resumableAnalysis: { workspace: string; runId: string } | null = null;
   private pendingRerun = false;
   private readonly currentRecordId = signal<string | null>(null);
   private attachedRecordId: string | null = null;
@@ -882,12 +883,22 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
       await this.loadSaved();
     }
     if (this.destroyed) return;
-    const resumable = await this.rpc.getResumableRun();
-    if (this.destroyed) return;
+    const workspace = this.workspacePath();
+    const resumable = await this.rpc.getResumableRun(workspace ?? undefined);
+    if (this.destroyed || workspace !== this.workspacePath()) return;
     const localRunSettled =
       (this.runner.runGeneration?.() ?? 0) !== initialRunGeneration ||
       (!hadResult && (this.runner.hasResult?.() ?? false)) ||
       (!hadLoaded && this.store.loaded() !== null);
+    const manifest = resumable.analysis?.manifest;
+    if (
+      !localRunSettled &&
+      workspace &&
+      manifest &&
+      manifest.lifecycle !== 'completed'
+    ) {
+      this.resumableAnalysis = { workspace, runId: manifest.runId };
+    }
     if (resumable.analysisActive === true) {
       if (!hadRunnerActive && !localRunSettled && !this.runner.isRunning()) {
         this.runner.syncBackendActive?.(true, {
@@ -1167,6 +1178,7 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (!this.setupReady() || this.hasLiveRun()) return;
     this.rerunNotice.set(null);
     this.pendingAnalysis = null;
+    this.resumableAnalysis = null;
     const existingResult = this.wizardState.multiPhaseResult?.();
     if (existingResult && existingResult.manifest.lifecycle !== 'completed') {
       this.wizardState.reset();
@@ -1232,14 +1244,19 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     if (!hadPendingRerun && targetRecordId) {
       this.bindUrlToRecord(targetRecordId);
     }
+    const resumable = this.resumableAnalysis;
+    if (targetRecordId && resumable && resumable.workspace === workspace) {
+      this.setupRuns.report(targetRecordId, {
+        backendRunId: resumable.runId,
+        analysisRunId: resumable.runId,
+      });
+    }
+    this.resumableAnalysis = null;
     this.store.clearSelection();
     this.interrupted.set(false);
     this.stopRecovery.set(false);
     this.startClock();
-    await Promise.all([
-      this.runner.resumeAnalysis(workspace),
-      rerunNavigation,
-    ]);
+    await Promise.all([this.runner.resumeAnalysis(workspace), rerunNavigation]);
     if (this.destroyed) return;
     await this.loadSaved();
   }

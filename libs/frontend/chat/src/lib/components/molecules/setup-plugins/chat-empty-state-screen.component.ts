@@ -20,7 +20,11 @@ import {
   planRingCaption,
   type ReadinessCheck,
 } from '@ptah-extension/chat-ui/vitals';
-import { AppStateManager, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  PluginCatalogService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   CircleDollarSign,
   Gauge,
@@ -116,7 +120,9 @@ import {
             [action]="readinessAction()"
             (actionRequested)="runReadinessAction($event)"
           />
-          @if (setup.error() || setup.scanError()) {
+          @if (
+            setup.scanError() || setup.workspaceNotOpen() || catalog.error()
+          ) {
             <div role="status" class="empty-chat__notice">
               Readiness unavailable
               <button type="button" (click)="setup.retry()">Retry</button>
@@ -137,6 +143,7 @@ export class ChatEmptyStateViewComponent {
   private readonly appState = inject(AppStateManager);
   protected readonly vitals = inject(ChatVitalsStore);
   protected readonly setup = inject(SetupStatusStore);
+  protected readonly catalog = inject(PluginCatalogService);
   private readonly vscodeService = inject(VSCodeService);
   protected readonly isElectron = this.vscodeService.isElectron;
   protected readonly ptahIconUri = this.vscodeService.getPtahIconUri();

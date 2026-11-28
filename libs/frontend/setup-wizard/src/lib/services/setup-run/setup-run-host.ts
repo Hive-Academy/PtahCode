@@ -17,6 +17,7 @@ export interface SetupRunReport {
   step?: SetupRunStep;
   backendRunId?: string;
   analysisRunId?: string;
+  agentsWritten?: number;
   /** User-facing text only; `null` clears it. */
   error?: string | null;
   handoffTabId?: string;
@@ -34,6 +35,11 @@ export interface SetupRunRecordHost {
     workflow: SetupRunWorkflow,
     runId: string,
   ): boolean;
+  clearDismissal(
+    workspace: string,
+    workflow: SetupRunWorkflow,
+    runId: string,
+  ): void;
   setCancelling(id: string, on: boolean): void;
   insert(record: SetupRunRecord): void;
   apply(

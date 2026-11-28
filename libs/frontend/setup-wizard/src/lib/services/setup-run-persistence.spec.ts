@@ -1,4 +1,5 @@
 import {
+  MAX_SETUP_RUN_DISMISSALS,
   MAX_SETUP_RUNS_PER_WORKSPACE,
   SETUP_RUNS_STORAGE_KEY,
   capWorkspaceRuns,
@@ -103,7 +104,59 @@ describe('setup-run-persistence', () => {
     });
   });
 
+  it('round-trips only the newest valid dismissal markers across workspaces', () => {
+    const markers = Array.from(
+      { length: MAX_SETUP_RUN_DISMISSALS + 1 },
+      (_, n) => ({
+        workspacePath: `${WORKSPACE}/${n}`,
+        workflow: 'analysis' as const,
+        backendRunId: `analysis-${n}`,
+      }),
+    );
+    const invalid = { ...markers[0], backendRunId: '../invalid' };
+    const expected = markers.slice(1);
+    const legacy = JSON.stringify({
+      version: 1,
+      byWorkspace: {},
+      dismissals: [...markers, invalid],
+    });
+    expect(readSetupRunIndex({ getItem: () => legacy }).dismissals).toEqual(
+      expected,
+    );
+    const stored = serializeSetupRunIndex({}, [...markers, invalid]);
+    expect(readSetupRunIndex({ getItem: () => stored }).dismissals).toEqual(
+      expected,
+    );
+  });
+
   describe('parseSetupRunRecord', () => {
+    it('keeps zero agents written and rejects invalid counts and freshness', () => {
+      const generation = record({
+        workflow: 'agent-generation',
+        step: 'generating',
+      });
+      expect(
+        parseSetupRunRecord({ ...generation, agentsWritten: 0 })?.agentsWritten,
+      ).toBe(0);
+      for (const agentsWritten of [-1, 1.5, '2']) {
+        expect(
+          parseSetupRunRecord({ ...generation, agentsWritten })?.agentsWritten,
+        ).toBeUndefined();
+      }
+      expect(
+        parseSetupRunRecord({
+          ...record(),
+          analysisFreshness: { state: 'stale', reason: 'incomplete' },
+        })?.analysisFreshness,
+      ).toEqual({ state: 'stale', reason: 'incomplete' });
+      expect(
+        parseSetupRunRecord({
+          ...record(),
+          analysisFreshness: { state: 'fresh', reason: 'invalid' },
+        })?.analysisFreshness,
+      ).toBeUndefined();
+    });
+
     it.each([5_000, 'skipped', 'consumed'] as const)(
       'round-trips guidance hand-off state %s for completed agent generation',
       (guidanceHandoff) => {

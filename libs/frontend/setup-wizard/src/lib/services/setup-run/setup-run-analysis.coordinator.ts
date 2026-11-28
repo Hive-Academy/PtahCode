@@ -179,12 +179,17 @@ export class SetupRunAnalysisCoordinator {
         result.manifest.lifecycle === 'completed' &&
         isOnboardingIdentityValue(result.manifest.runId)
       ) {
+        this.host.clearDismissal(
+          record.workspacePath,
+          'analysis',
+          result.manifest.runId,
+        );
         this.host.apply(id, {
           status: 'completed',
           backendRunId: result.manifest.runId,
           analysisRunId: result.manifest.runId,
         });
-        void this.saved.discoverAfterCompletion(record.workspacePath);
+        void this.saved.rediscover(record.workspacePath);
       } else {
         this.host.apply(id, { status: 'interrupted' });
       }
@@ -220,6 +225,13 @@ export class SetupRunAnalysisCoordinator {
   public run(record: SetupRunRecord, resume: boolean): void {
     this.host.markLiveThisSession(record.id);
     this.runnerSeen.set(record.id, false);
+    if (resume && record.backendRunId) {
+      this.host.clearDismissal(
+        record.workspacePath,
+        'analysis',
+        record.backendRunId,
+      );
+    }
     const run = resume
       ? this.runner.resumeAnalysis(record.workspacePath)
       : this.runner.startFreshAnalysis(record.workspacePath);
@@ -236,8 +248,10 @@ export class SetupRunAnalysisCoordinator {
     } else {
       await this.rpc.cancelAnalysis();
     }
-    const resumable = await this.rpc.getResumableRun();
-    if (resumable.analysisActive === true) return false;
+    const resumable = await this.rpc
+      .getResumableRun(record.workspacePath, { throwOnError: true })
+      .catch(() => null);
+    if (resumable?.analysisActive !== false) return false;
     this.host.apply(record.id, { status: 'cancelled' });
     return true;
   }

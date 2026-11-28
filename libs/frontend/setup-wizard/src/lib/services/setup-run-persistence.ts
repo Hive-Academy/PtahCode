@@ -25,6 +25,7 @@ export const SETUP_RUNS_STORAGE_KEY = 'ptah.setup-runs.v1';
 
 /** Records kept per workspace; only terminal records are evicted. */
 export const MAX_SETUP_RUNS_PER_WORKSPACE = 20;
+export const MAX_SETUP_RUN_DISMISSALS = 200;
 
 const STORAGE_VERSION = 1;
 const MAX_PATH_LENGTH = 4096;
@@ -86,7 +87,12 @@ function parseAnalysisFreshness(
 function parseDismissals(value: unknown): SetupRunDismissal[] {
   if (!Array.isArray(value)) return [];
   const dismissals: SetupRunDismissal[] = [];
-  for (const item of value) {
+  for (
+    let i = value.length - 1;
+    i >= 0 && dismissals.length < MAX_SETUP_RUN_DISMISSALS;
+    i--
+  ) {
+    const item: unknown = value[i];
     if (!isObject(item)) continue;
     const rawPath = item['workspacePath'];
     const workspacePath =
@@ -101,7 +107,7 @@ function parseDismissals(value: unknown): SetupRunDismissal[] {
       dismissals.push({ workspacePath, workflow, backendRunId });
     }
   }
-  return dismissals;
+  return dismissals.reverse();
 }
 
 const WORKFLOWS: readonly SetupRunWorkflow[] = [
@@ -431,10 +437,11 @@ export function serializeSetupRunIndex(
     );
     if (kept.length > 0) byWorkspace[workspace] = kept;
   }
+  const markers = parseDismissals(dismissals);
   return JSON.stringify({
     version: STORAGE_VERSION,
     byWorkspace,
-    ...(dismissals.length > 0 ? { dismissals } : {}),
+    ...(markers.length > 0 ? { dismissals: markers } : {}),
   });
 }
 
