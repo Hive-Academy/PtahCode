@@ -644,3 +644,21 @@ Edge cases:
   batch's projects, output tailed.
 - No per-batch review; the phase's code-logic review covers the batch in the combined diff.
 - The batch's listed edge cases and risks are addressed.
+
+## Batch 18: Phase C review fixes — IMPLEMENTED
+
+- Source: `code-logic-review-phase-c.md` (antigravity 5/10 REVISE: F1 Critical, F2–F6 Major,
+  F7–F9 Minor) + `code-logic-review-batch17b.md` Minors 1–4.
+- 18A (codex): `libs/frontend/setup-wizard/**` + `libs/frontend/onboarding/src/lib/{analyze,home,shell}/**`
+  — F1, F2, F3, F4, F7, F8, 17b M1 (analyze-skills part), M2, M4. Reviewer antigravity.
+- 18B (antigravity): `libs/frontend/onboarding/src/lib/proposal/**` — F5, F6, F9,
+  17b M1 (coordinator part), M3. Reviewer codex.
+- User decision (2026-11-28 13:15 UTC): no more local `npm run verify` runs. PR CI does the
+  verification. Lanes still run their focused jest/tsc/eslint checks; the coordinator relies on
+  lane checks + reviews, then pushes and reads `gh pr checks`.
+- 18A: codex impl → antigravity 6/10 REVISE → round 1 fix → 8/10 APPROVED. Open Minor:
+  `recoverSaved` scans all manifests in sequence without `backendRunId` (O(N), one unreadable
+  entry stops it) → Batch 16. Accepted: a dev profile that ran the uncommitted first 18A
+  revision may hold a folded record path (focus router not changed).
+- 18B: antigravity impl → codex 6/10 → round 1 5/10 → round 2 (final) 8/10 APPROVED. Coordinator
+  fixed two degradation-audit sites and narrowed the marker text (audit TOTAL 0).

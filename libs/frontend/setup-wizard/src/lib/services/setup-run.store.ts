@@ -30,6 +30,7 @@ import { GenerationHandoffStore } from './generation-handoff.store';
 import {
   isSetupRunStepOf,
   normalizeSetupWorkspacePath,
+  setupWorkspacePath,
   readSetupRunIndex,
   capWorkspaceRuns,
   writeSetupRunIndex,
@@ -113,9 +114,9 @@ export class SetupRunStore {
   private writeQueued = false;
   private reconcileSequence = 0;
 
-  /** The active workspace, normalized. */
+  /** The active workspace path as provided by the host. */
   public readonly workspacePath = computed(() =>
-    normalizeSetupWorkspacePath(
+    setupWorkspacePath(
       this.tabs.activeWorkspacePath || this.vscode.config().workspaceRoot,
     ),
   );
@@ -193,6 +194,7 @@ export class SetupRunStore {
     effect(() => {
       const workspace = this.workspacePath();
       untracked(() => {
+        this.runner.setCurrentWorkspacePath(workspace);
         this.bound.stopPoll();
         if (this.pollNeeded()) this.bound.ensurePoll();
         if (workspace) void this.activate();
@@ -202,6 +204,7 @@ export class SetupRunStore {
       const running = this.runner.isRunning();
       const canceling = this.runner.isCanceling();
       this.runner.runGeneration();
+      this.runner.activeWorkspacePath();
       untracked(() => this.analysis.syncFromRunner(running, canceling));
     });
     effect(() => {
@@ -277,7 +280,7 @@ export class SetupRunStore {
     workspacePath: string | null | undefined,
     options: SetupRunStartOptions = {},
   ): SetupRunRecord | null {
-    const workspace = normalizeSetupWorkspacePath(workspacePath);
+    const workspace = setupWorkspacePath(workspacePath);
     if (!workspace) return null;
     const live = this.runsFor(workspace).find(
       (record) => record.workflow === workflow && isLive(record),
@@ -493,7 +496,8 @@ export class SetupRunStore {
       previous.workflow === 'team-builder';
     const record = this.start(previous.workflow, previous.workspacePath, {
       parentId: previous.parentId,
-      analysisRunId: previous.analysisRunId,
+      analysisRunId:
+        previous.workflow === 'analysis' ? null : previous.analysisRunId,
       ...(previous.origin ? { origin: previous.origin } : {}),
       status: userStart ? 'needs-input' : 'running',
     });
@@ -555,7 +559,12 @@ export class SetupRunStore {
     const resumable = await this.rpc.getResumableRun();
     if (sequence !== this.reconcileSequence) return;
     if (this.workspacePath() !== workspace) return;
-    this.analysis.reconcile(workspace, resumable);
+    await this.analysis.reconcile(workspace, resumable);
+    if (
+      sequence !== this.reconcileSequence ||
+      this.workspacePath() !== workspace
+    )
+      return;
     this.bound.adoptResumableGeneration(workspace, resumable);
     await Promise.all(
       this.runsFor(workspace)
@@ -626,12 +635,14 @@ export class SetupRunStore {
   ): void {
     const record = this.get(id);
     if (!record) return;
+    const workspace = normalizeSetupWorkspacePath(record.workspacePath);
+    if (!workspace) return;
     const next = change(record);
     if (next === record) return;
     const updated = { ...next, updatedAt: Date.now() };
     this._index.update((index) => ({
       ...index,
-      [record.workspacePath]: (index[record.workspacePath] ?? []).map((item) =>
+      [workspace]: (index[workspace] ?? []).map((item) =>
         item.id === id ? updated : item,
       ),
     }));
@@ -640,12 +651,14 @@ export class SetupRunStore {
   }
 
   private insert(record: SetupRunRecord): void {
+    const workspace = normalizeSetupWorkspacePath(record.workspacePath);
+    if (!workspace) return;
     this._index.update((index) => {
-      const previous = index[record.workspacePath] ?? [];
+      const previous = index[workspace] ?? [];
       const kept = capWorkspaceRuns([...previous, record]);
       for (const item of previous)
         if (!kept.includes(item)) this.forget(item.id);
-      return { ...index, [record.workspacePath]: kept };
+      return { ...index, [workspace]: kept };
     });
     this.scheduleWrite();
   }
@@ -660,14 +673,16 @@ export class SetupRunStore {
   private remove(id: string): void {
     const record = this.get(id);
     if (!record) return;
+    const workspace = normalizeSetupWorkspacePath(record.workspacePath);
+    if (!workspace) return;
     this.forget(id);
     this._index.update((index) => {
-      const rest = (index[record.workspacePath] ?? []).filter(
+      const rest = (index[workspace] ?? []).filter(
         (item) => item.id !== id,
       );
       const next: Record<string, readonly SetupRunRecord[]> = { ...index };
-      if (rest.length > 0) next[record.workspacePath] = rest;
-      else delete next[record.workspacePath];
+      if (rest.length > 0) next[workspace] = rest;
+      else delete next[workspace];
       return next;
     });
     this.scheduleWrite();

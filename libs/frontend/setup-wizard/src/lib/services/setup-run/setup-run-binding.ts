@@ -7,7 +7,10 @@ import type {
   SetupGenerationTabBinding,
   SetupGenerationWorkflow,
 } from '@ptah-extension/shared';
-import { normalizeSetupWorkspacePath } from '../setup-run-persistence';
+import {
+  normalizeSetupWorkspacePath,
+  setupWorkspacePath,
+} from '../setup-run-persistence';
 import {
   isTerminalSetupRunStatus,
   type SetupRunRecord,
@@ -169,7 +172,7 @@ export function verifiedRunStatus(
 export function createBoundRunRecord(
   binding: SetupGenerationTabBinding,
 ): SetupRunRecord | null {
-  const workspace = normalizeSetupWorkspacePath(binding.workspacePath);
+  const workspace = setupWorkspacePath(binding.workspacePath);
   if (!workspace || !isOnboardingIdentityValue(binding.tabId)) return null;
   const now = Date.now();
   return {

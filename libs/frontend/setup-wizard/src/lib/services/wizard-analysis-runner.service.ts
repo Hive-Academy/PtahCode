@@ -11,6 +11,7 @@ import type {
   ResumableGenerationRun,
 } from '@ptah-extension/shared';
 
+import { normalizeSetupWorkspacePath } from './setup-run-persistence';
 import { SetupWizardStateService } from './setup-wizard-state.service';
 import type { SkillGenerationProgressItem } from './setup-wizard-state.types';
 import { WizardRpcService } from './wizard-rpc.service';
@@ -59,21 +60,6 @@ function toProgressItem(
   };
 }
 
-/** Normalize a workspace path for equality comparison by trimming trailing slashes. */
-function normalizeWorkspacePath(
-  workspacePath: string | null | undefined,
-): string | null {
-  if (!workspacePath) {
-    return null;
-  }
-  const trimmed = workspacePath.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const stripped = trimmed.replace(/[\\/]+$/, '');
-  return stripped.length > 0 ? stripped : trimmed[0];
-}
-
 /**
  * Check whether `candidatePath` is equal to or inside `workspacePath`.
  * Normalizes path separators and compares Windows drive paths case-insensitively.
@@ -82,22 +68,9 @@ function isPathWithinWorkspace(
   candidatePath: string,
   workspacePath: string,
 ): boolean {
-  const normCandidate = normalizeWorkspacePath(candidatePath)?.replace(
-    /\\/g,
-    '/',
-  );
-  const normWorkspace = normalizeWorkspacePath(workspacePath)?.replace(
-    /\\/g,
-    '/',
-  );
-  if (!normCandidate || !normWorkspace) {
-    return false;
-  }
-  const isWindows =
-    /^[a-zA-Z]:(?:\/|$)/.test(normWorkspace) ||
-    /^[a-zA-Z]:(?:\/|$)/.test(normCandidate);
-  const candidate = isWindows ? normCandidate.toLowerCase() : normCandidate;
-  const workspace = isWindows ? normWorkspace.toLowerCase() : normWorkspace;
+  const candidate = normalizeSetupWorkspacePath(candidatePath);
+  const workspace = normalizeSetupWorkspacePath(workspacePath);
+  if (!candidate || !workspace) return false;
   if (candidate === workspace) {
     return true;
   }
@@ -212,7 +185,7 @@ export class WizardAnalysisRunner {
     if (activePath === null) {
       return true;
     }
-    const normalized = normalizeWorkspacePath(workspacePath);
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
     return normalized !== null && normalized === activePath;
   }
 
@@ -228,7 +201,7 @@ export class WizardAnalysisRunner {
     if (resultPath === null) {
       return true;
     }
-    const normalized = normalizeWorkspacePath(workspacePath);
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
     return normalized !== null && normalized === resultPath;
   }
 
@@ -241,7 +214,7 @@ export class WizardAnalysisRunner {
   public setCurrentWorkspacePath(
     workspacePath: string | null | undefined,
   ): void {
-    const normalized = normalizeWorkspacePath(workspacePath);
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
     if (normalized === this.currentWorkspacePath) {
       return;
     }
@@ -291,14 +264,17 @@ export class WizardAnalysisRunner {
     this._backendActive.set(true);
     this._resumableAnalysis.set(null);
 
-    if (this._startedAt() === null) {
-      const parsedStartedAt = parseStartedAtMs(options?.startedAt);
-      if (parsedStartedAt !== null) {
-        this._startedAt.set(parsedStartedAt);
-      }
+    const normalizedWorkspace = normalizeSetupWorkspacePath(
+      options?.workspacePath,
+    );
+    if (
+      this._startedAt() === null ||
+      (normalizedWorkspace !== null &&
+        normalizedWorkspace !== this._activeWorkspacePath())
+    ) {
+      this._startedAt.set(parseStartedAtMs(options?.startedAt));
     }
 
-    const normalizedWorkspace = normalizeWorkspacePath(options?.workspacePath);
     if (normalizedWorkspace !== null) {
       this._activeWorkspacePath.set(normalizedWorkspace);
     }
@@ -581,7 +557,9 @@ export class WizardAnalysisRunner {
       // Not resumable — adopt it as the stored result so the wizard can
       // continue where it stopped (e.g. resume its generation run).
       if (!this.wizardState.multiPhaseResult()) {
-        this._resultWorkspacePath.set(normalizeWorkspacePath(workspacePath));
+        this._resultWorkspacePath.set(
+          normalizeSetupWorkspacePath(workspacePath),
+        );
         this.wizardState.setMultiPhaseResult(analysis);
       }
       return;
@@ -634,7 +612,7 @@ export class WizardAnalysisRunner {
     const token = ++this.runToken;
     this._runGeneration.update((n) => n + 1);
     this.stopBackendWatcher();
-    const normalizedWorkspace = normalizeWorkspacePath(workspacePath);
+    const normalizedWorkspace = normalizeSetupWorkspacePath(workspacePath);
     this._isRunning.set(true);
     this._backendActive.set(false);
     this._startedAt.set(Date.now());

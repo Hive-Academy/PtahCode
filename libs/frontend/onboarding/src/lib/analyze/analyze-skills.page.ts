@@ -28,6 +28,7 @@ import {
 import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 import {
   normalizeSetupWorkspacePath,
+  isTerminalSetupRunStatus,
   SetupRunStore,
   WizardRpcService,
 } from '@ptah-extension/setup-wizard';
@@ -522,6 +523,7 @@ export class AnalyzeSkillsPage implements OnInit {
   private version = 0;
   private searchVersion = 0;
   private identity = '\u0000';
+  private installRunId: string | null = null;
   private readonly setupRuns = inject(SetupRunStore);
   private readonly reviewRecordId = signal<string | null>(null);
 
@@ -531,7 +533,10 @@ export class AnalyzeSkillsPage implements OnInit {
       const root = this.workspace.config().workspaceRoot ?? '';
       const key = `${root}\u0000${runId}`;
       if (key === this.identity) return;
-      untracked(() => this.releaseReview());
+      untracked(() => {
+        this.cancelActiveInstall();
+        this.releaseReview();
+      });
       this.identity = key;
       this.version++;
       this.searchVersion++;
@@ -568,6 +573,7 @@ export class AnalyzeSkillsPage implements OnInit {
     });
     this.destroyRef.onDestroy(() => {
       this.version++;
+      this.cancelActiveInstall();
       this.releaseReview();
       this.runPill.clear();
     });
@@ -580,20 +586,20 @@ export class AnalyzeSkillsPage implements OnInit {
         const slug = params.get('analysis');
         const runId = params.get('run');
         const workspaceRoot = this.workspace.config().workspaceRoot;
-        const record = this.setupRuns
-          .runsFor(workspaceRoot)
-          .find((entry) => entry.id === params.get('tab'));
-        const recordedRunId =
-          record?.analysisRunId ??
-          (record?.workflow === 'analysis' ? record.backendRunId : null);
-        if (
-          workspaceRoot &&
-          recordedRunId &&
-          slug === recordedRunId &&
-          (record?.workflow === 'skill-review' ||
-            record?.workflow === 'analysis')
-        ) {
-          this.routedReview.set({ workspaceRoot, runId: recordedRunId });
+        const tab = params.get('tab');
+        const matchesRun =
+          slug &&
+          this.setupRuns
+            .runsFor(workspaceRoot)
+            .some(
+              (record) =>
+                (!tab || record.id === tab) &&
+                (record.analysisRunId === slug ||
+                  (record.workflow === 'analysis' &&
+                    record.backendRunId === slug)),
+            );
+        if (workspaceRoot && slug && matchesRun) {
+          this.routedReview.set({ workspaceRoot, runId: slug });
           return;
         }
         this.routedReview.set(null);
@@ -1228,6 +1234,8 @@ export class AnalyzeSkillsPage implements OnInit {
       version === this.version &&
       installWorkspace ===
         normalizeSetupWorkspacePath(this.workspace.config().workspaceRoot);
+    const installRunId = crypto.randomUUID();
+    this.installRunId = installRunId;
     this.state.setStage('installing');
     const consentDate = new Date().toISOString();
     try {
@@ -1235,7 +1243,7 @@ export class AnalyzeSkillsPage implements OnInit {
         'wizard:install-skills-with-consent',
         {
           workspacePath,
-          installRunId: crypto.randomUUID(),
+          installRunId,
           skills: previews.map((item) => item.skillName),
           consentRecords: previews
             .filter((item) => item.hasScripts)
@@ -1246,6 +1254,7 @@ export class AnalyzeSkillsPage implements OnInit {
             })),
         },
       );
+      if (this.installRunId === installRunId) this.installRunId = null;
       if (!isCurrent()) return;
       if (
         !response.isSuccess() ||
@@ -1254,14 +1263,20 @@ export class AnalyzeSkillsPage implements OnInit {
       ) {
         throw new Error('Install failed');
       }
-      this.state.setInstalled(response.data.installed);
+      const installed = response.data.installed;
+      if (!Array.isArray(installed))
+        throw new Error('Invalid install response');
+      this.state.setInstalled(installed);
       if (!response.data.success || response.data.cancelled) {
         const { cancelled, failedSkill, reason } = response.data;
         this.state.setError(
           [
             cancelled
               ? 'Skill installation was cancelled.'
-              : 'Some skills could not be installed.',
+              : 'Skill setup could not finish.',
+            installed.length > 0
+              ? `Installed skills: ${installed.join(', ')}.`
+              : null,
             failedSkill,
             reason,
           ]
@@ -1278,7 +1293,20 @@ export class AnalyzeSkillsPage implements OnInit {
         this.state.setError('Could not install skills. Try again.');
         this.closeConsent();
       }
+    } finally {
+      if (this.installRunId === installRunId) this.installRunId = null;
     }
+  }
+
+  private cancelActiveInstall(): void {
+    const installRunId = this.installRunId;
+    if (!installRunId) return;
+    this.installRunId = null;
+    void this.rpc
+      .call('wizard:cancel-skill-install', { installRunId })
+      .catch(() => {
+        // degradation-audit: optional-capability - a workspace-pinned install cannot affect the next view.
+      });
   }
 
   public closeConsent(): void {
@@ -1309,16 +1337,15 @@ export class AnalyzeSkillsPage implements OnInit {
       const runId = this.loadedRunId() || null;
       const parent = runId ? this.attachReview(runId) : null;
       if (runId && !parent) return;
-      const record = this.setupRuns.start(
-        'project-guidance',
-        this.workspace.config().workspaceRoot,
-        {
-          parentId: parent?.id,
-          analysisRunId: runId,
-          origin: 'analysis-result-continue',
-        },
-      );
-      if (!record) throw new Error('Workspace unavailable');
+      const workspace = this.workspace.config().workspaceRoot;
+      if (!workspace) throw new Error('Workspace unavailable');
+      const activeGuidance = this.setupRuns
+        .runsFor(workspace)
+        .find(
+          (record) =>
+            record.workflow === 'project-guidance' &&
+            !isTerminalSetupRunStatus(record.status),
+        );
       if (parent) {
         this.saveSelection(parent.id, this.state.selectedSelectionKeys());
         this.setupRuns.report(parent.id, {
@@ -1327,10 +1354,15 @@ export class AnalyzeSkillsPage implements OnInit {
           error: null,
         });
       }
-      const { subPath, queryParams } = this.setupRuns.targetOf(record);
+      const target = activeGuidance
+        ? this.setupRuns.targetOf(activeGuidance)
+        : {
+            subPath: ['analyze', 'guidance'],
+            queryParams: runId ? { analysis: runId } : {},
+          };
       const navigated = await this.router.navigate(
-        ['/onboarding', ...subPath],
-        { queryParams },
+        ['/onboarding', ...target.subPath],
+        { queryParams: target.queryParams },
       );
       if (!navigated) throw new Error('Navigation cancelled');
     } catch {
@@ -1348,11 +1380,15 @@ export class AnalyzeSkillsPage implements OnInit {
     }
   }
   public async back(): Promise<void> {
-    const analysis =
-      this.route.snapshot.queryParamMap.get('analysis') ??
-      this.analysis.selected() ??
-      this.analysis.loaded()?.manifest.slug ??
-      null;
+    const requested = this.route.snapshot.queryParamMap.get('analysis');
+    const loaded = this.analysis.loaded();
+    const loadedSlug =
+      loaded?.manifest.runId === this.loadedRunId()
+        ? loaded?.manifest.slug
+        : undefined;
+    const analysis = this.routedReview()
+      ? (loadedSlug ?? requested)
+      : (this.analysis.selected() ?? loadedSlug ?? requested);
     await this.router.navigate(
       ['/onboarding/analyze'],
       analysis ? { queryParams: { analysis } } : {},

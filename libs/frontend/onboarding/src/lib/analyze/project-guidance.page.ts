@@ -7,6 +7,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -29,6 +30,7 @@ import {
   GenerationWorkflowStore,
   GuidanceGenerationStore,
   GuidanceResultPanelComponent,
+  sameSetupWorkspacePath,
   SetupRunStore,
   SetupWizardStateService,
   WizardRpcService,
@@ -205,7 +207,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               [title]="runTitle()"
               [message]="runMessage()"
               continueLabel="Continue"
-              (stop)="workflow.stop()"
+              (stop)="stop()"
               (retry)="retry()"
               (startOver)="retry()"
               (continueRun)="continueDone()"
@@ -216,7 +218,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   ptahButton
                   type="button"
                   class="mt-3"
-                  (click)="workflow.stop()"
+                  (click)="stop()"
                 >
                   Stop
                 </button>
@@ -430,7 +432,7 @@ export class ProjectGuidancePage implements OnInit {
       const source = event.tabBinding;
       if (
         source?.tabId !== record.id ||
-        source.workspacePath !== record.workspacePath ||
+        !sameSetupWorkspacePath(source.workspacePath, record.workspacePath) ||
         source.workflow !== 'setup-project-prompt' ||
         source.runId !== runId
       )
@@ -557,6 +559,15 @@ export class ProjectGuidancePage implements OnInit {
   );
 
   constructor() {
+    let workspace = this.runs.workspacePath();
+    effect(() => {
+      const current = this.runs.workspacePath();
+      if (current === workspace) return;
+      workspace = current;
+      untracked(
+        () => void this.openRoute(this.route.snapshot.queryParamMap.get('tab')),
+      );
+    });
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
       const binding = this.binding();
@@ -574,7 +585,10 @@ export class ProjectGuidancePage implements OnInit {
         this.lookupPending() ||
         this.boundRunId() ||
         this.recovery() ||
-        started.workspacePath !== this.runs.workspacePath()
+        !sameSetupWorkspacePath(
+          started.workspacePath,
+          this.runs.workspacePath(),
+        )
       )
         return;
       const binding = this.binding();
@@ -606,6 +620,11 @@ export class ProjectGuidancePage implements OnInit {
 
   private async openRoute(recordId: string | null): Promise<void> {
     this.setBinding(null);
+    this.workflow.unbind();
+    this.guidance.unbind();
+    this.detectedStack.set(null);
+    this.lookupPending.set(false);
+    this.lookupError.set(false);
     this.boundRunId.set(null);
     this.recovery.set(null);
     const workspacePath = this.runs.workspacePath();
@@ -624,9 +643,6 @@ export class ProjectGuidancePage implements OnInit {
         this.route.snapshot.queryParamMap.get('run'),
       );
     } else {
-      this.workflow.unbind();
-      this.guidance.unbind();
-      this.lookupPending.set(false);
       await this.startPendingHandoff(null);
     }
   }
@@ -639,7 +655,7 @@ export class ProjectGuidancePage implements OnInit {
       this.recovery.set('foreign-tab');
       return;
     }
-    if (record.workspacePath !== this.runs.workspacePath()) {
+    if (!sameSetupWorkspacePath(record.workspacePath, this.runs.workspacePath())) {
       this.recovery.set('workspace-mismatch');
       return;
     }
@@ -661,13 +677,18 @@ export class ProjectGuidancePage implements OnInit {
 
   private latestGuidance(): SetupRunRecord | null {
     const parent = this.agentRecord(null);
+    const analysis = this.route.snapshot.queryParamMap.get('analysis');
     const records = this.runs
       .runs()
       .filter((record) => record.workflow === 'project-guidance');
     return (
       records.find((record) => !isTerminalSetupRunStatus(record.status)) ??
       records.find((record) =>
-        parent ? record.parentId === parent.id : record.parentId === null,
+        parent
+          ? record.parentId === parent.id
+          : analysis
+            ? record.analysisRunId === analysis && record.parentId !== null
+            : record.parentId === null,
       ) ??
       (this.standalone() ? records[0] : undefined) ??
       null
@@ -680,7 +701,7 @@ export class ProjectGuidancePage implements OnInit {
       guidance?.parentId ?? this.route.snapshot.queryParamMap.get('gen');
     const record = id ? this.runs.get(id) : null;
     return record?.workflow === 'agent-generation' &&
-      record.workspacePath === this.runs.workspacePath()
+      sameSetupWorkspacePath(record.workspacePath, this.runs.workspacePath())
       ? record
       : null;
   }
@@ -699,7 +720,7 @@ export class ProjectGuidancePage implements OnInit {
     if (
       !runId &&
       started?.tabId === binding.tabId &&
-      started.workspacePath === binding.workspacePath
+      sameSetupWorkspacePath(started.workspacePath, binding.workspacePath)
     )
       runId = started.runId;
     runId ??= record?.backendRunId ?? null;
@@ -709,17 +730,17 @@ export class ProjectGuidancePage implements OnInit {
           (await this.rpc.getBoundRunState(binding))?.binding.runId ?? null;
       } catch {
         // degradation-audit: reported — lookupError shows that the run lookup failed.
-        if (!this.destroyed && this.binding() === binding) {
+        if (this.hasWorkspaceBinding(binding)) {
           this.lookupError.set(true);
           this.lookupPending.set(false);
         }
         return;
       }
-      if (this.destroyed || this.binding() !== binding) return;
+      if (!this.hasWorkspaceBinding(binding)) return;
       const late = this.handoff.started();
       if (
         late?.tabId === binding.tabId &&
-        late.workspacePath === binding.workspacePath
+        sameSetupWorkspacePath(late.workspacePath, binding.workspacePath)
       )
         runId = late.runId;
     }
@@ -737,14 +758,14 @@ export class ProjectGuidancePage implements OnInit {
     this.boundRunId.set(runId);
     this.lookupPending.set(false);
     await this.workflow.refresh();
-    if (this.destroyed || this.binding() !== binding) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.guidance.refreshCommitted();
-    if (this.destroyed || this.binding() !== binding) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.refreshStatus();
-    if (this.destroyed || this.binding() !== binding) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     if (runId && !requestedRunId) {
       await this.replaceIdentity(binding, runId);
-      if (this.destroyed || this.binding() !== binding) return;
+      if (!this.hasWorkspaceBinding(binding)) return;
     }
     if (!runId && !interrupted) await this.startPendingHandoff(record);
   }
@@ -767,40 +788,39 @@ export class ProjectGuidancePage implements OnInit {
     }
   }
 
+  protected stop(): void {
+    if (this.hasWorkspaceBinding()) this.workflow.stop();
+  }
+
   protected async retryLookup(): Promise<void> {
     const binding = this.binding();
-    if (binding) {
-      await this.bindRunSequence(
-        binding,
-        this.route.snapshot.queryParamMap.get('run'),
-      );
-      if (this.destroyed) return;
-    }
+    if (!binding || !this.hasWorkspaceBinding(binding)) return;
+    await this.bindRunSequence(
+      binding,
+      this.route.snapshot.queryParamMap.get('run'),
+    );
   }
   private async refreshStatus(): Promise<void> {
     const binding = this.binding();
-    if (!binding) return;
+    if (!binding || !this.hasWorkspaceBinding(binding)) return;
     try {
       const status = await this.rpc.getEnhancedPromptsStatus(
         binding.workspacePath,
       );
-      if (
-        !this.destroyed &&
-        this.binding()?.tabId === binding.tabId &&
-        !status.error
-      )
+      if (this.hasWorkspaceBinding(binding) && !status.error)
         this.detectedStack.set(status.detectedStack);
     } catch {
       // degradation-audit: reported — the saved result panel presents status failures.
     }
   }
   protected async refresh(): Promise<void> {
+    const binding = this.binding();
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.workflow.refresh();
-    if (this.destroyed) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.guidance.refresh();
-    if (this.destroyed) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.refreshStatus();
-    if (this.destroyed) return;
   }
   protected async openLatest(): Promise<void> {
     const binding = this.binding();
@@ -811,9 +831,10 @@ export class ProjectGuidancePage implements OnInit {
       if (this.destroyed) return;
       return;
     }
+    if (!this.hasWorkspaceBinding(binding)) return;
     this.workflow.bind(binding);
     await this.refresh();
-    if (this.destroyed) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     const run = this.workflow.run();
     if (run) {
       await this.router.navigate([], {
@@ -837,12 +858,22 @@ export class ProjectGuidancePage implements OnInit {
       this.boundRunId() ||
       (binding &&
         started?.tabId === binding.tabId &&
-        started.workspacePath === binding.workspacePath)
+        sameSetupWorkspacePath(started.workspacePath, binding.workspacePath))
     )
       return;
     if (!binding) {
-      const parent = this.agentRecord(null);
       const analysis = this.route.snapshot.queryParamMap.get('analysis');
+      const parent =
+        this.agentRecord(null) ??
+        (!this.standalone() && analysis
+          ? this.runs
+              .runs()
+              .find(
+                (record) =>
+                  record.workflow === 'skill-review' &&
+                  record.analysisRunId === analysis,
+              )
+          : undefined);
       const record = this.runs.start(
         'project-guidance',
         this.runs.workspacePath(),
@@ -861,7 +892,11 @@ export class ProjectGuidancePage implements OnInit {
         return;
       }
       await this.openRecord(record);
-      if (this.destroyed) return;
+      if (
+        this.destroyed ||
+        !sameSetupWorkspacePath(this.runs.workspacePath(), record.workspacePath)
+      )
+        return;
       binding = this.binding();
       if (
         !binding ||
@@ -871,22 +906,28 @@ export class ProjectGuidancePage implements OnInit {
       )
         return;
     }
+    if (!this.hasWorkspaceBinding(binding)) return;
     await this.workflow.startGuidance();
     if (this.destroyed) return;
     await this.followWorkflowBinding();
   }
   protected async retry(): Promise<void> {
+    if (!this.hasWorkspaceBinding()) return;
     await this.workflow.regenerateGuidance();
     if (this.destroyed) return;
     await this.followWorkflowBinding();
   }
   private async followWorkflowBinding(): Promise<void> {
     const binding = this.workflow.binding();
-    if (!binding) return;
+    if (
+      !binding ||
+      !sameSetupWorkspacePath(binding.workspacePath, this.runs.workspacePath())
+    )
+      return;
     this.setBinding(binding);
     this.guidance.bind(binding);
     await this.refresh();
-    if (this.destroyed) return;
+    if (!this.hasWorkspaceBinding(binding)) return;
     const runId =
       this.runs.get(binding.tabId)?.backendRunId ??
       this.workflow.run()?.binding.runId ??
@@ -907,23 +948,36 @@ export class ProjectGuidancePage implements OnInit {
       replaceUrl: true,
     });
   }
+  private hasWorkspaceBinding(binding = this.binding()): boolean {
+    return (
+      !this.destroyed &&
+      binding !== null &&
+      this.binding() === binding &&
+      sameSetupWorkspacePath(binding.workspacePath, this.runs.workspacePath())
+    );
+  }
+
   protected async setEnabled(value: boolean): Promise<void> {
+    if (!this.hasWorkspaceBinding()) return;
     await this.guidance.setEnabled(value);
     if (this.destroyed) return;
     await this.refreshStatus();
     if (this.destroyed) return;
   }
   protected async refreshSaved(): Promise<void> {
+    if (!this.hasWorkspaceBinding()) return;
     await this.guidance.refreshCommitted();
     if (this.destroyed) return;
     await this.refreshStatus();
     if (this.destroyed) return;
   }
   protected async loadContent(): Promise<void> {
+    if (!this.hasWorkspaceBinding()) return;
     await this.guidance.loadContent();
     if (this.destroyed) return;
   }
   protected async download(): Promise<void> {
+    if (!this.hasWorkspaceBinding()) return;
     await this.guidance.download();
     if (this.destroyed) return;
   }
@@ -934,7 +988,7 @@ export class ProjectGuidancePage implements OnInit {
     const owner = ownerId ? this.runs.get(ownerId) : null;
     if (
       owner?.workflow !== 'project-guidance' ||
-      owner.workspacePath !== this.runs.workspacePath()
+      !sameSetupWorkspacePath(owner.workspacePath, this.runs.workspacePath())
     )
       return;
     const target = stepTarget(owner);

@@ -9,7 +9,10 @@ export type { PreviewConfirmation } from './lib/services/generation-preview.stor
 export { WizardAnalysisRunner } from './lib/services/wizard-analysis-runner.service';
 export { findBoundGenerationTab } from './lib/services/bound-generation-tab';
 export { SetupRunStore } from './lib/services/setup-run.store';
-export { normalizeSetupWorkspacePath } from './lib/services/setup-run-persistence';
+export {
+  normalizeSetupWorkspacePath,
+  sameSetupWorkspacePath,
+} from './lib/services/setup-run-persistence';
 export type {
   SetupRunStartOptions,
   SetupRunReport,

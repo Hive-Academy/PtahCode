@@ -460,7 +460,7 @@ describe('SetupRunsListComponent', () => {
     ]);
     render();
     expect(byTestId('setup-run-row')?.textContent).toContain(
-      '1 agent installed',
+      '1 skill installed',
     );
     expect(byTestId('setup-run-row')?.textContent).toContain(
       'The remaining agents could not be installed.',

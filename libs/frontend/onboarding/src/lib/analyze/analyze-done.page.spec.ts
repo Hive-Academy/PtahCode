@@ -129,6 +129,20 @@ describe('AnalyzeDonePage', () => {
     expect(fixture.nativeElement.textContent).not.toContain('Generate agents');
   });
 
+  it('keeps the originating Setup record and analysis ID when returning to Review skills', async () => {
+    params.next(convertToParamMap({ tab: agent.id, analysis: 'saved' }));
+    const fixture = TestBed.createComponent(AnalyzeDonePage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.nativeElement as HTMLElement;
+    [...page.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Review skills')
+      ?.click();
+    expect(navigate).toHaveBeenCalledWith(['/onboarding/analyze/skills'], {
+      queryParams: { tab: agent.id, analysis: agent.analysisRunId },
+    });
+  });
+
   it('shows the agent hand-off countdown on Done and skips the identified run', async () => {
     params.next(convertToParamMap({ tab: agent.id, analysis: 'saved' }));
     pending.set(true);

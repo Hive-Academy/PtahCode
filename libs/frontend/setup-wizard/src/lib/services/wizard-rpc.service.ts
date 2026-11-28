@@ -669,11 +669,7 @@ export class WizardRpcService {
   }
 
   /**
-   * Load a specific saved analysis by slug directory name.
-   * Returns the full multi-phase analysis response.
-   *
-   * @param filename - Slug directory name from .ptah/analysis/
-   * @returns Multi-phase analysis response with manifest and phase contents
+   * Read the status of workspace analysis.
    */
   public async getAnalysisStatus(): Promise<AnalysisStatus> {
     const result = await this.rpcService.call(
@@ -685,12 +681,16 @@ export class WizardRpcService {
     throw new Error(result.error || 'Failed to check analysis status');
   }
 
+  /** Load the manifest and phase contents by directory slug or run ID. */
   public async loadAnalysis(
     filename: string,
+    workspacePath?: string,
   ): Promise<MultiPhaseAnalysisResponse> {
+    // The handler also accepts a workspace to pin recovery lookups.
+    const params = workspacePath ? { filename, workspacePath } : { filename };
     const result = await this.rpcService.call(
       'wizard:load-analysis',
-      { filename },
+      params,
       { timeout: WIZARD_RPC_TIMEOUTS.LIST_MS },
     );
 

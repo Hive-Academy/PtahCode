@@ -24,6 +24,7 @@ import {
   AgentNextStepsComponent,
   GenerationHandoffStore,
   GenerationWorkflowStore,
+  sameSetupWorkspacePath,
   SetupRunStore,
   WizardRpcService,
 } from '@ptah-extension/setup-wizard';
@@ -162,7 +163,9 @@ export class AnalyzeDonePage implements OnInit {
   private readonly routedRun = computed(() => {
     const id = this.params().get(ONBOARDING_QUERY.tab);
     const record = isOnboardingIdentityValue(id) ? this.runs.get(id) : null;
-    return record?.workspacePath === this.runs.workspacePath() ? record : null;
+    return sameSetupWorkspacePath(record?.workspacePath, this.runs.workspacePath())
+      ? record
+      : null;
   });
   private readonly routedRunId = computed(() => this.routedRun()?.id);
   protected readonly agentRun = computed(() => {
@@ -256,9 +259,13 @@ export class AnalyzeDonePage implements OnInit {
     this.appState.setCurrentView('chat');
   }
   protected async reviewSkills(): Promise<void> {
+    const record = this.routedRun();
     await this.router.navigate(['/onboarding/analyze/skills'], {
       queryParams: {
-        analysis: this.route.snapshot.queryParamMap.get('analysis'),
+        analysis:
+          record?.analysisRunId ??
+          this.route.snapshot.queryParamMap.get('analysis'),
+        ...(record ? { tab: record.id } : {}),
       },
     });
   }

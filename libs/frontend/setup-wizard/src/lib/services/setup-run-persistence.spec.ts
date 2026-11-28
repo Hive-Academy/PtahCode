@@ -69,8 +69,19 @@ describe('setup-run-persistence', () => {
   describe('normalizeSetupWorkspacePath', () => {
     it('trims whitespace and trailing separators', () => {
       expect(normalizeSetupWorkspacePath('  /a/b/  ')).toBe('/a/b');
-      expect(normalizeSetupWorkspacePath('C:\\work\\repo\\\\')).toBe(
-        'C:\\work\\repo',
+    });
+
+    it('matches Windows aliases and retains POSIX case sensitivity', () => {
+      expect(normalizeSetupWorkspacePath('C:\\Work/Repo\\\\')).toBe(
+        'c:/work/repo',
+      );
+      expect(normalizeSetupWorkspacePath('c:/work/repo/')).toBe('c:/work/repo');
+      expect(normalizeSetupWorkspacePath('D:\\')).toBe('d:/');
+      expect(normalizeSetupWorkspacePath('\\\\Host\\Share\\Folder')).toBe(
+        '//host/share/folder',
+      );
+      expect(normalizeSetupWorkspacePath('/Work/Repo')).not.toBe(
+        normalizeSetupWorkspacePath('/work/repo'),
       );
     });
 
@@ -125,12 +136,12 @@ describe('setup-run-persistence', () => {
       );
     });
 
-    it('round-trips a valid record and normalizes its workspace', () => {
+    it('round-trips a valid record with its original workspace spelling', () => {
       const parsed = parseSetupRunRecord({
         ...record(),
         workspacePath: `${WORKSPACE}/`,
       });
-      expect(parsed).toEqual(record());
+      expect(parsed).toEqual(record({ workspacePath: `${WORKSPACE}/` }));
     });
 
     it('drops unknown and sensitive fields', () => {
@@ -363,6 +374,32 @@ describe('setup-run-persistence', () => {
         readSetupRunIndex(storage).index[WORKSPACE].map((r) => r.id),
       ).toEqual(['setup-1', 'setup-2']);
     });
+
+    it.each([
+      ['C:\\Work\\Repo', 'C:\\Work\\Repo', 'c:/work/repo'],
+      ['C:', 'C:\\', 'c:/'],
+    ])(
+      'merges legacy Windows bucket %s and preserves native record paths',
+      (legacy, native, key) => {
+        const legacyRecord = record({ workspacePath: legacy });
+        const currentRecord = record({ id: 'setup-2', workspacePath: native });
+        const storage = memoryStorage(
+          stored({ [legacy]: [legacyRecord], [key]: [currentRecord] }),
+        );
+        const expected = {
+          [key]: [{ ...legacyRecord, workspacePath: native }, currentRecord],
+        };
+        expect(readSetupRunIndex(storage)).toEqual({
+          index: expected,
+          corrupt: false,
+        });
+        expect(
+          readSetupRunIndex(memoryStorage(serializeSetupRunIndex(expected)))
+            .index,
+        ).toEqual(expected);
+        expect(warnSpy).not.toHaveBeenCalled();
+      },
+    );
 
     it('caps each workspace on read', () => {
       const runs = Array.from({ length: 25 }, (_, i) =>

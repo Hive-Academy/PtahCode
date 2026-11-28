@@ -18,12 +18,16 @@ import { FormsModule } from '@angular/forms';
 import { LucideAngularModule, Users } from 'lucide-angular';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { AppStateManager, ClaudeRpcService } from '@ptah-extension/core';
-import type { DeepProjectAnalysis } from '@ptah-extension/shared';
+import type {
+  DeepProjectAnalysis,
+  ProjectGuidance,
+} from '@ptah-extension/shared';
 import {
   AttachmentTrayComponent,
   ComposerAttachmentsService,
 } from '@ptah-extension/chat';
 import {
+  normalizeSetupWorkspacePath,
   SetupRunStore,
   type SetupRunRecord,
   type SetupRunStepOf,
@@ -32,6 +36,7 @@ import { HarnessChatLauncherService } from '../launcher/harness-chat-launcher.se
 import { WorkspaceHeaderComponent } from '../shell/workspace-header.component';
 import {
   PtahButtonDirective,
+  PtahCheckboxDirective,
   PtahFieldComponent,
   PtahTextareaDirective,
 } from '@ptah-extension/ui';
@@ -43,6 +48,17 @@ import {
   type TeamBuilderRunOutcome,
 } from './team-builder-run.coordinator';
 
+function sameWorkspacePath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalizedLeft = normalizeSetupWorkspacePath(left);
+  return (
+    Boolean(normalizedLeft) &&
+    normalizedLeft === normalizeSetupWorkspacePath(right)
+  );
+}
+
 @Component({
   selector: 'ptah-team-builder-start-page',
   standalone: true,
@@ -52,6 +68,7 @@ import {
     WorkspaceHeaderComponent,
     LucideAngularModule,
     PtahButtonDirective,
+    PtahCheckboxDirective,
     PtahFieldComponent,
     PtahTextareaDirective,
     StackSkillReviewComponent,
@@ -89,7 +106,7 @@ export class TeamBuilderStartPage {
   public readonly submitted = signal(false);
   public readonly missingAttachments = signal(false);
   public readonly activeRecord = computed<SetupRunRecord | null>(() => {
-    const root = this.launcher.workspaceRoot();
+    const root = normalizeSetupWorkspacePath(this.launcher.workspaceRoot());
     const workspaceRuns = root
       ? this.setupRuns
           .runsFor(root)
@@ -173,6 +190,10 @@ export class TeamBuilderStartPage {
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private returnFocus: HTMLElement | null = null;
   private workspace = '';
+  private readonly guidanceLoadedFor = signal<{
+    readonly loaded: boolean;
+    readonly recordId: string | null;
+  }>({ loaded: false, recordId: null });
   private guidanceAnalysis: DeepProjectAnalysis = {
     projectType: 'unknown',
     frameworks: [],
@@ -181,7 +202,7 @@ export class TeamBuilderStartPage {
   public constructor() {
     effect(() => {
       const root = this.launcher.workspaceRoot();
-      if (this.workspace && this.workspace !== root) {
+      if (this.workspace && !sameWorkspacePath(this.workspace, root)) {
         this.coordinator.abortWorkspace(this.workspace);
         this.currentRecordId.set(null);
         this.hydratedRecordId = null;
@@ -227,7 +248,9 @@ export class TeamBuilderStartPage {
           !record ||
           !root ||
           this.hydratedRecordId !== record.id ||
-          (record.status !== 'needs-input' && record.status !== 'failed')
+          (record.status !== 'needs-input' &&
+            record.status !== 'failed' &&
+            record.status !== 'interrupted')
         ) {
           return;
         }
@@ -282,6 +305,14 @@ export class TeamBuilderStartPage {
     this.persistActiveDraft();
   }
 
+  public guidanceLabel(value: ProjectGuidance['label']): string {
+    return value === 'do_not_copy'
+      ? 'Do not copy'
+      : value === 'tolerate'
+        ? 'Tolerate'
+        : 'Follow';
+  }
+
   public onApproveSkill(skillName: string): void {
     this.state.approve(skillName);
     this.persistActiveDraft();
@@ -304,16 +335,62 @@ export class TeamBuilderStartPage {
     const record = this.ensureRecord('review', 'needs-input', {
       allowNewAfterTerminal: true,
     });
+    const preserveInstalled = Boolean(
+      record && this.coordinator.hasCompletedInstall(record.id),
+    );
     if (record) {
       this.hydratedRecordId = record.id;
       this.hadLocalAttachmentsForRecord =
         this.attachments.files().length > 0 ||
         this.attachments.images().length > 0;
+      if (preserveInstalled) {
+        const root = this.launcher.workspaceRoot();
+        const recovery = this.coordinator.recoveryFor(record);
+        const installed = this.currentInstalled();
+        if (record.status === 'failed' || record.status === 'interrupted') {
+          await this.setupRuns.retry(record.id);
+          if (
+            this.destroyRef.destroyed ||
+            !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
+            this.activeRecord()?.id !== record.id
+          ) {
+            return;
+          }
+        }
+        this.setupRuns.report(record.id, {
+          status: 'needs-input',
+          step: 'review',
+          error: null,
+          teamBuilder: { intent: this.intent(), installed },
+        });
+        this.persistDraftFor(record.id, {
+          selectedIds:
+            this.state.selectedIds().size > 0
+              ? [...this.state.selectedIds()]
+              : recovery.selectedIds,
+          ownerDecision: this.state.ownerDecision() ?? recovery.ownerDecision,
+          installCompleted: true,
+        });
+        this.skillsInstalledState.set(true);
+        this.state.setInstalled(installed);
+        this.state.setStage('review');
+        this.state.setError(null);
+        if (!this.hasLoadedGuidanceFor(record.id)) {
+          await this.loadReview({
+            preserveSelection: true,
+            recordId: record.id,
+          });
+        }
+        return;
+      }
       this.setupRuns.report(record.id, {
         status: 'needs-input',
         step: 'review',
         error: null,
-        teamBuilder: { intent: this.intent(), installed: [] },
+        teamBuilder: {
+          intent: this.intent(),
+          installed: record.teamBuilder?.installed ?? [],
+        },
       });
       this.persistDraftFor(record.id, {
         selectedIds: [],
@@ -331,7 +408,11 @@ export class TeamBuilderStartPage {
   public readonly skillsInstalled = computed(() => {
     if (this.skillsInstalledState()) return true;
     const record = this.activeRecord();
-    if (!record || record.status !== 'failed' || record.step !== 'review') {
+    if (
+      !record ||
+      record.status === 'completed' ||
+      record.status === 'cancelled'
+    ) {
       return false;
     }
     return this.coordinator.hasCompletedInstall(record.id);
@@ -346,7 +427,7 @@ export class TeamBuilderStartPage {
       preserveError?: boolean;
       recordId?: string;
     } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!options.preserveSelection) {
       this.skillsInstalledState.set(false);
     }
@@ -362,8 +443,19 @@ export class TeamBuilderStartPage {
     const isStale = (): boolean =>
       version !== this.requestVersion ||
       this.destroyRef.destroyed ||
-      root !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
       (boundRecordId !== null && this.activeRecord()?.id !== boundRecordId);
+    this.guidanceLoadedFor.set({ loaded: false, recordId: null });
+    if (
+      boundRecordId !== null &&
+      root &&
+      this.coordinator.draftFor(boundRecordId)?.guidanceLoaded
+    ) {
+      this.coordinator.saveDraft(boundRecordId, {
+        workspacePath: root,
+        guidanceLoaded: false,
+      });
+    }
     this.state.setPreviewing(false);
     this.state.setPreview([]);
     this.state.setLoading(true);
@@ -381,13 +473,14 @@ export class TeamBuilderStartPage {
     this.state.setOwnerDecisionPrompt('');
     this.state.setGuidanceNote('');
     this.guidanceAnalysis = { projectType: 'unknown', frameworks: [] };
+    let recommendationsLoaded = false;
     try {
       let analysis: DeepProjectAnalysis = {
         projectType: 'unknown',
         frameworks: [],
       };
       const listed = await this.rpc.call('wizard:list-analyses', {});
-      if (isStale()) return;
+      if (isStale()) return false;
       if (listed.isSuccess() && listed.data.analyses.length) {
         const newest = [...listed.data.analyses].sort((a, b) =>
           b.savedAt.localeCompare(a.savedAt),
@@ -395,7 +488,7 @@ export class TeamBuilderStartPage {
         const loaded = await this.rpc.call('wizard:load-analysis', {
           filename: newest.filename,
         });
-        if (isStale()) return;
+        if (isStale()) return false;
         if (loaded.isSuccess()) {
           const profile = loaded.data.phaseContents['project-profile'] ?? '';
           const frameworksLine = profile.match(
@@ -427,35 +520,69 @@ export class TeamBuilderStartPage {
       const recommended = await this.rpc.call('wizard:recommend-skills', {
         analysis,
       });
-      if (isStale()) return;
+      if (isStale()) return false;
       if (!recommended.isSuccess()) {
         this.state.setError(
           this.rpcMessage(recommended, 'Could not load skill recommendations.'),
         );
-        return;
+        if (boundRecordId !== null) {
+          this.persistDraftFor(boundRecordId);
+        } else {
+          this.persistActiveDraft();
+        }
+        return false;
       }
+      recommendationsLoaded = true;
       this.loadErrorState.set(false);
       this.state.setRecommendations(recommended.data.skills);
       const guidance = await this.rpc.call('wizard:get-project-guidance', {
         analysis,
       });
-      if (isStale()) return;
+      if (isStale()) return false;
       this.guidanceAnalysis = analysis;
-      if (guidance.isSuccess()) {
-        this.state.setGuidanceFacts(guidance.data.facts);
-        this.state.setOwnerDecisionPrompt(guidance.data.ownerDecisionPrompt);
-      } else {
+      if (!guidance.isSuccess() || !Array.isArray(guidance.data?.facts)) {
         this.state.setGuidanceFacts([]);
         this.state.setGuidanceNote('Could not load project guidance.');
+        if (this.skillsInstalled()) {
+          this.state.setError(
+            this.rpcMessage(guidance, 'Could not load project guidance.'),
+          );
+        }
+        if (boundRecordId !== null) {
+          this.persistDraftFor(boundRecordId);
+        } else {
+          this.persistActiveDraft();
+        }
+        return false;
       }
+      this.guidanceLoadedFor.set({ loaded: true, recordId: boundRecordId });
+      this.state.setGuidanceFacts(guidance.data.facts);
+      this.state.setOwnerDecisionPrompt(guidance.data.ownerDecisionPrompt);
       if (boundRecordId !== null) {
         this.persistDraftFor(boundRecordId);
       } else {
         this.persistActiveDraft();
       }
+      return true;
     } catch {
-      if (!isStale())
-        this.state.setError('Could not load skill recommendations.');
+      // degradation-audit: reported - the page shows the load error for the
+      // current record, and installed recovery stays blocked until guidance loads.
+      if (!isStale()) {
+        this.state.setError(
+          recommendationsLoaded
+            ? 'Could not load project guidance.'
+            : 'Could not load skill recommendations.',
+        );
+        if (recommendationsLoaded) {
+          this.state.setGuidanceNote('Could not load project guidance.');
+        }
+        if (boundRecordId !== null) {
+          this.persistDraftFor(boundRecordId);
+        } else {
+          this.persistActiveDraft();
+        }
+      }
+      return false;
     } finally {
       if (!isStale()) this.state.setLoading(false);
     }
@@ -482,7 +609,7 @@ export class TeamBuilderStartPage {
     const isStale = (): boolean =>
       version !== this.searchVersion ||
       this.destroyRef.destroyed ||
-      root !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
       (boundRecordId !== null && this.activeRecord()?.id !== boundRecordId);
     this.searchTimer = setTimeout(async () => {
       try {
@@ -571,6 +698,7 @@ export class TeamBuilderStartPage {
       previews,
       guidanceAnalysis: this.guidanceAnalysis,
       guidanceFacts: this.state.guidanceFacts(),
+      guidanceLoaded: this.hasLoadedGuidanceFor(record.id),
       ownerDecision: this.state.ownerDecision(),
       attachmentSnapshot: snapshot,
     });
@@ -596,6 +724,32 @@ export class TeamBuilderStartPage {
     }
     const root = this.launcher.workspaceRoot();
     if (!root) return;
+    const currentRecordId = this.activeRecord()?.id ?? null;
+    if (
+      this.skillsInstalled() &&
+      !fromInstall &&
+      !this.hasLoadedGuidanceFor(currentRecordId)
+    ) {
+      const loaded = await this.loadReview({
+        preserveSelection: true,
+        recordId: currentRecordId ?? undefined,
+      });
+      if (
+        !loaded ||
+        this.destroyRef.destroyed ||
+        !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
+        (currentRecordId !== null &&
+          this.activeRecord()?.id !== currentRecordId) ||
+        !this.hasLoadedGuidanceFor(this.activeRecord()?.id ?? null) ||
+        this.blockForOwnerDecision() ||
+        this.missingAttachments() ||
+        this.viewStage() === 'launching' ||
+        this.viewStage() === 'handed-off' ||
+        this.starting()
+      ) {
+        return;
+      }
+    }
     const record = this.ensureRecord('launching', 'running', {
       allowNewAfterTerminal: !this.skillsInstalled(),
     });
@@ -617,6 +771,7 @@ export class TeamBuilderStartPage {
       installed,
       guidanceAnalysis: this.guidanceAnalysis,
       guidanceFacts: this.state.guidanceFacts(),
+      guidanceLoaded: this.hasLoadedGuidanceFor(record.id),
       ownerDecision: this.state.ownerDecision(),
       attachmentSnapshot: snapshot,
     });
@@ -633,7 +788,30 @@ export class TeamBuilderStartPage {
         hadAttachments: false,
       });
     }
+    if (record?.status === 'interrupted') {
+      await this.continueInterrupted();
+      return;
+    }
     if (this.skillsInstalled()) {
+      if (
+        !this.state.loading() &&
+        !this.hasLoadedGuidanceFor(record?.id ?? null)
+      ) {
+        const loaded = await this.loadReview({
+          preserveSelection: true,
+          preserveError: record?.status === 'failed',
+          recordId: record?.id,
+        });
+        if (
+          !loaded ||
+          this.destroyRef.destroyed ||
+          !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
+          (record && this.activeRecord()?.id !== record.id) ||
+          !this.hasLoadedGuidanceFor(record?.id ?? null)
+        ) {
+          return;
+        }
+      }
       await this.launchChat();
     }
   }
@@ -666,7 +844,7 @@ export class TeamBuilderStartPage {
     await this.setupRuns.retry(recordId);
     if (
       this.destroyRef.destroyed ||
-      root !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
       this.activeRecord()?.id !== recordId
     ) {
       return;
@@ -681,15 +859,17 @@ export class TeamBuilderStartPage {
     }
     if (recovery.installCompleted) {
       this.skillsInstalledState.set(true);
-      if (
-        !this.coordinator.draftFor(recordId) &&
-        this.state.guidanceFacts().length === 0
-      ) {
-        await this.loadReview({ preserveSelection: true, recordId });
+      if (!this.hasLoadedGuidanceFor(recordId)) {
+        const loaded = await this.loadReview({
+          preserveSelection: true,
+          recordId,
+        });
         if (
+          !loaded ||
           this.destroyRef.destroyed ||
-          root !== this.launcher.workspaceRoot() ||
-          this.activeRecord()?.id !== recordId
+          !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
+          this.activeRecord()?.id !== recordId ||
+          !this.hasLoadedGuidanceFor(recordId)
         ) {
           return;
         }
@@ -701,7 +881,7 @@ export class TeamBuilderStartPage {
     await this.loadReview({ preserveSelection: true, recordId });
     if (
       this.destroyRef.destroyed ||
-      root !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
       this.activeRecord()?.id !== recordId
     ) {
       return;
@@ -772,9 +952,11 @@ export class TeamBuilderStartPage {
   }
 
   private findLiveWorkspaceRecord(root: string): SetupRunRecord | null {
+    const normalized = normalizeSetupWorkspacePath(root);
+    if (!normalized) return null;
     return (
       this.setupRuns
-        .runsFor(root)
+        .runsFor(normalized)
         .find(
           (record) =>
             record.workflow === 'team-builder' &&
@@ -840,7 +1022,7 @@ export class TeamBuilderStartPage {
     const isStale = (): boolean =>
       version !== this.requestVersion ||
       this.destroyRef.destroyed ||
-      root !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(root, this.launcher.workspaceRoot()) ||
       (boundRecordId !== null && this.activeRecord()?.id !== boundRecordId);
     this.loadErrorState.set(false);
     this.state.setPreviewing(true);
@@ -927,7 +1109,7 @@ export class TeamBuilderStartPage {
   ): void {
     if (
       this.destroyRef.destroyed ||
-      workspaceRoot !== this.launcher.workspaceRoot() ||
+      !sameWorkspacePath(workspaceRoot, this.launcher.workspaceRoot()) ||
       this.activeRecord()?.id !== recordId
     ) {
       return;
@@ -1012,10 +1194,17 @@ export class TeamBuilderStartPage {
       attachmentImages: images,
       hadAttachments:
         files.length > 0 || images.length > 0 || this.missingAttachments(),
+      guidanceLoaded: this.hasLoadedGuidanceFor(recordId),
       ...(overrides.installCompleted !== undefined
         ? { installCompleted: overrides.installCompleted }
         : {}),
     });
+  }
+
+  private hasLoadedGuidanceFor(recordId: string | null): boolean {
+    const current = this.guidanceLoadedFor();
+    if (!current.loaded) return false;
+    return recordId === null || current.recordId === recordId;
   }
 
   private resetRecordViewState(): void {
@@ -1029,6 +1218,7 @@ export class TeamBuilderStartPage {
     this.attachments.restore([], []);
     this.attachments.clear();
     this.hadLocalAttachmentsForRecord = false;
+    this.guidanceLoadedFor.set({ loaded: false, recordId: null });
     this.guidanceAnalysis = { projectType: 'unknown', frameworks: [] };
     this.loadErrorState.set(false);
     this.skillsInstalledState.set(false);
@@ -1070,6 +1260,10 @@ export class TeamBuilderStartPage {
             draft.attachmentImages.length > 0),
       );
       if (draft) {
+        this.guidanceLoadedFor.set({
+          loaded: draft.guidanceLoaded,
+          recordId: draft.guidanceLoaded ? record.id : null,
+        });
         this.guidanceAnalysis = {
           projectType: draft.guidanceAnalysis.projectType,
           frameworks: [...draft.guidanceAnalysis.frameworks],
@@ -1083,6 +1277,7 @@ export class TeamBuilderStartPage {
         );
         this.hadLocalAttachmentsForRecord = hasAvailableAttachments;
       } else {
+        this.guidanceLoadedFor.set({ loaded: false, recordId: null });
         this.hadLocalAttachmentsForRecord = false;
       }
       this.missingAttachments.set(
@@ -1098,11 +1293,7 @@ export class TeamBuilderStartPage {
       this.skillsInstalledState.set(recovery.installCompleted);
       if (switchedRecord) {
         if (recovery.installCompleted) {
-          if (
-            !draft &&
-            !this.state.loading() &&
-            this.state.guidanceFacts().length === 0
-          ) {
+          if (!this.hasLoadedGuidanceFor(record.id) && !this.state.loading()) {
             void this.loadReview({
               preserveSelection: true,
               preserveError: true,
@@ -1136,10 +1327,19 @@ export class TeamBuilderStartPage {
       return;
     }
     if (record.status === 'needs-input' && switchedRecord) {
+      this.skillsInstalledState.set(recovery.installCompleted);
       if (record.step === 'intent') {
         this.state.setStage('intent');
       } else if (record.step === 'consent') {
-        if (recovery.selectedIds.length > 0) {
+        if (recovery.installCompleted) {
+          this.state.setStage('review');
+          if (!this.hasLoadedGuidanceFor(record.id) && !this.state.loading()) {
+            void this.loadReview({
+              preserveSelection: true,
+              recordId: record.id,
+            });
+          }
+        } else if (recovery.selectedIds.length > 0) {
           this.state.setStage('review');
           void this.rehydrateConsent(record.id);
         } else {
@@ -1156,7 +1356,14 @@ export class TeamBuilderStartPage {
         }
       } else if (record.step === 'review') {
         this.state.setStage('review');
-        if (
+        if (recovery.installCompleted) {
+          if (!this.hasLoadedGuidanceFor(record.id) && !this.state.loading()) {
+            void this.loadReview({
+              preserveSelection: true,
+              recordId: record.id,
+            });
+          }
+        } else if (
           !this.state.loading() &&
           this.state.recommendations().length === 0
         ) {

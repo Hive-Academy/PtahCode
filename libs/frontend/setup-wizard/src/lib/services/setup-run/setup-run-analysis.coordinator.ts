@@ -1,5 +1,6 @@
 import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type { WizardGetResumableRunResponse } from '@ptah-extension/shared';
+import { sameSetupWorkspacePath } from '../setup-run-persistence';
 import {
   isTerminalSetupRunStatus,
   type SetupRunRecord,
@@ -16,7 +17,7 @@ import {
 } from './setup-run-host';
 
 export class SetupRunAnalysisCoordinator {
-  private readonly runnerSeen = new Set<string>();
+  private readonly runnerSeen = new Map<string, boolean>();
 
   public constructor(
     private readonly host: SetupRunRecordHost,
@@ -25,38 +26,70 @@ export class SetupRunAnalysisCoordinator {
     private readonly rpc: WizardRpcService,
   ) {}
 
-  public reconcile(
+  public async reconcile(
     workspace: string,
     resumable: WizardGetResumableRunResponse,
-  ): void {
+  ): Promise<void> {
     const manifest = resumable.analysis?.manifest ?? null;
-    const active =
-      resumable.analysisActive === true ||
-      this.runner.isRunningForWorkspace(workspace);
     const live = this.host
       .runsFor(workspace)
       .filter((record) => record.workflow === 'analysis' && isLive(record));
-    if (active) {
+    if (
+      resumable.analysisActive === true ||
+      this.runner.isRunningForWorkspace(workspace)
+    ) {
       if (live.length === 0) {
-        this.adopt(workspace, 'running', manifest?.runId ?? null);
+        const startedAt = Date.parse(resumable.activeAnalysisStartedAt ?? '');
+        this.adopt(
+          workspace,
+          'running',
+          manifest?.lifecycle === 'running' ? manifest.runId : null,
+          Number.isFinite(startedAt) ? startedAt : undefined,
+        );
+      }
+      if (
+        resumable.analysisActive === true &&
+        !this.runner.isRunningForWorkspace(workspace)
+      ) {
+        this.runner.syncBackendActive(true, {
+          startedAt: resumable.activeAnalysisStartedAt,
+          workspacePath: workspace,
+        });
+      }
+      if (this.runner.isRunningForWorkspace(workspace)) {
+        this.syncFromRunner(true, this.runner.isCanceling());
       }
       return;
     }
-    for (const record of live) {
-      if (this.host.isLiveThisSession(record.id)) continue;
+    if (resumable.analysisActive === false) {
+      await Promise.all(
+        live.map(async (record) => {
+          if (this.host.isLiveThisSession(record.id)) return;
+          if (
+            manifest &&
+            (record.backendRunId === manifest.runId ||
+              (!record.backendRunId &&
+                Date.parse(manifest.updatedAt ?? manifest.analyzedAt) >=
+                  record.createdAt))
+          ) {
+            this.host.apply(record.id, {
+              status:
+                manifest.lifecycle === 'completed'
+                  ? 'completed'
+                  : 'interrupted',
+              backendRunId: manifest.runId,
+              analysisRunId: manifest.runId,
+            });
+          } else {
+            await this.recoverSaved(record);
+          }
+        }),
+      );
       if (
-        !manifest ||
-        (record.backendRunId !== null && record.backendRunId !== manifest.runId)
-      ) {
-        // No evidence about this run: keep the last known status.
-        continue;
-      }
-      this.host.apply(record.id, {
-        status:
-          manifest.lifecycle === 'completed' ? 'completed' : 'interrupted',
-        backendRunId: manifest.runId,
-        analysisRunId: manifest.runId,
-      });
+        this.host.workspacePath() !== workspace ||
+        this.runner.isRunningForWorkspace(workspace)
+      )
+        return;
     }
     if (
       manifest &&
@@ -77,8 +110,8 @@ export class SetupRunAnalysisCoordinator {
     workspace: string,
     status: SetupRunStatus,
     runId: string | null,
+    createdAt = Date.now(),
   ): void {
-    const now = Date.now();
     this.host.insert({
       id: newRunId(),
       workspacePath: workspace,
@@ -89,35 +122,46 @@ export class SetupRunAnalysisCoordinator {
       analysisRunId: runId,
       parentId: null,
       unseen: isTerminalSetupRunStatus(status),
-      createdAt: now,
-      updatedAt: now,
+      createdAt,
+      updatedAt: Date.now(),
     });
   }
 
-  /** Map the runner's signals onto the analysis records it ran here. */
+  /** Map the runner's state to the records that actually owned its work. */
   public syncFromRunner(running: boolean, canceling: boolean): void {
-    const workspace = this.host.workspacePath();
-    if (!workspace) return;
-    const live = this.host
-      .runsFor(workspace)
-      .filter((record) => record.workflow === 'analysis' && isLive(record));
-    if (running && this.runner.isRunningForWorkspace(workspace)) {
-      for (const record of live) {
-        this.runnerSeen.add(record.id);
+    if (running) {
+      const workspace =
+        this.runner.activeWorkspacePath() ?? this.host.workspacePath();
+      if (!workspace || !this.runner.isRunningForWorkspace(workspace)) return;
+      for (const id of this.runnerSeen.keys()) {
+        if (
+          !sameSetupWorkspacePath(this.host.get(id)?.workspacePath, workspace)
+        ) {
+          this.runnerSeen.delete(id);
+        }
+      }
+      for (const record of this.host.runsFor(workspace)) {
+        if (record.workflow !== 'analysis' || !isLive(record)) continue;
+        this.runnerSeen.set(record.id, this.runner.backendActive());
         if (canceling) this.host.setCancelling(record.id, true);
       }
       return;
     }
-    for (const record of live) {
-      if (!this.runnerSeen.has(record.id)) continue;
-      this.runnerSeen.delete(record.id);
+    for (const [id, hydrated] of this.runnerSeen) {
+      const record = this.host.get(id);
+      if (record && this.runner.isRunningForWorkspace(record.workspacePath))
+        continue;
+      this.runnerSeen.delete(id);
+      if (!record || !isLive(record)) continue;
       const result = this.wizardState.multiPhaseResult();
-      const ownsResult = this.runner.isResultForWorkspace(workspace);
-      if (this.host.isCancelling(record.id)) {
-        this.host.setCancelling(record.id, false);
-        this.host.apply(record.id, { status: 'cancelled' });
+      const ownsResult = this.runner.isResultForWorkspace(record.workspacePath);
+      if (this.host.isCancelling(id)) {
+        this.host.setCancelling(id, false);
+        this.host.apply(id, { status: 'cancelled' });
+      } else if (hydrated) {
+        void this.recoverSaved(record);
       } else if (ownsResult && this.runner.errorMessage()) {
-        this.host.apply(record.id, {
+        this.host.apply(id, {
           status: 'failed',
           error: FAILURE_COPY.analysis,
         });
@@ -127,19 +171,67 @@ export class SetupRunAnalysisCoordinator {
         result.manifest.lifecycle === 'completed' &&
         isOnboardingIdentityValue(result.manifest.runId)
       ) {
-        this.host.apply(record.id, {
+        this.host.apply(id, {
           status: 'completed',
           backendRunId: result.manifest.runId,
           analysisRunId: result.manifest.runId,
         });
       } else {
-        this.host.apply(record.id, { status: 'interrupted' });
+        this.host.apply(id, { status: 'interrupted' });
       }
     }
   }
 
+  private async recoverSaved(record: SetupRunRecord): Promise<void> {
+    const workspacePath = this.host.workspacePath();
+    if (
+      !workspacePath ||
+      !sameSetupWorkspacePath(workspacePath, record.workspacePath)
+    )
+      return;
+    const isCurrent = () =>
+      sameSetupWorkspacePath(this.host.workspacePath(), workspacePath) &&
+      this.host.get(record.id) === record &&
+      !this.runner.isRunningForWorkspace(workspacePath);
+    let runId: string | null = null;
+    try {
+      const filenames = record.backendRunId
+        ? [record.backendRunId]
+        : (await this.rpc.listAnalyses({ throwOnError: true }))
+            .filter((item) => item.lifecycle === 'completed')
+            .map((item) => item.filename);
+      // A resumed analysis keeps its original savedAt. Check the manifest's
+      // last update before ruling out an older entry.
+      for (const filename of filenames) {
+        if (!isCurrent()) return;
+        const { manifest } = await this.rpc.loadAnalysis(filename, workspacePath);
+        if (
+          manifest.lifecycle === 'completed' &&
+          isOnboardingIdentityValue(manifest.runId) &&
+          (record.backendRunId
+            ? manifest.runId === record.backendRunId
+            : Date.parse(manifest.updatedAt ?? manifest.analyzedAt) >=
+              record.createdAt)
+        ) {
+          runId = manifest.runId;
+          break;
+        }
+      }
+    } catch {
+      console.warn('[setup-run-analysis] Saved analysis recovery failed.');
+    }
+    if (!isCurrent()) return;
+    this.host.apply(
+      record.id,
+      runId
+        ? { status: 'completed', backendRunId: runId, analysisRunId: runId }
+        : { status: 'interrupted' },
+    );
+  }
+
   public run(record: SetupRunRecord, resume: boolean): void {
     this.host.markLiveThisSession(record.id);
+    this.runnerSeen.set(record.id, false);
     const run = resume
       ? this.runner.resumeAnalysis(record.workspacePath)
       : this.runner.startFreshAnalysis(record.workspacePath);

@@ -130,6 +130,7 @@ describe('TeamBuilderRunCoordinator', () => {
   let showError: jest.Mock;
   let restore: jest.Mock;
   let restoreAttachments: jest.Mock;
+  let loggerDebug: jest.Mock;
   let loggerError: jest.Mock;
   let setupRuns: {
     runsFor: jest.Mock<SetupRunRecord[], [string | null | undefined]>;
@@ -222,6 +223,7 @@ describe('TeamBuilderRunCoordinator', () => {
     showError = jest.fn();
     restore = jest.fn();
     restoreAttachments = jest.fn();
+    loggerDebug = jest.fn();
     loggerError = jest.fn();
     setupRuns = {
       runsFor: jest.fn((workspace: string | null | undefined) =>
@@ -311,7 +313,7 @@ describe('TeamBuilderRunCoordinator', () => {
         },
         {
           provide: LoggingService,
-          useValue: { debug: jest.fn(), error: loggerError },
+          useValue: { debug: loggerDebug, error: loggerError },
         },
       ],
     });
@@ -1190,6 +1192,912 @@ describe('TeamBuilderRunCoordinator', () => {
     expect(coordinator.guidanceNoteFor('setup-tb-1')).toBe(
       'Guidance record was not written.',
     );
+  });
+
+  describe('Phase C F5, F9, and Batch 17b M1/M3 regressions', () => {
+    it('normalizes trailing-separator workspace paths across invalidateForWorkspace, post-dispatch failure, and cancel transitions (F5)', async () => {
+      // Store holds normalized workspacePath '/ws', while launcher reports '/ws/'.
+      workspaceRoot.set('/ws/');
+      TestBed.tick();
+
+      // 1) Workspace invalidation during launch marks the normalized record interrupted.
+      let finishPrompt!: (value: {
+        isSuccess: () => boolean;
+        data: { prompt: string };
+      }) => void;
+      rpcCall.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishPrompt = resolve;
+          }),
+      );
+      const interruptedRun = coordinator.launch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws/',
+        intent: 'Build trailing-slash team',
+        installed: ['owner/repo/one'],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+      workspaceRoot.set('/ws-b/');
+      TestBed.tick();
+      expect(records.get('setup-tb-1')).toMatchObject({
+        status: 'interrupted',
+        teamBuilder: {
+          intent: 'Build trailing-slash team',
+          installed: ['owner/repo/one'],
+        },
+      });
+      finishPrompt({ isSuccess: () => true, data: { prompt: 'PREAMBLE' } });
+      expect(await interruptedRun).toEqual({ kind: 'ignored' });
+
+      // 2) Post-dispatch send failure reports failed on the normalized record.
+      workspaceRoot.set('/ws/');
+      TestBed.tick();
+      records.set(
+        'setup-tb-2',
+        makeRecord({ id: 'setup-tb-2', workspacePath: '/ws' }),
+      );
+      sendOrQueueMessage.mockResolvedValueOnce({
+        success: false,
+        error: 'send boom',
+      });
+      const failedOutcome = await coordinator.launch({
+        recordId: 'setup-tb-2',
+        workspacePath: '/ws/',
+        intent: 'Build failing team',
+        installed: ['owner/repo/one'],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+      expect(failedOutcome).toEqual({
+        kind: 'failed',
+        error: TEAM_BUILDER_INSTALLED_LAUNCH_ERROR,
+        installed: ['owner/repo/one'],
+      });
+      expect(records.get('setup-tb-2')).toMatchObject({
+        status: 'failed',
+        step: 'review',
+        error: TEAM_BUILDER_INSTALLED_LAUNCH_ERROR,
+      });
+
+      // 3) Cancelled send transitions the normalized record to cancelled and closes the uncommitted tab.
+      records.set(
+        'setup-tb-3',
+        makeRecord({ id: 'setup-tb-3', workspacePath: '/ws' }),
+      );
+      sendOrQueueMessage.mockResolvedValueOnce({
+        success: false,
+        cancelled: true,
+      });
+      const cancelledOutcome = await coordinator.launch({
+        recordId: 'setup-tb-3',
+        workspacePath: '/ws/',
+        intent: 'Build cancelled team',
+        installed: [],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+      expect(cancelledOutcome).toEqual({ kind: 'cancelled' });
+      expect(closeTab).toHaveBeenCalledWith('tab-handoff-1', true);
+      expect(records.get('setup-tb-3')).toMatchObject({
+        status: 'cancelled',
+        step: 'intent',
+      });
+    });
+
+    it('sends wizard:cancel-skill-install on workspace invalidation and keeps attributing late replies by normalized reply workspacePath (17b M1)', async () => {
+      let transport!: ReturnType<
+        typeof createProductionAbortRpc<{
+          isSuccess: () => boolean;
+          data: WizardInstallSkillsWithConsentResponse;
+        }>
+      >;
+      rpcCall.mockImplementationOnce(
+        (
+          _method: string,
+          _params: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          transport = createProductionAbortRpc(options);
+          return transport.promise;
+        },
+      );
+      records.set(
+        'setup-tb-b',
+        makeRecord({
+          id: 'setup-tb-b',
+          workspacePath: '/ws-b',
+          status: 'needs-input',
+          teamBuilder: { intent: 'Workspace B', installed: [] },
+        }),
+      );
+
+      const pending = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws/',
+        intent: 'Build a QA team',
+        previews: [
+          {
+            skillName: 'owner/repo/qa-one',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-1',
+          },
+          {
+            skillName: 'owner/repo/qa-two',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-2',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      const installParams = rpcCall.mock.calls[0][1] as {
+        installRunId: string;
+      };
+      expect(installParams.installRunId).toEqual(expect.any(String));
+
+      workspaceRoot.set('/ws-b');
+      TestBed.tick();
+
+      expect(rpcCall).toHaveBeenNthCalledWith(2, 'wizard:cancel-skill-install', {
+        installRunId: installParams.installRunId,
+      });
+      expect(records.get('setup-tb-1')?.status).toBe('interrupted');
+      expect(await pending).toEqual({ kind: 'ignored' });
+
+      transport.resolveBackend({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/qa-one'],
+          workspacePath: '/ws/',
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(transport.wasAbortedByTransport()).toBe(false);
+      expect(records.get('setup-tb-1')).toMatchObject({
+        status: 'interrupted',
+        teamBuilder: {
+          intent: 'Build a QA team',
+          installed: ['owner/repo/qa-one'],
+        },
+      });
+      expect(coordinator.hasCompletedInstall('setup-tb-1')).toBe(false);
+      expect(records.get('setup-tb-b')?.teamBuilder?.installed).toEqual([]);
+      expect(createTab).not.toHaveBeenCalled();
+    });
+
+    it('guards malformed late install replies and catches late handler throws without unhandled rejections (17b M3)', async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on('unhandledRejection', onUnhandled);
+      try {
+        // Case 1: malformed late reply missing the installed array.
+        let resolveMalformed!: (value: unknown) => void;
+        rpcCall.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveMalformed = resolve;
+            }),
+        );
+        const run1 = coordinator.installAndLaunch({
+          recordId: 'setup-tb-1',
+          workspacePath: '/ws',
+          intent: 'Build a team',
+          previews: [
+            {
+              skillName: 'owner/repo/one',
+              files: [],
+              scriptFiles: [],
+              hasScripts: false,
+              contentHash: 'hash',
+            },
+          ],
+          guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+          guidanceFacts: [],
+          ownerDecision: null,
+          attachmentSnapshot: makeSnapshot(),
+        });
+        await coordinator.cancel('setup-tb-1');
+        expect(await run1).toEqual({ kind: 'cancelled' });
+
+        resolveMalformed({
+          isSuccess: () => true,
+          data: {
+            success: true,
+            workspacePath: '/ws',
+          } as unknown as WizardInstallSkillsWithConsentResponse,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(unhandled).toEqual([]);
+        expect(records.get('setup-tb-1')?.teamBuilder?.installed).toEqual([]);
+
+        // Case 2: synchronous throw inside late reply handler is caught and logged.
+        records.set(
+          'setup-tb-throw',
+          makeRecord({ id: 'setup-tb-throw', workspacePath: '/ws' }),
+        );
+        let resolveThrowing!: (value: unknown) => void;
+        rpcCall.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveThrowing = resolve;
+            }),
+        );
+        const run2 = coordinator.installAndLaunch({
+          recordId: 'setup-tb-throw',
+          workspacePath: '/ws',
+          intent: 'Build a throwing team',
+          previews: [
+            {
+              skillName: 'owner/repo/one',
+              files: [],
+              scriptFiles: [],
+              hasScripts: false,
+              contentHash: 'hash',
+            },
+          ],
+          guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+          guidanceFacts: [],
+          ownerDecision: null,
+          attachmentSnapshot: makeSnapshot(),
+        });
+        await coordinator.cancel('setup-tb-throw');
+        expect(await run2).toEqual({ kind: 'cancelled' });
+
+        setupRuns.report.mockImplementationOnce(() => {
+          throw new Error('store report boom');
+        });
+        resolveThrowing({
+          isSuccess: () => true,
+          data: {
+            success: false,
+            cancelled: true,
+            installed: ['owner/repo/one'],
+            workspacePath: '/ws',
+          },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(unhandled).toEqual([]);
+        expect(loggerDebug).toHaveBeenCalledWith(
+          'TeamBuilderRunCoordinator',
+          'Late team builder skill install failed after stop',
+          expect.objectContaining({
+            recordId: 'setup-tb-throw',
+            error: 'store report boom',
+          }),
+        );
+      } finally {
+        process.off('unhandledRejection', onUnhandled);
+      }
+    });
+
+    it('prunes dismissed and evicted records from the 20-entry recovery sidecar reactively, on save, and on load (F9)', () => {
+      const configureSidecarBed = (
+        storeValue: Record<string, unknown>,
+      ): TeamBuilderRunCoordinator => {
+        TestBed.resetTestingModule();
+        TestBed.configureTestingModule({
+          providers: [
+            TeamBuilderRunCoordinator,
+            { provide: SetupRunStore, useValue: storeValue },
+            { provide: ClaudeRpcService, useValue: { call: rpcCall } },
+            {
+              provide: HarnessChatLauncherService,
+              useValue: { workspaceRoot, launchTeamBuilder: jest.fn() },
+            },
+            { provide: TabManagerService, useValue: null },
+            { provide: AppStateManager, useValue: null },
+            { provide: ChatStore, useValue: null },
+            { provide: ActionBannerService, useValue: null },
+            { provide: ComposerRestoreService, useValue: null },
+            {
+              provide: LoggingService,
+              useValue: { debug: loggerDebug, error: loggerError },
+            },
+          ],
+        });
+        return TestBed.inject(TeamBuilderRunCoordinator);
+      };
+
+      // 1) Reactive pruning when SetupRunStore.runs updates (e.g. dismiss).
+      const liveRecords = signal<SetupRunRecord[]>([
+        makeRecord({ id: 'setup-tb-keep', workspacePath: '/ws-b' }),
+        makeRecord({ id: 'setup-tb-dismiss', workspacePath: '/ws' }),
+      ]);
+      const reactiveStore = {
+        runs: liveRecords.asReadonly(),
+        runsFor: jest.fn((workspace: string | null | undefined) =>
+          workspace
+            ? liveRecords().filter(
+                (record) => record.workspacePath === workspace,
+              )
+            : [],
+        ),
+        get: jest.fn(
+          (id: string) =>
+            liveRecords().find((record) => record.id === id) ?? null,
+        ),
+        report: setupRuns.report,
+        cancel: setupRuns.cancel,
+      };
+      localStorage.clear();
+      const reactiveCoordinator = configureSidecarBed(reactiveStore);
+      TestBed.tick();
+
+      reactiveCoordinator.saveDraft('setup-tb-keep', {
+        workspacePath: '/ws-b',
+        intent: 'Keep B',
+        selectedIds: ['owner/repo/b'],
+        installCompleted: true,
+      });
+      reactiveCoordinator.saveDraft('setup-tb-dismiss', {
+        workspacePath: '/ws',
+        intent: 'Dismiss A',
+        selectedIds: ['owner/repo/a'],
+        installCompleted: true,
+      });
+
+      // Dismiss setup-tb-dismiss from the store.
+      liveRecords.set([liveRecords()[0]]);
+      TestBed.tick();
+
+      expect(reactiveCoordinator.draftFor('setup-tb-dismiss')).toBeNull();
+      expect(
+        reactiveCoordinator.hasCompletedInstall('setup-tb-dismiss'),
+      ).toBe(false);
+      expect(reactiveCoordinator.hasCompletedInstall('setup-tb-keep')).toBe(
+        true,
+      );
+      const afterDismiss = JSON.parse(
+        localStorage.getItem('ptah.team-builder-recovery.v1') ?? '{}',
+      ) as { byRecord?: Record<string, unknown> };
+      expect(afterDismiss.byRecord?.['setup-tb-dismiss']).toBeUndefined();
+      expect(afterDismiss.byRecord?.['setup-tb-keep']).toBeDefined();
+
+      // 2) Before applying MAX_RECOVERY_ENTRIES (20), stale dismissed records are pruned
+      //    so they cannot evict an older live recoverable entry from another workspace.
+      const keepB = makeRecord({ id: 'setup-tb-keep-b', workspacePath: '/ws-b' });
+      const newA = makeRecord({ id: 'setup-tb-new-a', workspacePath: '/ws' });
+      const byRecord: Record<string, unknown> = {
+        'setup-tb-keep-b': {
+          selectedIds: ['owner/repo/b'],
+          ownerDecision: 'raise',
+          installCompleted: true,
+          hadAttachments: true,
+          updatedAt: 1,
+        },
+      };
+      const staleRecords: SetupRunRecord[] = [];
+      for (let i = 0; i < 19; i += 1) {
+        const id = `setup-tb-stale-${i}`;
+        staleRecords.push(makeRecord({ id, workspacePath: '/ws' }));
+        byRecord[id] = {
+          selectedIds: ['owner/repo/stale'],
+          ownerDecision: null,
+          installCompleted: false,
+          hadAttachments: false,
+          updatedAt: 100 + i,
+        };
+      }
+      localStorage.setItem(
+        'ptah.team-builder-recovery.v1',
+        JSON.stringify({ version: 1, byRecord }),
+      );
+
+      // Load with all 20 present, then evict the 19 stale records from the backing store
+      // without firing a signal (testing savePersistedEntry's own pre-cap pruning).
+      const backing = new Map<string, SetupRunRecord>([
+        [keepB.id, keepB],
+        [newA.id, newA],
+        ...staleRecords.map((r) => [r.id, r] as const),
+      ]);
+      const backingStore = {
+        runsFor: jest.fn(() => []),
+        get: jest.fn((id: string) => backing.get(id) ?? null),
+        report: setupRuns.report,
+        cancel: setupRuns.cancel,
+      };
+      const capCoordinator = configureSidecarBed(backingStore);
+      TestBed.tick();
+      for (const stale of staleRecords) {
+        backing.delete(stale.id);
+      }
+
+      capCoordinator.saveDraft(newA.id, {
+        workspacePath: '/ws',
+        intent: 'New A',
+        selectedIds: ['owner/repo/new'],
+        installCompleted: false,
+      });
+
+      const afterSave = JSON.parse(
+        localStorage.getItem('ptah.team-builder-recovery.v1') ?? '{}',
+      ) as { byRecord?: Record<string, unknown> };
+      expect(Object.keys(afterSave.byRecord ?? {}).sort()).toEqual([
+        'setup-tb-keep-b',
+        'setup-tb-new-a',
+      ]);
+
+      // 3) Startup load prunes entries missing from SetupRunStore.
+      backing.delete(newA.id);
+      configureSidecarBed(backingStore);
+      const afterLoad = JSON.parse(
+        localStorage.getItem('ptah.team-builder-recovery.v1') ?? '{}',
+      ) as { byRecord?: Record<string, unknown> };
+      expect(Object.keys(afterLoad.byRecord ?? {})).toEqual([
+        'setup-tb-keep-b',
+      ]);
+
+      // 4) 21 indexed live records across 21 workspaces retain all sidecar checkpoints.
+      localStorage.clear();
+      const live21 = new Map<string, SetupRunRecord>();
+      for (let i = 0; i < 21; i += 1) {
+        const rec = makeRecord({
+          id: `setup-tb-live-${i}`,
+          workspacePath: `/ws-${i}`,
+          status: 'needs-input',
+        });
+        live21.set(rec.id, rec);
+      }
+      const live21Store = {
+        runsFor: jest.fn(() => []),
+        get: jest.fn((id: string) => live21.get(id) ?? null),
+        report: setupRuns.report,
+        cancel: setupRuns.cancel,
+      };
+      const live21Coordinator = configureSidecarBed(live21Store);
+      for (let i = 0; i < 21; i += 1) {
+        live21Coordinator.saveDraft(`setup-tb-live-${i}`, {
+          workspacePath: `/ws-${i}`,
+          intent: `Intent ${i}`,
+          selectedIds: [`owner/repo/skill-${i}`],
+          ownerDecision: 'raise',
+          hadAttachments: true,
+          installCompleted: false,
+        });
+      }
+      const reloaded21 = configureSidecarBed(live21Store);
+      const oldestLive = live21.get('setup-tb-live-0') as SetupRunRecord;
+      expect(reloaded21.recoveryFor(oldestLive)).toEqual({
+        selectedIds: ['owner/repo/skill-0'],
+        ownerDecision: 'raise',
+        installCompleted: false,
+        hadAttachments: true,
+      });
+    });
+
+    it('reconciles confirmed partial installs when an interrupted record is retried before the cancelled install reply settles (18B F2)', async () => {
+      let transport!: ReturnType<
+        typeof createProductionAbortRpc<{
+          isSuccess: () => boolean;
+          data: WizardInstallSkillsWithConsentResponse;
+        }>
+      >;
+      rpcCall.mockImplementationOnce(
+        (
+          _method: string,
+          _params: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          transport = createProductionAbortRpc(options);
+          return transport.promise;
+        },
+      );
+
+      const pending = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build Workspace A team',
+        previews: [
+          {
+            skillName: 'owner/repo/qa-one',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-1',
+          },
+          {
+            skillName: 'owner/repo/qa-two',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-2',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      // Switch workspace A -> B, interrupting the install and sending cancel RPC.
+      workspaceRoot.set('/ws-b');
+      TestBed.tick();
+      expect(records.get('setup-tb-1')?.status).toBe('interrupted');
+      expect(await pending).toEqual({ kind: 'ignored' });
+
+      // Return to workspace A and retry the same record before the backend reply arrives.
+      workspaceRoot.set('/ws');
+      TestBed.tick();
+      setupRuns.report('setup-tb-1', {
+        status: 'needs-input',
+        step: 'review',
+        error: null,
+      });
+      expect(records.get('setup-tb-1')?.status).toBe('needs-input');
+
+      // Now the cancelled install reply settles with confirmed partial writes for A.
+      transport.resolveBackend({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/qa-one'],
+          workspacePath: '/ws/',
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(records.get('setup-tb-1')).toMatchObject({
+        status: 'needs-input',
+        step: 'review',
+        teamBuilder: {
+          intent: 'Build Workspace A team',
+          installed: ['owner/repo/qa-one'],
+        },
+      });
+      expect(coordinator.hasCompletedInstall('setup-tb-1')).toBe(false);
+      expect(createTab).not.toHaveBeenCalled();
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+    });
+
+    it('preserves confirmed skills from a late stopped install reply that arrives while a retried handoff is in flight (18B r2 F3)', async () => {
+      let transportA!: ReturnType<
+        typeof createProductionAbortRpc<{
+          isSuccess: () => boolean;
+          data: WizardInstallSkillsWithConsentResponse;
+        }>
+      >;
+      let installAttempt = 0;
+      let markSendStarted!: () => void;
+      const sendStarted = new Promise<void>((resolve) => {
+        markSendStarted = resolve;
+      });
+      let settleSendB!: (value: { success: boolean; error?: string }) => void;
+
+      rpcCall.mockImplementation(
+        (
+          method: string,
+          _params: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (method === 'wizard:install-skills-with-consent') {
+            installAttempt += 1;
+            if (installAttempt === 1) {
+              transportA = createProductionAbortRpc(options);
+              return transportA.promise;
+            }
+            return Promise.resolve({
+              isSuccess: () => true,
+              data: {
+                success: true,
+                cancelled: false,
+                installed: ['owner/repo/from-b'],
+                workspacePath: '/ws',
+              },
+            });
+          }
+          if (method === 'wizard:cancel-skill-install') {
+            return Promise.resolve({ isSuccess: () => true, data: {} });
+          }
+          if (method === 'harness:workflow-prompt') {
+            return Promise.resolve({
+              isSuccess: () => true,
+              data: { prompt: 'CONFIGURE_PREAMBLE' },
+            });
+          }
+          return Promise.resolve({ isSuccess: () => true, data: {} });
+        },
+      );
+      sendOrQueueMessage.mockImplementationOnce(() => {
+        markSendStarted();
+        return new Promise<{ success: boolean; error?: string }>((resolve) => {
+          settleSendB = resolve;
+        });
+      });
+
+      const pendingA = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build Workspace A team',
+        previews: [
+          {
+            skillName: 'owner/repo/from-a',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-a',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      // Switch A -> B while install A is pending.
+      workspaceRoot.set('/ws-b');
+      TestBed.tick();
+      expect(records.get('setup-tb-1')?.status).toBe('interrupted');
+      expect(await pendingA).toEqual({ kind: 'ignored' });
+
+      // Return to A, retry same record, and run install attempt B with a different skill.
+      workspaceRoot.set('/ws');
+      TestBed.tick();
+      setupRuns.report('setup-tb-1', {
+        status: 'needs-input',
+        step: 'review',
+        error: null,
+      });
+
+      const pendingB = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build Workspace A team',
+        previews: [
+          {
+            skillName: 'owner/repo/from-b',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-b',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      // Wait until attempt B's install has succeeded and its handoff is awaiting send settlement.
+      await sendStarted;
+
+      // Late stopped reply from attempt A settles with a confirmed skill absent from B's reply.
+      transportA.resolveBackend({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/from-a'],
+          workspacePath: '/ws/',
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Now settle B's chat send. Final record and outcome must keep BOTH A's and B's confirmed skills.
+      settleSendB({ success: true });
+      const outcomeB = await pendingB;
+
+      expect(outcomeB).toEqual({
+        kind: 'handed-off',
+        tabId: expect.any(String),
+        installed: expect.arrayContaining([
+          'owner/repo/from-a',
+          'owner/repo/from-b',
+        ]),
+      });
+      if (outcomeB.kind === 'handed-off') {
+        expect(outcomeB.installed).toHaveLength(2);
+      }
+      expect(records.get('setup-tb-1')).toMatchObject({
+        status: 'completed',
+        step: 'handed-off',
+        teamBuilder: {
+          intent: 'Build Workspace A team',
+          installed: expect.arrayContaining([
+            'owner/repo/from-a',
+            'owner/repo/from-b',
+          ]),
+        },
+      });
+      expect(records.get('setup-tb-1')?.teamBuilder?.installed).toHaveLength(2);
+    });
+
+    it('preserves late-reconciled skills when a retried handoff fails after send dispatch (18B r2 F3)', async () => {
+      let transportA!: ReturnType<
+        typeof createProductionAbortRpc<{
+          isSuccess: () => boolean;
+          data: WizardInstallSkillsWithConsentResponse;
+        }>
+      >;
+      let installAttempt = 0;
+      let markSendStarted!: () => void;
+      const sendStarted = new Promise<void>((resolve) => {
+        markSendStarted = resolve;
+      });
+      let settleSendB!: (value: { success: boolean; error?: string }) => void;
+
+      rpcCall.mockImplementation(
+        (
+          method: string,
+          _params: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          if (method === 'wizard:install-skills-with-consent') {
+            installAttempt += 1;
+            if (installAttempt === 1) {
+              transportA = createProductionAbortRpc(options);
+              return transportA.promise;
+            }
+            return Promise.resolve({
+              isSuccess: () => true,
+              data: {
+                success: true,
+                cancelled: false,
+                installed: ['owner/repo/from-b'],
+                workspacePath: '/ws',
+              },
+            });
+          }
+          if (method === 'wizard:cancel-skill-install') {
+            return Promise.resolve({ isSuccess: () => true, data: {} });
+          }
+          if (method === 'harness:workflow-prompt') {
+            return Promise.resolve({
+              isSuccess: () => true,
+              data: { prompt: 'CONFIGURE_PREAMBLE' },
+            });
+          }
+          return Promise.resolve({ isSuccess: () => true, data: {} });
+        },
+      );
+      sendOrQueueMessage.mockImplementationOnce(() => {
+        markSendStarted();
+        return new Promise<{ success: boolean; error?: string }>((resolve) => {
+          settleSendB = resolve;
+        });
+      });
+
+      const pendingA = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build Workspace A team',
+        previews: [
+          {
+            skillName: 'owner/repo/from-a',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-a',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      workspaceRoot.set('/ws-b');
+      TestBed.tick();
+      expect(await pendingA).toEqual({ kind: 'ignored' });
+
+      workspaceRoot.set('/ws');
+      TestBed.tick();
+      setupRuns.report('setup-tb-1', {
+        status: 'needs-input',
+        step: 'review',
+        error: null,
+      });
+
+      const pendingB = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build Workspace A team',
+        previews: [
+          {
+            skillName: 'owner/repo/from-b',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-b',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      await sendStarted;
+      transportA.resolveBackend({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/from-a'],
+          workspacePath: '/ws/',
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      settleSendB({ success: false, error: 'send failed' });
+      const outcomeB = await pendingB;
+
+      expect(outcomeB).toEqual({
+        kind: 'failed',
+        error: TEAM_BUILDER_INSTALLED_LAUNCH_ERROR,
+        installed: expect.arrayContaining([
+          'owner/repo/from-a',
+          'owner/repo/from-b',
+        ]),
+      });
+      expect(records.get('setup-tb-1')).toMatchObject({
+        status: 'failed',
+        step: 'review',
+        teamBuilder: {
+          installed: expect.arrayContaining([
+            'owner/repo/from-a',
+            'owner/repo/from-b',
+          ]),
+        },
+      });
+    });
+
+    it('never infers guidanceLoaded from guidanceFacts or guidanceAnalysis in saveDraft (18B r2 F1)', () => {
+      coordinator.saveDraft('setup-tb-1', {
+        workspacePath: '/ws',
+        intent: 'Check explicit guidanceLoaded',
+        guidanceAnalysis: { projectType: 'node', frameworks: ['angular'] },
+        guidanceFacts: [],
+      });
+      expect(coordinator.draftFor('setup-tb-1')?.guidanceLoaded).toBe(false);
+
+      coordinator.saveDraft('setup-tb-1', {
+        workspacePath: '/ws',
+        guidanceLoaded: true,
+      });
+      expect(coordinator.draftFor('setup-tb-1')?.guidanceLoaded).toBe(true);
+
+      coordinator.saveDraft('setup-tb-1', {
+        workspacePath: '/ws',
+        guidanceLoaded: false,
+        guidanceFacts: [],
+      });
+      expect(coordinator.draftFor('setup-tb-1')?.guidanceLoaded).toBe(false);
+
+      coordinator.saveDraft('setup-tb-1', {
+        workspacePath: '/ws',
+        guidanceAnalysis: { projectType: 'node', frameworks: ['angular'] },
+        guidanceFacts: [],
+        installCompleted: true,
+      });
+      expect(coordinator.draftFor('setup-tb-1')?.guidanceLoaded).toBe(false);
+    });
   });
 
   describe('real cross-partition close guards', () => {

@@ -30,9 +30,12 @@ import { AnalysisStepStore } from './analysis-step.store';
 import { AnalyzeSkillsPage } from './analyze-skills.page';
 
 jest.mock('@ptah-extension/setup-wizard', () => ({
-  normalizeSetupWorkspacePath: jest.requireActual<typeof import('@ptah-extension/setup-wizard')>(
-    '@ptah-extension/setup-wizard',
-  ).normalizeSetupWorkspacePath,
+  normalizeSetupWorkspacePath: jest.requireActual<
+    typeof import('@ptah-extension/setup-wizard')
+  >('@ptah-extension/setup-wizard').normalizeSetupWorkspacePath,
+  isTerminalSetupRunStatus: jest.requireActual<
+    typeof import('@ptah-extension/setup-wizard')
+  >('@ptah-extension/setup-wizard').isTerminalSetupRunStatus,
   SetupRunStore: class SetupRunStore {},
   WizardRpcService: class WizardRpcService {},
 }));
@@ -228,7 +231,7 @@ function makeJudgedResultWithInstallAndBuild(): WizardRecommendAnalysisSkillsRes
 
 describe('AnalyzeSkillsPage', () => {
   afterEach(() => jest.restoreAllMocks());
-  const loaded = signal<{ manifest: { runId: string } } | null>({
+  const loaded = signal<{ manifest: { runId: string; slug?: string } } | null>({
     manifest: { runId: 'run-1' },
   });
   const root = signal({ workspaceRoot: '/ws' });
@@ -445,7 +448,7 @@ describe('AnalyzeSkillsPage', () => {
     expect(release).toHaveBeenCalledWith(record.id);
   });
 
-  it('continues from a routed review with its analysis and completes the parent record', async () => {
+  it('completes the skill review and opens guidance without recording an unstarted run', async () => {
     const { record } = seedRoutedReview();
     jest.mocked(TestBed.inject(Router).navigate).mockResolvedValue(true);
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);
@@ -456,21 +459,49 @@ describe('AnalyzeSkillsPage', () => {
     primaryButton(fixture.nativeElement).click();
     await fixture.whenStable();
 
-    const guidance = runsFor('/ws').find(
-      (entry) => entry.workflow === 'project-guidance',
-    );
-    expect(guidance).toEqual(
-      expect.objectContaining({
-        analysisRunId: 'run-1',
-        parentId: record.id,
-      }),
-    );
+    expect(
+      runsFor('/ws').some((entry) => entry.workflow === 'project-guidance'),
+    ).toBe(false);
     expect(get(record.id)?.status).toBe('completed');
     expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
       ['/onboarding', 'analyze', 'guidance'],
-      { queryParams: { tab: guidance?.id, analysis: 'run-1' } },
+      { queryParams: { analysis: 'run-1' } },
     );
   });
+
+  it.each(['agent-generation', 'project-guidance', 'recordless'] as const)(
+    'opens a review by its analysis ID from %s and sends the saved slug on Back',
+    async (source) => {
+      seedRoutedReview();
+      const record =
+        source === 'recordless'
+          ? null
+          : start(source, '/ws', { analysisRunId: 'run-1' });
+      const params = convertToParamMap({
+        analysis: 'run-1',
+        ...(record ? { tab: record.id } : {}),
+      });
+      TestBed.overrideProvider(ActivatedRoute, {
+        useValue: {
+          snapshot: { queryParamMap: params },
+          queryParamMap: of(params),
+        },
+      });
+      loaded.set({ manifest: { runId: 'run-1', slug: 'saved-slug' } });
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(getSkillReview).toHaveBeenCalledWith('run-1');
+      expect(
+        TestBed.inject(AnalysisStepStore).useAnalysis,
+      ).not.toHaveBeenCalled();
+      await fixture.componentInstance.back();
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+        ['/onboarding/analyze'],
+        { queryParams: { analysis: 'saved-slug' } },
+      );
+    },
+  );
 
   it('enables and runs Review again from a routed review', async () => {
     const { record } = seedRoutedReview();
@@ -659,7 +690,7 @@ describe('AnalyzeSkillsPage', () => {
     expect(primaryButton(fixture.nativeElement).disabled).toBe(true);
     expect(
       start.mock.calls.filter(([workflow]) => workflow === 'project-guidance'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(router.navigate).toHaveBeenCalledTimes(1);
     finish();
     await first;
@@ -778,16 +809,103 @@ describe('AnalyzeSkillsPage', () => {
         selection: { skillIds: ['owner/repo/angular'] },
       }),
     );
-    expect(start).toHaveBeenCalledWith('project-guidance', '/ws', {
-      parentId: review?.id,
-      analysisRunId: 'run-1',
-      origin: 'analysis-result-continue',
-    });
+    expect(start).not.toHaveBeenCalledWith(
+      'project-guidance',
+      expect.anything(),
+      expect.anything(),
+    );
     expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
       ['/onboarding', 'analyze', 'guidance'],
       expect.anything(),
     );
   });
+
+  it.each([false, true])(
+    'shows confirmed installs when selection saving fails or installation is cancelled (cancelled %s)',
+    async (cancelled) => {
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const page = fixture.componentInstance;
+      page.state.openConsent([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      call.mockResolvedValueOnce({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws',
+          reason: 'Could not save workspace skill selection.',
+        },
+      });
+      await page.install();
+      fixture.detectChanges();
+      const text = (fixture.nativeElement as HTMLElement).textContent;
+      expect(text).toContain('Installed skills: owner/repo/one.');
+      expect(text).toContain('Could not save workspace skill selection.');
+      if (cancelled)
+        expect(text).toContain('Skill installation was cancelled.');
+      expect(page.skillsInstalled()).toBe(false);
+      expect(page.state.stage()).toBe('review');
+      expect(TestBed.inject(Router).navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['workspace switch', 'destroy'])(
+    'cancels the active install on %s and ignores its late response',
+    async (scenario) => {
+      const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      const router = TestBed.inject(Router);
+      const page = fixture.componentInstance;
+      page.state.openConsent([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash',
+        },
+      ]);
+      let finish!: (value: unknown) => void;
+      const reply = new Promise((resolve) => {
+        finish = resolve;
+      });
+      call.mockReturnValueOnce(reply);
+      const pending = page.install();
+      const install = call.mock.lastCall?.[1] as { installRunId: string };
+      expect(install.installRunId).toEqual(expect.any(String));
+      if (scenario === 'destroy') fixture.destroy();
+      else {
+        root.set({ workspaceRoot: '/other' });
+        loaded.set(null);
+        fixture.detectChanges();
+      }
+      expect(call).toHaveBeenCalledWith('wizard:cancel-skill-install', {
+        installRunId: install.installRunId,
+      });
+      finish({
+        isSuccess: () => true,
+        data: {
+          success: true,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws',
+        },
+      });
+      await pending;
+      expect(page.state.installed()).toEqual([]);
+      expect(router.navigate).not.toHaveBeenCalled();
+    },
+  );
 
   it('does not apply install effects reported for another workspace', async () => {
     const fixture = TestBed.createComponent(AnalyzeSkillsPage);

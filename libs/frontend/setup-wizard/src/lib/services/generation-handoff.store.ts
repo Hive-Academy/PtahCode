@@ -13,7 +13,7 @@ import type {
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import { startRefusalCopy } from './setup-run/setup-run-binding';
-import { normalizeSetupWorkspacePath } from './setup-run-persistence';
+import { sameSetupWorkspacePath } from './setup-run-persistence';
 import { SetupRunStore } from './setup-run.store';
 import {
   isTerminalSetupRunStatus,
@@ -55,8 +55,7 @@ export class GenerationHandoffStore {
     () =>
       [...this.pendingByParent().values()].find(
         (entry) =>
-          normalizeSetupWorkspacePath(entry.workspacePath) ===
-          this.runs.workspacePath(),
+          sameSetupWorkspacePath(entry.workspacePath, this.runs.workspacePath()),
       ) ?? null,
   );
   public readonly started = this.startedValue.asReadonly();
@@ -136,7 +135,7 @@ export class GenerationHandoffStore {
       return;
     }
     if (
-      parent.workspacePath !== this.runs.workspacePath() ||
+      !sameSetupWorkspacePath(parent.workspacePath, this.runs.workspacePath()) ||
       this.waitsForGuidance(parent)
     )
       return;
@@ -154,7 +153,7 @@ export class GenerationHandoffStore {
     const activeWorkspace = this.runs.workspacePath();
     if (
       !activeWorkspace ||
-      activeWorkspace !== normalizeSetupWorkspacePath(workspacePath)
+      !sameSetupWorkspacePath(activeWorkspace, workspacePath)
     ) {
       this.outcomeValue.set('manual-recovery');
       return;
@@ -166,7 +165,7 @@ export class GenerationHandoffStore {
       agentRunId &&
       (parent?.workflow !== 'agent-generation' ||
         parent.status !== 'completed' ||
-        parent.workspacePath !== activeWorkspace ||
+        !sameSetupWorkspacePath(parent.workspacePath, activeWorkspace) ||
         this.waitsForGuidance(parent))
     )
       return;
@@ -198,7 +197,7 @@ export class GenerationHandoffStore {
       const parent = this.parentFor(entry);
       if (
         !parent ||
-        parent.workspacePath !== workspace ||
+        !sameSetupWorkspacePath(parent.workspacePath, workspace) ||
         (entry.guidanceStartDeadline <= Date.now() &&
           this.waitsForGuidance(parent))
       )
@@ -255,8 +254,7 @@ export class GenerationHandoffStore {
     return parent?.workflow === 'agent-generation' &&
       parent.status !== 'cancelled' &&
       !this.runs.isCancelling(parent.id) &&
-      parent.workspacePath ===
-        normalizeSetupWorkspacePath(pending.workspacePath)
+      sameSetupWorkspacePath(parent.workspacePath, pending.workspacePath)
       ? parent
       : null;
   }
@@ -280,7 +278,7 @@ export class GenerationHandoffStore {
         this.startedValue.set({ ...binding, runId: record.backendRunId });
       }
       this.outcomeValue.set('started');
-      if (!parent && this.runs.workspacePath() === record.workspacePath) {
+      if (!parent && sameSetupWorkspacePath(this.runs.workspacePath(), record.workspacePath)) {
         const { subPath, queryParams } = this.runs.targetOf(record);
         const result = await this.router.navigateToSurface(
           'onboarding',

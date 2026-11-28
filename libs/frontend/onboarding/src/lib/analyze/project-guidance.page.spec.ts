@@ -145,25 +145,32 @@ describe('ProjectGuidancePage', () => {
   };
   const router = { navigate: jest.fn() };
   const records = signal<SetupRunRecord[]>([]);
+  const workspace = signal<string | null>('/ws');
   const runs = {
     get: jest.fn(
       (id: string) => records().find((record) => record.id === id) ?? null,
     ),
     runs: records,
-    workspacePath: () => '/ws',
+    workspacePath: workspace,
     attach: jest.fn(),
     release: jest.fn(),
     start: jest.fn(),
-    bindingFor: (record: SetupRunRecord) => ({ ...binding, tabId: record.id }),
+    bindingFor: (record: SetupRunRecord) => ({
+      ...binding,
+      tabId: record.id,
+      workspacePath: record.workspacePath,
+    }),
   };
   const enhanceStream = signal<EnhancedGenerationStreamPayload[]>([]);
   let fixture: ReturnType<typeof TestBed.createComponent<ProjectGuidancePage>>;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    workspace.set('/ws');
     params['tab'] = 'setup-guidance';
     params['run'] = 'guidance-run';
     params['gen'] = 'setup-agent';
+    delete params['analysis'];
     records.set([guidanceRecord, agentRecord]);
     enhanceStream.set([]);
     workflow.binding.set(binding);
@@ -245,6 +252,74 @@ describe('ProjectGuidancePage', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
+  it('releases and unbinds guidance when the workspace changes while the route remains open', async () => {
+    const element = await render();
+    expect(runs.attach).toHaveBeenCalledWith(guidanceRecord.id);
+    workflow.unbind.mockClear();
+    guidance.unbind.mockClear();
+    workspace.set('/other');
+    await fixture.componentInstance['retry']();
+    expect(workflow.regenerateGuidance).not.toHaveBeenCalled();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(runs.release).toHaveBeenCalledWith(guidanceRecord.id);
+    expect(workflow.unbind).toHaveBeenCalled();
+    expect(guidance.unbind).toHaveBeenCalled();
+    expect(fixture.componentInstance['recovery']()).toBe('workspace-mismatch');
+    expect(
+      element.querySelector('[data-testid="guidance-recovery-panel"]'),
+    ).not.toBeNull();
+  });
+
+  it('ignores stale Stop, lookup, refresh and open actions before workspace effects run', async () => {
+    state.set('starting');
+    const element = await render();
+    const stop = Array.from(element.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Stop',
+    );
+    expect(stop).toBeDefined();
+    jest.clearAllMocks();
+    workspace.set('/other');
+    stop?.click();
+    expect(workflow.stop).not.toHaveBeenCalled();
+    await Promise.all([
+      fixture.componentInstance['retryLookup'](),
+      fixture.componentInstance['refresh'](),
+      fixture.componentInstance['openLatest'](),
+    ]);
+    expect(step.bindGuidance).not.toHaveBeenCalled();
+    expect(workflow.bind).not.toHaveBeenCalled();
+    expect(workflow.refresh).not.toHaveBeenCalled();
+    expect(guidance.refresh).not.toHaveBeenCalled();
+    expect(rpc.getEnhancedPromptsStatus).not.toHaveBeenCalled();
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('links a guidance run started after Skills to the completed skill review', async () => {
+    delete params['tab'];
+    delete params['run'];
+    delete params['gen'];
+    params['analysis'] = 'analysis-from-review';
+    const review: SetupRunRecord = {
+      ...agentRecord,
+      id: 'setup-review',
+      workflow: 'skill-review',
+      status: 'completed',
+      step: 'selecting',
+      analysisRunId: 'analysis-from-review',
+    };
+    records.set([review]);
+    await render();
+    expect(runs.start).not.toHaveBeenCalled();
+    await fixture.componentInstance['start']();
+    expect(runs.start).toHaveBeenCalledWith('project-guidance', '/ws', {
+      parentId: review.id,
+      analysisRunId: review.analysisRunId,
+      origin: 'analysis-result-continue',
+    });
+  });
+
   it('opens an existing Setup run when no record id is supplied', async () => {
     delete params['tab'];
     await render();
@@ -294,8 +369,14 @@ describe('ProjectGuidancePage', () => {
     expect(rpc.getBoundRunState).not.toHaveBeenCalled();
   });
   it('renders live guidance output scoped to the selected Setup record and backend attempt', async () => {
+    const backendBinding = {
+      ...completed.binding,
+      workspacePath: 'C:\\Work\\Repo',
+    };
+    workspace.set(backendBinding.workspacePath);
+    records.set([{ ...guidanceRecord, workspacePath: 'c:/work/repo' }]);
     state.set('running');
-    run.set({ ...completed, status: 'running' });
+    run.set({ ...completed, binding: backendBinding, status: 'running' });
     const element = await render();
     const log = element.querySelector('[role="log"]');
     const panel = element.querySelector('ptah-run-panel');
@@ -311,7 +392,7 @@ describe('ProjectGuidancePage', () => {
         kind: 'text',
         content: 'Current guidance',
         timestamp: 1,
-        tabBinding: completed.binding,
+        tabBinding: backendBinding,
       },
       {
         kind: 'text',

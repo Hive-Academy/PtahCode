@@ -2047,9 +2047,11 @@ describe('SetupRpcHandlers', () => {
         analysisDir: '/fake/workspace/.ptah/analysis/demo',
       };
       const loadMultiPhase = jest.fn().mockResolvedValue(loaded);
+      const loadByRunId = jest.fn();
       const link = jest.fn().mockResolvedValue({ written: true });
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadMultiPhase,
+        loadByRunId,
       });
       h.container.__register(
         AGENT_GENERATION_TOKENS.ANALYSIS_CLAUDE_MD_LINKER,
@@ -2059,12 +2061,95 @@ describe('SetupRpcHandlers', () => {
       expect(
         await call(h, 'wizard:load-analysis', { filename: 'demo' }),
       ).toEqual(loaded);
+      expect(loadMultiPhase).toHaveBeenCalledWith(WORKSPACE, 'demo');
+      expect(loadByRunId).not.toHaveBeenCalled();
       expect(link).toHaveBeenCalledWith(WORKSPACE);
     });
-    it('maps a saved-analysis read failure to ANALYSIS_LOAD_FAILED', async () => {
+
+    it('falls back to the exact manifest ID in the requested open workspace', async () => {
+      const workspacePath = '/fake/second-workspace';
+      const h = makeHarness({ workspaceFolders: [WORKSPACE, workspacePath] });
+      const loaded = {
+        isMultiPhase: true,
+        manifest: { runId: 'run-1', slug: 'demo', lifecycle: 'paused' },
+        phaseContents: {},
+        analysisDir: workspacePath + '/.ptah/analysis/demo',
+      };
+      const loadMultiPhase = jest
+        .fn()
+        .mockRejectedValue(new Error('Missing slug'));
+      const loadByRunId = jest.fn().mockResolvedValue(loaded);
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadMultiPhase,
+        loadByRunId,
+      });
+      h.handlers.register();
+
+      expect(
+        await call(h, 'wizard:load-analysis', { filename: 'run-1', workspacePath }),
+      ).toEqual(loaded);
+      expect(loadMultiPhase).toHaveBeenCalledWith(workspacePath, 'run-1');
+      expect(loadByRunId).toHaveBeenCalledTimes(1);
+      expect(loadByRunId).toHaveBeenCalledWith(workspacePath, 'run-1');
+    });
+
+    it.each(['dir/run-1', 'run.1', '../run-1'])(
+      'keeps %s out of the manifest-ID lookup',
+      async (filename) => {
+        const h = makeHarness();
+        const loadByRunId = jest.fn();
+        h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+          loadMultiPhase: jest.fn().mockRejectedValue(new Error('Missing slug')),
+          loadByRunId,
+        });
+        h.handlers.register();
+
+        expect(
+          await callRaw(h, 'wizard:load-analysis', { filename }),
+        ).toMatchObject({
+          success: false,
+          errorCode: 'ANALYSIS_LOAD_FAILED',
+        });
+        expect(loadByRunId).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects a workspace that is outside the open folders before reading storage', async () => {
       const h = makeHarness();
+      h.handlers.register();
+
+      expect(
+        await callRaw(h, 'wizard:load-analysis', {
+          filename: 'run-1',
+          workspacePath: '/fake/closed-workspace',
+        }),
+      ).toMatchObject({ success: false, errorCode: 'UNAUTHORIZED_WORKSPACE' });
+      expect(h.container.resolve).not.toHaveBeenCalled();
+    });
+
+    it('rejects a fallback result with a different manifest ID', async () => {
+      const h = makeHarness();
+      const loadByRunId = jest.fn().mockResolvedValue({
+        manifest: { runId: 'run-10', lifecycle: 'paused' },
+      });
+      h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
+        loadMultiPhase: jest.fn().mockRejectedValue(new Error('Missing slug')),
+        loadByRunId,
+      });
+      h.handlers.register();
+
+      expect(
+        await callRaw(h, 'wizard:load-analysis', { filename: 'run-1' }),
+      ).toMatchObject({ success: false, errorCode: 'ANALYSIS_LOAD_FAILED' });
+      expect(loadByRunId).toHaveBeenCalledWith(WORKSPACE, 'run-1');
+    });
+
+    it('maps a missing slug and manifest ID to ANALYSIS_LOAD_FAILED', async () => {
+      const h = makeHarness();
+      const loadByRunId = jest.fn().mockResolvedValue(null);
       h.container.__register(AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE, {
         loadMultiPhase: jest.fn().mockRejectedValue(new Error('private path')),
+        loadByRunId,
       });
       h.handlers.register();
       expect(
@@ -2074,6 +2159,7 @@ describe('SetupRpcHandlers', () => {
         errorCode: 'ANALYSIS_LOAD_FAILED',
         error: 'Could not read the saved analysis.',
       });
+      expect(loadByRunId).toHaveBeenCalledWith(WORKSPACE, 'demo');
     });
 
     it('throws when no workspace is open', async () => {

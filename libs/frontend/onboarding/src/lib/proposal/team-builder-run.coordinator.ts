@@ -53,6 +53,7 @@ export interface TeamBuilderInstallRequest {
   readonly previews: readonly WizardSkillConsentPreview[];
   readonly guidanceAnalysis: DeepProjectAnalysis;
   readonly guidanceFacts: readonly ProjectGuidance[];
+  readonly guidanceLoaded?: boolean;
   readonly ownerDecision: 'match' | 'raise' | null;
   readonly attachmentSnapshot: LauncherAttachmentSnapshot;
 }
@@ -64,6 +65,7 @@ export interface TeamBuilderLaunchRequest {
   readonly installed: readonly string[];
   readonly guidanceAnalysis: DeepProjectAnalysis;
   readonly guidanceFacts: readonly ProjectGuidance[];
+  readonly guidanceLoaded?: boolean;
   readonly ownerDecision: 'match' | 'raise' | null;
   readonly attachmentSnapshot: LauncherAttachmentSnapshot;
 }
@@ -83,6 +85,7 @@ export interface TeamBuilderDraftState {
   readonly attachmentImages: readonly ComposerImage[];
   readonly hadAttachments: boolean;
   readonly installCompleted: boolean;
+  readonly guidanceLoaded: boolean;
 }
 
 export interface TeamBuilderRecoveryState {
@@ -129,11 +132,29 @@ interface ActiveExecution {
   sendSettled: Promise<void> | null;
 }
 
+interface StoppedInstallAttempt {
+  readonly installRunId: string;
+  readonly recordId: string;
+  readonly workspacePath: string;
+  readonly intent: string;
+}
+
 function rpcMessage(
   result: { error?: string; errorCode?: string },
   fallback: string,
 ): string {
   return result.errorCode && result.error ? result.error : fallback;
+}
+
+function sameWorkspacePath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalizedLeft = normalizeSetupWorkspacePath(left);
+  return (
+    Boolean(normalizedLeft) &&
+    normalizedLeft === normalizeSetupWorkspacePath(right)
+  );
 }
 
 function browserStorage(): Storage | null {
@@ -206,6 +227,7 @@ export class TeamBuilderRunCoordinator {
   private readonly storage = browserStorage();
 
   private readonly executions = new Map<string, ActiveExecution>();
+  private readonly stoppedInstalls = new Map<string, StoppedInstallAttempt>();
   private readonly inFlight = new Map<string, Promise<TeamBuilderRunOutcome>>();
   private readonly attachedViews = new Map<string, number>();
   private readonly drafts = new Map<string, TeamBuilderDraftState>();
@@ -229,7 +251,7 @@ export class TeamBuilderRunCoordinator {
       untracked(() => {
         const previous = this.lastWorkspace;
         this.lastWorkspace = next;
-        if (previous && previous !== next) {
+        if (previous && !sameWorkspacePath(previous, next)) {
           this.abortWorkspace(previous);
         }
         if (next) {
@@ -244,6 +266,20 @@ export class TeamBuilderRunCoordinator {
       untracked(() => {
         if (this.pendingTabCleanups.size > 0) {
           void this.flushPendingTabCleanups();
+        }
+      });
+    });
+    effect(() => {
+      this.setupRuns.runs?.();
+      const workspace = normalizeSetupWorkspacePath(
+        this.launcher.workspaceRoot(),
+      );
+      if (workspace) {
+        this.setupRuns.runsFor?.(workspace);
+      }
+      untracked(() => {
+        if (this.persistedRecovery.size > 0 || this.drafts.size > 0) {
+          this.pruneStaleRecovery();
         }
       });
     });
@@ -385,6 +421,10 @@ export class TeamBuilderRunCoordinator {
         update.installCompleted !== undefined
           ? update.installCompleted
           : recoveredInstallCompleted,
+      guidanceLoaded:
+        update.guidanceLoaded !== undefined
+          ? update.guidanceLoaded
+          : (prev?.guidanceLoaded ?? false),
     };
     this.drafts.set(recordId, next);
     if (update.installCompleted !== undefined) {
@@ -424,17 +464,26 @@ export class TeamBuilderRunCoordinator {
       ownerDecision: request.ownerDecision,
       guidanceAnalysis: request.guidanceAnalysis,
       guidanceFacts: request.guidanceFacts,
+      ...(request.guidanceLoaded !== undefined
+        ? { guidanceLoaded: request.guidanceLoaded }
+        : {}),
       previews: request.previews,
       attachmentFiles: request.attachmentSnapshot.attachments.files,
       attachmentImages: request.attachmentSnapshot.attachments.images,
       hadAttachments: this.snapshotHasAttachments(request.attachmentSnapshot),
       installCompleted: false,
     });
+    const existingRecord = this.setupRuns.get(request.recordId);
+    const existingInstalled =
+      existingRecord &&
+      sameWorkspacePath(existingRecord.workspacePath, request.workspacePath)
+        ? (existingRecord.teamBuilder?.installed ?? [])
+        : [];
     const execution = this.beginExecution(
       request.recordId,
       request.workspacePath,
       request.intent,
-      [],
+      existingInstalled,
     );
     const run = this.executeInstallAndLaunch(request, execution).finally(() =>
       this.endExecution(request.recordId, execution, run),
@@ -457,6 +506,9 @@ export class TeamBuilderRunCoordinator {
       ownerDecision: request.ownerDecision,
       guidanceAnalysis: request.guidanceAnalysis,
       guidanceFacts: request.guidanceFacts,
+      ...(request.guidanceLoaded !== undefined
+        ? { guidanceLoaded: request.guidanceLoaded }
+        : {}),
       attachmentFiles: request.attachmentSnapshot.attachments.files,
       attachmentImages: request.attachmentSnapshot.attachments.images,
       hadAttachments: this.snapshotHasAttachments(request.attachmentSnapshot),
@@ -464,11 +516,17 @@ export class TeamBuilderRunCoordinator {
         request.installed.length > 0 ||
         this.hasCompletedInstall(request.recordId),
     });
+    const existingRecord = this.setupRuns.get(request.recordId);
+    const existingInstalled =
+      existingRecord &&
+      sameWorkspacePath(existingRecord.workspacePath, request.workspacePath)
+        ? (existingRecord.teamBuilder?.installed ?? [])
+        : [];
     const execution = this.beginExecution(
       request.recordId,
       request.workspacePath,
       request.intent,
-      request.installed,
+      [...new Set([...existingInstalled, ...request.installed])],
     );
     const run = this.executeLaunch(request, execution).finally(() =>
       this.endExecution(request.recordId, execution, run),
@@ -497,7 +555,9 @@ export class TeamBuilderRunCoordinator {
     if (execution) {
       this.executions.delete(recordId);
       if (execution.installRunId) {
-        void this.cancelSkillInstall(execution.installRunId);
+        const installRunId = execution.installRunId;
+        execution.installRunId = undefined;
+        void this.cancelSkillInstall(installRunId);
       }
     }
     this.setGuidanceNote(recordId, '');
@@ -541,21 +601,26 @@ export class TeamBuilderRunCoordinator {
    * from and immediately resolves their live records to `interrupted`.
    */
   public abortWorkspace(workspacePath: string): void {
-    if (!workspacePath) return;
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
+    if (!normalized) return;
     for (const [recordId, execution] of [...this.executions.entries()]) {
-      if (execution.workspacePath !== workspacePath) continue;
+      if (!sameWorkspacePath(execution.workspacePath, normalized)) continue;
       this.invalidateForWorkspace(recordId, execution);
     }
   }
 
   private canClaimWorkspace(recordId: string, workspacePath: string): boolean {
-    if (!workspacePath || this.launcher.workspaceRoot() !== workspacePath) {
+    const normalized = normalizeSetupWorkspacePath(workspacePath);
+    if (
+      !normalized ||
+      !sameWorkspacePath(this.launcher.workspaceRoot(), normalized)
+    ) {
       return false;
     }
     for (const [activeId, execution] of this.executions) {
       if (
         activeId !== recordId &&
-        execution.workspacePath === workspacePath &&
+        sameWorkspacePath(execution.workspacePath, normalized) &&
         !execution.abortedForWorkspace &&
         !execution.controller.signal.aborted
       ) {
@@ -563,7 +628,7 @@ export class TeamBuilderRunCoordinator {
       }
     }
     const otherRunning = this.setupRuns
-      .runsFor?.(workspacePath)
+      .runsFor?.(normalized)
       ?.find(
         (record) =>
           record.workflow === 'team-builder' &&
@@ -579,7 +644,7 @@ export class TeamBuilderRunCoordinator {
     intent: string,
     installed: readonly string[],
   ): ActiveExecution {
-    if (!this.lastWorkspace) {
+    if (!normalizeSetupWorkspacePath(this.lastWorkspace)) {
       this.lastWorkspace = workspacePath;
     }
     const execution: ActiveExecution = {
@@ -628,13 +693,18 @@ export class TeamBuilderRunCoordinator {
     if (this.executions.get(recordId) === execution) {
       this.executions.delete(recordId);
     }
+    if (execution.installRunId) {
+      const installRunId = execution.installRunId;
+      execution.installRunId = undefined;
+      void this.cancelSkillInstall(installRunId);
+    }
     execution.controller.abort();
     void this.cleanupUncommittedTab(execution);
     this.setGuidanceNote(recordId, '');
     const record = this.setupRuns.get(recordId);
     if (
       record &&
-      record.workspacePath === execution.workspacePath &&
+      sameWorkspacePath(record.workspacePath, execution.workspacePath) &&
       (record.status === 'running' || record.status === 'needs-input')
     ) {
       this.setupRuns.report(recordId, {
@@ -642,7 +712,7 @@ export class TeamBuilderRunCoordinator {
         error: null,
         teamBuilder: {
           intent: execution.intent,
-          installed: [...execution.installed],
+          installed: this.currentInstalledNames(recordId, execution),
         },
       });
     }
@@ -655,7 +725,9 @@ export class TeamBuilderRunCoordinator {
     if (execution.abortedForWorkspace) {
       return false;
     }
-    if (this.launcher.workspaceRoot() !== execution.workspacePath) {
+    if (
+      !sameWorkspacePath(this.launcher.workspaceRoot(), execution.workspacePath)
+    ) {
       this.invalidateForWorkspace(recordId, execution);
       return false;
     }
@@ -671,7 +743,9 @@ export class TeamBuilderRunCoordinator {
 
   private isForegroundFor(recordId: string, workspacePath: string): boolean {
     if ((this.attachedViews.get(recordId) ?? 0) <= 0) return false;
-    if (this.launcher.workspaceRoot() !== workspacePath) return false;
+    if (!sameWorkspacePath(this.launcher.workspaceRoot(), workspacePath)) {
+      return false;
+    }
     const view = this.appState?.currentView?.();
     return view === undefined || view === 'onboarding';
   }
@@ -685,7 +759,10 @@ export class TeamBuilderRunCoordinator {
       status: 'running',
       step: 'installing',
       error: null,
-      teamBuilder: { intent: request.intent, installed: [] },
+      teamBuilder: {
+        intent: request.intent,
+        installed: [...execution.installed],
+      },
     });
 
     try {
@@ -713,50 +790,78 @@ export class TeamBuilderRunCoordinator {
       );
 
       if (result === null) {
-        void installRpc.then(
-          (lateResult) => {
-            if (lateResult.isSuccess()) {
-              this.recordStoppedInstall(request, lateResult.data);
+        this.stoppedInstalls.set(installRunId, {
+          installRunId,
+          recordId: request.recordId,
+          workspacePath: request.workspacePath,
+          intent: request.intent,
+        });
+        void installRpc
+          .then((lateResult) => {
+            if (lateResult?.isSuccess?.()) {
+              this.recordStoppedInstall(installRunId, lateResult.data);
+            } else {
+              this.stoppedInstalls.delete(installRunId);
             }
-          },
-          (cause: unknown) => {
+          })
+          .catch((cause: unknown) => {
+            this.stoppedInstalls.delete(installRunId);
             this.logger.debug?.(
               'TeamBuilderRunCoordinator',
-              'Late team builder skill install rejected after stop',
+              'Late team builder skill install failed after stop',
               {
                 recordId: request.recordId,
+                installRunId,
                 error: cause instanceof Error ? cause.message : String(cause),
               },
             );
-          },
-        );
+          });
         return this.inactiveOutcome(request.recordId, execution);
       }
 
       execution.installRunId = undefined;
       if (!this.isStillActive(request.recordId, execution)) {
-        if (result.isSuccess()) {
-          this.recordStoppedInstall(request, result.data);
+        if (result?.isSuccess?.()) {
+          this.stoppedInstalls.set(installRunId, {
+            installRunId,
+            recordId: request.recordId,
+            workspacePath: request.workspacePath,
+            intent: request.intent,
+          });
+          this.recordStoppedInstall(installRunId, result.data);
         }
         return this.inactiveOutcome(request.recordId, execution);
       }
 
-      if (!result.isSuccess()) {
-        const error = rpcMessage(result, 'Could not install skills.');
+      if (!result?.isSuccess?.()) {
+        const error = rpcMessage(result ?? {}, 'Could not install skills.');
+        const installed = this.currentInstalledNames(
+          request.recordId,
+          execution,
+        );
         this.setupRuns.report(request.recordId, {
           status: 'failed',
           step: 'review',
           error,
-          teamBuilder: { intent: request.intent, installed: [] },
+          teamBuilder: { intent: request.intent, installed },
         });
-        return { kind: 'failed', error, installed: [] };
+        return { kind: 'failed', error, installed };
       }
 
+      if (!result.data || !Array.isArray(result.data.installed)) {
+        throw new Error('Skill install reply was malformed.');
+      }
       if (!this.installRecord(request.recordId, result.data.workspacePath)) {
         throw new Error('Skill install reply did not match the run workspace.');
       }
-      const installed = [...result.data.installed];
-      execution.installed = installed;
+      const confirmed = result.data.installed.filter(
+        (name): name is string => typeof name === 'string' && name.length > 0,
+      );
+      const installed = this.mergeInstalledNames(
+        request.recordId,
+        execution,
+        confirmed,
+      );
       if (result.data.cancelled) {
         this.clearRecovery(request.recordId);
         this.setupRuns.report(request.recordId, {
@@ -821,38 +926,80 @@ export class TeamBuilderRunCoordinator {
       );
       const error =
         'Could not install skills. Review the skills and try again.';
+      const installed = this.currentInstalledNames(request.recordId, execution);
       this.setupRuns.report(request.recordId, {
         status: 'failed',
         step: 'review',
         error,
-        teamBuilder: { intent: request.intent, installed: [] },
+        teamBuilder: { intent: request.intent, installed },
       });
-      return { kind: 'failed', error, installed: [] };
+      return { kind: 'failed', error, installed };
     }
   }
 
+  private mergeInstalledNames(
+    recordId: string,
+    execution: ActiveExecution,
+    extra: readonly string[] = [],
+  ): string[] {
+    const record = this.setupRuns.get(recordId);
+    const recordInstalled =
+      record && sameWorkspacePath(record.workspacePath, execution.workspacePath)
+        ? (record.teamBuilder?.installed ?? [])
+        : [];
+    const merged = [
+      ...new Set([...recordInstalled, ...execution.installed, ...extra]),
+    ];
+    execution.installed = merged;
+    return [...merged];
+  }
+
+  private currentInstalledNames(
+    recordId: string,
+    execution: ActiveExecution,
+  ): string[] {
+    return this.mergeInstalledNames(recordId, execution);
+  }
+
   private recordStoppedInstall(
-    request: TeamBuilderInstallRequest,
-    result: WizardInstallSkillsWithConsentResponse,
+    installRunId: string,
+    result: WizardInstallSkillsWithConsentResponse | null | undefined,
   ): void {
-    const record = this.installRecord(request.recordId, result.workspacePath);
-    if (
-      result.installed.length &&
-      (record?.status === 'cancelled' || record?.status === 'interrupted')
-    ) {
-      const installed = [
-        ...new Set([
-          ...(record.teamBuilder?.installed ?? []),
-          ...result.installed,
-        ]),
-      ];
-      this.setupRuns.report(request.recordId, {
-        teamBuilder: {
-          intent: record.teamBuilder?.intent ?? request.intent,
-          installed,
-        },
-      });
+    const attempt = this.stoppedInstalls.get(installRunId);
+    if (!attempt) return;
+    this.stoppedInstalls.delete(installRunId);
+    if (!result || !Array.isArray(result.installed)) return;
+    if (!sameWorkspacePath(result.workspacePath, attempt.workspacePath)) {
+      return;
     }
+    const record = this.installRecord(attempt.recordId, result.workspacePath);
+    if (!record) return;
+    const confirmed = result.installed.filter(
+      (name): name is string => typeof name === 'string' && name.length > 0,
+    );
+    if (confirmed.length === 0) return;
+    const activeExecution = this.executions.get(attempt.recordId);
+    const matchingExecution =
+      activeExecution &&
+      sameWorkspacePath(activeExecution.workspacePath, attempt.workspacePath)
+        ? activeExecution
+        : null;
+    const installed = [
+      ...new Set([
+        ...(record.teamBuilder?.installed ?? []),
+        ...(matchingExecution?.installed ?? []),
+        ...confirmed,
+      ]),
+    ];
+    if (matchingExecution) {
+      matchingExecution.installed = [...installed];
+    }
+    this.setupRuns.report(attempt.recordId, {
+      teamBuilder: {
+        intent: record.teamBuilder?.intent ?? attempt.intent,
+        installed,
+      },
+    });
   }
 
   private installRecord(
@@ -860,9 +1007,7 @@ export class TeamBuilderRunCoordinator {
     replyWorkspacePath: string | undefined,
   ): SetupRunRecord | null {
     const record = this.setupRuns.get(recordId);
-    const replyWorkspace = normalizeSetupWorkspacePath(replyWorkspacePath);
-    return replyWorkspace &&
-      replyWorkspace === normalizeSetupWorkspacePath(record?.workspacePath)
+    return sameWorkspacePath(replyWorkspacePath, record?.workspacePath)
       ? record
       : null;
   }
@@ -871,10 +1016,13 @@ export class TeamBuilderRunCoordinator {
     request: TeamBuilderLaunchRequest,
     execution: ActiveExecution,
   ): Promise<TeamBuilderRunOutcome> {
-    const installed = [...request.installed];
-    execution.installed = installed;
+    const initialInstalled = this.mergeInstalledNames(
+      request.recordId,
+      execution,
+      request.installed,
+    );
     const installCompleted =
-      installed.length > 0 || this.hasCompletedInstall(request.recordId);
+      initialInstalled.length > 0 || this.hasCompletedInstall(request.recordId);
     if (installCompleted) {
       this.markCompletedInstall(request.recordId, true);
     }
@@ -882,7 +1030,7 @@ export class TeamBuilderRunCoordinator {
       status: 'running',
       step: 'launching',
       error: null,
-      teamBuilder: { intent: request.intent, installed },
+      teamBuilder: { intent: request.intent, installed: initialInstalled },
     });
 
     try {
@@ -932,12 +1080,7 @@ export class TeamBuilderRunCoordinator {
       );
 
       if (this.tabs && this.appState && this.chatStore) {
-        return await this.handoffDirect(
-          request,
-          execution,
-          visibleMessage,
-          installed,
-        );
+        return await this.handoffDirect(request, execution, visibleMessage);
       }
 
       const launched = await this.launcher.launchTeamBuilder(
@@ -950,22 +1093,30 @@ export class TeamBuilderRunCoordinator {
         return this.inactiveOutcome(request.recordId, execution);
       }
 
+      const finalInstalled = this.currentInstalledNames(
+        request.recordId,
+        execution,
+      );
       this.clearRecovery(request.recordId);
       this.setupRuns.report(request.recordId, {
         status: 'completed',
         step: 'handed-off',
         handoffTabId: launched.tabId,
         error: null,
-        teamBuilder: { intent: request.intent, installed },
+        teamBuilder: { intent: request.intent, installed: finalInstalled },
       });
-      return { kind: 'handed-off', tabId: launched.tabId, installed };
+      return {
+        kind: 'handed-off',
+        tabId: launched.tabId,
+        installed: finalInstalled,
+      };
     } catch (cause: unknown) {
       // degradation-audit: reported - active launch failures are logged and recorded as review-stage errors; workspace switches and explicit cancel settle without error.
       if (execution.sendDispatched) {
         const record = this.setupRuns.get(request.recordId);
         if (
           !record ||
-          record.workspacePath !== execution.workspacePath ||
+          !sameWorkspacePath(record.workspacePath, execution.workspacePath) ||
           record.status !== 'running'
         ) {
           return this.inactiveOutcome(request.recordId, execution);
@@ -973,17 +1124,24 @@ export class TeamBuilderRunCoordinator {
         const error = installCompleted
           ? TEAM_BUILDER_INSTALLED_LAUNCH_ERROR
           : TEAM_BUILDER_LAUNCH_ERROR;
+        const finalInstalled = this.currentInstalledNames(
+          request.recordId,
+          execution,
+        );
         this.setupRuns.report(request.recordId, {
           status: 'failed',
           step: 'review',
           error,
-          teamBuilder: { intent: request.intent, installed },
+          teamBuilder: { intent: request.intent, installed: finalInstalled },
         });
-        return { kind: 'failed', error, installed };
+        return { kind: 'failed', error, installed: finalInstalled };
       }
       if (
         execution.abortedForWorkspace ||
-        this.launcher.workspaceRoot() !== execution.workspacePath
+        !sameWorkspacePath(
+          this.launcher.workspaceRoot(),
+          execution.workspacePath,
+        )
       ) {
         this.invalidateForWorkspace(request.recordId, execution);
         return { kind: 'ignored' };
@@ -1008,13 +1166,17 @@ export class TeamBuilderRunCoordinator {
       const error = installCompleted
         ? TEAM_BUILDER_INSTALLED_LAUNCH_ERROR
         : TEAM_BUILDER_LAUNCH_ERROR;
+      const finalInstalled = this.currentInstalledNames(
+        request.recordId,
+        execution,
+      );
       this.setupRuns.report(request.recordId, {
         status: 'failed',
         step: 'review',
         error,
-        teamBuilder: { intent: request.intent, installed },
+        teamBuilder: { intent: request.intent, installed: finalInstalled },
       });
-      return { kind: 'failed', error, installed };
+      return { kind: 'failed', error, installed: finalInstalled };
     }
   }
 
@@ -1022,7 +1184,6 @@ export class TeamBuilderRunCoordinator {
     request: TeamBuilderLaunchRequest,
     execution: ActiveExecution,
     visibleMessage: string,
-    installed: readonly string[],
   ): Promise<TeamBuilderRunOutcome> {
     const tabs = this.tabs;
     const appState = this.appState;
@@ -1140,7 +1301,10 @@ export class TeamBuilderRunCoordinator {
         const canRestoreForeground =
           foreground &&
           !execution.workspaceSwitchedDuringSend &&
-          this.launcher.workspaceRoot() === execution.workspacePath;
+          sameWorkspacePath(
+            this.launcher.workspaceRoot(),
+            execution.workspacePath,
+          );
         await this.handleSendFailure(
           execution,
           tabId,
@@ -1152,6 +1316,10 @@ export class TeamBuilderRunCoordinator {
         resolveSendSettled();
         throw error;
       }
+      const finalInstalled = this.currentInstalledNames(
+        request.recordId,
+        execution,
+      );
       execution.uncommittedTabId = null;
       execution.committed = true;
       request.attachmentSnapshot.removeSent();
@@ -1161,10 +1329,10 @@ export class TeamBuilderRunCoordinator {
         step: 'handed-off',
         handoffTabId: tabId,
         error: null,
-        teamBuilder: { intent: request.intent, installed: [...installed] },
+        teamBuilder: { intent: request.intent, installed: finalInstalled },
       });
       resolveSendSettled();
-      return { kind: 'handed-off', tabId, installed: [...installed] };
+      return { kind: 'handed-off', tabId, installed: finalInstalled };
     } catch (cause: unknown) {
       if (execution.sendInFlight) {
         execution.sendInFlight = false;
@@ -1175,7 +1343,10 @@ export class TeamBuilderRunCoordinator {
         const canRestoreForeground =
           foreground &&
           !execution.workspaceSwitchedDuringSend &&
-          this.launcher.workspaceRoot() === execution.workspacePath;
+          sameWorkspacePath(
+            this.launcher.workspaceRoot(),
+            execution.workspacePath,
+          );
         await this.handleSendFailure(
           execution,
           tabId,
@@ -1250,7 +1421,7 @@ export class TeamBuilderRunCoordinator {
     return (
       lookup !== null &&
       (lookup.workspacePath === null ||
-        lookup.workspacePath === tabs.activeWorkspacePath)
+        sameWorkspacePath(lookup.workspacePath, tabs.activeWorkspacePath))
     );
   }
 
@@ -1271,7 +1442,7 @@ export class TeamBuilderRunCoordinator {
         }
         if (
           lookup.workspacePath !== null &&
-          lookup.workspacePath !== workspacePath
+          !sameWorkspacePath(lookup.workspacePath, workspacePath)
         ) {
           this.pendingTabCleanups.delete(tabId);
           return;
@@ -1319,13 +1490,13 @@ export class TeamBuilderRunCoordinator {
       if (deferred) {
         if (
           this.isUserVisibleTab(tabs, tabId, null) ||
-          this.launcher.workspaceRoot() === workspacePath
+          sameWorkspacePath(this.launcher.workspaceRoot(), workspacePath)
         ) {
           this.pendingTabCleanups.delete(tabId);
         }
         return;
       }
-      if (this.launcher.workspaceRoot() === workspacePath) {
+      if (sameWorkspacePath(this.launcher.workspaceRoot(), workspacePath)) {
         await tabs.closeTab(tabId, true);
         this.pendingTabCleanups.delete(tabId);
       }
@@ -1349,21 +1520,23 @@ export class TeamBuilderRunCoordinator {
     for (const [tabId, ownerWorkspace] of [
       ...this.pendingTabCleanups.entries(),
     ]) {
-      if (workspacePath && ownerWorkspace !== workspacePath) continue;
+      if (workspacePath && !sameWorkspacePath(ownerWorkspace, workspacePath)) {
+        continue;
+      }
       if (this.closingTabIds.has(tabId)) continue;
       if (typeof tabs.findTabByIdAcrossWorkspaces === 'function') {
         const lookup = tabs.findTabByIdAcrossWorkspaces(tabId);
         if (
           !lookup ||
           (lookup.workspacePath !== null &&
-            lookup.workspacePath !== ownerWorkspace) ||
+            !sameWorkspacePath(lookup.workspacePath, ownerWorkspace)) ||
           lookup.tab.isDirty ||
           this.isUserVisibleTab(tabs, tabId, lookup)
         ) {
           this.pendingTabCleanups.delete(tabId);
           continue;
         }
-        if (this.launcher.workspaceRoot() === ownerWorkspace) {
+        if (sameWorkspacePath(this.launcher.workspaceRoot(), ownerWorkspace)) {
           continue;
         }
         if (this.isBusyTab(lookup.tab)) {
@@ -1371,7 +1544,7 @@ export class TeamBuilderRunCoordinator {
         }
       } else if (
         this.isUserVisibleTab(tabs, tabId, null) ||
-        this.launcher.workspaceRoot() === ownerWorkspace
+        sameWorkspacePath(this.launcher.workspaceRoot(), ownerWorkspace)
       ) {
         this.pendingTabCleanups.delete(tabId);
         continue;
@@ -1424,7 +1597,12 @@ export class TeamBuilderRunCoordinator {
   ): void {
     const record = this.setupRuns.get(recordId);
     if (!record) return;
-    if (workspacePath && record.workspacePath !== workspacePath) return;
+    if (
+      workspacePath &&
+      !sameWorkspacePath(record.workspacePath, workspacePath)
+    ) {
+      return;
+    }
     if (record.status === 'running' || record.status === 'needs-input') {
       this.clearRecovery(recordId);
       this.setupRuns.report(recordId, {
@@ -1477,14 +1655,20 @@ export class TeamBuilderRunCoordinator {
       ) {
         return;
       }
+      let pruned = false;
       for (const [id, value] of Object.entries(parsed['byRecord'])) {
         const entry = parsePersistedEntry(value);
-        if (entry) {
-          this.persistedRecovery.set(id, entry);
-          if (entry.installCompleted) {
-            this.markCompletedInstall(id, true);
-          }
+        if (!entry || this.setupRuns.get(id) === null) {
+          pruned = true;
+          continue;
         }
+        this.persistedRecovery.set(id, entry);
+        if (entry.installCompleted) {
+          this.markCompletedInstall(id, true);
+        }
+      }
+      if (pruned) {
+        this.flushPersistedRecovery();
       }
     } catch {
       // degradation-audit: optional-capability - unreadable team-builder recovery cache is ignored for this session.
@@ -1492,16 +1676,50 @@ export class TeamBuilderRunCoordinator {
     }
   }
 
+  private pruneStaleRecovery(keepRecordId?: string, flush = true): boolean {
+    let removedPersisted = false;
+    for (const id of [...this.persistedRecovery.keys()]) {
+      if (id === keepRecordId) continue;
+      if (this.setupRuns.get(id) === null) {
+        this.persistedRecovery.delete(id);
+        this.drafts.delete(id);
+        this.markCompletedInstall(id, false);
+        removedPersisted = true;
+      }
+    }
+    for (const id of [...this.drafts.keys()]) {
+      if (id === keepRecordId) continue;
+      if (this.setupRuns.get(id) === null) {
+        this.drafts.delete(id);
+        this.markCompletedInstall(id, false);
+      }
+    }
+    if (removedPersisted && flush) {
+      this.flushPersistedRecovery();
+    }
+    return removedPersisted;
+  }
+
   private savePersistedEntry(
     recordId: string,
     entry: PersistedRecoveryEntry,
   ): void {
+    this.pruneStaleRecovery(recordId, false);
     this.persistedRecovery.set(recordId, entry);
     if (this.persistedRecovery.size > MAX_RECOVERY_ENTRIES) {
-      const oldest = [...this.persistedRecovery.entries()]
+      const evictable = [...this.persistedRecovery.entries()]
+        .filter(([key]) => {
+          if (key === recordId) return false;
+          const record = this.setupRuns.get(key);
+          return (
+            !record ||
+            record.status === 'completed' ||
+            record.status === 'cancelled'
+          );
+        })
         .sort(([, a], [, b]) => a.updatedAt - b.updatedAt)
         .slice(0, this.persistedRecovery.size - MAX_RECOVERY_ENTRIES);
-      for (const [key] of oldest) this.persistedRecovery.delete(key);
+      for (const [key] of evictable) this.persistedRecovery.delete(key);
     }
     this.flushPersistedRecovery();
   }

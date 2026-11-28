@@ -74,7 +74,7 @@ function progressOf(record: SetupRunRecord): string | null {
   if (record.workflow === 'team-builder' && record.teamBuilder) {
     const count = record.teamBuilder.installed.length;
     if (count === 0) return null;
-    return `${count} ${count === 1 ? 'agent' : 'agents'} installed`;
+    return `${count} ${count === 1 ? 'skill' : 'skills'} installed`;
   }
   return null;
 }

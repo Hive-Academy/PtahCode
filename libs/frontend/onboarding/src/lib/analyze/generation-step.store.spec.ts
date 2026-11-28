@@ -116,6 +116,20 @@ describe('GenerationStepStore', () => {
     expect(getBoundRunState).toHaveBeenNthCalledWith(2, binding);
     expect(store.guidanceSections('/ws', 'A', 'g0')?.sections).toHaveLength(4);
   });
+  it('captures guidance returned with the native Windows workspace spelling', async () => {
+    const storedBinding = { ...binding, workspacePath: 'c:/work/repo' };
+    const backendBinding = { ...run.binding, workspacePath: 'C:\\Work\\Repo' };
+    localBinding.set(storedBinding);
+    getBoundRunState.mockResolvedValue({ ...run, binding: backendBinding });
+
+    expect(await store.captureGuidanceSections(storedBinding, 'A')).toBe(
+      'captured',
+    );
+    expect(
+      store.guidanceSections(backendBinding.workspacePath, 'A', 'g0')?.sections,
+    ).toHaveLength(4);
+  });
+
   it('updates a computed from null when capture resolves without another signal change', async () => {
     const sections = computed(() => store.guidanceSections('/ws', 'A', 'g0'));
     expect(sections()).toBeNull();

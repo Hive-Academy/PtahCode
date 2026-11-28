@@ -77,7 +77,7 @@
         type="submit"
         [disabled]="attachments.pendingReads() > 0"
       >
-        Review skills
+        {{ skillsInstalled() ? 'Continue' : 'Review skills' }}
       </button>
     </div>
   </form>
@@ -200,7 +200,63 @@
     </div>
     } @else if (skillsInstalled()) { @if (actionError()) {
     <p role="alert">{{ actionError() }}</p>
+    } @if (ownerDecisionRequired()) { @if (state.guidanceFacts().length) {
+    <section aria-labelledby="recovery-guidance-title" class="space-y-2">
+      <h3 id="recovery-guidance-title" class="font-semibold">
+        Project guidance
+      </h3>
+      @for ( fact of state.guidanceFacts(); track fact.category + fact.label +
+      fact.fact + fact.evidence ) {
+      <div
+        class="rounded-[14px] border border-base-300 p-3"
+        data-glass-surface="tile"
+      >
+        <span class="text-xs font-semibold"
+          >{{ fact.category }} · {{ guidanceLabel(fact.label) }}</span
+        >
+        <p class="text-sm">{{ fact.fact }}</p>
+        @if (fact.evidence) {
+        <p class="text-xs text-base-content-muted">{{ fact.evidence }}</p>
+        }
+      </div>
+      }
+    </section>
     }
+    <fieldset
+      class="space-y-2"
+      [disabled]="state.loading() || starting()"
+      data-testid="team-builder-recovery-owner-decision"
+    >
+      <legend class="font-semibold">
+        {{ state.ownerDecisionPrompt() || 'How should the team handle existing
+        practices?' }}
+      </legend>
+      <label class="flex items-center gap-2"
+        ><input
+          type="radio"
+          ptahCheckbox
+          name="owner-decision"
+          value="match"
+          [checked]="state.ownerDecision() === 'match'"
+          (change)="onOwnerDecisionChange('match')"
+        />Match the repository</label
+      >
+      <label class="flex items-center gap-2"
+        ><input
+          type="radio"
+          ptahCheckbox
+          name="owner-decision"
+          value="raise"
+          [checked]="state.ownerDecision() === 'raise'"
+          (change)="onOwnerDecisionChange('raise')"
+        />Raise the standard</label
+      >
+    </fieldset>
+    @if (ownerDecisionError()) {
+    <p role="alert" class="text-sm text-state-err">
+      Choose how to handle existing practices before continuing.
+    </p>
+    } }
     <div class="flex flex-wrap gap-2">
       <button ptahButton variant="ghost" type="button" (click)="backToIntent()">
         Back

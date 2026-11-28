@@ -196,7 +196,7 @@ export class AnalysisStepStore {
       )
         return 'superseded';
       if (result.manifest.lifecycle !== 'completed') return 'not-found';
-      this.selectedValue.set(slug);
+      this.selectedValue.set(result.manifest.slug ?? slug);
       this.loadedValue.set(result);
       return 'loaded';
     } catch {

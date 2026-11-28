@@ -1839,6 +1839,7 @@ describe('TeamBuilderStartPage', () => {
       selectedIds: ['owner/repo/skill-a'],
       ownerDecision: 'raise',
       guidanceFacts: [{ category: 'test', label: 'tolerate', fact: 'Fact A' }],
+      guidanceLoaded: true,
       ownerDecisionPrompt: 'Prompt A',
       guidanceNote: 'Note A',
       attachmentFiles: [attachment('/ws/file-a.md')],
@@ -1852,6 +1853,7 @@ describe('TeamBuilderStartPage', () => {
       selectedIds: ['owner/repo/skill-b'],
       ownerDecision: null,
       guidanceFacts: [],
+      guidanceLoaded: true,
       ownerDecisionPrompt: '',
       guidanceNote: '',
       attachmentFiles: [],
@@ -1970,6 +1972,7 @@ describe('TeamBuilderStartPage', () => {
       selectedIds: ['owner/repo/b'],
       ownerDecision: null,
       guidanceFacts: [],
+      guidanceLoaded: true,
       attachmentFiles: [],
       attachmentImages: [],
       hadAttachments: false,
@@ -2011,5 +2014,812 @@ describe('TeamBuilderStartPage', () => {
     expect(page.actionError()).toBe('Launch B failed.');
     expect(page.skillsInstalled()).toBe(true);
     fixture.destroy();
+  });
+
+  describe('Phase C F6 post-install attachment recovery regressions', () => {
+    it.each(['failed', 'interrupted'] as const)(
+      'preserves confirmed install state, selection, and owner decision when clicking Re-attach files and submitting on a reloaded post-install %s run',
+      async (initialStatus) => {
+        call.mockImplementation(async (method: string) => ({
+          isSuccess: () => true,
+          data:
+            method === 'wizard:list-analyses'
+              ? { analyses: [] }
+              : method === 'wizard:get-project-guidance'
+                ? {
+                    facts: [
+                      {
+                        category: 'test',
+                        label: 'tolerate',
+                        fact: 'Legacy Jest specs',
+                      },
+                    ],
+                    ownerDecisionPrompt: 'Match or raise?',
+                  }
+                : method === 'harness:workflow-prompt'
+                  ? { prompt: 'CONFIGURE_PREAMBLE' }
+                  : { skills: [] },
+        }));
+
+        const recordId = `setup-tb-reattach-${initialStatus}`;
+        runRecords.set([
+          {
+            id: recordId,
+            workspacePath: '/ws',
+            workflow: 'team-builder',
+            status: initialStatus,
+            step: initialStatus === 'failed' ? 'review' : 'launching',
+            backendRunId: null,
+            analysisRunId: null,
+            parentId: null,
+            teamBuilder: {
+              intent: 'Build a resilient team',
+              installed: ['owner/repo/one'],
+              selectedIds: ['owner/repo/one'],
+              ownerDecision: 'raise',
+              installCompleted: true,
+              hadAttachments: true,
+            },
+            ...(initialStatus === 'failed'
+              ? { error: 'Could not start chat.' }
+              : {}),
+            unseen: true,
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ]);
+
+        const fixture = TestBed.createComponent(TeamBuilderStartPage);
+        fixture.componentRef.setInput('tab', recordId);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        const page = fixture.componentInstance;
+        const coordinator = TestBed.inject(TeamBuilderRunCoordinator);
+        const root = fixture.nativeElement as HTMLElement;
+        expect(page.skillsInstalled()).toBe(true);
+        expect(page.missingAttachments()).toBe(true);
+
+        // Click "Re-attach files" to return to the intent form.
+        const reattachBtn = [...root.querySelectorAll('button')].find((btn) =>
+          btn.textContent?.includes('Re-attach files'),
+        );
+        expect(reattachBtn).toBeDefined();
+        reattachBtn?.click();
+        fixture.detectChanges();
+        expect(page.viewStage()).toBe('intent');
+        const submitBtn = root.querySelector<HTMLButtonElement>(
+          'button[type="submit"]',
+        );
+        expect(submitBtn?.textContent?.trim()).toBe('Continue');
+
+        // Re-attach a file and submit the intent form.
+        page.attachments.addFile(attachment('/ws/reattached.md'));
+        fixture.detectChanges();
+        await page.submit(submitEvent());
+        fixture.detectChanges();
+
+        // Confirmed install state must NOT be wiped.
+        expect(page.viewStage()).toBe('review');
+        expect(page.skillsInstalled()).toBe(true);
+        expect(coordinator.hasCompletedInstall(recordId)).toBe(true);
+        expect(page.missingAttachments()).toBe(false);
+        expect(page.state.installed()).toEqual(['owner/repo/one']);
+        expect(page.state.selectedIds()).toEqual(new Set(['owner/repo/one']));
+        expect(page.state.ownerDecision()).toBe('raise');
+        expect(runRecords()[0]).toMatchObject({
+          status: 'needs-input',
+          step: 'review',
+          teamBuilder: {
+            intent: 'Build a resilient team',
+            installed: ['owner/repo/one'],
+          },
+        });
+        expect(
+          root.querySelector('[data-testid="skill-install-primary"]'),
+        ).toBeNull();
+        expect(root.textContent).toContain('Continue to team builder');
+
+        // Clicking Continue to team builder launches directly with re-attached file,
+        // loaded project guidance, and zero re-install RPC calls.
+        const continueBtn = [...root.querySelectorAll('button')].find((btn) =>
+          btn.textContent?.includes('Continue to team builder'),
+        );
+        expect(continueBtn).toBeDefined();
+        continueBtn?.click();
+        await fixture.whenStable();
+
+        expect(
+          call.mock.calls.filter(
+            ([method]) => method === 'wizard:install-skills-with-consent',
+          ),
+        ).toHaveLength(0);
+        expect(sendOrQueueMessage).toHaveBeenCalledTimes(1);
+        const [sentMessage, sentOpts] = sendOrQueueMessage.mock.calls[0];
+        expect(sentMessage).toContain('Build a resilient team');
+        expect(sentMessage).toContain('Legacy Jest specs');
+        expect(sentMessage).toContain('Owner decision: Raise the standard');
+        expect(sentOpts).toEqual(
+          expect.objectContaining({ files: ['/ws/reattached.md'] }),
+        );
+        expect(runRecords()[0]).toMatchObject({
+          status: 'completed',
+          step: 'handed-off',
+          teamBuilder: {
+            intent: 'Build a resilient team',
+            installed: ['owner/repo/one'],
+          },
+        });
+        fixture.destroy();
+      },
+    );
+
+    it('loads project guidance and retries before launching when clicking Continue without attachments on a reloaded post-install interrupted run', async () => {
+      call.mockImplementation(async (method: string) => ({
+        isSuccess: () => true,
+        data:
+          method === 'wizard:list-analyses'
+            ? { analyses: [] }
+            : method === 'wizard:get-project-guidance'
+              ? {
+                  facts: [
+                    {
+                      category: 'test',
+                      label: 'tolerate',
+                      fact: 'Legacy Jest specs',
+                    },
+                  ],
+                  ownerDecisionPrompt: 'Match or raise?',
+                }
+              : method === 'harness:workflow-prompt'
+                ? { prompt: 'CONFIGURE_PREAMBLE' }
+                : { skills: [] },
+      }));
+
+      runRecords.set([
+        {
+          id: 'setup-tb-interrupted-post',
+          workspacePath: '/ws',
+          workflow: 'team-builder',
+          status: 'interrupted',
+          step: 'launching',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          teamBuilder: {
+            intent: 'Build a team without old files',
+            installed: ['owner/repo/one'],
+            selectedIds: ['owner/repo/one'],
+            ownerDecision: 'raise',
+            installCompleted: true,
+            hadAttachments: true,
+          },
+          unseen: true,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+
+      const fixture = TestBed.createComponent(TeamBuilderStartPage);
+      fixture.componentRef.setInput('tab', 'setup-tb-interrupted-post');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const page = fixture.componentInstance;
+      const root = fixture.nativeElement as HTMLElement;
+      expect(page.interrupted()).toBe(true);
+      expect(page.skillsInstalled()).toBe(true);
+      expect(page.missingAttachments()).toBe(true);
+      expect(page.state.guidanceFacts()).toEqual([]);
+
+      const continueWithout = root.querySelector<HTMLButtonElement>(
+        '[data-testid="team-builder-continue-without-attachments"]',
+      );
+      expect(continueWithout).not.toBeNull();
+      continueWithout?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(setupRuns.retry).toHaveBeenCalledWith('setup-tb-interrupted-post');
+      expect(call).toHaveBeenCalledWith(
+        'wizard:get-project-guidance',
+        expect.anything(),
+      );
+      expect(
+        call.mock.calls.filter(
+          ([method]) => method === 'wizard:install-skills-with-consent',
+        ),
+      ).toHaveLength(0);
+      expect(sendOrQueueMessage).toHaveBeenCalledTimes(1);
+      const [sentMessage, sentOpts] = sendOrQueueMessage.mock.calls[0];
+      expect(sentMessage).toContain('Build a team without old files');
+      expect(sentMessage).toContain('Legacy Jest specs');
+      expect(sentMessage).toContain('Owner decision: Raise the standard');
+      expect(sentOpts).toEqual(
+        expect.objectContaining({ files: undefined, images: undefined }),
+      );
+      expect(runRecords()[0]).toMatchObject({
+        status: 'completed',
+        step: 'handed-off',
+        teamBuilder: {
+          intent: 'Build a team without old files',
+          installed: ['owner/repo/one'],
+        },
+      });
+      fixture.destroy();
+    });
+
+    it.each(['unsuccessful', 'rejected', 'recommendations'] as const)(
+      'does not dispatch chat when guidance fails (%s) on reloaded post-install interrupted recovery and stays actionable for retry',
+      async (failureKind) => {
+        let guidanceShouldFail = true;
+        let recoveredFacts: Array<{
+          category: string;
+          label: 'follow' | 'tolerate';
+          fact: string;
+        }> = [];
+        call.mockImplementation(async (method: string) => {
+          if (
+            method === 'wizard:recommend-skills' &&
+            failureKind === 'recommendations' &&
+            guidanceShouldFail
+          ) {
+            return {
+              isSuccess: () => false,
+              error: 'recommendations offline',
+            };
+          }
+          if (method === 'wizard:get-project-guidance') {
+            if (guidanceShouldFail) {
+              if (failureKind === 'rejected') {
+                throw new Error('guidance transport offline');
+              }
+              return {
+                isSuccess: () => false,
+                error: 'internal guidance error',
+              };
+            }
+            return {
+              isSuccess: () => true,
+              data: {
+                facts: recoveredFacts,
+                ownerDecisionPrompt: recoveredFacts.length
+                  ? 'Match or raise?'
+                  : '',
+              },
+            };
+          }
+          return {
+            isSuccess: () => true,
+            data:
+              method === 'wizard:list-analyses'
+                ? { analyses: [] }
+                : method === 'harness:workflow-prompt'
+                  ? { prompt: 'CONFIGURE_PREAMBLE' }
+                  : { skills: [] },
+          };
+        });
+
+        const recordId = `setup-tb-guidance-fail-${failureKind}`;
+        const expectedError =
+          failureKind === 'recommendations'
+            ? 'Could not load skill recommendations.'
+            : 'Could not load project guidance.';
+        runRecords.set([
+          {
+            id: recordId,
+            workspacePath: '/ws',
+            workflow: 'team-builder',
+            status: 'interrupted',
+            step: 'launching',
+            backendRunId: null,
+            analysisRunId: null,
+            parentId: null,
+            teamBuilder: {
+              intent: 'Build a team with reliable guidance',
+              installed: ['owner/repo/one'],
+              selectedIds: ['owner/repo/one'],
+              ownerDecision: 'raise',
+              installCompleted: true,
+              hadAttachments: true,
+            },
+            unseen: true,
+            createdAt: 1000,
+            updatedAt: 1000,
+          },
+        ]);
+
+        const fixture = TestBed.createComponent(TeamBuilderStartPage);
+        fixture.componentRef.setInput('tab', recordId);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        const page = fixture.componentInstance;
+        const root = fixture.nativeElement as HTMLElement;
+        const continueWithout = root.querySelector<HTMLButtonElement>(
+          '[data-testid="team-builder-continue-without-attachments"]',
+        );
+        expect(continueWithout).not.toBeNull();
+        continueWithout?.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        // Must retry the record, surface the load error, and NEVER dispatch chat.
+        expect(setupRuns.retry).toHaveBeenCalledWith(recordId);
+        expect(sendOrQueueMessage).not.toHaveBeenCalled();
+        expect(page.skillsInstalled()).toBe(true);
+        expect(page.interrupted()).toBe(false);
+        expect(page.actionError()).toBe(expectedError);
+
+        // Post-install recovery remains actionable; clicking Continue while guidance still fails still blocks chat.
+        const continueBtn = [...root.querySelectorAll('button')].find((btn) =>
+          btn.textContent?.includes('Continue to team builder'),
+        ) as HTMLButtonElement | undefined;
+        expect(continueBtn).toBeDefined();
+        expect(continueBtn?.disabled).toBe(false);
+        continueBtn?.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(sendOrQueueMessage).not.toHaveBeenCalled();
+        expect(page.actionError()).toBe(expectedError);
+
+        // Once guidance succeeds (zero facts for unsuccessful case, real fact for rejected case), retry launches chat.
+        guidanceShouldFail = false;
+        recoveredFacts =
+          failureKind === 'rejected'
+            ? [
+                {
+                  category: 'test',
+                  label: 'tolerate',
+                  fact: 'Recovered guidance fact',
+                },
+              ]
+            : [];
+        continueBtn?.click();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(sendOrQueueMessage).toHaveBeenCalledTimes(1);
+        const [sentMessage] = sendOrQueueMessage.mock.calls[0];
+        expect(sentMessage).toContain('Build a team with reliable guidance');
+        if (failureKind === 'rejected') {
+          expect(sentMessage).toContain('Recovered guidance fact');
+        }
+        expect(runRecords()[0]).toMatchObject({
+          status: 'completed',
+          step: 'handed-off',
+          teamBuilder: {
+            intent: 'Build a team with reliable guidance',
+            installed: ['owner/repo/one'],
+          },
+        });
+        fixture.destroy();
+      },
+    );
+
+    it('reconciles confirmed partial installs on the page when continuing an interrupted run before the cancelled install reply settles', async () => {
+      let finishInstall!: (value: {
+        isSuccess: () => boolean;
+        data: WizardInstallSkillsWithConsentResponse;
+      }) => void;
+      call.mockImplementation(async (method: string) => {
+        if (method === 'wizard:install-skills-with-consent') {
+          return new Promise((resolve) => {
+            finishInstall = resolve;
+          });
+        }
+        if (method === 'wizard:preview-skills-for-consent') {
+          return {
+            isSuccess: () => true,
+            data: {
+              skills: [
+                {
+                  skillName: 'owner/repo/one',
+                  files: [],
+                  scriptFiles: [],
+                  hasScripts: false,
+                  contentHash: 'hash-1',
+                },
+              ],
+            },
+          };
+        }
+        return {
+          isSuccess: () => true,
+          data:
+            method === 'wizard:list-analyses'
+              ? { analyses: [] }
+              : method === 'wizard:get-project-guidance'
+                ? { facts: [], ownerDecisionPrompt: '' }
+                : method === 'harness:workflow-prompt'
+                  ? { prompt: 'CONFIGURE_PREAMBLE' }
+                  : { skills: [] },
+        };
+      });
+
+      const fixture = TestBed.createComponent(TeamBuilderStartPage);
+      fixture.detectChanges();
+      const page = fixture.componentInstance;
+      page.state.setIntent('Build A with retry');
+      page.state.setPreview([
+        {
+          skillName: 'owner/repo/one',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash-1',
+        },
+        {
+          skillName: 'owner/repo/two',
+          files: [],
+          scriptFiles: [],
+          hasScripts: false,
+          contentHash: 'hash-2',
+        },
+      ]);
+      page.state.setStage('consent');
+
+      const pendingInstall = page.install();
+      const recordId = page.activeRecord()?.id ?? '';
+      expect(recordId).toBeTruthy();
+
+      // Switch workspace A -> B while install reply is still pending.
+      workspaceRoot.set('/ws-b');
+      fixture.detectChanges();
+      TestBed.tick();
+      expect(runRecords()[0]?.status).toBe('interrupted');
+      await pendingInstall;
+
+      // Return to A and click Continue before the backend install reply settles.
+      workspaceRoot.set('/ws');
+      fixture.componentRef.setInput('tab', recordId);
+      fixture.detectChanges();
+      TestBed.tick();
+      expect(page.interrupted()).toBe(true);
+
+      await page.continueInterrupted();
+      fixture.detectChanges();
+      expect(runRecords()[0]?.status).toBe('needs-input');
+
+      // Now the cancelled install reply arrives carrying workspace A and a confirmed skill.
+      finishInstall({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/one'],
+          workspacePath: '/ws/',
+        },
+      });
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(runRecords()[0]).toMatchObject({
+        id: recordId,
+        status: 'needs-input',
+        teamBuilder: {
+          installed: ['owner/repo/one'],
+        },
+      });
+      expect(page.state.installed()).toEqual(['owner/repo/one']);
+      expect(page.skillsInstalled()).toBe(false);
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+      fixture.destroy();
+    });
+
+    it('keeps failed guidance unloaded through install, workspace interruption, and same-renderer recovery (18B r2 F1)', async () => {
+      let guidanceShouldFail = true;
+      let markPromptStarted!: () => void;
+      const promptStarted = new Promise<void>((resolve) => {
+        markPromptStarted = resolve;
+      });
+      let finishPrompt!: (value: {
+        isSuccess: () => boolean;
+        data: { prompt: string };
+      }) => void;
+      let promptCalls = 0;
+
+      call.mockImplementation(async (method: string) => {
+        if (method === 'wizard:list-analyses') {
+          return { isSuccess: () => true, data: { analyses: [] } };
+        }
+        if (method === 'wizard:recommend-skills') {
+          return {
+            isSuccess: () => true,
+            data: {
+              skills: [
+                {
+                  skill: {
+                    source: 'owner/repo',
+                    skillId: 'one',
+                    name: 'One',
+                    description: 'Angular skill',
+                    installs: 100,
+                  },
+                  evidence: 'Angular',
+                },
+              ],
+            },
+          };
+        }
+        if (method === 'wizard:get-project-guidance') {
+          if (guidanceShouldFail) {
+            return { isSuccess: () => false, error: 'guidance offline' };
+          }
+          return {
+            isSuccess: () => true,
+            data: { facts: [], ownerDecisionPrompt: '' },
+          };
+        }
+        if (method === 'wizard:preview-skills-for-consent') {
+          return {
+            isSuccess: () => true,
+            data: {
+              skills: [
+                {
+                  skillName: 'owner/repo/one',
+                  files: [],
+                  scriptFiles: [],
+                  hasScripts: false,
+                  contentHash: 'hash-1',
+                },
+              ],
+            },
+          };
+        }
+        if (method === 'wizard:install-skills-with-consent') {
+          return {
+            isSuccess: () => true,
+            data: {
+              success: true,
+              cancelled: false,
+              installed: ['owner/repo/one'],
+              workspacePath: '/ws',
+            },
+          };
+        }
+        if (method === 'harness:workflow-prompt') {
+          promptCalls += 1;
+          if (promptCalls === 1) {
+            markPromptStarted();
+            return new Promise((resolve) => {
+              finishPrompt = resolve;
+            });
+          }
+          return {
+            isSuccess: () => true,
+            data: { prompt: 'CONFIGURE_PREAMBLE' },
+          };
+        }
+        return { isSuccess: () => true, data: {} };
+      });
+
+      const coordinator = TestBed.inject(TeamBuilderRunCoordinator);
+      const fixture = TestBed.createComponent(TeamBuilderStartPage);
+      fixture.detectChanges();
+      const page = fixture.componentInstance;
+      page.state.setIntent('Build team with failed guidance');
+
+      await page.submit(new Event('submit'));
+      fixture.detectChanges();
+      const recordId = page.activeRecord()?.id ?? '';
+      expect(recordId).toBeTruthy();
+      expect(coordinator.draftFor(recordId)?.guidanceLoaded).toBe(false);
+
+      // Recommendations succeeded even though guidance failed: select skill, preview, and install.
+      page.onSelectionToggled('owner/repo/one');
+      await page.reviewSelection();
+      fixture.detectChanges();
+      expect(page.viewStage()).toBe('consent');
+
+      const pendingInstall = page.install();
+      await promptStarted;
+
+      // Install completed and draft must STILL record guidanceLoaded: false (never inferred).
+      expect(coordinator.hasCompletedInstall(recordId)).toBe(true);
+      expect(coordinator.draftFor(recordId)?.guidanceLoaded).toBe(false);
+
+      // Interrupt via workspace switch before first send.
+      workspaceRoot.set('/ws-b');
+      fixture.detectChanges();
+      TestBed.tick();
+      finishPrompt({
+        isSuccess: () => true,
+        data: { prompt: 'CONFIGURE_PREAMBLE' },
+      });
+      await pendingInstall;
+      expect(runRecords()[0]?.status).toBe('interrupted');
+
+      // Return to workspace A in the SAME renderer and click Continue while guidance still fails.
+      workspaceRoot.set('/ws');
+      fixture.componentRef.setInput('tab', recordId);
+      fixture.detectChanges();
+      TestBed.tick();
+      expect(page.interrupted()).toBe(true);
+      expect(page.skillsInstalled()).toBe(true);
+
+      const guidanceCallsBeforeContinue = call.mock.calls.filter(
+        ([method]) => method === 'wizard:get-project-guidance',
+      ).length;
+      const root = fixture.nativeElement as HTMLElement;
+      const continueInterruptedBtn = root.querySelector<HTMLButtonElement>(
+        '[data-testid="team-builder-continue-interrupted"]',
+      );
+      expect(continueInterruptedBtn).not.toBeNull();
+      continueInterruptedBtn?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(
+        call.mock.calls.filter(
+          ([method]) => method === 'wizard:get-project-guidance',
+        ).length,
+      ).toBeGreaterThan(guidanceCallsBeforeContinue);
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(page.actionError()).toBe('Could not load project guidance.');
+      expect(coordinator.draftFor(recordId)?.guidanceLoaded).toBe(false);
+
+      // Once guidance succeeds (even with an empty facts array), Continue to team builder dispatches chat.
+      guidanceShouldFail = false;
+      const continueBtn = [...root.querySelectorAll('button')].find((btn) =>
+        btn.textContent?.includes('Continue to team builder'),
+      ) as HTMLButtonElement | undefined;
+      expect(continueBtn).toBeDefined();
+      continueBtn?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(sendOrQueueMessage).toHaveBeenCalledTimes(1);
+      expect(runRecords()[0]).toMatchObject({
+        id: recordId,
+        status: 'completed',
+        step: 'handed-off',
+        teamBuilder: {
+          installed: ['owner/repo/one'],
+        },
+      });
+      fixture.destroy();
+    });
+
+    it('surfaces owner-decision controls in installed recovery when reloaded guidance requires a decision and allows Continue without reinstalling (18B r2 F2)', async () => {
+      call.mockImplementation(async (method: string) => {
+        if (method === 'wizard:list-analyses') {
+          return { isSuccess: () => true, data: { analyses: [] } };
+        }
+        if (method === 'wizard:recommend-skills') {
+          return { isSuccess: () => true, data: { skills: [] } };
+        }
+        if (method === 'wizard:get-project-guidance') {
+          return {
+            isSuccess: () => true,
+            data: {
+              facts: [
+                {
+                  category: 'testing',
+                  label: 'tolerate',
+                  fact: 'Legacy Jest specs coexist with Vitest',
+                  evidence: 'jest.config.ts',
+                },
+              ],
+              ownerDecisionPrompt:
+                'How should the team handle existing practices?',
+            },
+          };
+        }
+        if (method === 'harness:workflow-prompt') {
+          return {
+            isSuccess: () => true,
+            data: { prompt: 'CONFIGURE_PREAMBLE' },
+          };
+        }
+        return { isSuccess: () => true, data: {} };
+      });
+
+      const recordId = 'setup-tb-recovery-decision';
+      runRecords.set([
+        {
+          id: recordId,
+          workspacePath: '/ws',
+          workflow: 'team-builder',
+          status: 'interrupted',
+          step: 'launching',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          teamBuilder: {
+            intent: 'Build a team after guidance change',
+            installed: ['owner/repo/one'],
+            selectedIds: ['owner/repo/one'],
+            ownerDecision: null,
+            installCompleted: true,
+            hadAttachments: false,
+          },
+          unseen: true,
+          createdAt: 1000,
+          updatedAt: 1000,
+        },
+      ]);
+
+      const fixture = TestBed.createComponent(TeamBuilderStartPage);
+      fixture.componentRef.setInput('tab', recordId);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const page = fixture.componentInstance;
+      const root = fixture.nativeElement as HTMLElement;
+      expect(page.interrupted()).toBe(true);
+      expect(page.skillsInstalled()).toBe(true);
+      expect(page.state.ownerDecision()).toBeNull();
+
+      // Click Continue on the interrupted run: reloaded guidance has a `tolerate` fact, so dispatch must block.
+      const continueInterruptedBtn = root.querySelector<HTMLButtonElement>(
+        '[data-testid="team-builder-continue-interrupted"]',
+      );
+      expect(continueInterruptedBtn).not.toBeNull();
+      continueInterruptedBtn?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(setupRuns.retry).toHaveBeenCalledWith(recordId);
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(page.skillsInstalled()).toBe(true);
+      expect(page.ownerDecisionRequired()).toBe(true);
+      expect(page.ownerDecisionError()).toBe(true);
+      expect(root.textContent).toContain(
+        'Legacy Jest specs coexist with Vitest',
+      );
+
+      // The installed recovery panel must expose the owner-decision radio buttons.
+      const matchRadio = root.querySelector<HTMLInputElement>(
+        'input[name="owner-decision"][value="match"]',
+      );
+      const raiseRadio = root.querySelector<HTMLInputElement>(
+        'input[name="owner-decision"][value="raise"]',
+      );
+      expect(matchRadio).not.toBeNull();
+      expect(raiseRadio).not.toBeNull();
+
+      // Selecting a decision enables launching without reinstalling.
+      raiseRadio?.click();
+      raiseRadio?.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+      expect(page.state.ownerDecision()).toBe('raise');
+      expect(page.ownerDecisionError()).toBe(false);
+
+      const continueBtn = [...root.querySelectorAll('button')].find((btn) =>
+        btn.textContent?.includes('Continue to team builder'),
+      ) as HTMLButtonElement | undefined;
+      expect(continueBtn).toBeDefined();
+      expect(continueBtn?.disabled).toBe(false);
+      continueBtn?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(
+        call.mock.calls.filter(
+          ([method]) => method === 'wizard:install-skills-with-consent',
+        ),
+      ).toHaveLength(0);
+      expect(sendOrQueueMessage).toHaveBeenCalledTimes(1);
+      const [sentMessage] = sendOrQueueMessage.mock.calls[0];
+      expect(sentMessage).toContain('Build a team after guidance change');
+      expect(sentMessage).toContain('Legacy Jest specs coexist with Vitest');
+      expect(sentMessage).toContain('Owner decision: Raise the standard');
+      expect(runRecords()[0]).toMatchObject({
+        id: recordId,
+        status: 'completed',
+        step: 'handed-off',
+        teamBuilder: {
+          intent: 'Build a team after guidance change',
+          installed: ['owner/repo/one'],
+        },
+      });
+      fixture.destroy();
+    });
   });
 });

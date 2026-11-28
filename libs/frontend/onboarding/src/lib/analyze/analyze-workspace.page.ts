@@ -689,6 +689,15 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     () => this.isAnalysisActive() && this.runner.isRunning(),
   );
   protected readonly analysisError = computed<string | null>(() => {
+    if (this.store.selected()) return null;
+    const record = this.activeRecord();
+    if (
+      record?.status === 'failed' &&
+      record.id === this.tab() &&
+      !this.isAnalysisActive()
+    ) {
+      return record.error ?? 'Analysis could not finish. Try again.';
+    }
     if (
       typeof this.runner.isResultForWorkspace === 'function' &&
       !this.runner.isResultForWorkspace(this.workspacePath())
@@ -697,7 +706,6 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     }
     const runnerError = this.runner.errorMessage();
     if (runnerError) return runnerError;
-    if (this.store.selected()) return null;
     const liveResult = this.wizardState.multiPhaseResult?.();
     if (liveResult?.manifest.lifecycle === 'failed') {
       return 'Analysis could not finish. Try again.';
@@ -1052,12 +1060,12 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
     this.savedError.set(false);
     const filename = this.pendingAnalysis;
     this.pendingAnalysis = null;
-    if (
-      filename &&
-      !this.isAnalysisActive() &&
-      this.store.saved().some((item) => item.filename === filename)
-    )
+    if (!filename || this.isAnalysisActive()) return;
+    if (this.store.saved().some((item) => item.filename === filename)) {
       await this.useSaved(filename);
+    } else {
+      await this.store.useAnalysis(filename);
+    }
   }
   protected async useSaved(filename: string): Promise<void> {
     if (this.isAnalysisActive()) return;
@@ -1280,16 +1288,6 @@ export class AnalyzeWorkspacePage implements OnInit, OnDestroy {
         const target = this.setupRuns.targetOf(record);
         await this.router.navigate(['/onboarding', ...target.subPath], {
           queryParams: target.queryParams,
-          state: { explicitBack: false },
-        });
-        return;
-      }
-      if (displayedRunId) {
-        const link = onboardingStepLink('analyze', 'skills', {
-          analysis: displayedRunId,
-        });
-        await this.router.navigate([...link.commands], {
-          queryParams: link.queryParams,
           state: { explicitBack: false },
         });
         return;

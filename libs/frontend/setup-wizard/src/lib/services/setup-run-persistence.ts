@@ -124,8 +124,29 @@ export function normalizeSetupWorkspacePath(
 ): string | null {
   const trimmed = workspacePath?.trim() ?? '';
   if (!trimmed || trimmed.length > MAX_PATH_LENGTH) return null;
-  const stripped = trimmed.replace(/[\\/]+$/, '');
-  return stripped.length > 0 ? stripped : trimmed[0];
+  const separated = trimmed.replace(/\\/g, '/');
+  const windows =
+    /^[a-z]:/i.test(separated) || /^\/\/[^/]+\/[^/]+/.test(separated);
+  const normalized = windows ? separated.toLowerCase() : separated;
+  const stripped = normalized.replace(/\/+$/, '');
+  return /^[a-z]:$/.test(stripped) ? `${stripped}/` : stripped || '/';
+}
+
+/** Keep the filesystem spelling while validating the path for Setup. */
+export function setupWorkspacePath(
+  workspacePath: string | null | undefined,
+): string | null {
+  const path = workspacePath?.trim();
+  if (!path || !normalizeSetupWorkspacePath(path)) return null;
+  return /^[a-z]:$/i.test(path) ? path + '\\' : path;
+}
+
+export function sameSetupWorkspacePath(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const key = normalizeSetupWorkspacePath(left);
+  return key !== null && key === normalizeSetupWorkspacePath(right);
 }
 
 /**
@@ -149,7 +170,7 @@ export function parseSetupRunRecord(
     createdAt,
     updatedAt,
   } = value;
-  const workspace = normalizeSetupWorkspacePath(
+  const workspace = setupWorkspacePath(
     typeof workspacePath === 'string' ? workspacePath : null,
   );
   const created = timestamp(createdAt);
@@ -309,7 +330,7 @@ export function readSetupRunIndex(
       const record = parseSetupRunRecord(item);
       if (
         !record ||
-        record.workspacePath !== workspace ||
+        normalizeSetupWorkspacePath(record.workspacePath) !== workspace ||
         seen.has(record.id)
       ) {
         console.warn('[setup-run-persistence] Discarded an invalid Setup run.');

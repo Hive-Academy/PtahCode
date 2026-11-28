@@ -61,6 +61,7 @@ describe('AnalyzeWorkspacePage', () => {
     streamCounts: signal(null),
     listAnalyses: jest.fn(),
     selectAnalysis: jest.fn(),
+    useAnalysis: jest.fn(),
     clearSelection: jest.fn(),
     hideAnalysis: jest.fn(),
     attachStream: jest.fn(),
@@ -1599,6 +1600,81 @@ describe('AnalyzeWorkspacePage', () => {
       expect(fixture.componentInstance['interrupted']()).toBe(false);
       expect(store.listAnalyses).toHaveBeenCalledTimes(2);
       fixture.destroy();
+    });
+
+    it('shows the linked failure with safe copy and lets the user inspect a saved analysis', async () => {
+      setupRunRecords.set([
+        {
+          id: 'setup-failed',
+          workspacePath: '/workspace',
+          workflow: 'analysis',
+          status: 'failed',
+          step: 'analyzing',
+          backendRunId: null,
+          analysisRunId: null,
+          parentId: null,
+          unseen: true,
+          createdAt: 1,
+          updatedAt: 2,
+          error: 'Analysis failed while reading /private/workspace/config.',
+        },
+      ]);
+      loaded.set({
+        manifest: {
+          slug: 'newer-analysis',
+          totalDurationMs: 2000,
+        },
+        phaseContents: {},
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('tab', 'setup-failed');
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Analysis failed');
+      expect(fixture.nativeElement.textContent).toContain(
+        'Analysis could not finish. Try again.',
+      );
+      expect(fixture.nativeElement.textContent).not.toContain('/private/workspace');
+      expect(fixture.nativeElement.textContent).not.toContain('Analysis complete');
+
+      store.selectAnalysis.mockImplementationOnce(async (filename: string) => {
+        selected.set(filename);
+        return 'loaded';
+      });
+      await fixture.componentInstance['useSaved']('newer-analysis');
+      fixture.detectChanges();
+      expect(fixture.nativeElement.textContent).toContain('Analysis complete');
+      expect(fixture.nativeElement.textContent).not.toContain('Analysis failed');
+    });
+
+    it('resolves a run-ID Back link when the saved list is keyed by slug', async () => {
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      fixture.componentRef.setInput('analysis', '01K77VZ3XZJ6P1GKMV4BXCS0FT');
+      await fixture.componentInstance.ngOnInit();
+      expect(store.useAnalysis).toHaveBeenCalledWith(
+        '01K77VZ3XZJ6P1GKMV4BXCS0FT',
+      );
+    });
+
+    it('uses the analysis slug in Review skills when no completed Setup record exists', async () => {
+      loaded.set({
+        manifest: {
+          runId: '01K77VZ3XZJ6P1GKMV4BXCS0FT',
+          slug: 'workspace-analysis',
+          totalDurationMs: 2000,
+        },
+        phaseContents: {},
+      });
+      const fixture = TestBed.createComponent(AnalyzeWorkspacePage);
+      await fixture.componentInstance['reviewSkills']();
+      expect(navigate).toHaveBeenCalledWith(
+        ['/onboarding', 'analyze', 'skills'],
+        {
+          queryParams: { analysis: 'workspace-analysis' },
+          state: { explicitBack: false },
+        },
+      );
     });
 
     it('surfaces a failed panel when multiPhaseResult has lifecycle failed without runner errorMessage', async () => {

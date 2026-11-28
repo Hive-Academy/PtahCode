@@ -73,6 +73,7 @@ function binding(
 
 describe('SetupRunStore', () => {
   let workspace: ReturnType<typeof signal<string>>;
+  let runnerWorkspace: ReturnType<typeof signal<string | null>>;
   let runnerRunning: ReturnType<typeof signal<boolean>>;
   let runnerCanceling: ReturnType<typeof signal<boolean>>;
   let runnerGeneration: ReturnType<typeof signal<number>>;
@@ -117,6 +118,7 @@ describe('SetupRunStore', () => {
     localStorage.clear();
     jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
     workspace = signal(WS);
+    runnerWorkspace = signal<string | null>(null);
     runnerRunning = signal(false);
     runnerCanceling = signal(false);
     runnerGeneration = signal(0);
@@ -132,6 +134,8 @@ describe('SetupRunStore', () => {
       getBoundRunState: jest.fn().mockResolvedValue(null),
       cancelBoundRun: jest.fn().mockResolvedValue(true),
       cancelAnalysis: jest.fn().mockResolvedValue(undefined),
+      listAnalyses: jest.fn().mockResolvedValue([]),
+      loadAnalysis: jest.fn(),
       startBoundAgents: jest
         .fn()
         .mockResolvedValue({ accepted: { runId: 'run-9' } }),
@@ -147,6 +151,10 @@ describe('SetupRunStore', () => {
     };
     runner = {
       isRunning: runnerRunning.asReadonly(),
+      activeWorkspacePath: runnerWorkspace.asReadonly(),
+      backendActive: jest.fn(() => false),
+      syncBackendActive: jest.fn(),
+      setCurrentWorkspacePath: jest.fn(),
       isCanceling: runnerCanceling.asReadonly(),
       runGeneration: runnerGeneration.asReadonly(),
       errorMessage: runnerError.asReadonly(),
@@ -290,7 +298,14 @@ describe('SetupRunStore', () => {
 
   describe('status mapping: analysis', () => {
     const manifest = (lifecycle: string) => ({
-      analysis: { manifest: { runId: 'an-1', lifecycle } },
+      analysis: {
+        manifest: {
+          runId: 'an-1',
+          lifecycle,
+          analyzedAt: new Date().toISOString(),
+        },
+      },
+      analysisActive: false,
       generation: null,
     });
 
@@ -316,16 +331,185 @@ describe('SetupRunStore', () => {
       expect(store.get('setup-a1')?.status).toBe('running');
     });
 
-    it('maps the runner finishing a run started here', async () => {
+    it('interrupts a restored analysis when the backend is inactive and no matching result exists', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      rpc['getResumableRun'].mockResolvedValue({
+        analysisActive: false,
+        analysis: null,
+        generation: null,
+      });
+      rpc['listAnalyses'].mockResolvedValue([
+        {
+          filename: 'older',
+          lifecycle: 'completed',
+          savedAt: new Date(0).toISOString(),
+        },
+      ]);
+      rpc['loadAnalysis'].mockResolvedValue({
+        manifest: {
+          runId: 'an-older',
+          lifecycle: 'completed',
+          analyzedAt: new Date(0).toISOString(),
+        },
+      });
+      const store = await create();
+      expect(store.get('setup-a1')?.status).toBe('interrupted');
+      expect(rpc['loadAnalysis']).toHaveBeenCalledWith('older', WS);
+    });
+
+    it('reports a failed recovery read and leaves the inactive record retryable', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      rpc['getResumableRun'].mockResolvedValue({
+        analysisActive: false,
+        analysis: null,
+      });
+      rpc['listAnalyses'].mockRejectedValue(new Error('private path'));
+      const warn = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      try {
+        const store = await create();
+        expect(store.get('setup-a1')?.status).toBe('interrupted');
+        expect(warn).toHaveBeenCalledWith(
+          '[setup-run-analysis] Saved analysis recovery failed.',
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('recovers a resumed result with an older start date and no recorded backend ID', async () => {
+      const createdAt = 2000;
+      const analyzedAt = new Date(1000).toISOString();
+      const updatedAt = new Date(3000).toISOString();
+      seed(
+        record({
+          id: 'setup-a1',
+          workflow: 'analysis',
+          step: 'analyzing',
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      );
+      rpc['getResumableRun'].mockResolvedValue({
+        analysisActive: false,
+        analysis: null,
+      });
+      rpc['listAnalyses'].mockResolvedValue([
+        { filename: 'older', lifecycle: 'completed', savedAt: analyzedAt },
+        { filename: 'resumed', lifecycle: 'completed', savedAt: analyzedAt },
+      ]);
+      rpc['loadAnalysis']
+        .mockResolvedValueOnce({
+          manifest: { runId: 'an-older', lifecycle: 'completed', analyzedAt },
+        })
+        .mockResolvedValueOnce({
+          manifest: {
+            runId: 'an-resumed',
+            lifecycle: 'completed',
+            analyzedAt,
+            updatedAt,
+          },
+        });
+      const store = await create();
+      expect(store.get('setup-a1')).toMatchObject({
+        status: 'completed',
+        analysisRunId: 'an-resumed',
+        backendRunId: 'an-resumed',
+      });
+      expect(rpc['loadAnalysis']).toHaveBeenLastCalledWith('resumed', WS);
+    });
+
+    it('recovers a recent saved result when the inactive backend returns no resumable manifest', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      rpc['getResumableRun'].mockResolvedValue({
+        analysisActive: false,
+        analysis: null,
+        generation: null,
+      });
+      const analyzedAt = new Date().toISOString();
+      rpc['listAnalyses'].mockResolvedValue([
+        {
+          filename: 'saved-analysis',
+          lifecycle: 'completed',
+          savedAt: analyzedAt,
+        },
+      ]);
+      rpc['loadAnalysis'].mockResolvedValue({
+        manifest: { runId: 'an-saved', lifecycle: 'completed', analyzedAt },
+      });
+      const store = await create();
+      expect(rpc['loadAnalysis']).toHaveBeenCalledWith('saved-analysis', WS);
+      expect(store.get('setup-a1')).toMatchObject({
+        status: 'completed',
+        analysisRunId: 'an-saved',
+      });
+    });
+
+    it('hydrates an active backend analysis without the Analyze page and settles it when the watcher finishes', async () => {
+      seed(record({ id: 'setup-a1', workflow: 'analysis', step: 'analyzing' }));
+      const startedAt = new Date().toISOString();
+      rpc['getResumableRun'].mockResolvedValue({
+        analysis: null,
+        generation: null,
+        analysisActive: true,
+        activeAnalysisStartedAt: startedAt,
+      });
+      (runner['syncBackendActive'] as jest.Mock).mockImplementation(() => {
+        runnerWorkspace.set(WS);
+        runnerRunning.set(true);
+      });
+      (runner['backendActive'] as jest.Mock).mockImplementation(runnerRunning);
+      (runner['isRunningForWorkspace'] as jest.Mock).mockImplementation(
+        (path: string) => path === WS && runnerRunning(),
+      );
+      const store = await create();
+      expect(runner['syncBackendActive']).toHaveBeenCalledWith(true, {
+        startedAt,
+        workspacePath: WS,
+      });
+      expect(store.runningCount()).toBe(1);
+
+      rpc['listAnalyses'].mockResolvedValue([
+        {
+          filename: 'finished-analysis',
+          lifecycle: 'completed',
+          savedAt: startedAt,
+        },
+      ]);
+      rpc['loadAnalysis'].mockResolvedValue({
+        manifest: {
+          runId: 'an-finished',
+          lifecycle: 'completed',
+          analyzedAt: startedAt,
+        },
+      });
+      runnerRunning.set(false);
+      runnerWorkspace.set(null);
+      await flush();
+      expect(store.get('setup-a1')).toMatchObject({
+        status: 'completed',
+        analysisRunId: 'an-finished',
+      });
+      expect(store.runningCount()).toBe(0);
+    });
+
+    it('settles the originating analysis after switching workspaces mid-run', async () => {
       const store = await create();
       const rec = store.start('analysis', WS);
-      (runner['isRunningForWorkspace'] as jest.Mock).mockReturnValue(true);
+      (runner['isRunningForWorkspace'] as jest.Mock).mockImplementation(
+        (path: string) => path === WS && runnerRunning(),
+      );
+      runnerWorkspace.set(WS);
       runnerRunning.set(true);
+      await flush();
+      workspace.set(OTHER_WS);
       await flush();
       expect(store.get(rec!.id)?.status).toBe('running');
 
-      (runner['isRunningForWorkspace'] as jest.Mock).mockReturnValue(false);
-      (runner['isResultForWorkspace'] as jest.Mock).mockReturnValue(true);
+      (runner['isResultForWorkspace'] as jest.Mock).mockImplementation(
+        (path: string) => path === WS,
+      );
       multiPhaseResult.set({
         manifest: { lifecycle: 'completed', runId: 'an-2' },
       });
@@ -724,7 +908,7 @@ describe('SetupRunStore', () => {
         origin: 'chat',
       });
       expect(rec).toMatchObject({
-        workspacePath: WS,
+        workspacePath: `${WS}/`,
         workflow: 'skill-review',
         status: 'running',
         step: 'reviewing',
@@ -744,6 +928,25 @@ describe('SetupRunStore', () => {
       const second = store.start('agent-generation', WS);
       expect(second?.id).toBe(first?.id);
       expect(store.runs()).toHaveLength(1);
+    });
+
+    it('retains the native Windows path through updates in the shared workspace bucket', async () => {
+      const nativePath = 'C:\\Work\\Repo';
+      const alias = 'c:/work/repo';
+      workspace.set(nativePath);
+      const store = await create();
+      const run = store.start('agent-generation', nativePath);
+      if (!run) throw new Error('Expected a Windows Setup run');
+      expect(store.start('agent-generation', alias)?.id).toBe(run.id);
+      expect(store.workspacePath()).toBe(nativePath);
+      expect(store.bindingFor(run)?.workspacePath).toBe(nativePath);
+
+      store.report(run.id, { status: 'completed' });
+      expect(store.runsFor(alias)).toEqual([
+        expect.objectContaining({ status: 'completed', workspacePath: nativePath }),
+      ]);
+      expect(store.dismiss(run.id)).toBe(true);
+      expect(store.runsFor(nativePath)).toEqual([]);
     });
 
     it('creates a second record in another workspace or after a terminal one', async () => {
@@ -940,12 +1143,15 @@ describe('SetupRunStore', () => {
           step: 'analyzing',
           status: 'completed',
           parentId: 'setup-parent',
+          analysisRunId: 'old-analysis-output',
         }),
       );
       const store = await create();
       const next = store.rerun('setup-a1');
       expect(next?.id).not.toBe('setup-a1');
       expect(next?.parentId).toBe('setup-parent');
+      expect(next?.analysisRunId).toBeNull();
+      expect(store.get('setup-a1')?.analysisRunId).toBe('old-analysis-output');
       expect(next?.status).toBe('running');
       expect(store.get('setup-a1')?.status).toBe('completed');
       expect(store.runs()).toHaveLength(2);

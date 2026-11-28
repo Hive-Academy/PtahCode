@@ -975,10 +975,23 @@ export class SetupRpcHandlers {
         const storageService = this.container.resolve<AnalysisStorageService>(
           AGENT_GENERATION_TOKENS.ANALYSIS_STORAGE_SERVICE,
         );
-        loaded = await storageService.loadMultiPhase(
-          workspaceRoot,
-          path.basename(params.filename),
-        );
+        const filename = path.basename(params.filename);
+        try {
+          loaded = await storageService.loadMultiPhase(workspaceRoot, filename);
+        } catch (error) {
+          // Record-based Setup links can carry the manifest ID in place of a slug.
+          if (
+            params.filename !== filename ||
+            !/^[a-z0-9_-]{1,200}$/i.test(filename)
+          )
+            throw error;
+          const match = await storageService.loadByRunId(
+            workspaceRoot,
+            filename,
+          );
+          if (match?.manifest.runId !== filename) throw error;
+          loaded = match;
+        }
       } catch {
         this.logger.warn('Could not read the saved analysis.');
         throw new RpcUserError(

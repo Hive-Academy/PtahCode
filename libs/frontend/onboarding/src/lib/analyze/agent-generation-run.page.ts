@@ -26,6 +26,7 @@ import {
   GenerationSourceStatusComponent,
   GenerationStopControlComponent,
   GenerationWorkflowStore,
+  sameSetupWorkspacePath,
   SetupRunStore,
   SetupWizardStateService,
   WizardRpcService,
@@ -182,12 +183,14 @@ import { LiveRunLayoutComponent } from '../shared/live-run-layout.component';
               </section>
             }
             @case ('cancelled') {
-              <a
-                ptahButton
-                routerLink="/onboarding/analyze/skills"
-                [queryParams]="{ analysis: current.analysisRunId }"
-                >Return to Review skills</a
-              >
+              @if (previewTarget(); as target) {
+                <a
+                  ptahButton
+                  [routerLink]="['/onboarding', ...target.subPath]"
+                  [queryParams]="target.queryParams"
+                  >Return to Review skills</a
+                >
+              }
             }
           }
         </ptah-live-run-layout>
@@ -217,7 +220,7 @@ export class AgentGenerationRunPage {
     const id = this.recordId();
     const current = isOnboardingIdentityValue(id) ? this.runs.get(id) : null;
     return current?.workflow === 'agent-generation' &&
-      current.workspacePath === this.runs.workspacePath()
+      sameSetupWorkspacePath(current.workspacePath, this.runs.workspacePath())
       ? current
       : null;
   });
@@ -225,7 +228,7 @@ export class AgentGenerationRunPage {
   private readonly shownId = computed(() => this.record()?.id);
   protected readonly previewTarget = computed(() => {
     const record = this.record();
-    return record?.status === 'needs-input'
+    return record?.status === 'needs-input' || record?.status === 'cancelled'
       ? this.runs.targetOf(record, 'entry')
       : null;
   });
@@ -267,7 +270,7 @@ export class AgentGenerationRunPage {
     return run &&
       record &&
       run.binding.tabId === record.id &&
-      run.binding.workspacePath === record.workspacePath &&
+      sameSetupWorkspacePath(run.binding.workspacePath, record.workspacePath) &&
       run.binding.runId === record.backendRunId
       ? run
       : null;
@@ -297,7 +300,7 @@ export class AgentGenerationRunPage {
       const source = event.tabBinding;
       if (
         source?.tabId !== record.id ||
-        source.workspacePath !== record.workspacePath ||
+        !sameSetupWorkspacePath(source.workspacePath, record.workspacePath) ||
         source.workflow !== 'setup-agent-generation' ||
         source.runId !== runId
       )
@@ -437,7 +440,7 @@ export class AgentGenerationRunPage {
         !result.interrupted &&
         result.binding.tabId === binding.tabId &&
         result.binding.workflow === binding.workflow &&
-        result.binding.workspacePath === binding.workspacePath &&
+        sameSetupWorkspacePath(result.binding.workspacePath, binding.workspacePath) &&
         result.binding.runId === binding.runId
       ) {
         // Intermediate item results can still be failed. Reopen the record only once the whole checkpoint is complete.

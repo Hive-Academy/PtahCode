@@ -105,7 +105,7 @@ describe('AgentGenerationRunPage', () => {
     release: jest.fn(),
     bindingFor: jest.fn(() => ({
       tabId: binding.tabId,
-      workspacePath: binding.workspacePath,
+      workspacePath: record()?.workspacePath ?? binding.workspacePath,
       workflow: binding.workflow,
     })),
     isCancelling: jest.fn(() => false),
@@ -178,7 +178,10 @@ describe('AgentGenerationRunPage', () => {
     button?.click();
   }
 
-  it('attaches the view, renders live output for its own attempt, and lets the user stop it', async () => {
+  it('renders live output for its own Windows workspace and attempt, and lets the user stop it', async () => {
+    const backendBinding = { ...binding, workspacePath: 'C:\\Work\\Repo' };
+    runs.workspacePath.set(backendBinding.workspacePath);
+    record.set({ ...initialRecord, workspacePath: 'c:/work/repo' });
     const { fixture, page } = await render();
     expect(runs.attach).toHaveBeenCalledWith(binding.tabId);
     expect(page.querySelector('[role="status"]')?.textContent).toContain(
@@ -189,19 +192,19 @@ describe('AgentGenerationRunPage', () => {
         kind: 'text',
         content: 'current output',
         timestamp: 1,
-        tabBinding: binding,
+        tabBinding: backendBinding,
       },
       {
         kind: 'text',
         content: 'prior attempt',
         timestamp: 2,
-        tabBinding: { ...binding, runId: 'older' },
+        tabBinding: { ...backendBinding, runId: 'older' },
       },
       {
         kind: 'text',
         content: 'foreign output',
         timestamp: 3,
-        tabBinding: { ...binding, workspacePath: '/other' },
+        tabBinding: { ...backendBinding, workspacePath: '/other' },
       },
     ]);
     fixture.detectChanges();
@@ -217,8 +220,19 @@ describe('AgentGenerationRunPage', () => {
   });
 
   it('shows failed counts and retries failed items serially on the checkpoint', async () => {
-    record.set({ ...initialRecord, status: 'failed' });
-    rpc.getBoundRunState.mockResolvedValue(failedRun);
+    const storedPath = 'c:/work/repo';
+    const backendPath = 'C:\\Work\\Repo';
+    const backendBinding = { ...binding, workspacePath: backendPath };
+    runs.workspacePath.set(backendPath);
+    record.set({
+      ...initialRecord,
+      workspacePath: storedPath,
+      status: 'failed',
+    });
+    rpc.getBoundRunState.mockResolvedValue({
+      ...failedRun,
+      binding: backendBinding,
+    });
     const { fixture, page } = await render();
     expect(page.textContent).toContain('1 written');
     expect(page.textContent).toContain('1 failed');
@@ -231,6 +245,7 @@ describe('AgentGenerationRunPage', () => {
     );
     const resumedRun: SetupGenerationRunState = {
       ...failedRun,
+      binding: { ...binding, workspacePath: storedPath },
       status: 'completed',
       result: undefined,
     };
@@ -243,8 +258,8 @@ describe('AgentGenerationRunPage', () => {
     fixture.detectChanges();
 
     expect(rpc.retryGenerationItem.mock.calls).toEqual([
-      ['planner', binding],
-      ['reviewer', binding],
+      ['planner', backendBinding],
+      ['reviewer', backendBinding],
     ]);
     expect(runs.reportRun).toHaveBeenCalledWith(binding.tabId, resumedRun);
     expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
@@ -278,6 +293,14 @@ describe('AgentGenerationRunPage', () => {
       '/onboarding/analyze/skills?tab=setup-agent-1&analysis=analysis-1',
     );
     expect(rpc.getBoundRunState).not.toHaveBeenCalled();
+  });
+
+  it('keeps the originating generation binding on the cancelled Review skills link', async () => {
+    record.set({ ...initialRecord, status: 'cancelled' });
+    const { page } = await render();
+    expect(page.querySelector('a')?.getAttribute('href')).toBe(
+      '/onboarding/analyze/skills?tab=setup-agent-1&analysis=analysis-1',
+    );
   });
 
   it('navigates to the summary when a live record completes', async () => {
