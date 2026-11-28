@@ -97,6 +97,8 @@ export interface ProviderSessionAcquireRequest {
   };
   /** Where the runtime sends permission requests for this session. */
   readonly approvals: ProviderApprovalSink;
+  /** Effective permission to open a replacement process on continue. */
+  readonly permission?: PermissionLevel;
   /** `ProviderSessionChatPrepared.open` of this session. */
   readonly open?: ProviderSessionOpenOptions;
 }
@@ -165,6 +167,8 @@ export interface ProviderSessionChatPorts {
     config: AgentSessionStartConfig | AgentSessionResumeConfig,
     sessionId?: SessionId,
   ): Promise<ProviderSessionChatPrepared>;
+  /** Read the workspace default when continuing a retained chat session. */
+  readSavedPermissionLevel?(workspacePath: string): PermissionLevel;
   /**
    * A live session from the host pool: a reused entry or a newly opened one.
    * Rejects with a `ProviderSessionChatAdapterError` or with the runtime's

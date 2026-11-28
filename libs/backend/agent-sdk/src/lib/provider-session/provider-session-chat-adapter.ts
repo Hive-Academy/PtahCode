@@ -141,7 +141,8 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       turnState,
       logger: this.ports.logger,
       realpath,
-      live: (session) => this.live(session),
+      live: (session, refreshInheritedPermission) =>
+        this.live(session, refreshInheritedPermission),
       stats: (payload) => this.stats?.(payload),
       usage: this.usage,
       pricingReady,
@@ -219,7 +220,11 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined {
     if (!SessionId.validate(sessionId)) return undefined;
     const session = this.sessions.get(sessionId);
-    return session?.settings.permission ?? session?.live?.getPermission?.();
+    return (
+      session?.settings.permission ??
+      session?.inheritedPermission ??
+      session?.live?.getPermission?.()
+    );
   }
 
   /** Live chat session id for a Ptah MCP caller id (tab id or session id). */
@@ -265,7 +270,11 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       config.images,
       session,
     );
-    return isEmptyTurn(input) ? emptyStream() : this.turn(session, input, {});
+    return isEmptyTurn(input)
+      ? emptyStream()
+      : this.turn(session, input, {
+          refreshInheritedPermission: config.permissionLevel === undefined,
+        });
   }
 
   private async open(
@@ -348,6 +357,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     signal: AbortSignal,
     failReason: ProviderSessionReleaseReason,
     check?: () => void,
+    openingPermission?: Session['settings']['permission'],
   ): Promise<ProviderSession> {
     const nativeSessionId = session.nativeSessionId || undefined;
     const seed = session.prepared.seed;
@@ -363,6 +373,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
           : {}),
         approvals: session.approvals,
         ...(session.prepared.open ? { open: session.prepared.open } : {}),
+        ...(openingPermission ? { permission: openingPermission } : {}),
       },
       signal,
     );
@@ -383,13 +394,21 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       check?.();
       if (session.settings.effort !== undefined)
         await live.setEffort(session.settings.effort);
-      if (session.settings.permission !== undefined)
-        await live.setPermission(session.settings.permission);
-      // A process the pool opened for a history read carries no model; an
-      // attach to an existing native session sets the session's model.
-      const model = session.settings.model ?? seed.model;
-      if (nativeSessionId && model && live.capabilities().setModel)
-        await live.setModel(model);
+      await this.controls.changePermission(session, async () => {
+        const permission =
+          session.settings.permission ?? session.inheritedPermission;
+        if (permission !== undefined) await live.setPermission(permission);
+        // An adopted history process needs the session's model.
+        const model = session.settings.model ?? seed.model;
+        if (nativeSessionId && model && live.capabilities().setModel)
+          await live.setModel(model);
+        check?.();
+        // Publish the replacement before queued toggles can update it.
+        if (previous) session.approvals.cancelAll('superseded');
+        session.nativeSessionId = live.nativeSessionId;
+        session.contextId = randomUUID();
+        session.live = live;
+      });
     } catch (error) {
       // A session closed while its process opened is released for good, so
       // the host forgets its routing instead of keeping it for a re-acquire.
@@ -399,11 +418,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       );
       throw error;
     }
-    // Prompts of the process the pool replaced cannot be answered any more.
-    if (previous) session.approvals.cancelAll('superseded');
-    session.nativeSessionId = live.nativeSessionId;
-    session.contextId = randomUUID();
-    session.live = live;
+    await this.controls.waitForPermissionChanges(session);
     return live;
   }
 
@@ -412,13 +427,26 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
    * re-acquire after a break (respawn + attach), or the process the pool
    * opened after closing the cached one.
    */
-  private async live(session: Session): Promise<ProviderSession> {
+  private async live(
+    session: Session,
+    refreshInheritedPermission = false,
+  ): Promise<ProviderSession> {
+    if (refreshInheritedPermission)
+      await this.controls.refreshInheritedPermission(session);
     if (session.closing || this.disposed)
       throw new ProviderSessionChatAdapterError('unavailable', 'turn');
-    return this.attach(session, session.abort.signal, 'broken', () => {
-      if (session.closing || this.disposed)
-        throw new ProviderSessionChatAdapterError('cancelled', 'turn');
-    });
+    return this.attach(
+      session,
+      session.abort.signal,
+      'broken',
+      () => {
+        if (session.closing || this.disposed)
+          throw new ProviderSessionChatAdapterError('cancelled', 'turn');
+      },
+      refreshInheritedPermission
+        ? (session.settings.permission ?? session.inheritedPermission)
+        : undefined,
+    );
   }
 
   /** One notice per break; the session stays addressable. */

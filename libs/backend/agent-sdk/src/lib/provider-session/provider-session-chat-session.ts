@@ -50,7 +50,7 @@ export function createProviderSessionChatSession(
   );
   const permission = isPermissionLevel(config.permissionLevel)
     ? config.permissionLevel
-    : prepared.permission;
+    : undefined;
   const session: ProviderSessionChatSession = {
     id,
     token: randomUUID(),
@@ -63,6 +63,9 @@ export function createProviderSessionChatSession(
     nativeSessionId: prepared.resume?.nativeSessionId ?? '',
     contextId: '',
     settings: permission ? { permission } : {},
+    ...(!permission && prepared.permission
+      ? { inheritedPermission: prepared.permission }
+      : {}),
     busy: false,
     pendingInterrupt: false,
     stopRequested: false,

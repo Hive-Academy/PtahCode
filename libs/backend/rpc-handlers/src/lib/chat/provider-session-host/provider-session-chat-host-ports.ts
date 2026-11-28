@@ -118,6 +118,7 @@ export function createProviderSessionChatHostPorts(
 
   return {
     info: deps.info,
+    readSavedPermissionLevel: deps.readSavedPermissionLevel,
     async prepare(config, sessionId) {
       // Refused before anything resolves or spawns.
       startOptions.check(config);
@@ -162,6 +163,7 @@ export function createProviderSessionChatHostPorts(
             ? { nativeSessionId: request.resume.nativeSessionId }
             : {}),
           ...(seed.model ? { model: seed.model } : {}),
+          ...(request.permission ? { permission: request.permission } : {}),
           ...(request.open ? { open: request.open } : {}),
         });
         // Before the open: the agent may ask for approval while it starts.

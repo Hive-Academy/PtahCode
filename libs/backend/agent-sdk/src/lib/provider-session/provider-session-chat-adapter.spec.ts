@@ -196,7 +196,7 @@ async function promptedTurn(
 function setup(
   extra: Pick<
     ProviderSessionChatAdapterDependencies,
-    'usageSink' | 'pricing'
+    'usageSink' | 'pricing' | 'readSavedPermissionLevel'
   > = {},
 ) {
   const logger: Logger = Object.assign(
@@ -836,6 +836,117 @@ describe('ProviderSessionChatAdapter', () => {
 
     live.caps = { ...live.caps, setModel: false };
     await expectCode(h.adapter.setSessionModel(id, 'x'), 'unsupported-option');
+  });
+
+  it.each([
+    { scenario: 'the default changed' },
+    { scenario: 'the read failed', readFailed: true },
+    {
+      scenario: 'the read failed after eviction',
+      readFailed: true,
+      evicted: true,
+    },
+    { scenario: 'the tab made an explicit choice', explicit: true },
+  ])(
+    'uses the correct permission before prompting a retained session when $scenario',
+    async ({ readFailed, evicted, explicit }) => {
+      const readSavedPermissionLevel = jest.fn(
+        (): ProviderSessionPermission => {
+          if (readFailed) throw new Error('Settings unavailable');
+          return 'ask';
+        },
+      );
+      const h = setup({ readSavedPermissionLevel });
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'yolo',
+      });
+      const { id, live } = await startCompleted(h);
+      expect(h.adapter.getPermissionLevel(id)).toBe('yolo');
+      if (explicit) await h.adapter.setSessionPermissionLevel(id, 'yolo');
+      live.setPermission.mockClear();
+
+      await h.adapter.interruptSession(id, 'stream-exit');
+      if (evicted) h.pool.delete(id);
+      const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+      const events = collect(stream);
+      await flush();
+      const resumed = h.lives[h.lives.length - 1];
+      await promptedTurn(resumed, evicted ? 1 : 2);
+      resumed.emit({
+        type: 'terminal',
+        status: 'completed',
+        disposition: 'reusable',
+      });
+      await events;
+
+      expect(h.ports.prepare).toHaveBeenCalledTimes(1);
+      expect(h.adapter.getPermissionLevel(id)).toBe(explicit ? 'yolo' : 'ask');
+      if (evicted) {
+        expect(resumed).not.toBe(live);
+        expect(h.acquire.mock.lastCall?.[0].permission).toBe('ask');
+      }
+      if (explicit) {
+        expect(readSavedPermissionLevel).not.toHaveBeenCalled();
+        expect(resumed.setPermission).not.toHaveBeenCalled();
+      } else {
+        expect(readSavedPermissionLevel).toHaveBeenCalledWith(
+          seed.workspacePath,
+        );
+        expect(resumed.setPermission).toHaveBeenCalledWith('ask');
+        expect(resumed.setPermission.mock.invocationCallOrder[0]).toBeLessThan(
+          resumed.prompt.mock.invocationCallOrder[evicted ? 0 : 1],
+        );
+      }
+    },
+  );
+
+  it('applies a permission toggle queued during replacement attach before prompting', async () => {
+    const h = setup({ readSavedPermissionLevel: () => 'yolo' });
+    const { id, live } = await startCompleted(h);
+    h.pool.delete(id);
+    const replacement = new FakeProviderSession(
+      live.nativeSessionId,
+      2,
+      live.approvals,
+    );
+    let finishAttach!: () => void;
+    const attaching = new Promise<void>((resolve) => (finishAttach = resolve));
+    let finishToggle!: () => void;
+    const toggling = new Promise<void>((resolve) => (finishToggle = resolve));
+    replacement.setPermission.mockImplementation(async (permission) => {
+      await (permission === 'yolo' ? attaching : toggling);
+      replacement.getPermission.mockReturnValue(
+        permission === 'yolo' ? 'yolo' : 'ask',
+      );
+      return applied;
+    });
+    h.acquire.mockImplementationOnce(async (request) => {
+      h.pool.set(request.sessionId, replacement);
+      return replacement;
+    });
+
+    const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+    const events = collect(stream);
+    await flush();
+    expect(replacement.setPermission).toHaveBeenNthCalledWith(1, 'yolo');
+    const toggle = h.adapter.setSessionPermissionLevel(id, 'ask');
+    finishAttach();
+    await flush();
+    expect(replacement.setPermission).toHaveBeenNthCalledWith(2, 'ask');
+    expect(replacement.prompt).not.toHaveBeenCalled();
+
+    finishToggle();
+    await toggle;
+    await promptedTurn(replacement);
+    expect(replacement.getPermission()).toBe('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+    replacement.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
+    await events;
   });
 
   it('applies explicit permissionLevel on open and reports it via getPermissionLevel', async () => {

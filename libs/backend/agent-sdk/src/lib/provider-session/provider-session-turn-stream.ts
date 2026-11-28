@@ -61,6 +61,8 @@ export interface ProviderSessionChatSession {
     effort?: EffortLevel;
     permission?: ProviderSessionPermission;
   };
+  /** Last applied workspace default, when the session has no explicit choice. */
+  inheritedPermission?: ProviderSessionPermission;
   busy: boolean;
   turnId?: string;
   /** Stop arrived before the prompt receipt; interrupt as soon as it lands. */
@@ -112,6 +114,7 @@ export interface ProviderSessionTurnOptions {
   readonly admission?: ProviderSessionTurnAdmission;
   /** The caller already marked the session busy (follow-up publication). */
   readonly reserved?: boolean;
+  readonly refreshInheritedPermission?: boolean;
 }
 
 export interface ProviderSessionTurnDependencies {
@@ -123,7 +126,10 @@ export interface ProviderSessionTurnDependencies {
   /** Canonical path of a file reference (`fs.promises.realpath` in production). */
   readonly realpath: ProviderSessionRealpath;
   /** The live process, re-acquired (respawn + attach) when it broke. */
-  live(session: ProviderSessionChatSession): Promise<ProviderSession>;
+  live(
+    session: ProviderSessionChatSession,
+    refreshInheritedPermission?: boolean,
+  ): Promise<ProviderSession>;
   stats(payload: ResultStatsPayload): void;
   /** Durable usage; absent on a host without a usage sink. */
   readonly usage?: Pick<ProviderSessionUsagePersistence, 'record'>;
@@ -176,15 +182,19 @@ export async function* streamProviderSessionTurn(
       : { consumedClientMessageId: options.clientMessageId };
   try {
     try {
-      live = await deps.live(session);
+      live = await deps.live(session, options.refreshInheritedPermission);
       if (session.closing)
         throw new ProviderSessionChatAdapterError('cancelled', 'turn');
       // Subscribe before the prompt so no event of this turn is missed.
       // Refused before the prompt: an image is never dropped silently.
       if (input.images?.length && !live.capabilities().images)
-        throw new ProviderSessionChatAdapterError('unsupported-option', 'images', {
-          option: 'images',
-        });
+        throw new ProviderSessionChatAdapterError(
+          'unsupported-option',
+          'images',
+          {
+            option: 'images',
+          },
+        );
       const prompt = await providerTurnInput(session, input, deps.realpath);
       events = live.events(subscription.signal)[Symbol.asyncIterator]();
       const receipt = await live.prompt(prompt);
@@ -348,7 +358,12 @@ function* userEcho(
   const timestamp = Date.now();
   if (options.inboundPeer) {
     const messageId = `provider-session-peer:${sessionId}:${turnId}`;
-    const base = { timestamp, sessionId, source: 'complete' as const, messageId };
+    const base = {
+      timestamp,
+      sessionId,
+      source: 'complete' as const,
+      messageId,
+    };
     yield {
       ...base,
       id: `${messageId}:start`,
@@ -363,7 +378,11 @@ function* userEcho(
       delta: text,
       blockIndex: 0,
     };
-    yield { ...base, id: `${messageId}:complete`, eventType: 'message_complete' };
+    yield {
+      ...base,
+      id: `${messageId}:complete`,
+      eventType: 'message_complete',
+    };
     return;
   }
   if (options.clientMessageId === undefined) return;
@@ -444,7 +463,12 @@ function recordTurnUsage(
       })
     : undefined;
   session.usage ??= createProviderSessionUsageLedger(session);
-  const recorded = session.usage.record(model, usage, duration, contextCapacity);
+  const recorded = session.usage.record(
+    model,
+    usage,
+    duration,
+    contextCapacity,
+  );
   const { turnPrice, snapshot } = recorded;
   const pricing = {
     turnCost: turnPrice.totalCost,
@@ -512,7 +536,12 @@ export function brokenSessionNotice(
     messageId,
   };
   return [
-    { ...base, id: `${messageId}:start`, eventType: 'message_start', role: 'assistant' },
+    {
+      ...base,
+      id: `${messageId}:start`,
+      eventType: 'message_start',
+      role: 'assistant',
+    },
     {
       ...base,
       id: `${messageId}:text`,

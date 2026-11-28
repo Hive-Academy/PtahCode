@@ -25,7 +25,10 @@ export interface ProviderSessionOpening {
 interface SessionControlsDependencies {
   readonly sessions: Map<SessionId, Session>;
   readonly opening: Map<string, ProviderSessionOpening>;
-  readonly ports: Pick<ProviderSessionChatPorts, 'release'>;
+  readonly ports: Pick<
+    ProviderSessionChatPorts,
+    'release' | 'readSavedPermissionLevel'
+  >;
   readonly logger: Logger;
   session(id: SessionId): Session;
   /** The cached process while the pool still holds it (else forgotten). */
@@ -35,9 +38,8 @@ interface SessionControlsDependencies {
   rejectQueued(session: Session): void;
 }
 
-const PERMISSION_LEVELS: ReadonlySet<string> = new Set<ProviderSessionPermission>(
-  ['plan', 'ask', 'auto-edit', 'yolo'],
-);
+const PERMISSION_LEVELS: ReadonlySet<string> =
+  new Set<ProviderSessionPermission>(['plan', 'ask', 'auto-edit', 'yolo']);
 
 function isProviderSessionPermission(
   level: string,
@@ -51,6 +53,8 @@ function isProviderSessionPermission(
  * close); only an explicit end releases the session to the pool.
  */
 export class ProviderSessionSessionControls {
+  private readonly permissionChanges = new WeakMap<Session, Promise<void>>();
+
   constructor(private readonly deps: SessionControlsDependencies) {}
 
   owns(id: SessionId): boolean {
@@ -142,7 +146,10 @@ export class ProviderSessionSessionControls {
     }
   }
 
-  async interruptSession(id: SessionId, cause?: SessionEndCause): Promise<void> {
+  async interruptSession(
+    id: SessionId,
+    cause?: SessionEndCause,
+  ): Promise<void> {
     const opening = this.deps.opening.get(id);
     if (opening) {
       opening.cancelled = true;
@@ -186,9 +193,13 @@ export class ProviderSessionSessionControls {
     this.deps.session(id);
     // `/compact` and other native commands are not offered by provider
     // sessions; the slash router answers them before reaching here.
-    throw new ProviderSessionChatAdapterError('unsupported-option', 'slashCommand', {
-      option: command.split(/\s+/, 1)[0] || 'slash command',
-    });
+    throw new ProviderSessionChatAdapterError(
+      'unsupported-option',
+      'slashCommand',
+      {
+        option: command.split(/\s+/, 1)[0] || 'slash command',
+      },
+    );
   }
 
   async setSessionPermissionLevel(
@@ -196,16 +207,62 @@ export class ProviderSessionSessionControls {
   ): Promise<void> {
     // SDK aliases (default/acceptEdits/bypassPermissions) have no provider mode.
     if (!isProviderSessionPermission(level))
-      throw new ProviderSessionChatAdapterError('unsupported-option', 'permission', {
-        option: 'permission',
-      });
+      throw new ProviderSessionChatAdapterError(
+        'unsupported-option',
+        'permission',
+        {
+          option: 'permission',
+        },
+      );
     const permission = level;
     const session = this.deps.session(id);
-    await this.apply(session, 'permission', (live) =>
-      live.setPermission(permission),
-    );
-    session.settings = { ...session.settings, permission };
+    await this.changePermission(session, async () => {
+      await this.apply(session, 'permission', (live) =>
+        live.setPermission(permission),
+      );
+      session.settings = { ...session.settings, permission };
+    });
   }
+
+  refreshInheritedPermission(session: Session): Promise<void> {
+    return this.changePermission(session, async () => {
+      if (session.settings.permission !== undefined) return;
+      let permission: ProviderSessionPermission = 'ask';
+      try {
+        permission =
+          this.deps.ports.readSavedPermissionLevel?.(
+            session.prepared.seed.workspacePath,
+          ) ?? 'ask';
+      } catch {
+        this.deps.logger.warn(
+          'Could not read the saved provider-session permission level. Using ask.',
+          { sessionId: session.id },
+        );
+      }
+      if (session.inheritedPermission === permission) return;
+      await this.apply(session, 'permission', (live) =>
+        live.setPermission(permission),
+      );
+      session.inheritedPermission = permission;
+    });
+  }
+
+  changePermission(
+    session: Session,
+    change: () => Promise<void>,
+  ): Promise<void> {
+    // Attaching, refreshing, and toggling can target the same session.
+    const previous = this.permissionChanges.get(session) ?? Promise.resolve();
+    const pending = previous.catch(() => undefined).then(change);
+    this.permissionChanges.set(session, pending);
+    return pending;
+  }
+
+  /** Wait for toggles queued while a replacement process was attaching. */
+  async waitForPermissionChanges(session: Session): Promise<void> {
+    await this.permissionChanges.get(session);
+  }
+
   async setSessionModel(
     ...[id, model]: Parameters<IAgentAdapter['setSessionModel']>
   ): Promise<void> {
@@ -229,9 +286,7 @@ export class ProviderSessionSessionControls {
     if (!session.busy || session.closing) return false;
     // No receipt yet: the interrupt is held until it lands.
     if (turnId === undefined) return session.turnId === undefined;
-    return (
-      session.turnId === turnId && session.live?.isTurnRunning() === true
-    );
+    return session.turnId === turnId && session.live?.isTurnRunning() === true;
   }
 
   /** A broken or pool-closed session keeps the setting for its next acquire. */
