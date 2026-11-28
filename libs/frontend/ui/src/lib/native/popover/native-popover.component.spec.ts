@@ -151,6 +151,41 @@ describe('NativePopoverComponent', () => {
     expect(host.openedCount).toBe(1);
   });
 
+  it('repositions on panel resize and disconnects on close and destroy', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
+    const observers: TestResizeObserver[] = [];
+    class TestResizeObserver implements ResizeObserver {
+      readonly observe = jest.fn();
+      readonly unobserve = jest.fn();
+      readonly disconnect = jest.fn();
+      constructor(readonly callback: ResizeObserverCallback) {
+        observers.push(this);
+      }
+    }
+    Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: TestResizeObserver });
+    try {
+      await open();
+      const first = observers[0];
+      expect(first.observe).toHaveBeenCalledWith(panel(), { box: 'border-box' });
+      const update = jest.spyOn(connected().overlayRef, 'updatePosition');
+      first.callback([], first);
+      expect(update).toHaveBeenCalledTimes(1);
+
+      host.open.set(false);
+      await render();
+      expect(first.disconnect).toHaveBeenCalledTimes(1);
+
+      await open();
+      const second = observers[1];
+      expect(second.observe).toHaveBeenCalledWith(panel(), { box: 'border-box' });
+      fixture.destroy();
+      expect(second.disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'ResizeObserver', descriptor);
+      else Reflect.deleteProperty(globalThis, 'ResizeObserver');
+    }
+  });
+
   it('pushes caller-sized content inside the right edge with the cap disabled', async () => {
     const viewport = document.documentElement;
     const width = jest.spyOn(viewport, 'clientWidth', 'get').mockReturnValue(320);

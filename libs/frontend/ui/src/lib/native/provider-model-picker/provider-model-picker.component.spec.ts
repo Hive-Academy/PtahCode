@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import type {
   ProviderListModelsResult,
   ProviderModelInfo,
@@ -895,6 +896,36 @@ describe('ProviderModelPickerComponent', () => {
   });
 
   describe('catalog retry', () => {
+    it('blocks cached rich-select choices until a same-provider retry finishes', async () => {
+      const cached = model({ id: 'cached-model' });
+      let finishRetry: ((value: ProviderListModelsResult) => void) | undefined;
+      const pending = new Promise<ProviderListModelsResult>((resolve) => { finishRetry = resolve; });
+      listModels
+        .mockResolvedValueOnce({ ...result([cached]), error: 'Catalogue unavailable' })
+        .mockReturnValueOnce(pending);
+      const fixture = await create({ provider: 'openrouter', richSelect: true });
+      const changed = jest.fn();
+      fixture.componentInstance.selectionChange.subscribe(changed);
+      const picker = fixture.debugElement.query(By.css('ptah-select[data-testid="provider-model-picker-model"]'));
+      const trigger = (picker.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[role="combobox"]');
+      expect(trigger?.disabled).toBe(false);
+
+      (el(fixture, 'provider-model-picker-retry') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(trigger?.disabled).toBe(true);
+      picker.triggerEventHandler('valueChange', cached.id);
+      expect(changed).not.toHaveBeenCalled();
+
+      const fresh = model({ id: 'fresh-model' });
+      finishRetry?.(result([fresh]));
+      await pending;
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(trigger?.disabled).toBe(false);
+      picker.triggerEventHandler('valueChange', fresh.id);
+      expect(changed).toHaveBeenCalledWith({ provider: 'openrouter', model: fresh.id });
+    });
+
     it('offers a Retry action in the error row that re-runs the load', async () => {
       listModels
         .mockRejectedValueOnce(new Error('transport down'))

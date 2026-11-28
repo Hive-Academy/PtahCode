@@ -1,7 +1,7 @@
 import { CdkConnectedOverlay } from '@angular/cdk/overlay';
 import { Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, NgModel } from '@angular/forms';
 import { By } from '@angular/platform-browser';
 import { PtahFieldComponent } from '../../surfaces/field.component';
 import { PtahSelectIconDirective } from './rich-select-icon.directive';
@@ -252,9 +252,9 @@ describe('PtahRichSelectComponent ancestor scroll', () => {
 
 @Component({
   standalone: true,
-  imports: [PtahRichSelectComponent],
+  imports: [PtahRichSelectComponent, FormsModule],
   template: `
-    <ptah-select label="Provider" [options]="options" [searchable]="searchable" />
+    <ptah-select label="Provider" [options]="options" [searchable]="searchable" [ngModel]="null" />
     <button type="button" data-testid="other">Check connection</button>
     <div data-testid="pad">Notes</div>
   `,
@@ -280,15 +280,19 @@ describe('PtahRichSelectComponent outside click', () => {
     target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   }
 
-  it('closes on another control and leaves focus there', () => {
+  it('marks the form control touched on outside dismissal and leaves focus there', () => {
     const fixture = TestBed.createComponent(OutsideClickHost);
-    open(fixture);
+    const trigger = open(fixture);
+    const formModel = fixture.debugElement.query(By.directive(NgModel)).injector.get(NgModel);
     const other = fixture.nativeElement.querySelector(
       '[data-testid="other"]',
     ) as HTMLButtonElement;
+    trigger.focus();
     other.focus();
+    expect(formModel.touched).toBe(false);
     click(other);
     fixture.detectChanges();
+    expect(formModel.touched).toBe(true);
     expect(document.querySelector('.ptah-select__panel')).toBeNull();
     expect(document.activeElement).toBe(other);
     expect(fixture.nativeElement.querySelector('button[role="combobox"]')?.getAttribute('aria-expanded')).toBe(

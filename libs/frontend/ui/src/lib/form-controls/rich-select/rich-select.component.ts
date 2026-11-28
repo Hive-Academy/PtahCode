@@ -293,6 +293,7 @@ export class PtahRichSelectComponent<T = unknown>
     if (!this.open() || !claimOverlayDismissal(event)) return;
     const active = this.triggerRef().nativeElement.ownerDocument.activeElement;
     this.close(this.focusWouldBeStranded(active));
+    this.onTouched();
   }
 
   private focusWouldBeStranded(active: Element | null): boolean {

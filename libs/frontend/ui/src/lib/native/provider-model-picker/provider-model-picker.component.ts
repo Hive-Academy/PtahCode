@@ -247,7 +247,7 @@ function buildDefaultModelLabel(
               [label]="modelAriaLabel()"
               [options]="richModelOptions()"
               [value]="selectedModelId()"
-              [disabled]="modelEditsDisabled()"
+              [disabled]="modelsLoading() || modelEditsDisabled()"
               [searchable]="true"
               searchPlaceholder="Search models…"
               (valueChange)="selectModel($event ?? '')"
@@ -823,7 +823,7 @@ export class ProviderModelPickerComponent implements OnDestroy {
 
   protected onModelChange(event: Event): void {
     const select = event.target as HTMLSelectElement;
-    if (this.modelEditsDisabled()) {
+    if (this.modelsLoading() || this.modelEditsDisabled()) {
       select.value = this.selectedModelId();
       return;
     }
@@ -832,7 +832,7 @@ export class ProviderModelPickerComponent implements OnDestroy {
 
   /** Shared by the `<select>` and the searchable field. */
   protected selectModel(modelId: string): void {
-    if (this.modelEditsDisabled()) return;
+    if (this.modelsLoading() || this.modelEditsDisabled()) return;
     this._model.set(modelId);
     this.emit();
   }

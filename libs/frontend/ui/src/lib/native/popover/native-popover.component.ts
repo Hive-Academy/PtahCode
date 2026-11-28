@@ -123,19 +123,27 @@ export class NativePopoverComponent implements OnChanges, OnDestroy {
   private attachedPanel?: HTMLElement;
   private unregisterChild?: () => void;
   private owned?: OwnedOverlayRegistration;
-  private stopScroll?: () => void;
+  private stopPositionTracking?: () => void;
 
   constructor() {
     afterRenderEffect((onCleanup) => {
       const trigger = this.trigger()?.nativeElement;
       const overlayRef = this.overlay()?.overlayRef;
-      if (!this.isOpen() || !trigger || !overlayRef?.hasAttached()) return;
-      const stop = watchAncestorScroll(this.connectedAnchor(trigger), () => overlayRef.updatePosition());
-      this.stopScroll = stop;
+      const panel = this.panel()?.nativeElement;
+      if (!this.isOpen() || !trigger || !panel || !overlayRef?.hasAttached()) return;
+      const updatePosition = () => overlayRef.updatePosition();
+      const stopScroll = watchAncestorScroll(this.connectedAnchor(trigger), updatePosition);
+      const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(updatePosition);
+      resizeObserver?.observe(panel, { box: 'border-box' });
+      const stop = () => {
+        stopScroll();
+        resizeObserver?.disconnect();
+      };
+      this.stopPositionTracking = stop;
       onCleanup(() => {
-        if (this.stopScroll === stop) {
+        if (this.stopPositionTracking === stop) {
           stop();
-          this.stopScroll = undefined;
+          this.stopPositionTracking = undefined;
         }
       });
     });
@@ -204,8 +212,8 @@ export class NativePopoverComponent implements OnChanges, OnDestroy {
   }
 
   private releasePanel(): void {
-    this.stopScroll?.();
-    this.stopScroll = undefined;
+    this.stopPositionTracking?.();
+    this.stopPositionTracking = undefined;
     this.unregisterChild?.();
     this.unregisterChild = undefined;
     const panel = this.attachedPanel;
