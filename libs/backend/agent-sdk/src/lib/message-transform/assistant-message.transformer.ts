@@ -12,6 +12,7 @@ import {
   isAgentDispatchTool,
   isWorkflowTool,
 } from '@ptah-extension/shared';
+import { formatLocalCommandOutput } from '@ptah-extension/shared/mcp-apps-contracts';
 
 import {
   SDKAssistantMessage,
@@ -22,6 +23,7 @@ import {
   isToolResultBlock,
   isInterruptSentinelText,
   isSyntheticNoResponsePlaceholder,
+  SDK_SYNTHETIC_MODEL,
 } from '../types/sdk-types/claude-sdk.types';
 import { generateEventId } from './message-transform-helpers';
 import { toTurnStateEvent } from '../helpers/session-turn-state.registry';
@@ -157,7 +159,11 @@ export class AssistantMessageTransformer {
             sessionId,
             source: 'complete' as EventSource,
             messageId,
-            delta: block.text,
+            // Claude Code also emits local command stdout as a synthetic assistant block.
+            delta:
+              message.model === SDK_SYNTHETIC_MODEL
+                ? formatLocalCommandOutput(block.text)
+                : block.text,
             blockIndex: contentIndex,
             parentToolUseId: parent_tool_use_id ?? undefined,
           };

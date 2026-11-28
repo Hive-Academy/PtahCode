@@ -357,6 +357,83 @@ describe('artifact replay/live visible-text parity (TASK_2026_414)', () => {
       ),
       'utf8',
     );
+    const contextStdout = readFileSync(
+      join(
+        __dirname,
+        '../../../../../shared/src/lib/local-command/__fixtures__/context.txt',
+      ),
+      'utf8',
+    );
+
+    it.each([
+      ['/cost', usageStdout, '<synthetic>', true],
+      ['/usage', usageStdout, '<synthetic>', true],
+      ['/context', contextStdout, '<synthetic>', true],
+      ['other command', 'Command completed successfully.', '<synthetic>', false],
+      ['ordinary assistant reply', contextStdout, 'claude-haiku-4-5', false],
+    ] as const)('matches live and replayed assistant text for %s', (_command, stdout, model, card) => {
+      const content = [{ type: 'text', text: stdout, citations: null }] as const;
+      const events = createLiveTransformer().transform({
+        type: 'assistant',
+        session_id: SESSION_ID,
+        uuid: '00000000-0000-4000-8000-000000000001',
+        parent_tool_use_id: null,
+        message: {
+          id: 'local-command-assistant',
+          type: 'message',
+          role: 'assistant',
+          model,
+          content: [...content],
+          stop_reason: 'end_turn',
+          stop_sequence: null,
+          stop_details: null,
+          container: null,
+          context_management: null,
+          diagnostics: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: null,
+            cache_read_input_tokens: null,
+            cache_creation: null,
+            fallback_credit: null,
+            inference_geo: null,
+            iterations: null,
+            output_tokens_details: null,
+            server_tool_use: null,
+            service_tier: null,
+            speed: null,
+          },
+        },
+      });
+
+      expect(events.find((event) => event.eventType === 'message_start')).toMatchObject({
+        eventType: 'message_start',
+        role: 'assistant',
+      });
+      expect(visibleText(events)).toEqual([
+        card ? expect.stringMatching(/^```ptah-ui\n/) : stdout,
+      ]);
+      const replay = createReplayService().replayToStreamEvents(
+        SESSION_ID,
+        [
+          {
+            type: 'assistant',
+            uuid: '00000000-0000-4000-8000-000000000001',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            message: {
+              id: 'local-command-assistant',
+              role: 'assistant',
+              model,
+              content,
+            },
+          },
+        ],
+        [],
+      );
+      expect(visibleText(replay)).toEqual(visibleText(events));
+    });
+
     const liveUsage = (): FlatStreamEventUnion[] =>
       createLiveTransformer().transform(
         {

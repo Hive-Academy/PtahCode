@@ -417,6 +417,48 @@ describe('SessionReplayService', () => {
       ),
       'utf8',
     );
+    const contextStdout = readFileSync(
+      join(
+        __dirname,
+        '../../../../../../shared/src/lib/local-command/__fixtures__/context.txt',
+      ),
+      'utf8',
+    );
+
+    it.each([
+      ['/usage', '<synthetic>', usage, true],
+      ['/context', '<synthetic>', contextStdout, true],
+      ['ordinary synthetic text', '<synthetic>', 'Command completed.', false],
+      ['regular model report', 'claude-haiku-4-5', usage, false],
+    ] as const)('replays persisted assistant output for %s', (_name, model, text, card) => {
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [
+          {
+            type: 'assistant',
+            uuid: 'command-assistant-record',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            message: {
+              id: 'command-assistant',
+              role: 'assistant',
+              model,
+              content: [{ type: 'text', text }],
+            },
+          },
+        ],
+        [],
+      );
+
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[0]).toMatchObject({ role: 'assistant' });
+      expect(events[1]).toMatchObject({
+        delta: card ? expect.stringMatching(/^```ptah-ui\n/) : text,
+      });
+    });
 
     const command = (name = 'usage', timestamp?: string) => ({
       ...u({ role: 'user', content: `<command-name>/${name}</command-name>` }),

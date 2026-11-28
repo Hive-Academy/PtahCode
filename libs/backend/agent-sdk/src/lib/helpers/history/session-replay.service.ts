@@ -52,6 +52,7 @@ import type {
 import {
   isInterruptSentinelText,
   isSyntheticNoResponsePlaceholder,
+  SDK_SYNTHETIC_MODEL,
 } from '../../types/sdk-types/claude-sdk.types';
 import {
   isHiddenTranscriptRecord,
@@ -601,7 +602,11 @@ export class SessionReplayService {
                 this.eventFactory.createTextDelta(
                   sessionId,
                   currentMessageId,
-                  block.text,
+                  // Claude Code persists local command stdout (/usage,
+                  // /context) as synthetic assistant text; match live.
+                  msgModel === SDK_SYNTHETIC_MODEL
+                    ? formatLocalCommandOutput(block.text)
+                    : block.text,
                   blockIndex++,
                   eventIndex++,
                   currentMessageTimestamp + messageSequence++ * 0.001,
