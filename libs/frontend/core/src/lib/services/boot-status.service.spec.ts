@@ -365,6 +365,58 @@ describe('BootStatusService', () => {
     jest.useRealTimers();
   });
 
+  it('does not pile up a second pull while one is still on the wire (TASK startup-rpc-timeouts)', async () => {
+    jest.useFakeTimers();
+    let resolveSecond: ((value: RpcResult<unknown>) => void) | undefined;
+    const call = jest
+      .fn()
+      // Pull #1: resolves immediately with `warming`, which arms the watchdog.
+      .mockResolvedValueOnce(
+        new RpcResult(true, {
+          readiness: 'warming',
+          phase: 'database',
+          startedAt: 1,
+        }),
+      )
+      // Pull #2: the watchdog's first re-pull. Held open to simulate a
+      // main-process stall that outlives one 2 s watchdog period.
+      .mockImplementationOnce(
+        () =>
+          new Promise<RpcResult<unknown>>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      )
+      .mockResolvedValue(
+        new RpcResult(true, { readiness: 'ready', phase: 'settled', startedAt: 1 }),
+      );
+    configure({ isElectron: true, rpc: { call } });
+
+    await flushMicrotasks();
+    expect(call).toHaveBeenCalledTimes(1);
+
+    // Watchdog tick #1 dispatches pull #2, which stays pending.
+    jest.advanceTimersByTime(2000);
+    await flushMicrotasks();
+    expect(call).toHaveBeenCalledTimes(2);
+
+    // Watchdog tick #2 lands while pull #2 is still on the wire: without the
+    // in-flight guard this would dispatch a third, overlapping RPC.
+    jest.advanceTimersByTime(2000);
+    await flushMicrotasks();
+    expect(call).toHaveBeenCalledTimes(2);
+
+    // Once the stalled pull settles, the watchdog is free to pull again.
+    resolveSecond?.(
+      new RpcResult(true, { readiness: 'warming', phase: 'database', startedAt: 1 }),
+    );
+    await flushMicrotasks();
+
+    jest.advanceTimersByTime(2000);
+    await flushMicrotasks();
+    expect(call).toHaveBeenCalledTimes(3);
+    jest.useRealTimers();
+  });
+
   it('never starts the watchdog outside Electron', async () => {
     jest.useFakeTimers();
     const call = jest.fn();

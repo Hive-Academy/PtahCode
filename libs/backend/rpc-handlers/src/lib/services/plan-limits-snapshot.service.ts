@@ -93,7 +93,15 @@ interface NativeSessionMetadata {
   } | null>;
 }
 type CodexHomeOwnerResolver = Pick<ProviderOwnerResolver, 'ownerForCodexHome'>;
-/** Leaves six seconds for RPC transport and rendering (30 second client timeout). */
+/**
+ * Leaves six seconds for RPC transport and rendering (30 second client
+ * timeout). Not lowered further (TASK startup-rpc-timeouts): discovery gets
+ * `SNAPSHOT_BUDGET_MS - RESERVED_READ_MS` of this, and a cold-start
+ * `CliDetectionService.detectAll()` on Windows already measures close to
+ * `RESERVED_READ_MS` (12 s) on its own — shrinking the total budget further
+ * would starve discovery first. `sessionOwners()` is what used to run
+ * unbounded past this deadline; it is now capped by it below instead.
+ */
 const SNAPSHOT_BUDGET_MS = 24_000;
 const PLAN_LIMITS_SNAPSHOT_TTL_MS = 30_000;
 const MAX_SNAPSHOT_KEYS = 32;
@@ -274,11 +282,20 @@ export class PlanLimitsSnapshotService {
       entries.map((entry) => this.ownerSnapshot(entry, refresh, true, deadlineAt, () => { cacheable = false; })),
     );
     const readsMs = this.now() - readsStarted;
+    // Computed before the returned object is built: `cacheable` is read by
+    // value as a shorthand property below, so a flip from inside this call
+    // must land before that property is evaluated, not inside it.
+    const sessionOwners = await this.sessionOwners(
+      scope.sessionIds ?? [],
+      owners,
+      deadlineAt,
+      () => { cacheable = false; },
+    );
     return { discoveryMs, readsMs, cacheable, snapshot: {
       generatedAt: this.now(),
       owners,
       discoveryIncomplete: entries.discoveryIncomplete === true,
-      sessionOwners: await this.sessionOwners(scope.sessionIds ?? [], owners),
+      sessionOwners,
     } };
   }
 
@@ -368,41 +385,89 @@ export class PlanLimitsSnapshotService {
     };
   }
 
-  /** Ledger owners plus native Codex and provider-session sessions bound to a discovered owner. */
+  /**
+   * Ledger owners plus native Codex and provider-session sessions bound to a
+   * discovered owner.
+   *
+   * Runs every `metadata.get()` lookup in parallel (not one `await` per
+   * session in a loop) and caps the whole batch by the remaining
+   * `deadlineAt` budget: this used to run sequentially AFTER the snapshot's
+   * budget had already elapsed, with no bound of its own, so a handful of
+   * sessions could push a cold-start read well past the client's 30 s RPC
+   * timeout (TASK startup-rpc-timeouts).
+   */
   private async sessionOwners(
     sessionIds: readonly string[],
     owners: readonly PlanLimitOwnerSnapshot[],
+    deadlineAt: number,
+    onFallback?: () => void,
   ): Promise<Record<string, PlanLimitSessionOwner>> {
     const known = this.ledger.sessionOwners();
     const result: Record<string, PlanLimitSessionOwner> = { ...known };
     const codexOwners = new Set(owners.filter((entry) =>
       entry.owner.providerId === 'openai-codex',
     ).map((entry) => entry.owner.key));
-    for (const sessionId of sessionIds) {
-      if (!result[sessionId]?.ownerKey && this.metadata && this.ownerResolver) {
-        try {
-          const metadata = await this.metadata.get(sessionId);
-          const execution = metadata?.codexExecution;
-          if (execution?.runtime === 'codex-app-server') {
-            const owner = this.ownerResolver.ownerForCodexHome(execution.codex.normalizedHome);
-            if (codexOwners.has(owner.key)) {
-              result[sessionId] = { ownerKey: owner.key, modelScope: null };
+    const remainingMs = deadlineAt - this.now();
+    const metadata = this.metadata;
+    const ownerResolver = this.ownerResolver;
+    // Deduplicated: a repeated sessionId would otherwise launch a redundant
+    // concurrent `metadata.get()` call and timer per repeat.
+    const pending = [...new Set(sessionIds)].filter(
+      (sessionId) => !result[sessionId]?.ownerKey,
+    );
+    if (metadata && ownerResolver && pending.length > 0) {
+      if (remainingMs <= 0) {
+        // The deadline is already behind us: every pending lookup falls back
+        // to `ownerKey: null` below, so the snapshot built from it must not
+        // be cached as if it were complete.
+        this.logger.debug('[PlanLimitsSnapshot] native session owner lookups skipped', {
+          reason: 'timeout',
+          pending: pending.length,
+        });
+        onFallback?.();
+      } else {
+        await Promise.all(
+          pending.map(async (sessionId) => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              const timeout = new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => {
+                  reject(new Error('Session owner lookup deadline'));
+                }, remainingMs);
+                timer.unref?.();
+              });
+              const sessionMetadata = await Promise.race([
+                metadata.get(sessionId),
+                timeout,
+              ]);
+              const execution = sessionMetadata?.codexExecution;
+              if (execution?.runtime === 'codex-app-server') {
+                const owner = ownerResolver.ownerForCodexHome(execution.codex.normalizedHome);
+                if (codexOwners.has(owner.key)) {
+                  result[sessionId] = { ownerKey: owner.key, modelScope: null };
+                }
+              }
+              const providerSession = sessionMetadata?.providerSessionExecution;
+              if (providerSession?.runtime === 'provider-session') {
+                const ownerKey = providerSessionOwnerKey(
+                  providerSession.providerSession.profile,
+                  owners,
+                );
+                if (ownerKey) result[sessionId] = { ownerKey, modelScope: null };
+              }
+            } catch (error: unknown) {
+              this.logger.warn('[PlanLimitsSnapshot] native session owner lookup failed', {
+                errorName: error instanceof Error ? error.name : typeof error,
+              });
+              onFallback?.();
+            } finally {
+              if (timer !== undefined) clearTimeout(timer);
             }
-          }
-          const providerSession = metadata?.providerSessionExecution;
-          if (providerSession?.runtime === 'provider-session') {
-            const ownerKey = providerSessionOwnerKey(
-              providerSession.providerSession.profile,
-              owners,
-            );
-            if (ownerKey) result[sessionId] = { ownerKey, modelScope: null };
-          }
-        } catch (error: unknown) {
-          this.logger.warn('[PlanLimitsSnapshot] native session owner lookup failed', {
-            errorName: error instanceof Error ? error.name : typeof error,
-          });
-        }
+          }),
+        );
       }
+    }
+    for (const sessionId of sessionIds) {
       result[sessionId] ??= { ownerKey: null, modelScope: null };
     }
     return result;

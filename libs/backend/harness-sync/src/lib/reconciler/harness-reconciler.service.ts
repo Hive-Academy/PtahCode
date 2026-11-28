@@ -476,7 +476,7 @@ export class HarnessReconcilerService {
           ),
         );
       }
-      this.maintainGitignore(workspaceRoot, selected, targetHealth, options);
+      await this.maintainGitignore(workspaceRoot, selected, targetHealth, options);
     } finally {
       lock.release();
     }
@@ -570,12 +570,12 @@ export class HarnessReconcilerService {
    * Inside the lock, because it writes a workspace file; non-fatal, because a
    * `.gitignore` that could not be updated has not broken anybody's harness.
    */
-  private maintainGitignore(
+  private async maintainGitignore(
     workspaceRoot: string,
     selected: readonly IHarnessTarget[],
     targetHealth: readonly HarnessTargetHealth[],
     options: HarnessReconcileOptions,
-  ): void {
+  ): Promise<void> {
     if (this.gitignore === null || options.mode !== 'full') return;
 
     const detected = new Set(
@@ -600,7 +600,7 @@ export class HarnessReconcilerService {
           .filter(([, entry]) => entry.kind === 'skill')
           .map(([relPath]) => relPath),
       );
-      const result = this.gitignore.apply(workspaceRoot, dirs, skillPaths);
+      const result = await this.gitignore.apply(workspaceRoot, dirs, skillPaths);
       if (result.outcome === 'failed') {
         this.logger.warn('[harness-sync] Could not update .gitignore', {
           workspaceRoot,

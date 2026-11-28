@@ -10,10 +10,12 @@
  * **Why a SYNC variant exists.** The copy engine is async and uses
  * {@link withWindowsRetry}. Every PERSISTENCE write in this lib is synchronous
  * and has to stay that way: `ManagedManifestStore.save` runs inside the
- * reconciler's synchronous bookkeeping, `HarnessGitignoreWriter.apply` is a
- * pure read-modify-write, and `McpIntentStore.record`/`forget` are called from
- * synchronous RPC bookkeeping. Making them async would ripple through four
- * callers apiece to buy nothing — so the retry meets them where they are.
+ * reconciler's synchronous bookkeeping; `HarnessGitignoreWriter.apply`'s own
+ * read-modify-write of `.gitignore` is one such write (its git-tracked-path
+ * lookup is async, the file write itself is not), and `McpIntentStore.record`/
+ * `forget` are called from synchronous RPC bookkeeping. Making them async
+ * would ripple through four callers apiece to buy nothing — so the retry
+ * meets them where they are.
  * {@link withWindowsRetrySync} blocks the thread for at most 40ms + 80ms, and
  * only on the rare path where a write actually failed.
  */

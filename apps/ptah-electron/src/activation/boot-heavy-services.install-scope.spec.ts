@@ -97,6 +97,23 @@ function makeContainer(
   } as unknown as DependencyContainer;
 }
 
+/** Wraps `container` so `TOKENS.BACKGROUND_WORK_GOVERNOR` resolves to `governor`. */
+function withGovernor(
+  container: DependencyContainer,
+  governor: { isClear: () => boolean; whenClear: () => Promise<unknown> },
+): DependencyContainer {
+  return {
+    isRegistered: (token: unknown, recursive?: boolean) =>
+      token === TOKENS.BACKGROUND_WORK_GOVERNOR
+        ? true
+        : container.isRegistered(token as never, recursive),
+    resolve: (token: unknown) =>
+      token === TOKENS.BACKGROUND_WORK_GOVERNOR
+        ? governor
+        : container.resolve(token as never),
+  } as unknown as DependencyContainer;
+}
+
 interface Harness {
   container: DependencyContainer;
   run: jest.Mock;
@@ -291,6 +308,70 @@ describe('Electron heavy boot — install-scope migration trigger', () => {
     await driveBoot(container, ['/ws-a', '/ws-b']);
 
     expect(refreshUserLayer).toHaveBeenCalledTimes(2);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('defers the migration until the background-work governor clears, without the boot waiting on it', async () => {
+    const run = jest.fn(async () => {
+      mockCallOrder.push('migration.run');
+    });
+    let releaseClear: ((outcome: 'clear' | 'timeout') => void) | undefined;
+    const governor = {
+      isClear: jest.fn(() => false),
+      whenClear: jest.fn(
+        () =>
+          new Promise<'clear' | 'timeout'>((resolve) => {
+            releaseClear = resolve;
+          }),
+      ),
+    };
+    const { container } = makeHarness(run);
+
+    await driveBoot(withGovernor(container, governor));
+    expect(governor.whenClear).toHaveBeenCalledTimes(1);
+    // The boot itself finishes without waiting for the governor to clear.
+    expect(run).not.toHaveBeenCalled();
+
+    releaseClear?.('clear');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the migration when the background-work governor is disposed (AbortError)', async () => {
+    const run = jest.fn(async () => {
+      mockCallOrder.push('migration.run');
+    });
+    const abortError = Object.assign(new Error('governor disposed'), {
+      name: 'AbortError',
+    });
+    const governor = {
+      isClear: jest.fn(() => false),
+      whenClear: jest.fn(() => Promise.reject(abortError)),
+    };
+    const { container } = makeHarness(run);
+
+    await driveBoot(withGovernor(container, governor));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(governor.whenClear).toHaveBeenCalledTimes(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('runs the migration anyway when the governor wait fails for a reason other than disposal', async () => {
+    const run = jest.fn(async () => {
+      mockCallOrder.push('migration.run');
+    });
+    const governor = {
+      isClear: jest.fn(() => false),
+      whenClear: jest.fn(() => Promise.reject(new Error('governor defect'))),
+    };
+    const { container } = makeHarness(run);
+
+    await driveBoot(withGovernor(container, governor));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(governor.whenClear).toHaveBeenCalledTimes(1);
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
