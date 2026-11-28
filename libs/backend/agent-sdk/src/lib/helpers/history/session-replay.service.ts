@@ -30,6 +30,7 @@ import type {
 } from '@ptah-extension/shared';
 import {
   calculateMessageCost,
+  formatLocalCommandOutput,
   isAgentDispatchTool,
   laneEnvelopePeerLabel,
   parseLaneEnvelope,
@@ -85,22 +86,34 @@ function parseTaskNotification(text: string): TaskNotification | null {
   const bodyStart = root.length;
   const bodyEnd = head.indexOf(endRoot, bodyStart);
   const body = head.slice(bodyStart, bodyEnd < 0 ? undefined : bodyEnd);
-  const field = (tag: string, limit: number, allowTruncated = false): string | null => {
+  const field = (
+    tag: string,
+    limit: number,
+    allowTruncated = false,
+  ): string | null => {
     const startTag = `<${tag}>`;
     const endTag = `</${tag}>`;
     const start = body.indexOf(startTag);
     if (start < 0) return null;
     const valueStart = start + startTag.length;
     const end = body.indexOf(endTag, valueStart);
-    if ((end < 0 && !allowTruncated) || (!allowTruncated && end - valueStart > limit)) return null;
-    return body.slice(valueStart, Math.min(end < 0 ? body.length : end, valueStart + limit)).trim();
+    if (
+      (end < 0 && !allowTruncated) ||
+      (!allowTruncated && end - valueStart > limit)
+    )
+      return null;
+    return body
+      .slice(
+        valueStart,
+        Math.min(end < 0 ? body.length : end, valueStart + limit),
+      )
+      .trim();
   };
   const taskId = field('task-id', 128);
   const toolUseId = field('tool-use-id', 128);
   const statusText = field('status', 32);
   if (!taskId || !/^[A-Za-z0-9_-]+$/.test(taskId)) return null;
-  if (toolUseId !== null && !/^[A-Za-z0-9_-]+$/.test(toolUseId))
-    return null;
+  if (toolUseId !== null && !/^[A-Za-z0-9_-]+$/.test(toolUseId)) return null;
   const status =
     statusText === 'completed'
       ? 'completed'
@@ -156,6 +169,61 @@ export class SessionReplayService {
     @inject(AUTH_PROVIDERS_TOKENS.SDK_MODEL_RESOLVER)
     private readonly modelResolver: IModelResolver,
   ) {}
+
+  /**
+   * The record's own timestamp, else the nearest preceding record's, else the
+   * nearest following record's; null when no record has one. Keeps a replayed
+   * card's position deterministic instead of stamping it with the wall clock.
+   */
+  private neighbourTimestamp(
+    messages: readonly SessionHistoryMessage[],
+    index: number,
+  ): number | null {
+    const at = (i: number): number | null => {
+      const parsed = Date.parse(messages[i]?.timestamp ?? '');
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    for (let i = index; i >= 0; i--) {
+      const ts = at(i);
+      if (ts !== null) return ts;
+    }
+    for (let i = index + 1; i < messages.length; i++) {
+      const ts = at(i);
+      if (ts !== null) return ts;
+    }
+    return null;
+  }
+
+  /**
+   * The ptah-ui card for a recorded `/usage` or `/context` stdout, matching
+   * what `SystemMessageTransformer.transformLocalCommandOutput` streams live.
+   * Transcripts store that stdout wrapped in `<local-command-stdout>`, either
+   * as the top-level `content` of a `system`/`local_command` record or, in
+   * older transcripts, as the text of a `user` record. Returns null for every
+   * other record and for any output the formatter leaves unchanged, so other
+   * commands keep their existing replay behaviour.
+   */
+  private localCommandCardText(msg: SessionHistoryMessage): string | null {
+    let raw: unknown;
+    if (msg.type === 'system' && msg.subtype === 'local_command') {
+      raw = (msg as { readonly content?: unknown }).content;
+    } else if (
+      msg.type === 'user' &&
+      typeof msg.message?.content === 'string' &&
+      !isHiddenTranscriptRecord(msg)
+    ) {
+      raw = msg.message.content;
+    }
+    if (typeof raw !== 'string') return null;
+    const match =
+      /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/.exec(
+        raw,
+      );
+    if (!match) return null;
+    const stdout = match[1];
+    const formatted = formatLocalCommandOutput(stdout);
+    return formatted === stdout ? null : formatted;
+  }
 
   /**
    * Main replay function - converts JSONL messages to FlatStreamEventUnion events.
@@ -220,7 +288,53 @@ export class SessionReplayService {
     let messageSequence = 0;
     let currentMessageUsage: MessageUsageData | undefined;
 
-    for (const msg of effectiveMessages) {
+    for (const [msgIndex, msg] of effectiveMessages.entries()) {
+      const commandCard = this.localCommandCardText(msg);
+      if (commandCard !== null) {
+        if (currentMessageId) {
+          events.push(
+            this.eventFactory.createMessageComplete(
+              sessionId,
+              currentMessageId,
+              eventIndex++,
+              currentMessageTimestamp + messageSequence * 0.001,
+              currentMessageUsage,
+            ),
+          );
+          currentMessageId = null;
+          blockIndex = 0;
+          messageSequence = 0;
+          currentMessageUsage = undefined;
+        }
+        const cardMessageId = `cmd_${msg.uuid || this.eventFactory.generateId()}`;
+        const cardTimestamp =
+          this.neighbourTimestamp(effectiveMessages, msgIndex) ??
+          currentMessageTimestamp;
+        events.push(
+          this.eventFactory.createMessageStart(
+            sessionId,
+            cardMessageId,
+            'assistant',
+            eventIndex++,
+            cardTimestamp,
+          ),
+          this.eventFactory.createTextDelta(
+            sessionId,
+            cardMessageId,
+            commandCard,
+            0,
+            eventIndex++,
+            cardTimestamp + 0.001,
+          ),
+          this.eventFactory.createMessageComplete(
+            sessionId,
+            cardMessageId,
+            eventIndex++,
+            cardTimestamp + 0.002,
+          ),
+        );
+        continue;
+      }
       if (!msg.type || !['user', 'assistant'].includes(msg.type)) {
         continue;
       }
@@ -249,7 +363,10 @@ export class SessionReplayService {
           continue;
         }
         const rawText = this.eventFactory.extractTextContent(contentRaw);
-        if (rawText && rawText.slice(0, 1024).trimStart().startsWith('<task-notification>')) {
+        if (
+          rawText &&
+          rawText.slice(0, 1024).trimStart().startsWith('<task-notification>')
+        ) {
           // A typed user message may contain an XML-looking example.
           if (msg.origin?.kind === 'human' || msg.turnOrigin === 'human')
             continue;
@@ -266,7 +383,11 @@ export class SessionReplayService {
             const started = toolUseId
               ? emittedAgentStarts.get(toolUseId)
               : undefined;
-            if (toolUseId && started && !completedTaskIds.has(notification.taskId)) {
+            if (
+              toolUseId &&
+              started &&
+              !completedTaskIds.has(notification.taskId)
+            ) {
               completedTaskIds.add(notification.taskId);
               const parsedTimestamp = Date.parse(msg.timestamp ?? '');
               const notificationTimestamp = Number.isFinite(parsedTimestamp)
@@ -294,7 +415,10 @@ export class SessionReplayService {
               // Task result may have settled it earlier; a launch placeholder
               // alone never does.
               const backgroundStarted = backgroundSpawns.get(toolUseId);
-              if (backgroundStarted && !completedBackgroundToolIds.has(toolUseId)) {
+              if (
+                backgroundStarted &&
+                !completedBackgroundToolIds.has(toolUseId)
+              ) {
                 completedBackgroundToolIds.add(toolUseId);
                 events.push(
                   buildHistoricalBackgroundTerminalEvent({
@@ -552,12 +676,12 @@ export class SessionReplayService {
                 );
                 const backgroundStarted = backgroundSpawn
                   ? buildHistoricalBackgroundStartedEvent({
-                    sessionId,
-                    messageId: currentMessageId,
-                    timestamp:
-                      currentMessageTimestamp + messageSequence++ * 0.001,
-                    spawn: backgroundSpawn,
-                  })
+                      sessionId,
+                      messageId: currentMessageId,
+                      timestamp:
+                        currentMessageTimestamp + messageSequence++ * 0.001,
+                      spawn: backgroundSpawn,
+                    })
                   : null;
                 if (backgroundStarted) {
                   backgroundSpawns.set(toolCallId, backgroundStarted);
@@ -593,7 +717,10 @@ export class SessionReplayService {
                   );
                   if (
                     backgroundStarted &&
-                    isFinalBackgroundToolResult(toolResult.content, backgroundStarted)
+                    isFinalBackgroundToolResult(
+                      toolResult.content,
+                      backgroundStarted,
+                    )
                   ) {
                     completedBackgroundToolIds.add(toolCallId);
                     events.push(

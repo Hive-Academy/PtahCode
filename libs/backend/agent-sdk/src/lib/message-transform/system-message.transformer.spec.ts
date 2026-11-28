@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { SystemMessageTransformer } from './system-message.transformer';
 import type { TransformerState } from './transformer-state';
 import type { TransformerHelpers } from './transformer-helpers';
@@ -436,6 +438,24 @@ describe('SystemMessageTransformer', () => {
         'message_complete',
       ]);
       expect((events[1] as { delta: string }).delta).toBe('output text');
+    });
+
+    it('renders /usage stdout as one ptah-ui block', () => {
+      const usage = readFileSync(
+        join(
+          __dirname,
+          '../../../../../shared/src/lib/local-command/__fixtures__/usage.txt',
+        ),
+        'utf8',
+      );
+      const events = transformer.transformLocalCommandOutput(
+        { content: usage, session_id: 'sess-x' } as never,
+        makeHelpers(),
+        undefined,
+      );
+      const delta = (events[1] as { delta: string }).delta;
+      expect(delta.startsWith('```ptah-ui')).toBe(true);
+      expect(delta).not.toBe(usage);
     });
   });
 
@@ -1746,7 +1766,8 @@ describe('SystemMessageTransformer', () => {
       'marks background_agent_stopped as a budget-monitor stop for a %s task with a Ptah notice',
       (status) => {
         const helpers = makeHelpers();
-        const notice = 'Ptah stopped `Explore`: budget. The user did not stop it.';
+        const notice =
+          'Ptah stopped `Explore`: budget. The user did not stop it.';
         helpers.stopNotices.record('sess', 'task-resumed', notice);
         transformer.transformTaskStarted(
           {
@@ -1914,9 +1935,7 @@ describe('SystemMessageTransformer', () => {
       );
 
       expect(
-        events
-          .map((e) => e.eventType)
-          .filter((t) => t !== 'turn_state'),
+        events.map((e) => e.eventType).filter((t) => t !== 'turn_state'),
       ).toEqual(['agent_completed', 'background_agent_completed']);
     });
 

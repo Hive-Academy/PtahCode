@@ -15,6 +15,7 @@ import {
   ToolResultEvent,
   SessionId,
   isAgentTaskType,
+  formatLocalCommandOutput,
 } from '@ptah-extension/shared';
 
 import type {
@@ -195,7 +196,9 @@ export class SystemMessageTransformer {
         timestamp: Date.now(),
         sessionId: resolvedSessionId,
         messageId,
-        delta: sdkMessage.content,
+        // `/usage` and `/context` stdout becomes one ptah-ui dashboard block;
+        // any other command's output passes through unchanged.
+        delta: formatLocalCommandOutput(sdkMessage.content),
         blockIndex: 0,
       } as TextDeltaEvent,
       {

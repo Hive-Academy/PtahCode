@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 
 import type { AuthEnv, FlatStreamEventUnion } from '@ptah-extension/shared';
@@ -345,5 +347,60 @@ describe('artifact replay/live visible-text parity (TASK_2026_414)', () => {
     );
 
     expect(visibleText(replay)).toEqual(visibleText(live));
+  });
+
+  describe('/usage and /context command cards (TASK_2026_2336)', () => {
+    const usageStdout = readFileSync(
+      join(
+        __dirname,
+        '../../../../../shared/src/lib/local-command/__fixtures__/usage.txt',
+      ),
+      'utf8',
+    );
+    const liveUsage = (): FlatStreamEventUnion[] =>
+      createLiveTransformer().transform(
+        {
+          type: 'system',
+          subtype: 'local_command_output',
+          session_id: SESSION_ID,
+          content: usageStdout,
+        } as never,
+        SESSION_ID as never,
+      );
+
+    it('replays a system/local_command record as the live ptah-ui card', () => {
+      const replay = createReplayService().replayToStreamEvents(
+        SESSION_ID,
+        [
+          {
+            type: 'system',
+            subtype: 'local_command',
+            uuid: 'cmd-record',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            content: `<local-command-stdout>${usageStdout}</local-command-stdout>`,
+          } as unknown as SessionHistoryMessage,
+        ],
+        [],
+      );
+      const live = visibleText(liveUsage());
+
+      expect(live).toHaveLength(1);
+      expect(live[0].startsWith('```ptah-ui')).toBe(true);
+      expect(visibleText(replay)).toEqual(live);
+    });
+
+    it('replays an older user stdout record as the live ptah-ui card', () => {
+      const replay = createReplayService().replayToStreamEvents(
+        SESSION_ID,
+        [
+          replayUser(
+            `<local-command-stdout>${usageStdout}</local-command-stdout>`,
+          ),
+        ],
+        [],
+      );
+
+      expect(visibleText(replay)).toEqual(visibleText(liveUsage()));
+    });
   });
 });
