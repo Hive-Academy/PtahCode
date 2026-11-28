@@ -142,12 +142,6 @@ export function groupLayoutChildren(children: readonly SurfaceNode[]): readonly 
 }
 
 let nextLayoutInstance = 0;
-const GAP_CLASSES = { none: 'gap-0', small: 'gap-2', medium: 'gap-4', large: 'gap-6' } as const;
-const CONTAINER_GAP_CLASSES = {
-  none: 'dp-gap-none', small: 'dp-gap-small', medium: 'dp-gap-medium', large: 'dp-gap-large',
-} as const;
-/** Literal class names so the Tailwind scanner emits them. Index = column count. */
-const SM_GRID_COLUMNS = ['sm:grid-cols-1', 'sm:grid-cols-1', 'sm:grid-cols-2', 'sm:grid-cols-3', 'sm:grid-cols-4'] as const;
 const NO_ACTION_STATES: ReadonlyMap<string, SurfaceActionUiState> = new Map();
 
 function plainText(value: unknown): string | undefined {
@@ -200,7 +194,11 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
               }
             </div>
           } @else if (horizontal()) {
-            <div [class]="rowItemClass(group.entry.child)" data-testid="row-item">
+            <div
+              [class.dp-row-item-divider]="isVerticalDivider(group.entry.child)"
+              [class.dp-row-item-inline]="isInlineKind(group.entry.child)"
+              [class.dp-row-item]="!isVerticalDivider(group.entry.child) && !isInlineKind(group.entry.child)"
+              data-testid="row-item">
               <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
             </div>
           } @else {
@@ -256,7 +254,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
               @if (layoutWidth() === 'container') {
                 <ng-container [ngTemplateOutlet]="responsiveChildren" />
               } @else {
-                <div [class]="containerClass()"><ng-container [ngTemplateOutlet]="children" /></div>
+                <div class="flex flex-col gap-4"><ng-container [ngTemplateOutlet]="children" /></div>
               }
               <ng-container [ngTemplateOutlet]="submit" />
             </div>
@@ -292,7 +290,32 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
       }
       @default {
         <div class="flex flex-col gap-3">
-          <div [class]="containerClass()"><ng-container [ngTemplateOutlet]="children" /></div>
+          <div [class]="{
+            'dp-grid': containerGrid(),
+            'dp-grid--stats': containerGrid() && isStatGrid(),
+            'dp-cols-1': containerGrid() && gridColumns() === 1,
+            'dp-cols-2': containerGrid() && gridColumns() === 2,
+            'dp-cols-3': containerGrid() && gridColumns() === 3,
+            'dp-cols-4': containerGrid() && gridColumns() === 4,
+            'dp-gap-none': containerGrid() && gapKey() === 'none',
+            'dp-gap-small': containerGrid() && gapKey() === 'small',
+            'dp-gap-medium': containerGrid() && gapKey() === 'medium',
+            'dp-gap-large': containerGrid() && gapKey() === 'large',
+            'grid': viewportGrid(),
+            'grid-cols-1': viewportGrid(),
+            'sm:grid-cols-1': viewportGrid() && gridColumns() === 1,
+            'sm:grid-cols-2': viewportGrid() && gridColumns() === 2,
+            'sm:grid-cols-3': viewportGrid() && gridColumns() === 3,
+            'sm:grid-cols-4': viewportGrid() && gridColumns() === 4,
+            'flex': !isGrid(),
+            'flex-row': horizontal(),
+            'flex-wrap': horizontal(),
+            'flex-col': !isGrid() && !horizontal(),
+            'gap-0': !containerGrid() && gapKey() === 'none',
+            'gap-2': !containerGrid() && gapKey() === 'small',
+            'gap-4': !containerGrid() && gapKey() === 'medium',
+            'gap-6': !containerGrid() && gapKey() === 'large'
+          }"><ng-container [ngTemplateOutlet]="children" /></div>
           <ng-container [ngTemplateOutlet]="submit" />
         </div>
       }
@@ -334,23 +357,17 @@ export class SurfaceLayoutComponent {
     const node = this.node();
     return node.kind === 'section' || node.kind === 'card' ? plainText(node.description) : undefined;
   });
-  /**
-   * Stack: flex by direction. Grid, viewport mode: at most maxGridColumns, one
-   * column below `sm`. Grid, container mode: the `dp-grid` rules, with the
-   * stat variant when every child is a stat.
-   */
-  public readonly containerClass = computed(() => {
+  public readonly isGrid = computed(() => this.node().kind === 'grid');
+  public readonly containerGrid = computed(() => this.isGrid() && this.layoutWidth() === 'container');
+  public readonly viewportGrid = computed(() => this.isGrid() && this.layoutWidth() !== 'container');
+  public readonly isStatGrid = computed(() => {
+    const children = this.node().children;
+    return children.length > 0 && children.every(child => child.kind === 'stat');
+  });
+  public readonly gapKey = computed((): 'none' | 'small' | 'medium' | 'large' => {
     const node = this.node();
-    const gapKey = node.kind === 'stack' || node.kind === 'grid' ? node.gap ?? 'medium' : 'medium';
-    const gap = GAP_CLASSES[gapKey] ?? GAP_CLASSES.medium;
-    if (node.kind === 'grid' && this.layoutWidth() === 'container') {
-      const stats = node.children.length > 0 && node.children.every(child => child.kind === 'stat');
-      const containerGap = CONTAINER_GAP_CLASSES[gapKey] ?? CONTAINER_GAP_CLASSES.medium;
-      return `dp-grid dp-cols-${this.gridColumns()} ${containerGap}${stats ? ' dp-grid--stats' : ''}`;
-    }
-    if (node.kind === 'grid') return `grid grid-cols-1 ${SM_GRID_COLUMNS[this.gridColumns()]} ${gap}`;
-    if (node.kind === 'stack' && node.direction === 'horizontal') return `flex flex-row flex-wrap ${gap}`;
-    return `flex flex-col ${gap}`;
+    const gap = node.kind === 'stack' || node.kind === 'grid' ? node.gap : undefined;
+    return gap === 'none' || gap === 'small' || gap === 'medium' || gap === 'large' ? gap : 'medium';
   });
   public readonly horizontal = computed(() => {
     const node = this.node();
@@ -379,9 +396,8 @@ export class SurfaceLayoutComponent {
   }
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
   public isInlineKind(child: SurfaceNode): boolean { return INLINE_SURFACE_KINDS.has(child.kind); }
-  public rowItemClass(child: SurfaceNode): string {
-    if (child.kind === 'divider' && child.direction === 'vertical') return 'dp-row-item-divider';
-    return this.isInlineKind(child) ? 'dp-row-item-inline' : 'dp-row-item';
+  public isVerticalDivider(child: SurfaceNode): boolean {
+    return child.kind === 'divider' && child.direction === 'vertical';
   }
   public statusId(index: number): string { return `${this.instanceId}-status-${index}`; }
   public statusText(action: SurfaceAction): string { return submitStatusText(this.actionStates().get(action.id)); }
