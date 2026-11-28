@@ -110,6 +110,7 @@ describe('classifyToolCall', () => {
     'ls a#b; rm tmp.txt',
     'rg TODO src # note\nrm tmp.txt',
     'rg "#x" src; rm tmp.txt',
+    'rg foo\\ #tag; rm tmp.txt',
   ])('excludes mutating shell command from read categories: %s', (cmd) => {
     const classification = classifyToolCall({ name: 'Bash', input: { command: cmd } });
     expect(classification.operation).toBe('native-other');

@@ -204,10 +204,12 @@ interface CommandStage {
 function stripShellComments(command: string): string {
   let out = '';
   let quote: '"' | "'" | null = null;
+  let wordStart = true;
   for (let i = 0; i < command.length; i++) {
     const ch = command[i] ?? '';
     if (quote !== null) {
       out += ch;
+      wordStart = false;
       if (ch === '\\' && quote === '"' && i + 1 < command.length) {
         out += command[i + 1] ?? '';
         i++;
@@ -216,13 +218,21 @@ function stripShellComments(command: string): string {
       }
       continue;
     }
+    if (ch === '\\' && i + 1 < command.length) {
+      // An escaped character (including an escaped space) stays inside the word.
+      out += ch + (command[i + 1] ?? '');
+      i++;
+      wordStart = false;
+      continue;
+    }
     if (ch === '"' || ch === "'") {
       quote = ch;
-    } else if (ch === '#' && (i === 0 || /\s/.test(command[i - 1] ?? ''))) {
+    } else if (ch === '#' && wordStart) {
       while (i + 1 < command.length && command[i + 1] !== '\n' && command[i + 1] !== '\r') i++;
       continue;
     }
     out += ch;
+    wordStart = /\s/.test(ch);
   }
   return out;
 }
