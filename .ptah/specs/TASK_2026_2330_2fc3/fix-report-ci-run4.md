@@ -1,0 +1,20 @@
+# CI run 4 onboarding Jest failure
+
+## Finding
+
+**Root cause unconfirmed.** Shard 3 ran the PR merge of `89f3e36b5c` and reported 1 failed and 897 passed onboarding tests. Angular found the `NativeModalComponent` instance, but its host contained only a container comment. Both fixture and document dialog counts were zero. The modal source declares the dialog unconditionally, and the failure log contains no component creation error. [CI checkout](../../tmp/ci4-test3.log#L404) [Failure](../../tmp/ci4-test3.log#L743) [Modal template](../../../libs/frontend/ui/src/lib/native/modal/native-modal.component.ts#L108)
+
+Both the spec and consent component import the same UI barrel. Onboarding inherits the Nx Jest resolver, which reads the project TypeScript configuration. The only root Jest mapper redirects `marked`, and the TypeScript UI path points to the source barrel. The spec and its setup have no modal mock, template override, or consent import override. The onboarding setup initializes Angular's test environment and supplies jsdom dialog methods. I found no evidence of a silent view creation exception. [Jest config](../../../libs/frontend/onboarding/jest.config.ts) [Root preset](../../../jest.preset.js) [TypeScript paths](../../../tsconfig.base.json#L270) [Test setup](../../../libs/frontend/onboarding/src/test-setup.ts)
+
+CI uses `nx show projects --affected` to select projects, then `nx run-many -t test` with coverage, two concurrent projects, and two Jest workers. The workflow does not explicitly pass `--ci`. CI restored `node_modules` and missed the Nx task cache. The earlier focused Jest check ran one spec in-band with coverage off. The two locked local runs used the same Nx target and coverage with two Jest workers, scoped to onboarding. The merge checkout, runner caches, and concurrent shard load were unavailable locally. The local Node version was v24.15.0 and CI used v24.22.3. This leaves CI-specific resolution and Jest transform behavior unverified. [CI command](../../../.github/workflows/ci.yml#L316) [Node and dependency cache](../../tmp/ci4-test3.log#L442) [Nx cache miss](../../tmp/ci4-test3.log#L583) [Shard invocation](../../tmp/ci4-test3.log#L653)
+
+## Change
+
+The page spec requires both real component instances and checks their open state from intent through consent to installation. It also checks consent approval and busy state. When the dialog renders, the spec clicks its enabled Install button and still verifies the dialog closes and becomes inert. When the dialog is absent, the spec emits the consent component's Install output, which exercises the page's template binding. Both paths require enabled Back and Cancel controls outside inert ancestors, focus on Cancel, and a cancelled run that returns to intent after the pending install settles. Retained the bounded lookup diagnostics and fixture cleanup. [Updated spec](../../../libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts#L352)
+
+## Checks
+
+- Locked baseline via `node scripts/verify.mjs --exec --task ci4-repro -- …` with `CI=true` and the onboarding Nx coverage target passed with no cache hit. The original CI failure did not reproduce. [Baseline log](../../tmp/ci4-repro-onboarding.log)
+- Locked corrected run with `CI=true`, `--coverage`, `--maxWorkers=2`, `--ci`, and `--skip-nx-cache` passed all 898 tests across 64 suites. [Corrected log](../../tmp/ci4-repro-corrected.log)
+- Temporarily removed the dialog DOM before the lookups and asserted its absence to exercise the output fallback. All 46 focused tests passed. Removed the temporary instrumentation and reran the delivered spec, which also passed all 46 tests. [Forced absence log](../../tmp/ci4-forced-missing-dialog.log) [Final focused Jest log](../../tmp/ci4-focused-jest.log)
+- Scoped ESLint and `git diff --check` passed. The requested spec TypeScript check exited 2 with the same 17 diagnostics as the run 3 correction, and scoped Ptah diagnostics found zero errors in the edited spec. [ESLint log](../../tmp/ci4-focused-eslint.log) [TypeScript log](../../tmp/ci4-focused-tsc.log)

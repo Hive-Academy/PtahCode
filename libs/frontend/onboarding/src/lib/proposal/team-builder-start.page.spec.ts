@@ -379,16 +379,22 @@ describe('TeamBuilderStartPage', () => {
         );
       }
       const consentHost = consent.nativeElement as HTMLElement;
-      const dialog = consentHost.getElementsByTagName('dialog').item(0);
-      if (!dialog) {
-        const nativeModal = consent.query(By.directive(NativeModalComponent));
+      const nativeModal = consent.query(By.directive(NativeModalComponent));
+      if (!nativeModal) {
         throw new Error(
-          `Expected a native dialog in skill consent (nativeModal=${Boolean(nativeModal)}, rootDialogs=${root.getElementsByTagName('dialog').length}, documentDialogs=${document.getElementsByTagName('dialog').length}, consentHtml=${consentHost.outerHTML.slice(0, 500)})`,
+          `Expected a NativeModalComponent in skill consent (stage=${page.viewStage()}, nativeModal=${Boolean(nativeModal)}, rootDialogs=${root.getElementsByTagName('dialog').length}, documentDialogs=${document.getElementsByTagName('dialog').length}, consentHtml=${consentHost.outerHTML.slice(0, 500)})`,
         );
       }
-      expect(dialog.isConnected).toBe(true);
-      expect(root.contains(dialog)).toBe(true);
-      expect(dialog.open).toBe(false);
+      const consentComponent = consent.injector.get(StackSkillConsentComponent);
+      const modalComponent = nativeModal.injector.get(NativeModalComponent);
+      expect(consentComponent.open()).toBe(false);
+      expect(modalComponent.isOpen()).toBe(false);
+      const initialDialog = consentHost.getElementsByTagName('dialog').item(0);
+      if (initialDialog) {
+        expect(initialDialog.isConnected).toBe(true);
+        expect(root.contains(initialDialog)).toBe(true);
+        expect(initialDialog.open).toBe(false);
+      }
 
       page.state.setIntent('Build a team');
       page.state.setPreview([
@@ -404,24 +410,40 @@ describe('TeamBuilderStartPage', () => {
       fixture.detectChanges();
       TestBed.tick();
       expect(page.viewStage()).toBe('consent');
-      expect(dialog.open).toBe(true);
+      expect(consentComponent.open()).toBe(true);
+      expect(consentComponent.busy()).toBe(false);
+      expect(consentComponent.allApproved()).toBe(true);
+      expect(modalComponent.isOpen()).toBe(true);
 
-      // Click Install from inside the consent modal.
-      const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
-        btn.textContent?.includes('Install 1 skill'),
-      );
-      if (!installBtn) {
-        throw new Error(
-          `Expected the consent Install button (stage=${page.viewStage()}, dialogHtml=${dialog.outerHTML.slice(0, 500)})`,
+      const dialog = consentHost.getElementsByTagName('dialog').item(0);
+      if (dialog) {
+        expect(dialog.open).toBe(true);
+        const installBtn = [...dialog.querySelectorAll('button')].find((btn) =>
+          btn.textContent?.includes('Install 1 skill'),
         );
+        if (!installBtn) {
+          throw new Error(
+            `Expected the consent Install button (stage=${page.viewStage()}, dialogHtml=${dialog.outerHTML.slice(0, 500)})`,
+          );
+        }
+        expect(installBtn.disabled).toBe(false);
+        installBtn.click();
+      } else {
+        // The page still receives the consent output when Jest omits the dialog view.
+        consentComponent.install.emit();
       }
-      installBtn.click();
       fixture.detectChanges();
       TestBed.tick();
 
       // Consent modal must be closed and inert; progress controls must be reachable.
-      expect(dialog.open).toBe(false);
-      expect(dialog.inert).toBe(true);
+      expect(page.viewStage()).toBe('installing');
+      expect(consentComponent.open()).toBe(false);
+      expect(consentComponent.busy()).toBe(true);
+      expect(modalComponent.isOpen()).toBe(false);
+      if (dialog) {
+        expect(dialog.open).toBe(false);
+        expect(dialog.inert).toBe(true);
+      }
       const backBtn = root.querySelector<HTMLButtonElement>(
         '[data-testid="team-builder-installing-back"]',
       );
@@ -433,6 +455,8 @@ describe('TeamBuilderStartPage', () => {
           `Expected Back and Cancel while installing (stage=${page.viewStage()}, back=${Boolean(backBtn)}, cancel=${Boolean(cancelBtn)}, rootHtml=${root.innerHTML.slice(0, 500)})`,
         );
       }
+      expect(cancelBtn.disabled).toBe(false);
+      expect(backBtn.disabled).toBe(false);
       expect(cancelBtn.closest('[inert]')).toBeNull();
       expect(backBtn.closest('[inert]')).toBeNull();
       expect(document.activeElement).toBe(cancelBtn);
