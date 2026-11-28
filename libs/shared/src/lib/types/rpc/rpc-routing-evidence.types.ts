@@ -64,9 +64,18 @@ export interface AgentRoutingDecisionModelEvidence {
   readonly funnel: AgentRoutingFunnel;
 }
 
+/** Deduplicated workspace runs for a recorded lane and provider family. */
+export interface AgentRoutingLaneFunnel {
+  readonly laneId: string;
+  readonly family: string;
+  readonly funnel: AgentRoutingFunnel;
+}
+
 export interface AgentGetRoutingEvidenceResult {
   readonly windowDays: number;
   readonly performanceRouting: boolean;
   readonly lanes: readonly AgentRoutingEvidenceLane[];
+  /** Includes historical lanes with runs in the window, even without a current catalog. */
+  readonly laneFunnels: readonly AgentRoutingLaneFunnel[];
   readonly decisionModels: readonly AgentRoutingDecisionModelEvidence[];
 }

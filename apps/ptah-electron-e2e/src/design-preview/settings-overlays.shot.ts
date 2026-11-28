@@ -1,7 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Page } from '@playwright/test';
-import type { AgentGetRoutingEvidenceResult } from '@ptah-extension/shared';
+import type {
+  AgentGetRoutingEvidenceResult,
+  AgentRoutingEvidenceKey,
+} from '@ptah-extension/shared';
 import { test, expect } from '../support/fixtures';
 import { dynamicMocks, staticMocks } from './settings-lanes.fixtures';
 
@@ -223,137 +226,215 @@ for (const [id, model] of Object.entries(curatorModels)) {
   });
 }
 
-test('captures the routing evidence summary', async ({
-  ui,
-  mainWindow: page,
-}) => {
-  const funnel = {
-    spawned: 12,
-    completed: 11,
-    delivered: 10,
-    reviewed: 9,
-    approved: 8,
-    capacityDropped: 0,
-    unverified: 1,
-    noDeliverable: 1,
-    failed: 0,
-    rejected: 0,
-    unresolvedRevise: 1,
-    reviseRounds: 3,
+function dashboardEvidence(): AgentGetRoutingEvidenceResult {
+  const now = Date.now();
+  const sample = (
+    taskKind: AgentRoutingEvidenceKey['taskKind'],
+    effort: string,
+    score: number,
+    approved: number,
+    stale = false,
+    effortBuckets = 1,
+  ): AgentRoutingEvidenceKey => {
+    const spawned = approved + 7 * effortBuckets;
+    return {
+      taskKind,
+      effort,
+      score,
+      sampleCount: spawned - 4 * effortBuckets,
+      asOf: new Date(stale ? now - 20 * 86_400_000 : now).toISOString(),
+      stale,
+      funnel: {
+        spawned,
+        completed: spawned - effortBuckets,
+        delivered: spawned - 4 * effortBuckets,
+        reviewed: spawned - 5 * effortBuckets,
+        approved,
+        capacityDropped: effortBuckets,
+        unverified: effortBuckets,
+        noDeliverable: effortBuckets,
+        failed: effortBuckets,
+        rejected: effortBuckets,
+        unresolvedRevise: effortBuckets,
+        reviseRounds: 3 * effortBuckets,
+      },
+      effortNotSent: effort === '*' ? 1 : 0,
+      durationMs: { total: spawned * 50_000, count: spawned },
+      inputTokens: { total: spawned * 10_000, count: spawned },
+      outputTokens: { total: spawned * 1_200, count: spawned },
+      costUsd: { total: 0, count: 0 },
+    };
   };
-  const emptyFunnel = {
-    spawned: 0,
-    completed: 0,
-    delivered: 0,
-    reviewed: 0,
-    approved: 0,
-    capacityDropped: 0,
-    unverified: 0,
-    noDeliverable: 0,
-    failed: 0,
-    rejected: 0,
-    unresolvedRevise: 0,
-    reviseRounds: 0,
-  };
-  const evidence: AgentGetRoutingEvidenceResult = {
-    windowDays: 30,
-    performanceRouting: true,
-    lanes: [
-      {
-        laneId: 'codex',
-        family: 'codex',
-        catalog: {
-          status: 'ok',
-          fetchedAt: Date.now(),
-          lastOkAt: Date.now(),
-          modelCount: 1,
-        },
-        models: [
-          {
-            model: staticMocks['agent:getConfig'].codexModel,
-            inCatalog: true,
-            efforts: {
-              provenance: 'native',
-              supported: ['medium', 'high'],
-              default: 'medium',
+  const lanes: AgentGetRoutingEvidenceResult['lanes'] = [
+    {
+      laneId: 'codex',
+      family: 'codex',
+      catalog: { status: 'ok', fetchedAt: now, lastOkAt: now, modelCount: 1 },
+      models: [{
+        model: staticMocks['agent:getConfig'].codexModel,
+        inCatalog: true,
+        efforts: { provenance: 'native', supported: ['medium', 'high'], default: 'medium' },
+        keys: [
+          sample('implement', '*', 85, 32, false, 2),
+          sample('implement', 'high', 87, 21),
+          sample('implement', 'medium', 83, 11),
+          sample('review', 'high', 75, 7),
+          sample('tests', 'medium', 80, 9),
+        ],
+      }],
+    },
+    {
+      laneId: 'claude',
+      family: 'claude',
+      catalog: { status: 'ok', fetchedAt: now, lastOkAt: now, modelCount: 1 },
+      models: [{
+        model: 'claude-sonnet-4-6',
+        inCatalog: true,
+        efforts: { provenance: 'native', supported: ['medium', 'high'], default: 'high' },
+        keys: [
+          sample('plan', 'medium', 82, 8),
+          sample('implement', 'high', 82, 16),
+          sample('review', 'high', 89, 13),
+          sample('research', 'medium', 77, 5),
+        ],
+      }],
+    },
+    {
+      laneId: 'copilot',
+      family: 'copilot',
+      catalog: { status: 'timeout', fetchedAt: now - 10_800_000, lastOkAt: null, modelCount: 0 },
+      models: [{
+        model: 'gpt-5.2',
+        inCatalog: false,
+        efforts: { provenance: 'native', supported: ['medium'], default: 'medium' },
+        keys: [
+          sample('implement', 'medium', 66, 4, true),
+          sample('tests', 'medium', 69, 5),
+        ],
+      }],
+    },
+  ];
+  const laneFunnels = lanes.map(({ laneId, family, models }) => {
+    // Each preview lane has one model. Use rollup keys where effort variants overlap.
+    const keys = models.flatMap(({ keys }) => keys.filter((key) =>
+      key.effort === '*' || !keys.some((other) => other.taskKind === key.taskKind && other.effort === '*'),
+    ));
+    const funnel = { ...sample('implement', '*', 0, 0, false, 0).funnel };
+    for (const key of keys) {
+      for (const field of Object.keys(funnel) as (keyof typeof funnel)[]) {
+        funnel[field] += key.funnel[field];
+      }
+    }
+    return { laneId, family, funnel };
+  });
+  return { windowDays: 30, performanceRouting: true, lanes, laneFunnels, decisionModels: [] };
+}
+
+async function setDashboardTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
+  const html = page.locator('html');
+  const themeId = theme === 'dark' ? 'ptah-glass' : 'ptah-glass-light';
+  if ((await html.getAttribute('data-theme')) !== themeId) {
+    await page.getByRole('button', { name: 'Change theme' }).click();
+    await page.getByRole('tab', { name: 'Glass', exact: true }).click();
+    await page.getByRole('button', {
+      name: theme === 'dark' ? 'Ptah Glass' : 'Ptah Glass Light',
+      exact: true,
+    }).first().click();
+    await page.keyboard.press('Escape');
+  }
+  await expect(html).toHaveAttribute('data-theme', themeId);
+  await expect(html).toHaveAttribute('data-theme-mode', theme);
+}
+
+for (const theme of ['dark', 'light'] as const) {
+  for (const width of [800, 1440, 1824]) {
+    test(`captures the decision matrix dashboard at ${width} in ${theme} mode`, async ({
+      ui,
+      mainWindow: page,
+    }) => {
+      await ui.mockRpc({
+        ...staticMocks,
+        ...dynamicMocks,
+        'agent:getConfig': {
+          ...staticMocks['agent:getConfig'],
+          decisionModel: {
+            selection: {
+              kind: 'structured',
+              providerId: 'anthropic',
+              model: 'claude-sonnet-4-6',
             },
-            keys: [
-              {
-                taskKind: 'implement',
-                effort: 'high',
-                funnel,
-                effortNotSent: 0,
-                durationMs: { total: 500_000, count: 10 },
-                inputTokens: { total: 100_000, count: 10 },
-                outputTokens: { total: 12_000, count: 10 },
-                costUsd: { total: 0, count: 0 },
-                score: 74,
-                sampleCount: 10,
+            locality: 'remote',
+            reportsConfidence: false,
+            state: 'ready',
+            detail: null,
+          },
+        },
+        'agent:getCapabilityMatrix': {
+          profiles: [{
+            family: 'codex',
+            model: staticMocks['agent:getConfig'].codexModel,
+            cells: {
+              implement: {
+                kind: 'value',
+                score: 90,
+                source: 'local',
+                sourceRef: 'design-preview',
                 asOf: new Date().toISOString(),
                 stale: false,
+                sampleCount: 40,
               },
-              {
-                taskKind: 'implement',
-                effort: 'medium',
-                funnel: emptyFunnel,
-                effortNotSent: 0,
-                durationMs: { total: 0, count: 0 },
-                inputTokens: { total: 0, count: 0 },
-                outputTokens: { total: 0, count: 0 },
-                costUsd: { total: 0, count: 0 },
-                score: null,
-                sampleCount: 0,
-                asOf: null,
-                stale: false,
-              },
-            ],
-          },
-        ],
-      },
-    ],
-    decisionModels: [
-      {
-        decisionModel: 'structured:anthropic/claude-sonnet-4-6',
-        proposals: 10,
-        accepted: 7,
-        meanConfidence: 0.8,
-        funnel,
-      },
-    ],
-  };
-  await ui.mockRpc({
-    ...staticMocks,
-    ...dynamicMocks,
-    'agent:getConfig': {
-      ...staticMocks['agent:getConfig'],
-      decisionModel: {
-        selection: {
-          kind: 'structured',
-          providerId: 'anthropic',
-          model: 'claude-sonnet-4-6',
+              plan: { kind: 'unknown' },
+              review: { kind: 'unknown' },
+              research: { kind: 'unknown' },
+              tests: { kind: 'unknown' },
+              docs: { kind: 'unknown' },
+            },
+          }],
+          lastPicks: [
+            { key: 'review|review', candidateId: 'claude' },
+            { key: 'implement|implement', candidateId: 'codex' },
+          ],
         },
-        locality: 'remote',
-        reportsConfidence: false,
-        state: 'ready',
-        detail: null,
-      },
-    },
-    'agent:getCapabilityMatrix': {
-      profiles: [],
-      lastPicks: [],
-      lastPicksUnavailable: false,
-    },
-    'agent:getRoutingEvidence': evidence,
-  });
-  await ui.prepare();
-  await ui.goto('settings');
-  await openSection(page, 'Decision matrix');
-  await expect(page.getByText('No recent picks yet')).toBeVisible();
-  await expect(page.getByRole('switch', { name: 'Routing suggestions' })).toBeChecked();
-  const summary = page.getByText('Outcomes from the last 30 days', {
-    exact: false,
-  });
-  await expect(summary).toBeVisible();
-  await summary.scrollIntoViewIfNeeded();
-  await shot(page, 'routing-evidence-summary');
-});
+        'agent:getRoutingEvidence': dashboardEvidence(),
+      });
+      await ui.prepare();
+      await ui.goto('settings');
+      await setDashboardTheme(page, theme);
+      await openSection(page, 'Decision matrix', width);
+
+      const dashboard = page.locator('ptah-decision-matrix-page');
+      const rings = dashboard.locator('ptah-ring');
+      await expect(rings).toHaveCount(4);
+      for (const ring of await rings.all()) await expect(ring).toBeVisible();
+      for (const name of ['Run pipeline', 'Outcome mix by lane', 'Who does the work']) {
+        await expect(dashboard.getByRole('heading', { name, exact: true })).toBeVisible();
+      }
+      await expect(dashboard.locator('ptah-stacked-bar').first()).toBeVisible();
+      await expect(dashboard.locator('ptah-donut')).toBeVisible();
+      const expectNoHorizontalOverflow = () =>
+        expect.poll(() => dashboard.evaluate((element) => {
+          const root = element.ownerDocument.documentElement;
+          return Math.max(
+            root.scrollWidth - root.clientWidth,
+            element.scrollWidth - element.clientWidth,
+          );
+        })).toBeLessThanOrEqual(rowTolerance);
+
+      await expectNoHorizontalOverflow();
+      const suffix = theme === 'light' ? '-light' : '';
+      await shot(page, `decision-matrix-dashboard-${width}${suffix}`);
+
+      if (width === 1440) {
+        const cell = dashboard.locator('table').getByRole('button', {
+          name: /(?=.*codex)(?=.*gpt-5\.5-codex)(?=.*implement)/i,
+        });
+        await cell.click();
+        await expect(cell).toHaveAttribute('aria-pressed', 'true');
+        await expect(dashboard.getByRole('heading', { name: 'Effort split' })).toBeVisible();
+        await expectNoHorizontalOverflow();
+        await cell.scrollIntoViewIfNeeded();
+        await shot(page, `decision-matrix-dashboard-detail${suffix}`);
+      }
+    });
+  }
+}

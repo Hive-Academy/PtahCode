@@ -22,9 +22,6 @@ import { OrchestrationSettingsComponent } from './orchestration-settings.compone
 import { SubagentCacheTtlSettingComponent } from './subagent-cache-ttl-setting.component';
 import { SessionBudgetSettingsComponent } from './session-budget-settings.component';
 import { LaneGuardsSettingsComponent } from './lane-guards-settings.component';
-import { HostRoutingSettingComponent } from './host-routing-setting.component';
-import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
-import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-group.component';
 
 @Component({
@@ -50,30 +47,6 @@ class SessionBudgetStub {}
   template: '<section data-testid="lane-guards-settings">Guards</section>',
 })
 class LaneGuardsStub {}
-
-@Component({
-  selector: 'ptah-host-routing-setting',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<section data-testid="host-routing-setting">Routing</section>',
-})
-class HostRoutingStub {}
-
-@Component({
-  selector: 'ptah-lane-rotation-setting',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<section data-testid="lane-rotation-setting">Rotation</section>',
-})
-class LaneRotationStub {}
-
-@Component({
-  selector: 'ptah-capability-matrix-setting',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<section data-testid="capability-matrix-setting">Matrix</section>',
-})
-class CapabilityMatrixStub {}
 
 @Component({
   selector: 'ptah-advanced-settings-group',
@@ -143,9 +116,6 @@ describe('OrchestrationSettingsComponent', () => {
             SubagentCacheTtlSettingComponent,
             SessionBudgetSettingsComponent,
             LaneGuardsSettingsComponent,
-            HostRoutingSettingComponent,
-            LaneRotationSettingComponent,
-            CapabilityMatrixSettingComponent,
             AdvancedSettingsGroupComponent,
           ],
         },
@@ -154,9 +124,6 @@ describe('OrchestrationSettingsComponent', () => {
             SubagentCacheTtlStub,
             SessionBudgetStub,
             LaneGuardsStub,
-            HostRoutingStub,
-            LaneRotationStub,
-            CapabilityMatrixStub,
             AdvancedGroupStub,
           ],
         },

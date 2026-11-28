@@ -2,12 +2,14 @@ import {
   ChangeDetectionStrategy,
   Component,
   OnInit,
+  computed,
   inject,
   signal,
 } from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import type { AgentGetCapabilityMatrixParams } from '@ptah-extension/shared';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
+import { DecisionMatrixDashboardStore } from './decision-matrix-dashboard.store';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
 import {
   SettingsSaveFeedbackService,
@@ -19,7 +21,6 @@ import {
   PtahSettingRowComponent,
   PtahSkeletonComponent,
   PtahToggleDirective,
-  PtahFormSectionComponent,
   PtahBadgeDirective,
   PtahAlertComponent,
 } from '@ptah-extension/ui';
@@ -52,28 +53,20 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     PtahSettingRowComponent,
     PtahSkeletonComponent,
     PtahToggleDirective,
-    PtahFormSectionComponent,
     PtahBadgeDirective,
     PtahAlertComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-form-section
-      wide
-      level="2"
-      heading="Rotate close executors"
-      description="When two lanes rate the same, Ptah takes turns between them."
-      data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content [container-type:inline-size]"
-      aria-labelledby="lane-rotation-heading"
+    <div
+      class="flex flex-col gap-ptah-controls text-sm text-base-content"
       data-testid="lane-rotation-setting"
     >
       <div>
-        <span id="lane-rotation-heading" hidden>{{ label }}</span>
         <ptah-setting-row
-          label="Take turns between close lanes"
-          hint="Recent picks, newest first."
-          controlId="lane-rotation-toggle"
+          [label]="label"
+          hint="Take turns when two lanes have close scores."
+          [controlId]="load() === 'ready' && stored() !== null ? 'lane-rotation-toggle' : null"
         >
           @if (load() === 'ready' && stored() !== null) {
             <input
@@ -89,13 +82,16 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             />
           }
         </ptah-setting-row>
-        <p id="lane-rotation-help" class="sr-only">
-          When several executors are equally suitable, Ptah cycles which one it
-          picks. Off keeps the first candidate.
-        </p>
+      </div>
+      <p id="lane-rotation-help" class="sr-only">
+        When several executors are equally suitable, Ptah cycles which one it
+        picks. Off keeps the first candidate.
+      </p>
+      <div>
         @if (lastPicks().length > 0) {
           <ul
-            class="mt-3 flex flex-wrap gap-2"
+            class="flex flex-wrap gap-ptah-controls"
+            aria-label="Recent picks, newest first"
             data-testid="lane-rotation-last-picks"
           >
             @for (pick of lastPicks(); track pick.key) {
@@ -108,8 +104,8 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
               </li>
             }
           </ul>
-        } @else if (load() === 'ready' && !lastPicksUnavailable()) {
-          <p class="mt-2 text-xs text-base-content-muted">
+        } @else if (load() === 'ready' && !lastPicksUnavailable() && dashboard?.ratings() !== 'loading') {
+          <p class="text-xs text-base-content-muted">
             No recent picks yet
           </p>
         }
@@ -142,7 +138,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </p>
         }
         @case ('error') {
-          <div role="alert" class="space-y-1.5">
+          <div role="alert" class="space-y-ptah-controls">
             <ptah-alert
               tone="error"
               [compact]="true"
@@ -162,16 +158,12 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </div>
         }
       }
-    </ptah-form-section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
+    </div>
   `,
 })
 export class LaneRotationSettingComponent implements OnInit {
   private readonly rpc = inject(ClaudeRpcService);
+  protected readonly dashboard = inject(DecisionMatrixDashboardStore, { optional: true });
   private readonly logger = inject(LoggingService);
   protected readonly feedback = inject(SettingsSaveFeedbackService);
   protected readonly names = inject(RoutingDisplayNamesStore);
@@ -187,10 +179,20 @@ export class LaneRotationSettingComponent implements OnInit {
   protected readonly stored = signal<boolean | null>(null);
   protected readonly load = signal<'loading' | 'ready' | 'error'>('loading');
   protected readonly saving = signal(false);
-  protected readonly lastPicks = signal<
+  private readonly standalonePicks = signal<
     readonly { key: string; candidateId: string }[]
   >([]);
-  protected readonly lastPicksUnavailable = signal(false);
+  private readonly standalonePicksUnavailable = signal(false);
+  protected readonly lastPicks = computed(() => {
+    if (!this.dashboard) return this.standalonePicks();
+    const result = this.dashboard.ratings();
+    return typeof result === 'string' ? [] : [...(result.lastPicks ?? [])].reverse();
+  });
+  protected readonly lastPicksUnavailable = computed(() => {
+    if (!this.dashboard) return this.standalonePicksUnavailable();
+    const result = this.dashboard.ratings();
+    return typeof result === 'string' ? result === 'error' : result.lastPicksUnavailable === true;
+  });
 
   ngOnInit(): void {
     void this.reload();
@@ -204,7 +206,7 @@ export class LaneRotationSettingComponent implements OnInit {
       const stored = await this.readStored();
       this.stored.set(stored);
       this.load.set(stored === null ? 'error' : 'ready');
-      if (stored !== null) await this.readLastPicks();
+      if (stored !== null && !this.dashboard) await this.readLastPicks();
     } finally {
       this.saving.set(false);
     }
@@ -219,22 +221,26 @@ export class LaneRotationSettingComponent implements OnInit {
         { timeout: RPC_TIMEOUT_MS },
       );
       if (response.isSuccess()) {
-        this.lastPicks.set([...(response.data.lastPicks ?? [])].reverse());
-        this.lastPicksUnavailable.set(response.data.lastPicksUnavailable === true);
+        this.standalonePicks.set([...(response.data.lastPicks ?? [])].reverse());
+        this.standalonePicksUnavailable.set(response.data.lastPicksUnavailable === true);
       } else {
-        this.lastPicksUnavailable.set(true);
+        this.standalonePicksUnavailable.set(true);
       }
     } catch (error: unknown) {
       // degradation-audit: reported - rotation history is optional while the setting remains usable.
       this.logger.warn('LaneRotationSetting', 'rotation history read failed', {
         errorType: errorTypeOf(error),
       });
-      this.lastPicksUnavailable.set(true);
+      this.standalonePicksUnavailable.set(true);
     }
   }
 
   protected async retryPicks(): Promise<void> {
-    this.lastPicksUnavailable.set(false);
+    if (this.dashboard) {
+      await this.dashboard.loadRatings();
+      return;
+    }
+    this.standalonePicksUnavailable.set(false);
     await this.readLastPicks();
   }
 

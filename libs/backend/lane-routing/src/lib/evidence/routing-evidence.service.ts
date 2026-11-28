@@ -95,6 +95,7 @@ export class RoutingEvidenceService {
       windowDays: OUTCOME_WINDOW_DAYS,
       performanceRouting: enabled,
       lanes,
+      laneFunnels: evidence.laneFunnels(),
       decisionModels: evidence.decisionModels(),
     };
   }

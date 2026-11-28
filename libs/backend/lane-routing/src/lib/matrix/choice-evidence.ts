@@ -2,6 +2,8 @@ import {
   LANE_DEFAULT_MODEL,
   LANE_USER_STOP_CLASS,
   type AgentRoutingDecisionModelEvidence,
+  type AgentRoutingFunnel,
+  type AgentRoutingLaneFunnel,
   type LaneOutcomeSummary,
   type OutcomeTaskKind,
 } from '@ptah-extension/shared';
@@ -29,20 +31,7 @@ export interface ChoiceKey {
 }
 
 /** Each stage is a subset of the preceding stage. */
-export interface FunnelCounts {
-  readonly spawned: number;
-  readonly completed: number;
-  readonly delivered: number;
-  readonly reviewed: number;
-  readonly approved: number;
-  readonly capacityDropped: number;
-  readonly unverified: number;
-  readonly noDeliverable: number;
-  readonly failed: number;
-  readonly rejected: number;
-  readonly unresolvedRevise: number;
-  readonly reviseRounds: number;
-}
+export type FunnelCounts = AgentRoutingFunnel;
 
 interface Aggregate {
   readonly total: number;
@@ -71,6 +60,7 @@ export interface ChoiceEvidence {
   cell(key: ChoiceKey): ChoiceCell | undefined;
   cells(): readonly ChoiceCell[];
   routedRuns(laneId: string, taskKind: OutcomeTaskKind): number;
+  laneFunnels(): readonly AgentRoutingLaneFunnel[];
   decisionModels(): readonly DecisionModelEvidence[];
 }
 
@@ -245,6 +235,7 @@ export function deriveChoiceEvidence(
   const drafts = new Map<string, ChoiceDraft>();
   const routed = new Map<string, number>();
   const decisions = new Map<string, DecisionDraft>();
+  const laneFunnels = new Map<string, AgentRoutingLaneFunnel & { funnel: FunnelDraft }>();
 
   for (const row of dedupeByRun(summaries)) {
     const { family, taskKind } = row;
@@ -252,6 +243,14 @@ export function deriveChoiceEvidence(
     if (!family.trim() || !row.model.trim()) continue;
 
     const capacity = isCapacityFailure(row.failureClass);
+    const laneKey = JSON.stringify([row.laneId, family]);
+    let lane = laneFunnels.get(laneKey);
+    if (lane === undefined) {
+      lane = { laneId: row.laneId, family, funnel: emptyFunnel() };
+      laneFunnels.set(laneKey, lane);
+    }
+    addToFunnel(lane.funnel, row, capacity);
+
     const model = choiceModelOf(row);
     const effort = sentEffortBucket(row.effort);
     const models = row.model === LANE_DEFAULT_MODEL && model !== FAMILY_PROFILE_MODEL
@@ -291,6 +290,7 @@ export function deriveChoiceEvidence(
   }
 
   const cells = [...byKey.values()];
+  const lanes = [...laneFunnels.values()];
   const decisionModels = [...decisions.values()].map(({ decisionModel, funnel, accepted, confidence }) => ({
     decisionModel,
     proposals: funnel.spawned,
@@ -302,6 +302,7 @@ export function deriveChoiceEvidence(
     cell: (key) => byKey.get(choiceId(key)),
     cells: () => cells,
     routedRuns: (laneId, taskKind) => routed.get(laneTaskId(laneId, taskKind)) ?? 0,
+    laneFunnels: () => lanes,
     decisionModels: () => decisionModels,
   };
 }

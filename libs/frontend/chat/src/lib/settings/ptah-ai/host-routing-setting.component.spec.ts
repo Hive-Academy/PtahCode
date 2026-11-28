@@ -77,8 +77,11 @@ describe('HostRoutingSettingComponent', () => {
       fixture.detectChanges();
     }
   }
-  async function create(): Promise<void> {
+  async function create(onModelConfigured?: (configured: boolean | null) => void): Promise<void> {
     fixture = TestBed.createComponent(HostRoutingSettingComponent);
+    if (onModelConfigured) {
+      fixture.componentInstance.modelConfiguredChange.subscribe(onModelConfigured);
+    }
     fixture.detectChanges();
     await settle();
   }
@@ -106,11 +109,9 @@ describe('HostRoutingSettingComponent', () => {
 
   it('reads the default (no stored value) as on when a decision model is configured', async () => {
     await create();
-    expect(
-      (fixture.nativeElement as HTMLElement)
-        .querySelector('[data-testid="host-routing-setting"]')
-        ?.getAttribute('data-glass-surface'),
-    ).toBe('content');
+    const row = byTestId('host-routing-setting');
+    expect(row).not.toBeNull();
+    expect(row?.matches('ptah-form-section, [data-glass-surface]')).toBe(false);
     expect(host.call).toHaveBeenCalledWith(
       'settings:get',
       { key: KEY },
@@ -125,7 +126,9 @@ describe('HostRoutingSettingComponent', () => {
     expect(toggle()?.disabled).toBe(false);
     expect(toggle()?.getAttribute('data-ptah-control')).toBe('toggle');
     expect(toggle()?.getAttribute('aria-label')).toBe('Routing suggestions');
-    expect(el().textContent).toContain('Routing suggestions');
+    expect(toggle()?.labels?.[0]?.textContent?.trim()).toBe(
+      'Suggest a lane for each task',
+    );
     expect(toggle()?.getAttribute('aria-describedby')).toBe(
       'host-routing-help',
     );
@@ -146,11 +149,13 @@ describe('HostRoutingSettingComponent', () => {
     expect(host.call.mock.calls.filter(([method]) => method === 'agent:getConfig')).toHaveLength(2);
   });
 
-  it('shows a stored false as off', async () => {
+  it('shows a stored false as off while reporting that the model is configured', async () => {
     host.stored = false;
-    await create();
+    const modelConfigured = jest.fn();
+    await create(modelConfigured);
     expect(toggle()?.checked).toBe(false);
     expect(toggle()?.disabled).toBe(false);
+    expect(modelConfigured).toHaveBeenCalledWith(true);
   });
 
   it('turns routing off and on again, persisting each change and showing the read-back value', async () => {

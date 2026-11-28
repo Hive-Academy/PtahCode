@@ -9,7 +9,6 @@ import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
   PtahAlertComponent,
   PtahButtonDirective,
-  PtahFormSectionComponent,
   PtahSettingRowComponent,
   PtahSkeletonComponent,
   PtahToggleDirective,
@@ -33,20 +32,34 @@ const TOAST_LABEL = 'performance routing';
   imports: [
     PtahAlertComponent,
     PtahButtonDirective,
-    PtahFormSectionComponent,
     PtahSettingRowComponent,
     PtahSkeletonComponent,
     PtahToggleDirective,
     SettingsBusyDisabledDirective,
   ],
   template: `
-    <ptah-form-section
-      wide
-      level="2"
-      heading="Performance routing"
-      data-glass-surface="content"
-    >
+    <div class="flex flex-col gap-ptah-controls text-sm text-base-content">
       @let value = stored();
+      <div>
+        <ptah-setting-row
+          label="Use measured performance"
+          hint="Use recent outcomes to rank lane, model and effort choices."
+          [controlId]="value !== 'loading' && value !== 'error' ? 'performance-routing-toggle' : null"
+        >
+          @if (value !== 'loading' && value !== 'error') {
+            <input
+              id="performance-routing-toggle"
+              type="checkbox"
+              ptahToggle
+              aria-describedby="performance-routing-toggle-hint"
+              [checked]="value"
+              [ptahBusyDisabled]="feedback.saving()"
+              (change)="toggle($event)"
+              data-testid="performance-routing-toggle"
+            />
+          }
+        </ptah-setting-row>
+      </div>
       @if (value === 'loading') {
         <ptah-skeleton shape="lines" />
         <p class="sr-only" role="status">Loading performance routing…</p>
@@ -63,30 +76,8 @@ const TOAST_LABEL = 'performance routing';
             Retry
           </button>
         </ptah-alert>
-      } @else {
-        <ptah-setting-row
-          label="Use measured performance"
-          hint="Use recent outcomes to rank lane, model and effort choices."
-          controlId="performance-routing-toggle"
-        >
-          <input
-            id="performance-routing-toggle"
-            type="checkbox"
-            ptahToggle
-            aria-describedby="performance-routing-toggle-hint"
-            [checked]="value"
-            [ptahBusyDisabled]="feedback.saving()"
-            (change)="toggle($event)"
-            data-testid="performance-routing-toggle"
-          />
-        </ptah-setting-row>
       }
-    </ptah-form-section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
+    </div>
   `,
 })
 export class PerformanceRoutingSettingComponent implements OnInit {

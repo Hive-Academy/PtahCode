@@ -1,325 +1,199 @@
-import { TestBed } from '@angular/core/testing';
-import {
-  ChangeDetectionStrategy,
-  Component,
-  signal,
-  output,
-} from '@angular/core';
-import {
-  ClaudeRpcService,
-  ProvidersSettingsStateService,
-} from '@ptah-extension/core';
-import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
+import { ChangeDetectionStrategy, Component, output, signal } from '@angular/core';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { PtahRichSelectComponent } from '@ptah-extension/ui';
+import { ClaudeRpcService, ProvidersSettingsStateService } from '@ptah-extension/core';
+import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
+import { PTAH_CLOCK, type PtahClock } from '@ptah-extension/ui';
+import { evidence, ratings } from './decision-matrix-dashboard.fixtures';
 import { DecisionMatrixPageComponent } from './decision-matrix-page.component';
 import { HostRoutingSettingComponent } from './host-routing-setting.component';
-import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
+import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { PerformanceRoutingSettingComponent } from './performance-routing-setting.component';
-import { RoutingEvidenceComponent } from './routing-evidence.component';
+
 @Component({
   selector: 'ptah-host-routing-setting',
-  standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: '',
 })
-class HostRoutingStubComponent {
+class HostRoutingStub {
   readonly modelConfiguredChange = output<boolean | null>();
 }
 @Component({
-  selector: 'ptah-lane-rotation-setting',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '',
-})
-class LaneRotationStubComponent {}
-
-@Component({
   selector: 'ptah-performance-routing-setting',
-  standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: '',
 })
-class PerformanceRoutingStubComponent {}
-
-@Component({
-  selector: 'ptah-routing-evidence',
-  standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '',
-})
-class RoutingEvidenceStubComponent {}
+class PerformanceStub {}
 
 describe('DecisionMatrixPageComponent', () => {
-  beforeEach(() =>
-    TestBed.overrideComponent(DecisionMatrixPageComponent, {
-      remove: {
-        imports: [
-          HostRoutingSettingComponent,
-          LaneRotationSettingComponent,
-          PerformanceRoutingSettingComponent,
-          RoutingEvidenceComponent,
-        ],
-      },
-      add: {
-        imports: [
-          HostRoutingStubComponent,
-          LaneRotationStubComponent,
-          PerformanceRoutingStubComponent,
-          RoutingEvidenceStubComponent,
-        ],
-      },
-    }),
-  );
-  it('shows the back action and RPC-backed band', async () => {
-    const call = jest
-      .fn()
-      .mockResolvedValue(
-        rpcSuccess({ profiles: [], lastPicksUnavailable: false }),
-      );
-    TestBed.configureTestingModule({
+  let fixture: ComponentFixture<DecisionMatrixPageComponent>;
+  const root = (): HTMLElement => fixture.nativeElement as HTMLElement;
+  const call = jest.fn((method: string) => Promise.resolve(
+    method === 'agent:getRoutingEvidence' ? rpcSuccess(evidence) : rpcSuccess(ratings),
+  ));
+
+  beforeEach(async () => {
+    call.mockClear();
+    await TestBed.configureTestingModule({
       imports: [DecisionMatrixPageComponent],
       providers: [
-        { provide: ClaudeRpcService, useValue: { call } },
+        {
+          provide: ClaudeRpcService,
+          useValue: { call: (method: string) => method === 'settings:get'
+            ? Promise.resolve(rpcSuccess({ success: true, value: true }))
+            : call(method) },
+        },
+        SettingsSaveFeedbackService,
+        { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } satisfies PtahClock },
         {
           provide: ProvidersSettingsStateService,
           useValue: {
+            commit: signal({ status: 'idle' }),
             cliAgents: signal({ status: 'ready', data: [] }),
             cliModels: signal({ status: 'ready', data: {} }),
           },
         },
       ],
-    });
-    const fixture = TestBed.createComponent(DecisionMatrixPageComponent);
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('ptah-page-header')).toBeNull();
-    expect(root.querySelectorAll('h1')).toHaveLength(0);
-    expect(
-      root.querySelector('button[aria-label="Context management"]'),
-    ).not.toBeNull();
-    expect(root.textContent).toContain('No ratings yet.');
-    expect(root.textContent).toContain('Families');
-    expect(root.querySelector('#capability-matrix-heading')?.tagName).toBe(
-      'H2',
-    );
-    const refresh = root.querySelector(
-      'button[aria-label="Refresh ratings"]',
-    ) as HTMLButtonElement;
-    expect(refresh.querySelector('lucide-angular')).not.toBeNull();
-    expect(refresh.textContent).not.toContain('?');
-    expect(root.querySelector('ptah-host-routing-setting')).not.toBeNull();
-    expect(root.querySelector('ptah-lane-rotation-setting')).not.toBeNull();
-    expect(
-      root.querySelector(
-        'ptah-lane-rotation-setting + ptah-performance-routing-setting + ptah-routing-evidence',
-      ),
-    ).not.toBeNull();
-    // Before the routing read succeeds, the band makes no claim about the model.
-    expect(
-      root.querySelector(
-        'ptah-instrument-band button[aria-label="Routing model Unknown"]',
-      ),
-    ).not.toBeNull();
-    expect(root.textContent).not.toContain('Needs a model');
-    expect(root.querySelectorAll('ptah-instrument-band button')).toHaveLength(4);
-    expect(root.textContent).not.toContain('Stale ratings');
-    const routing = fixture.debugElement.query(
-      By.directive(HostRoutingStubComponent),
-    ).componentInstance as HostRoutingStubComponent;
-    routing.modelConfiguredChange.emit(false);
-    fixture.detectChanges();
-    expect(root.textContent).toContain('Needs a model');
-    routing.modelConfiguredChange.emit(true);
-    fixture.detectChanges();
-    expect(
-      root.querySelector(
-        'ptah-instrument-band button[aria-label="Routing model On"]',
-      ),
-    ).not.toBeNull();
-    expect(call).toHaveBeenCalledTimes(1);
-    fixture.destroy();
-    TestBed.resetTestingModule();
+    }).overrideComponent(DecisionMatrixPageComponent, {
+      remove: { imports: [HostRoutingSettingComponent, PerformanceRoutingSettingComponent] },
+      add: { imports: [HostRoutingStub, PerformanceStub] },
+    }).compileComponents();
+    fixture = TestBed.createComponent(DecisionMatrixPageComponent);
   });
-  it('ends refresh busy state and announces an RPC error once', async () => {
-    let fail!: (value: unknown) => void;
-    const call = jest
-      .fn()
-      .mockResolvedValueOnce(rpcSuccess({ profiles: [] }))
-      .mockImplementationOnce(
-        () =>
-          new Promise((done) => {
-            fail = done;
-          }),
-      );
-    TestBed.configureTestingModule({
-      imports: [DecisionMatrixPageComponent],
-      providers: [
-        { provide: ClaudeRpcService, useValue: { call } },
-        {
-          provide: ProvidersSettingsStateService,
-          useValue: {
-            cliAgents: signal({ status: 'ready', data: [] }),
-            cliModels: signal({ status: 'ready', data: {} }),
-          },
-        },
-      ],
-    });
-    const fixture = TestBed.createComponent(DecisionMatrixPageComponent);
+
+  async function settle(): Promise<void> {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const refresh = root.querySelector(
-      'button[aria-label="Refresh ratings"]',
-    ) as HTMLButtonElement;
-    refresh.click();
-    fixture.detectChanges();
-    expect(refresh.getAttribute('aria-busy')).toBe('true');
-    refresh.click();
-    expect(call).toHaveBeenCalledTimes(2);
-    fail(rpcError('unavailable'));
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(refresh.getAttribute('aria-busy')).not.toBe('true');
-    expect(
-      root.querySelector('[data-testid="capability-matrix-error"]'),
-    ).not.toBeNull();
-    expect(
-      root.querySelector('[data-testid="capability-matrix-retry"]'),
-    ).not.toBeNull();
-    expect(root.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
-    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
-      'Ratings could not be loaded.',
+  }
+
+  function click(text: string): void {
+    const button = Array.from(root().querySelectorAll('button')).find((candidate) =>
+      candidate.textContent?.trim() === text || candidate.getAttribute('aria-label') === text,
     );
-    fixture.destroy();
-    TestBed.resetTestingModule();
+    if (!button) throw new Error(`Missing button: ${text}`);
+    button.click();
+    fixture.detectChanges();
+  }
+
+  it('renders four KPIs, three charts, picks, catalog ages and one controls card', async () => {
+    await settle();
+
+    expect(root().querySelector('h1')?.textContent).toBe('Decision matrix');
+    expect(root().textContent).toContain('Routing model: Unknown');
+    const rings = root().querySelectorAll('[data-testid="decision-matrix-kpis"] ptah-ring');
+    expect(Array.from(rings, (ring) => ring.textContent?.trim())).toEqual(['67%', '70%', '17%', '100%']);
+    const decisions = root().querySelector('details:has(> summary)');
+    expect(decisions?.querySelector('summary')?.textContent).toBe('Decision models');
+    expect(decisions?.hasAttribute('open')).toBe(false);
+    expect(decisions?.textContent).toContain('Mean confidence');
+    expect(decisions?.textContent).toContain('Approved');
+    expect(root().querySelectorAll('[data-testid="decision-matrix-chart"]')).toHaveLength(3);
+    expect(root().querySelector('ptah-donut')).not.toBeNull();
+    expect(root().querySelector('[aria-label="Catalog health"]')?.textContent).toContain('Ready');
+    expect(root().textContent).toContain('Rotates with Beta');
+    expect(root().textContent).toContain('No evidence yet — falls back to lane order');
+    expect(root().querySelector('[aria-labelledby="routing-controls-heading"] ptah-host-routing-setting + ptah-performance-routing-setting + ptah-lane-rotation-setting')).not.toBeNull();
+    const host = fixture.debugElement.query(By.directive(HostRoutingStub)).injector.get(HostRoutingStub);
+    host.modelConfiguredChange.emit(false);
+    fixture.detectChanges();
+    expect(root().textContent).toContain('Routing model: Off');
+    host.modelConfiguredChange.emit(true);
+    fixture.detectChanges();
+    expect(root().textContent).toContain('Routing model: On');
+    const back = jest.fn();
+    fixture.componentInstance.back.subscribe(back);
+    click('Context management');
+    expect(back).toHaveBeenCalledTimes(1);
   });
-  it('shows page busy state while the table Retry request is pending', async () => {
-    let resolveRetry!: (value: unknown) => void;
-    const call = jest
-      .fn()
-      .mockResolvedValueOnce(rpcError('unavailable'))
-      .mockImplementationOnce(
-        () =>
-          new Promise((done) => {
-            resolveRetry = done;
-          }),
-      );
-    TestBed.configureTestingModule({
-      imports: [DecisionMatrixPageComponent],
-      providers: [
-        { provide: ClaudeRpcService, useValue: { call } },
-        {
-          provide: ProvidersSettingsStateService,
-          useValue: {
-            cliAgents: signal({ status: 'ready', data: [] }),
-            cliModels: signal({ status: 'ready', data: {} }),
-          },
-        },
-      ],
-    });
-    const fixture = TestBed.createComponent(DecisionMatrixPageComponent);
+
+  it('keeps selection and provenance accessible across score sources', async () => {
+    await settle();
+    const selector = 'button[aria-label^="Alpha model-a implement"]';
+    root().querySelector<HTMLButtonElement>(selector)?.click();
     fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const refresh = root.querySelector(
-      'button[aria-label="Refresh ratings"]',
-    ) as HTMLButtonElement;
-    (
-      root.querySelector(
-        '[data-testid="capability-matrix-retry"]',
-      ) as HTMLButtonElement
-    ).click();
-    fixture.detectChanges();
-    expect(refresh.getAttribute('aria-busy')).toBe('true');
-    expect(root.querySelector('ptah-instrument-band .skeleton')).not.toBeNull();
-    resolveRetry(rpcSuccess({ profiles: [] }));
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(refresh.getAttribute('aria-busy')).not.toBe('true');
-    fixture.destroy();
-    TestBed.resetTestingModule();
+
+    expect(root().querySelector(selector)?.getAttribute('aria-pressed')).toBe('true');
+    const content = () => root().querySelector('[aria-label="Selected cell detail"]')?.textContent;
+    expect(content()).toContain('10 runs');
+    expect(content()).toContain('Effort split');
+    expect(content()).toContain('Reported by lane');
+    expect(content()).toContain('high · 7 runs');
+    expect(content()).toContain('80 / 100');
+    const aside = root().querySelector('[aria-label="Selected cell detail"]');
+    expect(aside?.hasAttribute('aria-live')).toBe(false);
+    expect(root().querySelector('#matrix-heading')?.closest('section')?.querySelector('p[aria-live="polite"]')?.textContent)
+      .toContain('Alpha model-a implement');
+    expect(content()).toContain('Capacity drop-outs');
+    expect(content()).toContain('Stale');
+    expect(content()).toContain('Measured vs model rating');
+    click('Model ratings');
+    expect(root().querySelector(selector)?.getAttribute('aria-pressed')).toBe('true');
+    expect(content()).toContain('72');
+    expect(content()).toContain('seed');
+    expect(content()).toContain('benchmark-v2');
+    expect(content()).toContain('Catalog benchmark');
+    expect(content()).toContain('Not counted');
+    expect(content()).toContain('StaleYes');
+    expect(root().textContent).toContain('Unrated');
   });
-  it('counts only distinct models with a value rating and uses one ready announcement', async () => {
-    const unknown = { kind: 'unknown' as const };
-    const emptyCells = {
-      plan: unknown,
-      implement: unknown,
-      review: unknown,
-      research: unknown,
-      tests: unknown,
-      docs: unknown,
-    };
-    const ratedCells = {
-      ...emptyCells,
-      plan: {
-        kind: 'value' as const,
-        score: 70,
-        source: 'local' as const,
-        sourceRef: null,
-        asOf: '2026-11-01',
-        stale: false,
-        sampleCount: 1,
-      },
-    };
-    const profiles = [
-      { family: 'one', model: '*', cells: ratedCells },
-      { family: 'one', model: 'unknown-only', cells: emptyCells },
-      { family: 'one', model: 'rated', cells: ratedCells },
-      { family: 'two', model: 'rated', cells: ratedCells },
-    ];
-    const call = jest.fn().mockResolvedValue(rpcSuccess({ profiles }));
-    TestBed.configureTestingModule({
-      imports: [DecisionMatrixPageComponent],
-      providers: [
-        { provide: ClaudeRpcService, useValue: { call } },
-        {
-          provide: ProvidersSettingsStateService,
-          useValue: {
-            cliAgents: signal({ status: 'ready', data: [] }),
-            cliModels: signal({ status: 'ready', data: {} }),
-          },
-        },
-      ],
-    });
-    const fixture = TestBed.createComponent(DecisionMatrixPageComponent);
+
+  it('renders loading and a retryable evidence error, then shows empty evidence', async () => {
+    call.mockResolvedValueOnce(rpcError('Unable to load'));
+    call.mockResolvedValueOnce(rpcSuccess(ratings));
+    call.mockResolvedValueOnce(rpcSuccess({ ...evidence, lanes: [], laneFunnels: [] }));
     fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    expect(
-      root.querySelector(
-        'ptah-instrument-band button[aria-label="Families 2"]',
-      ),
-    ).not.toBeNull();
-    expect(
-      root.querySelector(
-        'ptah-instrument-band button[aria-label="Models rated 1"]',
-      ),
-    ).not.toBeNull();
-    expect(root.querySelector('#capability-matrix-heading')?.tagName).toBe(
-      'H2',
-    );
-    expect(root.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
-    expect(root.querySelector('[aria-live="polite"]')?.textContent).toContain(
-      '4 ratings loaded.',
-    );
-    expect(root.textContent).toContain('3 results');
-    const familyFilter = fixture.debugElement.queryAll(
-      By.directive(PtahRichSelectComponent),
-    )[0].componentInstance as PtahRichSelectComponent<string>;
-    familyFilter.value.set('one');
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    expect(root.textContent).toContain('2 results');
-    fixture.destroy();
-    TestBed.resetTestingModule();
+    expect(root().textContent).toContain('Loading routing evidence');
+    await settle();
+    expect(root().textContent).toContain('Routing evidence could not be loaded.');
+    click('Retry');
+    await settle();
+    expect(root().textContent).toContain('No lane evidence yet.');
+    expect(root().textContent).toContain('No runs to show.');
+    const rings = root().querySelectorAll('[data-testid="decision-matrix-kpis"] ptah-ring');
+    expect(Array.from(rings, (ring) => ring.textContent?.trim())).toEqual(['—', '—', '—', '—']);
+  });
+
+  it('retries ratings independently and refreshes both datasets from the header', async () => {
+    call.mockResolvedValueOnce(rpcSuccess(evidence));
+    call.mockResolvedValueOnce(rpcError('Unable to load'));
+    await settle();
+    click('Model ratings');
+    expect(root().textContent).toContain('Ratings could not be loaded.');
+    click('Retry');
+    await settle();
+    expect(root().querySelector('table')).not.toBeNull();
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      'agent:getRoutingEvidence', 'agent:getCapabilityMatrix', 'agent:getCapabilityMatrix',
+    ]);
+    click('Refresh decision matrix');
+    await settle();
+    expect(call.mock.calls.slice(3).map(([method]) => method)).toEqual([
+      'agent:getRoutingEvidence', 'agent:getCapabilityMatrix',
+    ]);
+    expect(root().textContent).toContain('Updated');
+  });
+
+  it('shares one capability request with rotation and refreshes its chips even when evidence fails', async () => {
+    call.mockResolvedValueOnce(rpcSuccess(evidence));
+    call.mockResolvedValueOnce(rpcSuccess({
+      ...ratings, lastPicks: [{ key: 'plan|plan', candidateId: 'alpha' }],
+    }));
+    await settle();
+
+    const picks = () => root().querySelector('[data-testid="lane-rotation-last-picks"]')?.textContent;
+    expect(picks()).toContain('Plan: Alpha');
+    expect(call.mock.calls.map(([method]) => method)).toEqual([
+      'agent:getRoutingEvidence', 'agent:getCapabilityMatrix',
+    ]);
+    call.mockResolvedValueOnce(rpcError('Unable to refresh evidence'));
+    call.mockResolvedValueOnce(rpcSuccess({
+      ...ratings, lastPicks: [{ key: 'plan|plan', candidateId: 'beta' }],
+    }));
+    click('Refresh decision matrix');
+    await settle();
+
+    expect(picks()).toContain('Plan: Beta');
+    expect(root().textContent).not.toContain('Updated');
   });
 });

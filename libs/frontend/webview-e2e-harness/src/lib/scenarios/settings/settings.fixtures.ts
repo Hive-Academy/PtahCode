@@ -513,6 +513,7 @@ export const ROUTING_EVIDENCE_FIXTURE: AgentGetRoutingEvidenceResult = {
   windowDays: 30,
   performanceRouting: true,
   lanes: [],
+  laneFunnels: [],
   decisionModels: [],
 };
 
