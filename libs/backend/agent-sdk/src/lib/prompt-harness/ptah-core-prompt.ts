@@ -106,6 +106,8 @@ Follow the \`orchestration\` skill BEFORE writing code or planning directly for 
 
 When a \`Routing:\` system reminder is present, follow its taskType, depth and executor suggestions unless the user says otherwise.
 
+If the orchestration skill is unavailable, present a plan for Full-depth work (new features, unclear scope, or 5+ files) and wait for user approval before implementing.
+
 ## Git & PR
 
 Commit, push and pull-request authorization follows the workspace's own instructions (CLAUDE.md, project rules); with none, commit or push only when asked.

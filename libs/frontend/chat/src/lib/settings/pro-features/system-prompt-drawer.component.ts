@@ -422,6 +422,8 @@ export class SystemPromptDrawerComponent {
   readonly changed = output<string>();
   readonly statusObserved = output<string>();
   private statusReadId = 0;
+  private contentReadId = 0;
+  private previewWorkspaceGeneration = this.workspaceScope.generation();
 
   private readonly scopedStatus = signal<{
     workspacePath: string;
@@ -493,6 +495,12 @@ export class SystemPromptDrawerComponent {
   });
 
   constructor() {
+    effect(() => {
+      const generation = this.workspaceScope.generation();
+      if (generation === this.previewWorkspaceGeneration) return;
+      this.previewWorkspaceGeneration = generation;
+      this.resetPromptPreview();
+    });
     // Runs once for a drawer created open, and again on every reopen: the only status load (Minor 13).
     effect(() => {
       if (this.isOpen()) {
@@ -602,8 +610,7 @@ export class SystemPromptDrawerComponent {
     if (workspacePath !== this.workspacePath() || this.regenerationStartedAt() !== null) return;
     const current = this.status()?.generatedAt ?? null;
     if (current !== null && current !== generatedBefore) {
-      this.promptPreviewContent.set(null);
-      this.promptPreviewExpanded.set(false);
+      this.resetPromptPreview();
       this.changed.emit(workspacePath);
     } else {
       this.feedback.announce(PROMPT_REGENERATE_FAILED, 'alert');
@@ -637,29 +644,43 @@ export class SystemPromptDrawerComponent {
     }
   }
 
+  private resetPromptPreview(): void {
+    this.contentReadId++;
+    this.promptPreviewContent.set(null);
+    this.promptPreviewExpanded.set(false);
+    this.isLoadingContent.set(false);
+  }
+
   async togglePromptPreview(): Promise<void> {
     if (this.promptPreviewExpanded()) {
       this.promptPreviewExpanded.set(false);
       return;
     }
     if (!this.promptPreviewContent()) {
+      const workspacePath = this.workspacePath();
+      const generation = this.workspaceScope.generation();
+      const readId = ++this.contentReadId;
+      const isCurrent = () =>
+        readId === this.contentReadId && generation === this.workspaceScope.generation();
       this.isLoadingContent.set(true);
       try {
         const result = await this.rpcService.call(
           'enhancedPrompts:getPromptContent',
           {
-            workspacePath: this.workspacePath(),
+            workspacePath,
           },
         );
+        if (!isCurrent()) return;
         if (result.isSuccess() && result.data.content) {
           this.promptPreviewContent.set(result.data.content);
         } else {
           this.error.set(PROMPT_PREVIEW_LOAD_FAILED);
         }
       } catch {
+        if (!isCurrent()) return;
         this.error.set(PROMPT_PREVIEW_LOAD_FAILED);
       } finally {
-        this.isLoadingContent.set(false);
+        if (isCurrent()) this.isLoadingContent.set(false);
       }
     }
     this.promptPreviewExpanded.set(true);

@@ -95,7 +95,7 @@ describe('AgentBehaviourSectionComponent', () => {
       deferBlockBehavior: DeferBlockBehavior.Manual,
       providers: [
         { provide: ClaudeRpcService, useValue: { call } },
-        { provide: WorkspaceScopeService, useValue: { activeWorkspacePath: workspace } },
+        { provide: WorkspaceScopeService, useValue: { activeWorkspacePath: workspace, generation: signal(0) } },
         {
           provide: EffortStateService,
           useValue: { currentEffort: effort, setEffort },

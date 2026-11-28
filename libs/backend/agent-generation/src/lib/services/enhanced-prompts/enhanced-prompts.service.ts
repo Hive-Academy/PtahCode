@@ -739,6 +739,7 @@ export class EnhancedPromptsService {
       }
       if (!generationCommitting) ensureActive();
       const newState = await this.updateState(workspacePath, (state) => {
+        if (!bound) ensureActive();
         // A legacy generated prompt was enabled automatically, so false with
         // an existing prompt records an earlier explicit opt-out.
         const enabledPreference =

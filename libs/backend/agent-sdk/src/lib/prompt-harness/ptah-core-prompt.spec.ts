@@ -12,6 +12,12 @@ import {
 } from './ptah-core-prompt';
 
 describe('PTAH_CORE_SYSTEM_PROMPT', () => {
+  it('requires plan approval for Full-depth work when orchestration is unavailable', () => {
+    expect(PTAH_CORE_SYSTEM_PROMPT).toMatch(
+      /If the orchestration skill is unavailable, present a plan for Full-depth work \(new features, unclear scope, or 5\+ files\) and wait for user approval before implementing\./,
+    );
+  });
+
   it('stays within the measured token budget plus five percent', () => {
     expect(PTAH_CORE_SYSTEM_PROMPT.length).toBeLessThanOrEqual(9000);
     expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(2261);

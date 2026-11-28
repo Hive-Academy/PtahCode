@@ -1908,6 +1908,59 @@ describe('EnhancedPromptsService', () => {
   });
 
   describe('generation lock timeout', () => {
+    it('does not save an unbound wizard prompt after timing out in the state queue', async () => {
+      jest.useFakeTimers();
+      try {
+        mocks.promptDesignerAgent.buildPrompts.mockResolvedValue({
+          systemPrompt: 's',
+          userPrompt: 'u',
+          outputSchema: {},
+        });
+        mocks.internalQueryService.execute.mockResolvedValue({
+          stream: (async function* () {
+            /* No stream events are needed for the mocked parser. */
+          })(),
+          close: jest.fn(),
+        });
+        mockProcess.mockResolvedValue({ structuredOutput: { ok: true } });
+        mocks.promptDesignerAgent.parseAndValidateOutput.mockResolvedValue(fullOutput());
+
+        let releaseToggle: () => void = () => undefined;
+        mocks.context.globalState.update.mockReturnValueOnce(
+          new Promise<void>((resolve) => {
+            releaseToggle = resolve;
+          }),
+        );
+        const toggle = service.setEnabled(testWorkspacePath, false);
+        const generation = service.runWizard(testWorkspacePath, undefined, undefined, {
+          workspacePath: testWorkspacePath,
+          projectType: 'app',
+          isMonorepo: false,
+          dependencies: [],
+          devDependencies: [],
+        });
+
+        try {
+          await jest.advanceTimersByTimeAsync(0);
+          expect(mocks.analysisStorage.writeEnhancedPromptTrace).toHaveBeenCalledTimes(1);
+          expect(mocks.context.globalState.update).toHaveBeenCalledTimes(1);
+          await jest.advanceTimersByTimeAsync(12 * 60 * 1000);
+        } finally {
+          releaseToggle();
+          await toggle;
+        }
+
+        expect(await generation).toMatchObject({
+          success: false,
+          error: 'Guidance generation timed out',
+        });
+        expect(mocks.context.globalState.update).toHaveBeenCalledTimes(1);
+        expect(mocks.cacheService.set).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('checks a force-released stale run abort while a new run is committing', async () => {
       jest.useFakeTimers();
       try {
