@@ -1,12 +1,14 @@
 import { signal } from '@angular/core';
 import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type {
+  EnhancedPromptsRunWizardResponse,
   SetupGenerationResultFacts,
   SetupGenerationRunBinding,
   SetupGenerationRunLifecycle,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
   SetupGenerationWorkflow,
+  WizardSubmitSelectionResponse,
 } from '@ptah-extension/shared';
 import { WizardRpcError, type WizardRpcService } from './wizard-rpc.service';
 import { normalizeSetupWorkspacePath } from './setup-run-persistence';
@@ -79,11 +81,13 @@ export function matchesBinding(
   expected: SetupGenerationTabBinding | null,
   actual: SetupGenerationTabBinding,
 ): boolean {
+  if (expected === null) return false;
+  const expectedPath = normalizeSetupWorkspacePath(expected.workspacePath);
   return (
-    expected !== null &&
+    expectedPath !== null &&
     expected.tabId === actual.tabId &&
     expected.workflow === actual.workflow &&
-    expected.workspacePath === normalizeSetupWorkspacePath(actual.workspacePath)
+    expectedPath === normalizeSetupWorkspacePath(actual.workspacePath)
   );
 }
 
@@ -294,11 +298,22 @@ export class SetupRunAttempts {
     );
   }
 
+  /** The record update a verified run proves, plus its correction flags. */
   public observation(
     record: SetupRunRecord | null,
     attempt: SetupRunAttempt | undefined,
     run: SetupGenerationRunState,
-  ) {
+  ): {
+    update: {
+      status: SetupRunStatus;
+      step?: 'generating';
+      backendRunId: string;
+      error: string | null;
+      analysisRunId: string | undefined;
+    };
+    correction: boolean;
+    finalizationRunId: string | undefined;
+  } | null {
     if (!record) return null;
     const status = verifiedRunStatus(run, bindingOf(record));
     if (!status) return null;
@@ -391,7 +406,12 @@ export async function requestBoundStart(
   rpc: WizardRpcService,
   binding: SetupGenerationTabBinding,
   mode: 'retry' | 'regenerate',
-) {
+): Promise<
+  | WizardSubmitSelectionResponse
+  | EnhancedPromptsRunWizardResponse
+  | { refusalCode: string }
+  | null
+> {
   try {
     // Resume agent retries from the checkpoint so settled items are kept.
     if (binding.workflow === 'setup-agent-generation') {
@@ -415,7 +435,7 @@ export async function reconcileGuidanceOutput(
 ): Promise<SetupRunStatus | null> {
   const status = await rpc.getEnhancedPromptsStatus(record.workspacePath);
   if (status.error) {
-    // degradation-audit: optional-capability - an unavailable guidance status keeps the last known status
+    // An unavailable guidance status keeps the last known status.
     return null;
   }
   const generatedAt = status.generatedAt ? Date.parse(status.generatedAt) : NaN;

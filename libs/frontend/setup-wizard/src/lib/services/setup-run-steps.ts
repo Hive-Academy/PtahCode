@@ -99,19 +99,27 @@ function guidanceSubPath(record: SetupRunRecord): SubPath {
   return chained ? ANALYZE_GUIDANCE : GUIDANCE;
 }
 
-/** The route a workflow starts at; also the fallback for an unknown step. */
-function entrySubPath(record: SetupRunRecord): SubPath {
-  switch (record.workflow) {
+/** The route a workflow starts at; `chained` guidance starts inside analysis. */
+export function entrySubPathFor(
+  workflow: SetupRunWorkflow,
+  chained = false,
+): SubPath {
+  switch (workflow) {
     case 'analysis':
       return ANALYZE;
     case 'skill-review':
     case 'agent-generation':
       return ANALYZE_SKILLS;
     case 'project-guidance':
-      return record.parentId !== null ? ANALYZE_GUIDANCE : GUIDANCE;
+      return chained ? ANALYZE_GUIDANCE : GUIDANCE;
     case 'team-builder':
       return TEAM_BUILDER;
   }
+}
+
+/** The route a workflow starts at; also the fallback for an unknown step. */
+function entrySubPath(record: SetupRunRecord): SubPath {
+  return entrySubPathFor(record.workflow, record.parentId !== null);
 }
 
 function isStepOf(workflow: SetupRunWorkflow, step: unknown): boolean {

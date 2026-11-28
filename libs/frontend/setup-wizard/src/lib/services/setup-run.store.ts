@@ -137,6 +137,7 @@ function browserStorage(): Storage | null {
   try {
     return typeof localStorage === 'undefined' ? null : localStorage;
   } catch {
+    // degradation-audit: optional-capability - unavailable browser storage keeps Setup runs in memory for this session.
     return null;
   }
 }
@@ -1081,7 +1082,10 @@ export class SetupRunStore {
   public async resolveBlockedStart(
     binding: SetupGenerationTabBinding,
     ownerTabId: string,
-  ) {
+  ): Promise<{
+    owner: SetupRunRecord | null;
+    run: SetupGenerationRunState | null;
+  }> {
     const owner = this.adopt({ ...binding, tabId: ownerTabId });
     if (owner?.id !== binding.tabId) return { owner, run: null };
     const attempt = this.attempts.hold(owner.id);

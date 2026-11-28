@@ -1,4 +1,10 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import {
+  DestroyRef,
+  Injectable,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import type {
   SetupGenerationAccepted,
   SetupGenerationRejection,
@@ -6,15 +12,18 @@ import type {
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
 import {
-  WizardRpcService,
-  type BoundAgentDecisions,
-} from './wizard-rpc.service';
-import {
   FOREIGN_WORKSPACE_COPY,
   isFinalizationCorrection,
+  isTerminalLifecycle,
+  matchesBinding,
 } from './setup-run-attempt';
 import { SetupRunStore } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
+import {
+  WizardRpcError,
+  WizardRpcService,
+  type BoundAgentDecisions,
+} from './wizard-rpc.service';
 
 const LOOKUP_FAILED = Symbol('lookup-failed');
 
@@ -56,17 +65,18 @@ export class GenerationWorkflowStore {
   private lookupFailures = 0;
   private expectedRunId: string | undefined;
   private bindingRevision = 0;
-  readonly runMismatch = signal(false);
-  readonly lookupExhausted = signal(false);
-  readonly acceptedRun = signal<{ runId: string; revision: number } | null>(
-    null,
-  );
-  readonly binding = this.bindingValue.asReadonly();
-  readonly run = this.runValue.asReadonly();
-  readonly state = this.stateValue.asReadonly();
-  readonly rejection = this.rejectionValue.asReadonly();
-  readonly startError = signal<string | null>(null);
-  readonly isBound = computed(() =>
+  public readonly runMismatch = signal(false);
+  public readonly lookupExhausted = signal(false);
+  public readonly acceptedRun = signal<{
+    runId: string;
+    revision: number;
+  } | null>(null);
+  public readonly binding = this.bindingValue.asReadonly();
+  public readonly run = this.runValue.asReadonly();
+  public readonly state = this.stateValue.asReadonly();
+  public readonly rejection = this.rejectionValue.asReadonly();
+  public readonly startError = signal<string | null>(null);
+  public readonly isBound = computed(() =>
     [
       'starting',
       'running',
@@ -76,22 +86,28 @@ export class GenerationWorkflowStore {
       'stop-unknown',
     ].includes(this.stateValue()),
   );
-  readonly provider = computed(() => {
+  public readonly provider = computed(() => {
     const value = this.runValue()?.effectiveProvider;
     return value && value !== 'unknown' ? value : null;
   });
-  readonly model = computed(() => {
+  public readonly model = computed(() => {
     const value = this.runValue()?.effectiveModel;
     return value && value !== 'unknown' ? value : null;
   });
 
-  bind(binding: SetupGenerationTabBinding, expectedRunId?: string): void {
+  public constructor() {
+    // The watchdog is a fallback timer; release it with the store.
+    inject(DestroyRef).onDestroy(() => this.clearWatchdog());
+  }
+
+  public bind(
+    binding: SetupGenerationTabBinding,
+    expectedRunId?: string,
+  ): void {
     this.lookupExhausted.set(false);
     const old = this.bindingValue();
     if (
-      old?.tabId === binding.tabId &&
-      old.workspacePath === binding.workspacePath &&
-      old.workflow === binding.workflow &&
+      matchesBinding(old, binding) &&
       (this.expectedRunId === expectedRunId ||
         (expectedRunId !== undefined &&
           this.runValue()?.binding.runId === expectedRunId))
@@ -113,14 +129,14 @@ export class GenerationWorkflowStore {
   }
 
   /** Show a Setup run record: its binding and its latest run. */
-  bindRecord(record: SetupRunRecord): boolean {
+  public bindRecord(record: SetupRunRecord): boolean {
     const binding = this.runs.bindingFor(record);
     if (!binding) return false;
     this.bind(binding);
     return true;
   }
 
-  unbind(): void {
+  public unbind(): void {
     this.pendingStop = false;
     this.bindingRevision++;
     this.expectedRunId = undefined;
@@ -138,7 +154,7 @@ export class GenerationWorkflowStore {
    * preview's token, replace entries and target; without it the server keeps
    * every existing file and writes to the harness root.
    */
-  async startAgents(
+  public async startAgents(
     selectedAgentIds: string[],
     decisions?: BoundAgentDecisions,
   ): Promise<void> {
@@ -184,7 +200,7 @@ export class GenerationWorkflowStore {
     }
   }
 
-  async startGuidance(): Promise<void> {
+  public async startGuidance(): Promise<void> {
     const binding = this.bindingValue();
     const revision = this.bindingRevision;
     if (
@@ -209,8 +225,11 @@ export class GenerationWorkflowStore {
       else await this.refresh();
     } catch (error: unknown) {
       if (this.sameBinding(binding) && revision === this.bindingRevision) {
+        const coded =
+          error instanceof WizardRpcError && !!error.code?.startsWith('SETUP_');
         const message = error instanceof Error ? error.message : '';
         if (
+          coded ||
           message.startsWith('SETUP_') ||
           message.includes('Update Background models and retry.')
         ) {
@@ -227,7 +246,7 @@ export class GenerationWorkflowStore {
    * failed or interrupted record, `rerun` (a new record) for a completed or
    * cancelled one.
    */
-  async regenerateGuidance(): Promise<void> {
+  public async regenerateGuidance(): Promise<void> {
     const binding = this.bindingValue();
     if (
       !binding ||
@@ -258,7 +277,7 @@ export class GenerationWorkflowStore {
    * generation resumes from its checkpoint. A run that already owns the
    * workflow is attached instead.
    */
-  async retry(): Promise<void> {
+  public async retry(): Promise<void> {
     const binding = this.bindingValue();
     const record = binding ? this.runs.get(binding.tabId) : null;
     if (
@@ -404,14 +423,14 @@ export class GenerationWorkflowStore {
     if (this.pendingStop) await this.flushStop(binding);
   }
 
-  stop(): void {
+  public stop(): void {
     if (!this.bindingValue() || !this.isBound()) return;
     this.pendingStop = true;
     this.stateValue.set('cancelling');
     void this.refresh();
   }
 
-  async refresh(): Promise<void> {
+  public async refresh(): Promise<void> {
     const binding = this.bindingValue();
     if (!binding || this.runMismatch()) return;
     const revision = this.bindingRevision;
@@ -448,7 +467,7 @@ export class GenerationWorkflowStore {
     this.runMismatch.set(false);
     if (!run) {
       const lastRun = this.runValue();
-      if (lastRun && this.isTerminal(lastRun.status)) return;
+      if (lastRun && isTerminalLifecycle(lastRun.status)) return;
       if (this.stateValue() !== 'idle' && this.lookupFailures < 3) {
         const delay = 1000 * 2 ** this.lookupFailures++;
         this.clearWatchdog();
@@ -471,7 +490,7 @@ export class GenerationWorkflowStore {
     const heldRunId = this.runValue()?.binding.runId;
     if (heldRunId && run.binding.runId !== heldRunId) return;
     this.applyRun(run, report);
-    if (this.pendingStop && !this.isTerminal(run.status))
+    if (this.pendingStop && !isTerminalLifecycle(run.status))
       await this.flushStop(binding);
   }
 
@@ -483,7 +502,7 @@ export class GenerationWorkflowStore {
     if (!this.pendingStop) return;
     this.pendingStop = false;
     const record = this.runs.get(binding.tabId) ?? this.runs.adopt(binding);
-    let cancelled = false;
+    let cancelled: boolean;
     try {
       cancelled = record ? await this.runs.cancel(record.id) : false;
     } catch {
@@ -512,22 +531,16 @@ export class GenerationWorkflowStore {
     report?: (run: SetupGenerationRunState) => void,
   ): void {
     const binding = this.bindingValue();
-    if (
-      !binding ||
-      run.binding.tabId !== binding.tabId ||
-      run.binding.workspacePath !== binding.workspacePath ||
-      run.binding.workflow !== binding.workflow
-    )
-      return;
+    if (!binding || !matchesBinding(binding, run.binding)) return;
     const previous = this.runValue();
     if (
       previous?.binding.runId === run.binding.runId &&
-      this.isTerminal(previous.status)
+      isTerminalLifecycle(previous.status)
     ) {
       const verifiedCorrection = isFinalizationCorrection(previous, run);
       if (
         !verifiedCorrection &&
-        (!this.isTerminal(run.status) || previous.result || !run.result)
+        (!isTerminalLifecycle(run.status) || previous.result || !run.result)
       )
         return;
     }
@@ -535,11 +548,11 @@ export class GenerationWorkflowStore {
     if (
       report &&
       (this.runs.get(binding.tabId) ||
-        (!this.isTerminal(run.status) && this.runs.adopt(binding)))
+        (!isTerminalLifecycle(run.status) && this.runs.adopt(binding)))
     )
       report(run);
     this.stateValue.set(
-      this.isTerminal(run.status)
+      isTerminalLifecycle(run.status)
         ? run.status
         : run.status === 'starting'
           ? 'starting'
@@ -549,7 +562,7 @@ export class GenerationWorkflowStore {
               ? 'cancelling'
               : run.status,
     );
-    if (this.isTerminal(run.status)) {
+    if (isTerminalLifecycle(run.status)) {
       this.pendingStop = false;
       this.clearWatchdog();
     }
@@ -561,17 +574,6 @@ export class GenerationWorkflowStore {
   }
 
   private sameBinding(binding: SetupGenerationTabBinding): boolean {
-    const current = this.bindingValue();
-    return (
-      current?.tabId === binding.tabId &&
-      current.workflow === binding.workflow &&
-      current.workspacePath === binding.workspacePath
-    );
-  }
-
-  private isTerminal(
-    status: string,
-  ): status is 'completed' | 'cancelled' | 'failed' | 'timed-out' {
-    return ['completed', 'cancelled', 'failed', 'timed-out'].includes(status);
+    return matchesBinding(this.bindingValue(), binding);
   }
 }

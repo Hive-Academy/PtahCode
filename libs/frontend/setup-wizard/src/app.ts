@@ -5,3 +5,4 @@ export { SetupGenerationOpenHandler } from './lib/services/setup-generation-open
 export { GenerationRunEventAdapter } from './lib/services/generation-run-event-adapter';
 export { provideWizardInternalState } from './lib/services/wizard-internal-state.provider';
 export { SetupRunEntryService } from './lib/services/setup-run-entry.service';
+export { SetupRunStore } from './lib/services/setup-run.store';

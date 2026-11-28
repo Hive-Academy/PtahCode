@@ -4,7 +4,11 @@ import type {
   SetupGenerationRunState,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
-import { hasCommittedGuidance } from './setup-run-attempt';
+import {
+  hasCommittedGuidance,
+  isTerminalLifecycle,
+  matchesBinding,
+} from './setup-run-attempt';
 import { SetupRunStore } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';
@@ -58,23 +62,21 @@ export class GuidanceGenerationStore {
   private readonly snapshotValue = signal<GuidanceSnapshot | null>(null);
   private readonly resultValue = signal<GuidanceCommittedResult | null>(null);
   private restoring = false;
-  readonly binding = this.bindingValue.asReadonly();
-  readonly run = this.runValue.asReadonly();
-  readonly status = this.statusValue.asReadonly();
-  readonly snapshot = this.snapshotValue.asReadonly();
-  readonly result = this.resultValue.asReadonly();
-  readonly content = signal<string | null>(null);
-  readonly actionFailed = signal(false);
-  readonly source = computed(() => this.snapshotValue()?.sourceLabel ?? null);
+  public readonly binding = this.bindingValue.asReadonly();
+  public readonly run = this.runValue.asReadonly();
+  public readonly status = this.statusValue.asReadonly();
+  public readonly snapshot = this.snapshotValue.asReadonly();
+  public readonly result = this.resultValue.asReadonly();
+  public readonly content = signal<string | null>(null);
+  public readonly actionFailed = signal(false);
+  public readonly source = computed(
+    () => this.snapshotValue()?.sourceLabel ?? null,
+  );
 
-  bind(binding: SetupGenerationTabBinding): void {
+  public bind(binding: SetupGenerationTabBinding): void {
     if (binding.workflow !== 'setup-project-prompt') return;
     const old = this.bindingValue();
-    if (
-      old?.tabId === binding.tabId &&
-      old.workspacePath === binding.workspacePath
-    )
-      return;
+    if (matchesBinding(old, binding)) return;
     this.restoring = true;
     this.bindingValue.set(binding);
     this.runValue.set(null);
@@ -86,14 +88,14 @@ export class GuidanceGenerationStore {
   }
 
   /** Show a project-guidance Setup run record. */
-  bindRecord(record: SetupRunRecord): boolean {
+  public bindRecord(record: SetupRunRecord): boolean {
     const binding = this.runs.bindingFor(record);
     if (binding?.workflow !== 'setup-project-prompt') return false;
     this.bind(binding);
     return true;
   }
 
-  unbind(): void {
+  public unbind(): void {
     this.restoring = false;
     this.bindingValue.set(null);
     this.runValue.set(null);
@@ -103,7 +105,10 @@ export class GuidanceGenerationStore {
     this.content.set(null);
   }
 
-  adopt(run: SetupGenerationRunState, acceptedThisSession = false): void {
+  public adopt(
+    run: SetupGenerationRunState,
+    acceptedThisSession = false,
+  ): void {
     const binding = this.bindingValue();
     if (!binding || !this.sameBinding(run.binding)) return;
     const changedRun = this.snapshotValue()?.runId !== run.binding.runId;
@@ -113,15 +118,11 @@ export class GuidanceGenerationStore {
       this.snapshotValue.set(null);
       this.statusValue.set('starting');
     }
-    if (acceptedThisSession || !this.isTerminal(run.status))
+    if (acceptedThisSession || !isTerminalLifecycle(run.status))
       this.restoring = false;
     if (changedRun) this.accept(run);
     this.applyRun(run);
-    if (
-      changedRun ||
-      (changedStatus &&
-        ['completed', 'failed', 'cancelled', 'timed-out'].includes(run.status))
-    )
+    if (changedRun || (changedStatus && isTerminalLifecycle(run.status)))
       void this.refreshCommitted(binding);
   }
 
@@ -138,7 +139,7 @@ export class GuidanceGenerationStore {
     });
   }
 
-  async refresh(): Promise<void> {
+  public async refresh(): Promise<void> {
     const binding = this.bindingValue();
     if (!binding) return;
     const requestedRunId = this.snapshotValue()?.runId;
@@ -153,9 +154,7 @@ export class GuidanceGenerationStore {
     if (requestedRunId !== this.snapshotValue()?.runId) return;
     if (
       run &&
-      run.binding.tabId === binding.tabId &&
-      run.binding.workspacePath === binding.workspacePath &&
-      run.binding.workflow === binding.workflow &&
+      matchesBinding(binding, run.binding) &&
       (!this.snapshotValue() ||
         run.binding.runId === this.snapshotValue()?.runId)
     ) {
@@ -170,9 +169,7 @@ export class GuidanceGenerationStore {
   private applyRun(run: SetupGenerationRunState): void {
     this.runValue.set(run);
     this.report(run);
-    const terminal = ['completed', 'cancelled', 'failed', 'timed-out'].includes(
-      run.status,
-    );
+    const terminal = isTerminalLifecycle(run.status);
     this.statusValue.set(
       this.restoring && terminal && run.status !== 'cancelled'
         ? 'idle'
@@ -189,15 +186,11 @@ export class GuidanceGenerationStore {
     if (!binding) return;
     const record =
       this.runs.get(binding.tabId) ??
-      (this.isTerminal(run.status) ? null : this.runs.adopt(binding));
+      (isTerminalLifecycle(run.status) ? null : this.runs.adopt(binding));
     if (record) this.runs.reportRun(record.id, run);
   }
 
-  private isTerminal(status: SetupGenerationRunState['status']): boolean {
-    return ['completed', 'cancelled', 'failed', 'timed-out'].includes(status);
-  }
-
-  async refreshCommitted(binding = this.bindingValue()): Promise<void> {
+  public async refreshCommitted(binding = this.bindingValue()): Promise<void> {
     if (!binding) return;
     try {
       const status = await this.rpc.getEnhancedPromptsStatus(
@@ -226,7 +219,7 @@ export class GuidanceGenerationStore {
     }
   }
 
-  async setEnabled(enabled: boolean): Promise<void> {
+  public async setEnabled(enabled: boolean): Promise<void> {
     const binding = this.bindingValue();
     if (!binding) return;
     this.actionFailed.set(false);
@@ -242,7 +235,7 @@ export class GuidanceGenerationStore {
     }
   }
 
-  async loadContent(): Promise<void> {
+  public async loadContent(): Promise<void> {
     const binding = this.bindingValue();
     if (!binding) return;
     this.actionFailed.set(false);
@@ -260,7 +253,7 @@ export class GuidanceGenerationStore {
     }
   }
 
-  async download(): Promise<void> {
+  public async download(): Promise<void> {
     const binding = this.bindingValue();
     if (!binding) return;
     this.actionFailed.set(false);
@@ -276,11 +269,6 @@ export class GuidanceGenerationStore {
   }
 
   private sameBinding(binding: SetupGenerationTabBinding): boolean {
-    const current = this.bindingValue();
-    return (
-      current?.tabId === binding.tabId &&
-      current.workspacePath === binding.workspacePath &&
-      current.workflow === binding.workflow
-    );
+    return matchesBinding(this.bindingValue(), binding);
   }
 }

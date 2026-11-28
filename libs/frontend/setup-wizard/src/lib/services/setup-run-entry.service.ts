@@ -6,6 +6,7 @@ import {
 } from '@ptah-extension/core';
 import type { SetupGenerationWorkflow } from '@ptah-extension/shared';
 import { workflowOfBinding } from './setup-run-attempt';
+import { entrySubPathFor } from './setup-run-steps';
 import { SetupRunStore } from './setup-run.store';
 import {
   isTerminalSetupRunStatus,
@@ -41,9 +42,10 @@ export class SetupRunEntryService implements SetupRunEntry {
       );
     if (active) return this.openRun(active);
 
-    const entry =
-      requested === 'agent-generation' ? ['analyze', 'skills'] : ['guidance'];
-    return this.router.navigateToSurface('onboarding', entry);
+    return this.router.navigateToSurface(
+      'onboarding',
+      entrySubPathFor(requested),
+    );
   }
 
   private openRun(record: SetupRunRecord): Promise<SurfaceNavigationResult> {

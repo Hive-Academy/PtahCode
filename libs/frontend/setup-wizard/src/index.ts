@@ -1,21 +1,20 @@
 export { SetupWizardStateService } from './lib/services/setup-wizard-state.service';
-export { WizardRpcService } from './lib/services/wizard-rpc.service';
+export {
+  WizardRpcError,
+  WizardRpcService,
+} from './lib/services/wizard-rpc.service';
 export type { BoundAgentDecisions } from './lib/services/wizard-rpc.service';
 export { GenerationPreviewStore } from './lib/services/generation-preview.store';
 export type { PreviewConfirmation } from './lib/services/generation-preview.store';
 export { WizardAnalysisRunner } from './lib/services/wizard-analysis-runner.service';
 export { findBoundGenerationTab } from './lib/services/bound-generation-tab';
-export {
-  SetupRunStore,
-  SETUP_RUN_POLL_INTERVAL_MS,
-} from './lib/services/setup-run.store';
+export { SetupRunStore } from './lib/services/setup-run.store';
 export type {
   SetupRunStartOptions,
   SetupRunReport,
 } from './lib/services/setup-run.store';
 export {
   SETUP_RUN_STEPS,
-  TERMINAL_SETUP_RUN_STATUSES,
   isTerminalSetupRunStatus,
 } from './lib/services/setup-run.types';
 export type {

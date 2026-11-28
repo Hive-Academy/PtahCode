@@ -247,7 +247,7 @@ export class GenerationHandoffStore {
   private failStart(id: string, reason?: string): SetupRunRecord | null {
     const record = this.runs.get(id);
     if (record?.backendRunId) return record;
-    // degradation-audit: preserved - manual recovery keeps non-running statuses such as needs-input intact.
+    // Manual recovery keeps non-running statuses such as needs-input intact.
     if (record?.status === 'running') {
       this.runs.report(id, {
         status: 'failed',

@@ -305,6 +305,7 @@ export function writeSetupRunIndex(
     storage.setItem(SETUP_RUNS_STORAGE_KEY, serializeSetupRunIndex(index));
     return true;
   } catch {
+    // degradation-audit: optional-capability - a refused storage write keeps Setup runs for the current session.
     console.warn('[setup-run-persistence] Setup runs could not be saved.');
     return false;
   }
