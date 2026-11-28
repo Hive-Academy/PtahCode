@@ -472,8 +472,6 @@ function ruleMatches(body: string, rel: string): boolean {
   return !insideOnly && rel === base;
 }
 
-const execFileAsync = promisify(execFile);
-
 /**
  * The subset of `relPaths` that hold a git-tracked file, from one
  * `git ls-files` call. `null` when git cannot answer.
@@ -482,11 +480,19 @@ const execFileAsync = promisify(execFile);
  * is called from the Electron main process during startup, and a synchronous
  * spawn-and-wait here would stall the event loop for the whole process while
  * `git` runs (TASK startup-rpc-timeouts).
+ *
+ * `promisify(execFile)` is created HERE, not at module scope: a spec that
+ * mocks `child_process` with only the functions it needs (`spawn`, say) makes
+ * `execFile` `undefined` on that mocked module, and `promisify(undefined)`
+ * throws immediately — at import time if done at module scope, which broke
+ * every unrelated spec that merely imports this module's barrel. Creating it
+ * inside the function defers that to the one path that actually calls git.
  */
 async function gitTrackedPaths(
   workspaceRoot: string,
   relPaths: readonly string[],
 ): Promise<ReadonlySet<string> | null> {
+  const execFileAsync = promisify(execFile);
   let output: string;
   try {
     ({ stdout: output } = await execFileAsync(
