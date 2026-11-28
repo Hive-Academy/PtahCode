@@ -113,8 +113,14 @@ export type ProviderSessionEventBody =
       readonly kind?: string;
       /** The tool input when the agent sent a plain object. */
       readonly input?: Record<string, unknown>;
+      readonly presentation?: ToolPresentation;
     }
-  | { readonly type: 'toolUpdated'; readonly toolId: string; readonly output?: unknown }
+  | {
+      readonly type: 'toolUpdated';
+      readonly toolId: string;
+      readonly output?: unknown;
+      readonly presentation?: ToolPresentation;
+    }
   | {
       readonly type: 'toolCompleted';
       readonly toolId: string;
@@ -179,6 +185,12 @@ export type ProviderSessionEventBody =
       readonly usage?: ProviderUsage;
       readonly error?: ProviderSessionError;
     };
+
+/** A full chat-card snapshot while preserving the provider's native tool data. */
+interface ToolPresentation {
+  readonly toolName: string;
+  readonly input?: Record<string, unknown>;
+}
 
 export type ProviderSessionEventType = ProviderSessionEventBody['type'];
 

@@ -18,6 +18,16 @@ interface ToolCallDetails {
   readonly kind?: string;
   readonly title?: string;
   readonly output?: string;
+  readonly input?: Record<string, unknown>;
+  readonly path?: string;
+  readonly diffs?: ReadonlyMap<string, ToolDiff>;
+}
+
+interface ToolDiff {
+  readonly path: string;
+  readonly oldText?: string;
+  readonly newText?: string;
+  readonly patch?: string;
 }
 
 export interface AcpSessionUpdateMapper {
@@ -87,28 +97,108 @@ function itemIdOf(update: Record<string, unknown>, fallback: string): string {
   return typeof id === 'string' && id ? id : fallback;
 }
 
-function fileChanges(content: unknown): ProviderSessionEventBody[] {
-  if (!Array.isArray(content)) return [];
+function fileChanges(diffs: readonly ToolDiff[]): ProviderSessionEventBody[] {
+  return diffs.map(({ path, oldText }) => ({
+    type: 'fileChange',
+    path,
+    changeKind: oldText === undefined ? 'added' : 'modified',
+  }));
+}
 
-  return content.flatMap((item): ProviderSessionEventBody[] => {
-    if (
-      !isRecord(item) ||
-      item['type'] !== 'diff' ||
-      typeof item['path'] !== 'string'
-    ) {
-      return [];
-    }
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function toolDiffs(content: unknown): ToolDiff[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((block: unknown) => {
+    if (!isRecord(block) || block['type'] !== 'diff') return [];
+    const path = stringValue(block['path']);
+    if (!path) return [];
     return [
       {
-        type: 'fileChange',
-        path: item['path'],
-        changeKind:
-          item['oldText'] === undefined || item['oldText'] === null
-            ? 'added'
-            : 'modified',
+        path,
+        oldText: stringValue(block['oldText']),
+        newText: stringValue(block['newText']),
       },
     ];
   });
+}
+
+function presentTool(details: ToolCallDetails): {
+  toolName: string;
+  input?: Record<string, unknown>;
+} {
+  const { kind, title, input } = details;
+  const diffs = Array.from(details.diffs?.values() ?? []);
+  if (kind === 'execute') {
+    const command =
+      stringValue(input?.['command']) ?? stringValue(input?.['CommandLine']);
+    return {
+      toolName: 'Bash',
+      input: command === undefined ? undefined : { command },
+    };
+  }
+  if (kind !== 'edit' && kind !== 'delete' && diffs.length === 0)
+    return { toolName: title ?? kind ?? 'Tool', input };
+
+  const path =
+    stringValue(input?.['file_path']) ??
+    stringValue(input?.['path']) ??
+    details.path;
+  if (diffs.length === 0 && path) {
+    diffs.push({
+      path,
+      oldText:
+        stringValue(input?.['old_string']) ?? stringValue(input?.['oldText']),
+      newText:
+        stringValue(input?.['new_string']) ?? stringValue(input?.['newText']),
+      patch: stringValue(input?.['diff']),
+    });
+  }
+  if (diffs.length === 1 && (kind === 'edit' || kind === 'delete')) {
+    const { path: file_path, oldText, newText } = diffs[0];
+    if (oldText !== undefined && (newText !== undefined || kind === 'delete')) {
+      return {
+        toolName: 'Edit',
+        input: { file_path, old_string: oldText, new_string: newText ?? '' },
+      };
+    }
+  }
+  if (!diffs.length) return { toolName: 'FileChange' };
+  return {
+    toolName: 'FileChange',
+    input: {
+      ...(diffs.length === 1 ? { file_path: diffs[0].path } : {}),
+      changes: diffs.map(({ path, oldText, newText, patch }) => {
+        if (kind === 'delete')
+          return { path, kind: { type: 'delete' }, diff: oldText ?? patch ?? '' };
+        if (oldText === undefined && newText !== undefined)
+          return { path, kind: { type: 'add' }, diff: newText };
+        return {
+          path,
+          kind: { type: 'update' },
+          diff: patch ?? snapshotDiff(oldText, newText),
+        };
+      }),
+    },
+  };
+}
+
+function snapshotDiff(
+  oldText: string | undefined,
+  newText: string | undefined,
+): string {
+  const lines = (value: string | undefined) =>
+    value ? value.replace(/\r?\n$/, '').split(/\r?\n/) : [];
+  const oldLines = lines(oldText);
+  const newLines = lines(newText);
+  if (!oldLines.length && !newLines.length) return '';
+  return [
+    `@@ -${oldLines.length ? 1 : 0},${oldLines.length} +${newLines.length ? 1 : 0},${newLines.length} @@`,
+    ...oldLines.map((line) => `-${line}`),
+    ...newLines.map((line) => `+${line}`),
+  ].join('\n');
 }
 
 /** The output an update carries, or `undefined` when it carries none. */
@@ -128,8 +218,10 @@ function outputFromToolUpdate(
   return capOutput(safeStringify(update['rawOutput']));
 }
 
-function isTerminalToolStatus(status: unknown): status is 'completed' | 'failed' {
-  return status === 'completed' || status === 'failed';
+function isTerminalToolStatus(
+  status: unknown,
+): status is 'completed' | 'failed' | 'cancelled' {
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
 /** Updates that belong to the agent's side of a turn. */
@@ -179,27 +271,85 @@ export function createAcpSessionUpdateMapper(
     const title =
       typeof update['title'] === 'string' ? update['title'] : remembered?.title;
     const output = outputFromToolUpdate(update) ?? remembered?.output;
+    const rawInput = isPlainObject(update['rawInput'])
+      ? update['rawInput']
+      : undefined;
+    const input = rawInput
+      ? { ...remembered?.input, ...rawInput }
+      : remembered?.input;
+    const location: unknown = Array.isArray(update['locations'])
+      ? update['locations'][0]
+      : undefined;
+    const path =
+      (isRecord(location) ? stringValue(location['path']) : undefined) ??
+      remembered?.path;
+    const changes = toolDiffs(update['content']);
+    const diffs = changes.length ? new Map(remembered?.diffs) : undefined;
+    for (const change of changes) diffs?.set(change.path, change);
+    const details: ToolCallDetails = {
+      kind,
+      title,
+      output,
+      input,
+      path,
+      diffs: diffs ?? remembered?.diffs,
+    };
+    const events: ProviderSessionEventBody[] = [];
+    if (update['sessionUpdate'] === 'tool_call' && title !== undefined) {
+      events.push({
+        type: 'toolStarted',
+        toolId: toolCallId,
+        toolName: kind === 'edit' || kind === 'delete' ? kind : title,
+        kind,
+        input: rawInput,
+        presentation: presentTool(details),
+      });
+    } else if (
+      remembered &&
+      (rawInput ||
+        changes.length ||
+        path !== remembered.path ||
+        kind !== remembered.kind ||
+        title !== remembered.title)
+    ) {
+      events.push({
+        type: 'toolUpdated',
+        toolId: toolCallId,
+        presentation: presentTool(details),
+      });
+    }
+    events.push(...fileChanges(changes));
     const status = update['status'];
     if (!isTerminalToolStatus(status)) {
-      tools.set(toolCallId, { kind, title, output });
-      return [];
+      tools.set(toolCallId, details);
+      return events;
     }
     // The final update: its metadata has no further use.
     tools.delete(toolCallId);
     const isCommand = status === 'completed' && kind === 'execute';
-    return [
-      {
-        type: 'toolCompleted',
-        toolId: toolCallId,
-        status,
-        toolName: title,
-        kind,
-        output: output ?? '',
-        exitCode: isCommand
-          ? options.extractExitCode?.(update['rawOutput'])
-          : undefined,
-      },
-    ];
+    // A shell card reads only the command in its input. Put a reported patch
+    // in its output so a shell edit still has one card.
+    const commandDiffs = kind === 'execute' && details.diffs
+      ? Array.from(details.diffs.values(), ({ path, oldText, newText }) =>
+          `${path}\n${snapshotDiff(oldText, newText)}`,
+        ).join('\n')
+      : undefined;
+    events.push({
+      type: 'toolCompleted',
+      toolId: toolCallId,
+      status,
+      toolName: title,
+      kind,
+      output: status === 'cancelled'
+        ? 'Tool cancelled.'
+        : commandDiffs
+          ? capOutput(output ? `${output}\n${commandDiffs}` : commandDiffs)
+          : output ?? '',
+      exitCode: isCommand
+        ? options.extractExitCode?.(update['rawOutput'])
+        : undefined,
+    });
+    return events;
   };
 
   const map = (update: SessionUpdate): ProviderSessionEventBody[] => {
@@ -272,33 +422,15 @@ export function createAcpSessionUpdateMapper(
           typeof update.toolCallId !== 'string' ||
           typeof update.title !== 'string'
         ) {
-          return fileChanges(update.content);
+          return fileChanges(toolDiffs(update.content));
         }
-        const kind = typeof update.kind === 'string' ? update.kind : undefined;
-        const toolInput = isPlainObject(update.rawInput)
-          ? update.rawInput
-          : undefined;
-        // The first event may already be final (ACP lets `tool_call` carry
-        // the current status): it completes through the same path as an
-        // update, so a failed call is not left open (PR #1450 review).
-        const completion = trackTool(update, update.toolCallId);
-        return [
-          {
-            type: 'toolStarted',
-            toolId: update.toolCallId,
-            toolName: kind === 'edit' || kind === 'delete' ? kind : update.title,
-            kind,
-            input: toolInput,
-          },
-          ...fileChanges(update.content),
-          ...completion,
-        ];
+        return trackTool(update, update.toolCallId);
       }
 
       case 'tool_call_update': {
-        const changes = fileChanges(update.content);
-        if (typeof update.toolCallId !== 'string') return changes;
-        return [...trackTool(update, update.toolCallId), ...changes];
+        if (typeof update.toolCallId !== 'string')
+          return fileChanges(toolDiffs(update.content));
+        return trackTool(update, update.toolCallId);
       }
 
       case 'plan':

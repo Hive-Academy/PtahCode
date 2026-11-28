@@ -1,8 +1,69 @@
+import { createFlatStreamProjector } from '@ptah-extension/provider-session-contracts';
 import { createAcpReplayCollector } from './acp-replay-collector';
 
 const ids = { contextId: 'ctx', processGeneration: 1, sessionId: 'old' };
 
 describe('createAcpReplayCollector', () => {
+  it.each([
+    {
+      toolName: 'FileChange',
+      input: {
+        changes: [
+          { path: 'a.ts', kind: { type: 'update' }, diff: `+${'a'.repeat(5_000)}` },
+          { path: 'b.ts', kind: { type: 'add' }, diff: '+second file' },
+        ],
+      },
+    },
+    {
+      toolName: 'Edit',
+      input: { file_path: 'a.ts', old_string: 'a'.repeat(3_000), new_string: 'b'.repeat(3_000) },
+    },
+  ])('replays the complete $toolName input above the generic compaction limit', (presentation) => {
+    const collector = createAcpReplayCollector(ids);
+    collector.add([
+      { type: 'toolStarted', toolId: 't1', toolName: 'edit', presentation },
+      { type: 'toolUpdated', toolId: 't1', presentation },
+    ]);
+
+    const projector = createFlatStreamProjector();
+    const rows = collector.events().flatMap((event) => projector.project(event));
+    const starts = rows.filter((row) => row.eventType === 'tool_start');
+    expect(starts).toHaveLength(2);
+    for (const start of starts) {
+      expect(start).toMatchObject({
+        toolName: presentation.toolName,
+        toolInput: presentation.input,
+      });
+    }
+    expect(collector.events().map((event) => event.type)).toEqual(['toolStarted', 'toolUpdated']);
+  });
+
+  it('keeps the last complete patch when an update exceeds the entire replay budget', () => {
+    const collector = createAcpReplayCollector(ids, { maxTextChars: 150 });
+    const input = { changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '+old' }] };
+    collector.add([
+      { type: 'toolStarted', toolId: 't1', toolName: 'edit', presentation: { toolName: 'FileChange', input } },
+      {
+        type: 'toolUpdated',
+        toolId: 't1',
+        presentation: {
+          toolName: 'FileChange',
+          input: { changes: [{ ...input.changes[0], diff: 'x'.repeat(200) }] },
+        },
+      },
+    ]);
+
+    const events = collector.events();
+    expect(events.map((event) => event.type)).toEqual(['info', 'toolStarted', 'toolUpdated']);
+    expect(events[2]).toMatchObject({ presentation: { toolName: 'FileChange' } });
+    const projector = createFlatStreamProjector();
+    const rows = events.flatMap((event) => projector.project(event));
+    expect(rows.filter((row) => row.eventType === 'tool_start')).toEqual([
+      expect.objectContaining({ toolInput: input }),
+      expect.objectContaining({ toolInput: input }),
+    ]);
+  });
+
   it('opens a replay turn per user turn and merges the chunks of one turn', () => {
     const collector = createAcpReplayCollector(ids);
     collector.add([

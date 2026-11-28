@@ -46,6 +46,10 @@ interface TurnState {
   textItemId: string | undefined;
   thinkingBlock: number;
   thinkingItemId: string | undefined;
+  readonly toolStarts: Map<
+    string,
+    Extract<FlatStreamEventUnion, { eventType: 'tool_start' }>
+  >;
 }
 
 export function createFlatStreamProjector(
@@ -66,6 +70,7 @@ export function createFlatStreamProjector(
         textItemId: undefined,
         thinkingBlock: -1,
         thinkingItemId: undefined,
+        toolStarts: new Map(),
       };
     }
     return turn;
@@ -169,24 +174,41 @@ export function createFlatStreamProjector(
       }
       case 'toolStarted': {
         const { state, out } = assistant();
-        out.push({
+        const input = event.presentation ? event.presentation.input : event.input;
+        const start: Extract<FlatStreamEventUnion, { eventType: 'tool_start' }> = {
           ...base(state.messageId, 'tool-start'),
           eventType: 'tool_start',
           toolCallId: event.toolId,
-          toolName: event.toolName,
-          ...(event.input === undefined ? {} : { toolInput: event.input }),
           isTaskTool: false,
-        });
+          toolName: event.presentation?.toolName ?? event.toolName,
+          ...(input === undefined ? {} : { toolInput: input }),
+        };
+        if (event.presentation) state.toolStarts.set(event.toolId, start);
+        out.push(start);
         return out;
+      }
+      case 'toolUpdated': {
+        const { toolStarts } = turnFor(event);
+        const start = toolStarts.get(event.toolId);
+        if (!start || !event.presentation) return [];
+        // Preserve the card identity, ordering, and last available input.
+        const updated = {
+          ...start,
+          toolName: event.presentation.toolName,
+          toolInput: event.presentation.input ?? start.toolInput,
+        };
+        toolStarts.set(event.toolId, updated);
+        return [updated];
       }
       case 'toolCompleted': {
         const { state, out } = assistant();
+        state.toolStarts.delete(event.toolId);
         out.push({
           ...base(state.messageId, 'tool-result'),
           eventType: 'tool_result',
           toolCallId: event.toolId,
           output: event.output,
-          isError: event.status !== 'completed',
+          isError: event.status !== 'completed' || (event.exitCode ?? 0) !== 0,
         });
         return out;
       }
@@ -226,6 +248,7 @@ export function createFlatStreamProjector(
       }
       case 'terminal': {
         const state = turnFor(event);
+        state.toolStarts.clear();
         if (state.completed) return [];
         if (!state.started && event.status !== 'failed') return [];
         // A failed turn with no output yet: the message it opens says why,
@@ -251,7 +274,6 @@ export function createFlatStreamProjector(
         });
         return out;
       }
-      case 'toolUpdated':
       case 'fileChange':
       case 'plan':
       case 'approvalRequested':
