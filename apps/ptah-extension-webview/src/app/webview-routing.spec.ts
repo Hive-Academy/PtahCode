@@ -26,7 +26,6 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generationRouteTabValidator } from './app.config';
 
 import { PlatformLocation } from '@angular/common';
 import { ErrorHandler, signal } from '@angular/core';
@@ -216,24 +215,6 @@ function savedRoute(
 }
 
 describe('webview routing composition', () => {
-  it('keeps a restored workflow route until its workspace activates and then revalidates', () => {
-    const tabs = {
-      activeWorkspacePath: null as string | null,
-      findTabByIdAcrossWorkspaces: jest.fn().mockReturnValue({
-        workspacePath: '/ws',
-        tab: { workflow: 'setup-agent-generation' },
-      }),
-    };
-    const valid = generationRouteTabValidator(tabs);
-    expect(valid('restored', 'setup-agent-generation')).toBe(true);
-    expect(valid('restored', 'setup-project-prompt')).toBe(false);
-    tabs.activeWorkspacePath = '/ws';
-    expect(valid('restored', 'setup-agent-generation')).toBe(true);
-    tabs.activeWorkspacePath = '/other';
-    expect(valid('restored', 'setup-agent-generation')).toBe(false);
-    tabs.findTabByIdAcrossWorkspaces.mockReturnValue(null);
-    expect(valid('missing', 'setup-agent-generation')).toBe(false);
-  });
   let history: Record<string, jest.SpyInstance>;
 
   beforeEach(() => {
@@ -521,18 +502,15 @@ describe('webview routing composition', () => {
       );
     }, 30_000);
 
-    it('waits for the Electron workspace before restoring an onboarding tab', async () => {
+    it('waits for the Electron workspace before validating a saved Setup run', async () => {
       const workspaceResolved = signal(false);
-      const tabs = {
-        activeWorkspacePath: '/ws',
-        findTabByIdAcrossWorkspaces: jest.fn().mockReturnValue(null),
-      };
+      const validateRun = jest.fn(() => workspaceResolved());
       TestBed.configureTestingModule({
         providers: [
           { provide: ElectronLayoutService, useValue: { workspaceResolved } },
           {
             provide: SurfaceRouterService.generationRouteTabValidatorToken,
-            useValue: generationRouteTabValidator(tabs),
+            useValue: validateRun,
           },
         ],
       });
@@ -542,15 +520,11 @@ describe('webview routing composition', () => {
 
       const boot = runBoot();
       await Promise.resolve();
-      expect(tabs.findTabByIdAcrossWorkspaces).not.toHaveBeenCalled();
-
-      tabs.findTabByIdAcrossWorkspaces.mockReturnValue({
-        workspacePath: '/ws',
-        tab: { workflow: 'setup-project-prompt' },
-      });
+      expect(validateRun).not.toHaveBeenCalled();
       workspaceResolved.set(true);
 
       expect(surfaceNavigationLanded(await boot)).toBe(true);
+      expect(validateRun).toHaveBeenCalledWith(tabId, 'setup-project-prompt');
       expect(TestBed.inject(Router).url).toBe(route);
       expect(TestBed.inject(AppStateManager).currentView()).toBe('onboarding');
     });

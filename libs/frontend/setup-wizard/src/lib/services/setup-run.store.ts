@@ -24,12 +24,14 @@ import type {
   SetupGenerationRunBinding,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
+  SetupGenerationWorkflow,
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { GenerationHandoffStore } from './generation-handoff.store';
 import {
   isSetupRunStepOf,
   normalizeSetupWorkspacePath,
+  sameSetupWorkspacePath,
   setupWorkspacePath,
   readSetupRunIndex,
   capWorkspaceRuns,
@@ -239,6 +241,25 @@ export class SetupRunStore {
       if (found) return found;
     }
     return null;
+  }
+
+  /** Validate a persisted generation route against its Setup-owned record. */
+  public canRestoreGenerationRoute(
+    id: string,
+    workflow: SetupGenerationWorkflow,
+  ): boolean {
+    let record = this.get(id);
+    if (!record) {
+      // A saved route can be checked before the workspace activation effect runs.
+      this.adoptLegacyTabs();
+      record = this.get(id);
+    }
+    if (!record || bindingOf(record)?.workflow !== workflow) return false;
+    const workspace = this.workspacePath();
+    return (
+      workspace === null ||
+      sameSetupWorkspacePath(record.workspacePath, workspace)
+    );
   }
 
   /** Where Setup opens `record` (plan section 3). */

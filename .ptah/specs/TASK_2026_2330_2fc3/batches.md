@@ -662,3 +662,6 @@ Edge cases:
   revision may hold a folded record path (focus router not changed).
 - 18B: antigravity impl → codex 6/10 → round 1 5/10 → round 2 (final) 8/10 APPROVED. Coordinator
   fixed two degradation-audit sites and narrowed the marker text (audit TOTAL 0).
+- CI fix for PR #1533 (2026-11-28): unit-test mocks (coordinator) + webview route validator moved
+  from chat tabs to Setup records (codex, `fix-report-ci-webview-e2e.md`). This completes the
+  Batch 14 "validator switch" item; the rest of Batch 14 stays PENDING. Review: antigravity.

@@ -5,6 +5,7 @@ import {
   provideZoneChangeDetection,
   provideZonelessChangeDetection,
   ErrorHandler,
+  Injector,
   inject,
 } from '@angular/core';
 import { PlatformLocation } from '@angular/common';
@@ -47,28 +48,7 @@ import {
   withSurfaceViewTransitions,
 } from '@ptah-extension/core';
 import { PTAH_CLOCK } from '@ptah-extension/ui';
-import { TabManagerService } from '@ptah-extension/chat-state';
-
-/** During Electron restore the workspace may activate after initial navigation; the shell revalidates the tab when it does. */
-export function generationRouteTabValidator(
-  tabs: Pick<
-    TabManagerService,
-    'findTabByIdAcrossWorkspaces' | 'activeWorkspacePath'
-  >,
-) {
-  return (
-    tabId: string,
-    workflow: 'setup-agent-generation' | 'setup-project-prompt',
-  ): boolean => {
-    const located = tabs.findTabByIdAcrossWorkspaces(tabId);
-    return (
-      !!located &&
-      located.tab.workflow === workflow &&
-      (tabs.activeWorkspacePath === null ||
-        located.workspacePath === tabs.activeWorkspacePath)
-    );
-  };
-}
+import type { SetupGenerationWorkflow } from '@ptah-extension/shared';
 import { appRoutes } from './app.routes';
 import { SurfaceUpdateInbox } from '@ptah-extension/chat-routing';
 import {
@@ -106,6 +86,7 @@ import { WorkspaceIndexingService } from '@ptah-extension/workspace-indexing';
 import {
   provideWizardInternalState,
   SetupWizardStateService,
+  SetupRunStore,
   SetupGenerationOpenHandler,
   GenerationRunEventAdapter,
 } from '@ptah-extension/setup-wizard/app';
@@ -265,8 +246,9 @@ export const appConfig: ApplicationConfig = {
     {
       provide: SurfaceRouterService.generationRouteTabValidatorToken,
       useFactory: () => {
-        const tabs = inject(TabManagerService);
-        return generationRouteTabValidator(tabs);
+        const injector = inject(Injector);
+        return (id: string, workflow: SetupGenerationWorkflow) =>
+          injector.get(SetupRunStore).canRestoreGenerationRoute(id, workflow);
       },
     },
     {

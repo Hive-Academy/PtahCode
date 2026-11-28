@@ -13,6 +13,8 @@ const ALLOWED_EXPORT_SOURCES = [
   './lib/services/setup-generation-open.handler',
   './lib/services/generation-run-event-adapter',
   './lib/services/wizard-internal-state.provider',
+  './lib/services/setup-run-entry.service',
+  './lib/services/setup-run.store',
 ];
 
 /** Module specifiers of real import/export declarations (comments stripped). */

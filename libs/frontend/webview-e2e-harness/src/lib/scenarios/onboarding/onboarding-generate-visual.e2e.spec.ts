@@ -41,7 +41,8 @@ const CAPTURE_DIR = resolve(ONBOARDING_ANALYZE_CAPTURE_DIR, '../generate');
 const GUIDANCE = '[data-testid="project-guidance-page"]';
 const DONE = '[data-testid="analyze-done-page"]';
 const GUIDANCE_ROUTE = `/onboarding/analyze/guidance?tab=${GUIDANCE_TAB}&run=${GUIDANCE_RUN_ID}`;
-const GUIDANCE_IDLE_ROUTE = `/onboarding/guidance?tab=${GUIDANCE_TAB}`;
+const GUIDANCE_IDLE_ROUTE = '/onboarding/guidance';
+const GUIDANCE_LOOKUP_ROUTE = `/onboarding/guidance?tab=${GUIDANCE_TAB}`;
 const DONE_ROUTE = `/onboarding/analyze/done?gen=${AGENT_TAB}&tab=${GUIDANCE_TAB}`;
 
 async function shoot(
@@ -146,10 +147,13 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
         await expectState(page, 'guidance', 'running');
         completed = true;
         await bridge.inject({
-          type: 'setup-wizard:generation-complete',
+          type: 'setup-wizard:enhance-stream',
           payload: {
             tabBinding: GUIDANCE_BINDING,
-            terminalStatus: 'completed',
+            kind: 'status',
+            content: 'Guidance ready',
+            timestamp: Date.now(),
+            lifecycle: 'completed',
           },
         });
         await expectState(page, 'guidance', 'completed');
@@ -179,7 +183,7 @@ for (const theme of ONBOARDING_CAPTURE_THEMES) {
           fixtureServer.url,
           theme,
           size.viewport,
-          GUIDANCE_IDLE_ROUTE,
+          GUIDANCE_LOOKUP_ROUTE,
           {
             'enhancedPrompts:getRunState': () =>
               rpcError('Guidance state unavailable'),

@@ -193,6 +193,10 @@ describe('GenerationRunEventAdapter', () => {
           provide: WizardAnalysisRunner,
           useValue: {
             isRunning: signal(false),
+            activeWorkspacePath: signal(null),
+            backendActive: jest.fn(() => false),
+            syncBackendActive: jest.fn(),
+            setCurrentWorkspacePath: jest.fn(),
             isCanceling: signal(false),
             runGeneration: signal(0),
             errorMessage: signal(null),

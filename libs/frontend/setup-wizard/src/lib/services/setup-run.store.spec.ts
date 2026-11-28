@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import * as chatState from '@ptah-extension/chat-state';
 import { SurfaceRouterService, VSCodeService } from '@ptah-extension/core';
@@ -202,6 +203,57 @@ describe('SetupRunStore', () => {
     jest.useRealTimers();
     jest.restoreAllMocks();
     localStorage.clear();
+  });
+
+  it('restores a saved guidance route from a Windows Setup record without a chat tab', async () => {
+    workspace.set('c:/ptah-e2e-ws-a/');
+    seed(
+      record({
+        id: 'e2e-guidance-tab',
+        workspacePath: 'C:\\ptah-e2e-ws-a',
+        workflow: 'project-guidance',
+        status: 'completed',
+        backendRunId: 'e2e-guidance-run',
+      }),
+    );
+    TestBed.configureTestingModule({
+      providers: [
+        provideRouter([
+          { path: 'onboarding/analyze/guidance', children: [] },
+          { path: 'onboarding/guidance', children: [] },
+          { path: 'onboarding/analyze/generate', children: [] },
+        ]),
+        SurfaceRouterService,
+        {
+          provide: SurfaceRouterService.generationRouteTabValidatorToken,
+          useFactory: (runs: SetupRunStore) =>
+            runs.canRestoreGenerationRoute.bind(runs),
+          deps: [SetupRunStore],
+        },
+      ],
+    });
+    const surface = TestBed.inject(SurfaceRouterService);
+    const router = TestBed.inject(Router);
+    const route =
+      '/onboarding/analyze/guidance?tab=e2e-guidance-tab&run=e2e-guidance-run';
+
+    expect(await surface.navigateToUrl(route)).toBe('navigated');
+    expect(router.url).toBe(route);
+    const standalone = '/onboarding/guidance?tab=e2e-guidance-tab';
+    expect(await surface.navigateToUrl(standalone)).toBe('navigated');
+    expect(router.url).toBe(standalone);
+
+    expect(
+      await surface.navigateToUrl('/onboarding/guidance?tab=missing'),
+    ).toBe('failed');
+    expect(
+      await surface.navigateToUrl(
+        '/onboarding/analyze/generate?tab=e2e-guidance-tab',
+      ),
+    ).toBe('failed');
+    workspace.set('C:\\other-workspace');
+    expect(await surface.navigateToUrl(route)).toBe('failed');
+    expect(router.url).toBe(standalone);
   });
 
   describe('status mapping: agent generation and guidance', () => {
@@ -660,11 +712,14 @@ describe('SetupRunStore', () => {
       expect(store.runs()[0].status).toBe('interrupted');
     });
 
-    it('adopts legacy chat tabs under their tab id', async () => {
-      legacyTabs.mockReturnValue([
+  it('adopts a legacy chat tab in time to validate its saved route', () => {
+    legacyTabs.mockReturnValueOnce([
         binding('legacy-tab-1', 'setup-project-prompt'),
       ]);
-      const store = await create();
+    const store = TestBed.inject(SetupRunStore);
+    expect(
+      store.canRestoreGenerationRoute('legacy-tab-1', 'setup-project-prompt'),
+    ).toBe(true);
       const adopted = store.get('legacy-tab-1');
       expect(adopted?.workflow).toBe('project-guidance');
       expect(adopted?.workspacePath).toBe(WS);
