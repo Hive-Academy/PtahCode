@@ -60,6 +60,7 @@ describe('Electron RPC surface', () => {
         'wizard:get-project-guidance',
         'wizard:preview-skills-for-consent',
         'wizard:install-skills-with-consent',
+        'wizard:cancel-skill-install',
       ]),
     );
   });

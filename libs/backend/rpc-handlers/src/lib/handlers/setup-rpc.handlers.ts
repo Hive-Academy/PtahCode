@@ -1441,6 +1441,12 @@ export class SetupRpcHandlers {
           'UNAUTHORIZED_WORKSPACE',
         );
       }
+      if (installRunId && this.skillInstallRuns.has(installRunId)) {
+        throw new RpcUserError(
+          'A skill install with this run ID is already running.',
+          'INVALID_PARAMS',
+        );
+      }
       if (params.skills.length === 0) {
         return {
           success: true,
@@ -1453,12 +1459,6 @@ export class SetupRpcHandlers {
         throw new RpcUserError(
           'No workspace folder open.',
           'WORKSPACE_NOT_OPEN',
-        );
-      }
-      if (installRunId && this.skillInstallRuns.has(installRunId)) {
-        throw new RpcUserError(
-          'A skill install with this run ID is already running.',
-          'INVALID_PARAMS',
         );
       }
 
@@ -1579,15 +1579,29 @@ export class SetupRpcHandlers {
         HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE,
         'SkillSyncGate',
       );
-      const selectionSaved = gate.keepSelected(
-        workspaceRoot,
-        installed.map((name) => name.split('/')[2]),
-      );
-      if (!selectionSaved) {
-        throw new RpcUserError(
-          'Could not save the skill selection.',
-          'PERSISTENCE_UNAVAILABLE',
+      let selectionSaved = false;
+      try {
+        selectionSaved = gate.keepSelected(
+          workspaceRoot,
+          installed.map((name) => name.split('/')[2]),
         );
+      } catch (error) {
+        this.logger.error(
+          'Failed to save the skill selection',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+      if (!selectionSaved) {
+        return {
+          success: false,
+          workspacePath: workspaceRoot,
+          installed,
+          cancelled: signal.aborted,
+          failedSkill: failure?.failedSkill,
+          reason: [failure?.reason, 'Could not save the skill selection.']
+            .filter(Boolean)
+            .join(' '),
+        };
       }
       const propagation = this.resolveService<HarnessPropagationService>(
         HARNESS_SYNC_TOKENS.PROPAGATION,

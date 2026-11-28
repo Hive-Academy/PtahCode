@@ -239,7 +239,7 @@ describe('wizard skill installation', () => {
     },
   );
 
-  it('stops after the in-flight skill on cancellation and reports the confirmed write', async () => {
+  it('rejects duplicate IDs and keeps the original run cancellable after its in-flight write', async () => {
     consent.hasScripts.mockReturnValue(false);
     getWorkspaceRoot.mockReturnValue(otherWorkspace);
     const { started, resume } = pauseNextStage();
@@ -247,14 +247,21 @@ describe('wizard skill installation', () => {
     const installSkills = method();
     const cancel = methods.get('wizard:cancel-skill-install');
     if (!cancel) throw new Error('The cancel RPC was not registered.');
-    const result = installSkills({
+    const params = {
       skills: ['owner/repo/example', 'owner/repo/second'],
       consentRecords: [],
       workspacePath: workspaceRoot,
       installRunId,
-    });
+    };
+    const result = installSkills(params);
     await started;
     try {
+      await expect(installSkills(params)).rejects.toMatchObject({
+        errorCode: 'INVALID_PARAMS',
+      });
+      await expect(
+        installSkills({ ...params, skills: [] }),
+      ).rejects.toMatchObject({ errorCode: 'INVALID_PARAMS' });
       await expect(cancel({ installRunId: 'other-run' })).resolves.toEqual({
         cancelled: false,
       });
@@ -282,12 +289,15 @@ describe('wizard skill installation', () => {
     });
   });
 
-  it('rejects a path inside an open workspace when it is not a registered root', async () => {
+  it.each([
+    ['an unregistered child', (root: string) => path.join(root, 'unregistered-child')],
+    ['a traversal outside the workspace', (root: string) => `${root}/../unregistered-sibling`],
+  ])('rejects %s as the install root', async (_description, requestedRoot) => {
     await expect(
       method()({
         skills: ['owner/repo/example'],
         consentRecords: [],
-        workspacePath: path.join(workspaceRoot, 'unregistered-child'),
+        workspacePath: requestedRoot(workspaceRoot),
       }),
     ).rejects.toMatchObject({
       message: 'Access denied: workspace path is not an open folder.',
@@ -295,6 +305,83 @@ describe('wizard skill installation', () => {
     });
     expect(install).not.toHaveBeenCalled();
   });
+
+  it('requires an open workspace for a non-empty install', async () => {
+    getWorkspaceRoot.mockReturnValue('');
+    const installSkills = method();
+
+    await expect(
+      installSkills({ skills: ['owner/repo/example'], consentRecords: [] }),
+    ).rejects.toMatchObject({ errorCode: 'WORKSPACE_NOT_OPEN' });
+    await expect(
+      installSkills({ skills: [], consentRecords: [] }),
+    ).resolves.toEqual({ success: true, installed: [], cancelled: false });
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('clears the run registration when the installer throws', async () => {
+    const installSkills = method();
+    const cancel = methods.get('wizard:cancel-skill-install');
+    if (!cancel) throw new Error('The cancel RPC was not registered.');
+    const installRunId = 'failed-run';
+    install.mockRejectedValueOnce(new Error('Installer failed'));
+
+    await expect(
+      installSkills({
+        skills: ['owner/repo/example'],
+        consentRecords: [],
+        installRunId,
+      }),
+    ).resolves.toMatchObject({ success: false, installed: [] });
+    await expect(cancel({ installRunId })).resolves.toEqual({
+      cancelled: false,
+    });
+  });
+
+  it('clears the run registration when install settlement rejects', async () => {
+    consent.hasScripts.mockReturnValue(false);
+    propagate.mockRejectedValueOnce(new Error('Propagation failed'));
+    const installSkills = method();
+    const cancel = methods.get('wizard:cancel-skill-install');
+    if (!cancel) throw new Error('The cancel RPC was not registered.');
+    const installRunId = 'rejected-run';
+    const params = {
+      skills: ['owner/repo/example'],
+      consentRecords: [],
+      installRunId,
+    };
+
+    await expect(installSkills(params)).rejects.toThrow('Propagation failed');
+    await expect(cancel({ installRunId })).resolves.toEqual({
+      cancelled: false,
+    });
+    await expect(installSkills(params)).resolves.toMatchObject({ success: true });
+  });
+
+  it.each(['returns false', 'throws'])(
+    'reports confirmed writes when saving selection %s',
+    async (outcome) => {
+      consent.hasScripts.mockReturnValue(false);
+      if (outcome === 'throws') {
+        keepSelected.mockImplementationOnce(() => {
+          throw new Error('Selection storage failed');
+        });
+      } else {
+        keepSelected.mockReturnValueOnce(false);
+      }
+
+      await expect(
+        method()({ skills: ['owner/repo/example'], consentRecords: [] }),
+      ).resolves.toEqual({
+        success: false,
+        workspacePath: workspaceRoot,
+        installed: ['owner/repo/example'],
+        cancelled: false,
+        reason: 'Could not save the skill selection.',
+      });
+      expect(propagate).not.toHaveBeenCalled();
+    },
+  );
 
   it('refuses unapproved scripts before install or propagation', async () => {
     consent.hasScripts.mockReturnValue(true);

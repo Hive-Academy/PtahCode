@@ -598,6 +598,10 @@ Edge cases:
     drops `installed`, nullish `getWorkspaceFolders()`, cancel method missing in surface asserts).
   - 17b (frontend wiring in `team-builder-run.coordinator.ts` and `analyze-skills.page.ts`):
     after the Batch 12 bounded correction lands.
+    IMPLEMENTED — `impl-report-batch17b.md`; antigravity review 8/10 APPROVED
+    (`code-logic-review-batch17b.md`). Finding 11 closed. Minors 1–4 open: no cancel RPC on
+    workspace invalidation, analyze-skills hides confirmed names on save failure + missing specs,
+    unguarded malformed late reply, Windows path normalization asymmetry.
 
 ## Batch 14: App wiring, validator switch and cleanup — PENDING
 

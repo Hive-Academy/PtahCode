@@ -26,7 +26,11 @@ import {
   type WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
 import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
-import { SetupRunStore, WizardRpcService } from '@ptah-extension/setup-wizard';
+import {
+  normalizeSetupWorkspacePath,
+  SetupRunStore,
+  WizardRpcService,
+} from '@ptah-extension/setup-wizard';
 import { StackSkillStore } from '../proposal/stack-skill.store';
 import type { RecommendationApplyResult } from '../proposal/stack-coverage';
 import { StackSkillConsentComponent } from '../proposal/stack-skill-consent.component';
@@ -1204,8 +1208,12 @@ export class AnalyzeSkillsPage implements OnInit {
 
   public async install(): Promise<void> {
     if (this.skillsInstalled()) return;
+    const workspacePath = this.workspace.config().workspaceRoot;
+    const installWorkspace = normalizeSetupWorkspacePath(workspacePath);
     const previews = this.state.preview();
     if (
+      !workspacePath ||
+      !installWorkspace ||
       this.state.loading() ||
       this.state.stage() !== 'consent' ||
       !previews.length ||
@@ -1216,12 +1224,18 @@ export class AnalyzeSkillsPage implements OnInit {
     )
       return;
     const version = this.version;
+    const isCurrent = (): boolean =>
+      version === this.version &&
+      installWorkspace ===
+        normalizeSetupWorkspacePath(this.workspace.config().workspaceRoot);
     this.state.setStage('installing');
     const consentDate = new Date().toISOString();
     try {
       const response = await this.rpc.call(
         'wizard:install-skills-with-consent',
         {
+          workspacePath,
+          installRunId: crypto.randomUUID(),
           skills: previews.map((item) => item.skillName),
           consentRecords: previews
             .filter((item) => item.hasScripts)
@@ -1232,12 +1246,27 @@ export class AnalyzeSkillsPage implements OnInit {
             })),
         },
       );
-      if (version !== this.version) return;
-      if (!response.isSuccess()) throw new Error('Install failed');
+      if (!isCurrent()) return;
+      if (
+        !response.isSuccess() ||
+        normalizeSetupWorkspacePath(response.data.workspacePath) !==
+          installWorkspace
+      ) {
+        throw new Error('Install failed');
+      }
       this.state.setInstalled(response.data.installed);
-      if (!response.data.success) {
+      if (!response.data.success || response.data.cancelled) {
+        const { cancelled, failedSkill, reason } = response.data;
         this.state.setError(
-          `Some skills could not be installed. ${response.data.failedSkill ?? ''}`,
+          [
+            cancelled
+              ? 'Skill installation was cancelled.'
+              : 'Some skills could not be installed.',
+            failedSkill,
+            reason,
+          ]
+            .filter(Boolean)
+            .join(' '),
         );
         this.closeConsent();
         return;
@@ -1245,7 +1274,7 @@ export class AnalyzeSkillsPage implements OnInit {
       this.skillsInstalledState.set(true);
       await this.continueToGuidance();
     } catch {
-      if (version === this.version) {
+      if (isCurrent()) {
         this.state.setError('Could not install skills. Try again.');
         this.closeConsent();
       }

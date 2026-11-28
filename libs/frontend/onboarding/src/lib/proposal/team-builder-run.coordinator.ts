@@ -15,9 +15,14 @@ import {
 import type {
   DeepProjectAnalysis,
   ProjectGuidance,
+  WizardInstallSkillsWithConsentResponse,
   WizardSkillConsentPreview,
 } from '@ptah-extension/shared';
-import { SetupRunStore, type SetupRunRecord } from '@ptah-extension/setup-wizard';
+import {
+  normalizeSetupWorkspacePath,
+  SetupRunStore,
+  type SetupRunRecord,
+} from '@ptah-extension/setup-wizard';
 import {
   HarnessChatLaunchCancelledError,
   HarnessChatLauncherService,
@@ -113,6 +118,7 @@ interface ActiveExecution {
   readonly workspacePath: string;
   readonly intent: string;
   readonly controller: AbortController;
+  installRunId?: string;
   installed: string[];
   abortedForWorkspace: boolean;
   workspaceSwitchedDuringSend: boolean;
@@ -490,6 +496,9 @@ export class TeamBuilderRunCoordinator {
     }
     if (execution) {
       this.executions.delete(recordId);
+      if (execution.installRunId) {
+        void this.cancelSkillInstall(execution.installRunId);
+      }
     }
     this.setGuidanceNote(recordId, '');
     const cancelled = await this.setupRuns.cancel(recordId);
@@ -502,6 +511,29 @@ export class TeamBuilderRunCoordinator {
       this.setupRuns.report(recordId, { step: 'intent', error: null });
     }
     return cancelled;
+  }
+
+  private async cancelSkillInstall(installRunId: string): Promise<void> {
+    try {
+      const result = await this.rpc.call('wizard:cancel-skill-install', {
+        installRunId,
+      });
+      if (!result.isSuccess()) {
+        throw new Error(
+          rpcMessage(result, 'Could not request skill install cancellation.'),
+        );
+      }
+    } catch (cause: unknown) {
+      // degradation-audit: reported - a failed cancel request leaves the install reply observable.
+      this.logger.debug?.(
+        'TeamBuilderRunCoordinator',
+        'Skill install cancellation request failed',
+        {
+          installRunId,
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+      );
+    }
   }
 
   /**
@@ -665,14 +697,15 @@ export class TeamBuilderRunCoordinator {
           contentHash: item.contentHash,
           consentDate,
         }));
-      // Do not pass execution.controller.signal to ClaudeRpcService here:
-      // ClaudeRpcService deletes its response handler on signal abort without
-      // stopping backend installation, which would discard real install
-      // evidence. Race with awaitWithAbort so the frontend stops immediately
-      // while late settlement stays observable and workspace-guarded.
+      // Keep the transport reply handler alive for the final install effects.
+      // Local abort stops the launch while the cancel RPC stops backend work.
+      const installRunId = crypto.randomUUID();
+      execution.installRunId = installRunId;
       const installRpc = this.rpc.call('wizard:install-skills-with-consent', {
         skills: request.previews.map((item) => item.skillName),
         consentRecords,
+        workspacePath: execution.workspacePath,
+        installRunId,
       });
       const result = await this.awaitWithAbort(
         installRpc,
@@ -681,8 +714,11 @@ export class TeamBuilderRunCoordinator {
 
       if (result === null) {
         void installRpc.then(
-          (lateResult) =>
-            this.handleLateInstallSettlement(request, execution, lateResult),
+          (lateResult) => {
+            if (lateResult.isSuccess()) {
+              this.recordStoppedInstall(request, lateResult.data);
+            }
+          },
           (cause: unknown) => {
             this.logger.debug?.(
               'TeamBuilderRunCoordinator',
@@ -697,8 +733,11 @@ export class TeamBuilderRunCoordinator {
         return this.inactiveOutcome(request.recordId, execution);
       }
 
+      execution.installRunId = undefined;
       if (!this.isStillActive(request.recordId, execution)) {
-        this.handleLateInstallSettlement(request, execution, result);
+        if (result.isSuccess()) {
+          this.recordStoppedInstall(request, result.data);
+        }
         return this.inactiveOutcome(request.recordId, execution);
       }
 
@@ -713,10 +752,21 @@ export class TeamBuilderRunCoordinator {
         return { kind: 'failed', error, installed: [] };
       }
 
-      const installed = Array.isArray(result.data?.installed)
-        ? [...result.data.installed]
-        : [];
+      if (!this.installRecord(request.recordId, result.data.workspacePath)) {
+        throw new Error('Skill install reply did not match the run workspace.');
+      }
+      const installed = [...result.data.installed];
       execution.installed = installed;
+      if (result.data.cancelled) {
+        this.clearRecovery(request.recordId);
+        this.setupRuns.report(request.recordId, {
+          status: 'cancelled',
+          step: 'intent',
+          error: null,
+          teamBuilder: { intent: request.intent, installed },
+        });
+        return { kind: 'cancelled' };
+      }
       if (!result.data.success) {
         const failed = result.data.failedSkill
           ? `Failed: ${result.data.failedSkill}. `
@@ -725,7 +775,13 @@ export class TeamBuilderRunCoordinator {
         const installedSummary = installed.length
           ? `Installed: ${installed.join(', ')}. `
           : '';
-        const error = `${failed}${reason}${installedSummary}Review the skills and try again.`;
+        const pending = request.previews.filter(
+          (item) => !installed.includes(item.skillName),
+        );
+        const pendingSummary = pending.length
+          ? `Still to install: ${pending.length}. `
+          : '';
+        const error = `${failed}${reason}${installedSummary}${pendingSummary}Review the skills and try again.`;
         this.setupRuns.report(request.recordId, {
           status: 'failed',
           step: 'review',
@@ -775,41 +831,40 @@ export class TeamBuilderRunCoordinator {
     }
   }
 
-  private handleLateInstallSettlement(
+  private recordStoppedInstall(
     request: TeamBuilderInstallRequest,
-    execution: ActiveExecution,
-    result: {
-      isSuccess: () => boolean;
-      data?: { success?: boolean; installed?: readonly string[] };
-    },
+    result: WizardInstallSkillsWithConsentResponse,
   ): void {
-    const record = this.setupRuns.get(request.recordId);
-    if (!record || record.workspacePath !== execution.workspacePath) return;
-    if (execution.abortedForWorkspace) {
-      // Backend wizard:install-skills-with-consent currently resolves the
-      // active workspace root dynamically per skill. After a workspace switch
-      // we cannot verify which workspace received late writes, so keep
-      // recovery conservative (do not mark installCompleted or mutate either
-      // workspace's records).
-      this.logger.debug?.(
-        'TeamBuilderRunCoordinator',
-        'Ignored late install settlement after workspace switch',
-        {
-          recordId: request.recordId,
-          workspacePath: execution.workspacePath,
-        },
-      );
-      return;
-    }
-    if (!result.isSuccess() || !Array.isArray(result.data?.installed)) return;
-    const installed = [...result.data.installed];
-    if (installed.length === 0) return;
-    execution.installed = installed;
-    if (record.status === 'cancelled') {
+    const record = this.installRecord(request.recordId, result.workspacePath);
+    if (
+      result.installed.length &&
+      (record?.status === 'cancelled' || record?.status === 'interrupted')
+    ) {
+      const installed = [
+        ...new Set([
+          ...(record.teamBuilder?.installed ?? []),
+          ...result.installed,
+        ]),
+      ];
       this.setupRuns.report(request.recordId, {
-        teamBuilder: { intent: request.intent, installed },
+        teamBuilder: {
+          intent: record.teamBuilder?.intent ?? request.intent,
+          installed,
+        },
       });
     }
+  }
+
+  private installRecord(
+    recordId: string,
+    replyWorkspacePath: string | undefined,
+  ): SetupRunRecord | null {
+    const record = this.setupRuns.get(recordId);
+    const replyWorkspace = normalizeSetupWorkspacePath(replyWorkspacePath);
+    return replyWorkspace &&
+      replyWorkspace === normalizeSetupWorkspacePath(record?.workspacePath)
+      ? record
+      : null;
   }
 
   private async executeLaunch(

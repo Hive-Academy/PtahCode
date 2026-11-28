@@ -30,6 +30,9 @@ import { AnalysisStepStore } from './analysis-step.store';
 import { AnalyzeSkillsPage } from './analyze-skills.page';
 
 jest.mock('@ptah-extension/setup-wizard', () => ({
+  normalizeSetupWorkspacePath: jest.requireActual<typeof import('@ptah-extension/setup-wizard')>(
+    '@ptah-extension/setup-wizard',
+  ).normalizeSetupWorkspacePath,
   SetupRunStore: class SetupRunStore {},
   WizardRpcService: class WizardRpcService {},
 }));
@@ -752,11 +755,17 @@ describe('AnalyzeSkillsPage', () => {
     button.click();
     await fixture.whenStable();
     expect(fixture.componentInstance.state.stage()).toBe('consent');
-    call.mockImplementationOnce((method: string) => {
+    call.mockImplementationOnce((method: string, params: unknown) => {
       expect(method).toBe('wizard:install-skills-with-consent');
+      expect(params).toEqual({
+        skills: ['owner/repo/angular'],
+        consentRecords: [],
+        workspacePath: '/ws',
+        installRunId: expect.any(String),
+      });
       return Promise.resolve({
         isSuccess: () => true,
-        data: { success: true, installed: ['owner/repo/angular'] },
+        data: { success: true, installed: ['owner/repo/angular'], workspacePath: '/ws' },
       });
     });
     await fixture.componentInstance.install();
@@ -778,6 +787,41 @@ describe('AnalyzeSkillsPage', () => {
       ['/onboarding', 'analyze', 'guidance'],
       expect.anything(),
     );
+  });
+
+  it('does not apply install effects reported for another workspace', async () => {
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const page = fixture.componentInstance;
+    page.state.openConsent([
+      {
+        skillName: 'owner/repo/one',
+        files: [],
+        scriptFiles: [],
+        hasScripts: false,
+        contentHash: 'hash',
+      },
+    ]);
+    call.mockResolvedValueOnce({
+      isSuccess: () => true,
+      data: {
+        success: true,
+        installed: ['owner/repo/one'],
+        workspacePath: '/other',
+      },
+    });
+
+    await page.install();
+
+    expect(call).toHaveBeenCalledWith(
+      'wizard:install-skills-with-consent',
+      expect.objectContaining({ workspacePath: '/ws' }),
+    );
+    expect(page.state.installed()).toEqual([]);
+    expect(page.skillsInstalled()).toBe(false);
+    expect(page.state.stage()).toBe('review');
+    expect(TestBed.inject(Router).navigate).not.toHaveBeenCalled();
   });
 
   it('blocks consent preview and duplicate re-runs during Setup preflight, then protects open consent', async () => {
@@ -862,7 +906,7 @@ describe('AnalyzeSkillsPage', () => {
     expect(call).toHaveBeenCalledTimes(4);
     settleInstallation({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/angular'] },
+      data: { success: true, installed: ['owner/repo/angular'], workspacePath: '/ws' },
     });
     await installation;
   });
@@ -1152,7 +1196,7 @@ describe('AnalyzeSkillsPage', () => {
         else
           call.mockResolvedValueOnce({
             isSuccess: () => true,
-            data: { success: false, installed: [] },
+            data: { success: false, installed: [], workspacePath: '/ws' },
           });
         TestBed.inject(Router).navigate = jest.fn().mockResolvedValue(false);
         await page.install();
@@ -1187,7 +1231,7 @@ describe('AnalyzeSkillsPage', () => {
       fixture.detectChanges();
       call.mockResolvedValueOnce({
         isSuccess: () => true,
-        data: { success: true, installed: ['owner/repo/one'] },
+        data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
       });
       const navigate = jest.spyOn(TestBed.inject(Router), 'navigate');
       if (failure === 'reject')

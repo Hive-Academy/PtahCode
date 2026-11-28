@@ -65,6 +65,11 @@ describe('sameWorkspaceRoot', () => {
       });
     }
   });
+  it.each([null, undefined])('returns no root when the folder list is %p', (folders) => {
+    const provider = { ...makeProvider([]), getWorkspaceFolders: jest.fn().mockReturnValue(folders) };
+    expect(findOpenWorkspaceRoot(FOLDER, provider)).toBeUndefined();
+  });
+
   it('keeps case significant on non-Windows hosts', () => {
     expect(
       sameWorkspaceRoot('/Users/Ann/MyApp', '/users/ann/myapp', 'linux'),

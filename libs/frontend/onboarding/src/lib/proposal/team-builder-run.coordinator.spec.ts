@@ -15,7 +15,10 @@ import {
   type ClosedTabEvent,
   type ModelRefreshControl,
 } from '@ptah-extension/chat-state';
-import { SessionId } from '@ptah-extension/shared';
+import {
+  SessionId,
+  type WizardInstallSkillsWithConsentResponse,
+} from '@ptah-extension/shared';
 import {
   AppStateManager,
   ClaudeRpcService,
@@ -324,7 +327,7 @@ describe('TeamBuilderRunCoordinator', () => {
   it('completes install-then-launch detached without stealing focus and records handoffTabId and handed-off', async () => {
     let finishInstall!: (value: {
       isSuccess: () => boolean;
-      data: { success: boolean; installed: string[] };
+      data: WizardInstallSkillsWithConsentResponse;
     }) => void;
     rpcCall.mockImplementationOnce(
       () =>
@@ -366,7 +369,7 @@ describe('TeamBuilderRunCoordinator', () => {
     coordinator.detachView('setup-tb-1');
     finishInstall({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/qa'] },
+      data: { success: true, installed: ['owner/repo/qa'], workspacePath: '/ws' },
     });
 
     const outcome = await pending;
@@ -543,7 +546,7 @@ describe('TeamBuilderRunCoordinator', () => {
     });
   });
 
-  it('immediately resolves live runs to interrupted on root workspace switch A -> B -> A between two selected skills using production abort transport and ignores untrusted late writes', async () => {
+  it('immediately resolves live runs to interrupted on workspace switch and records late confirmed writes only in the originating workspace', async () => {
     records.set(
       'setup-tb-b',
       makeRecord({
@@ -557,7 +560,7 @@ describe('TeamBuilderRunCoordinator', () => {
     let transport!: ReturnType<
       typeof createProductionAbortRpc<{
         isSuccess: () => boolean;
-        data: { success: boolean; installed: string[] };
+        data: WizardInstallSkillsWithConsentResponse;
       }>
     >;
     rpcCall.mockImplementationOnce(
@@ -612,14 +615,13 @@ describe('TeamBuilderRunCoordinator', () => {
     expect(createTab).not.toHaveBeenCalled();
     expect(sendOrQueueMessage).not.toHaveBeenCalled();
 
-    // Switch back B -> A and let the backend install reply arrive late.
-    workspaceRoot.set('/ws');
-    TestBed.tick();
+    // The install settles for A while B is active.
     transport.resolveBackend({
       isSuccess: () => true,
       data: {
         success: true,
         installed: ['owner/repo/qa-one', 'owner/repo/qa-two'],
+        workspacePath: '/ws/',
       },
     });
     await Promise.resolve();
@@ -628,11 +630,12 @@ describe('TeamBuilderRunCoordinator', () => {
     expect(transport.wasAbortedByTransport()).toBe(false);
     expect(createTab).not.toHaveBeenCalled();
     expect(sendOrQueueMessage).not.toHaveBeenCalled();
-    // Conservative recovery: untrusted cross-workspace late writes do not mark
-    // installCompleted or mutate workspace B's record.
     expect(records.get('setup-tb-1')).toMatchObject({
       status: 'interrupted',
-      teamBuilder: { intent: 'Build a QA team', installed: [] },
+      teamBuilder: {
+        intent: 'Build a QA team',
+        installed: ['owner/repo/qa-one', 'owner/repo/qa-two'],
+      },
     });
     expect(coordinator.hasCompletedInstall('setup-tb-1')).toBe(false);
     expect(records.get('setup-tb-b')).toMatchObject({
@@ -718,7 +721,7 @@ describe('TeamBuilderRunCoordinator', () => {
     rpcCall
       .mockResolvedValueOnce({
         isSuccess: () => true,
-        data: { success: true, installed: ['owner/repo/one'] },
+        data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
       })
       .mockResolvedValueOnce({
         isSuccess: () => false,
@@ -836,69 +839,146 @@ describe('TeamBuilderRunCoordinator', () => {
     expect(rpcCall).toHaveBeenCalledTimes(1);
   });
 
-  it('obeys the production RPC abort contract on mid-install cancel so chat launch stops immediately while late install evidence is preserved', async () => {
-    let transport!: ReturnType<
-      typeof createProductionAbortRpc<{
-        isSuccess: () => boolean;
-        data: { success: boolean; installed: string[] };
-      }>
-    >;
-    rpcCall.mockImplementationOnce(
-      (
-        _method: string,
-        _params: unknown,
-        options?: { signal?: AbortSignal },
-      ) => {
-        transport = createProductionAbortRpc(options);
-        return transport.promise;
-      },
-    );
+  it.each([
+    ['/ws/', ['owner/repo/one']],
+    ['/ws-b', []],
+  ])(
+    'attributes a cancelled install reply from %s after switching to B',
+    async (replyWorkspacePath, expectedInstalled) => {
+      let transport!: ReturnType<
+        typeof createProductionAbortRpc<{
+          isSuccess: () => boolean;
+          data: WizardInstallSkillsWithConsentResponse;
+        }>
+      >;
+      rpcCall.mockImplementationOnce(
+        (
+          _method: string,
+          _params: unknown,
+          options?: { signal?: AbortSignal },
+        ) => {
+          transport = createProductionAbortRpc(options);
+          return transport.promise;
+        },
+      );
 
-    const pending = coordinator.installAndLaunch({
+      const pending = coordinator.installAndLaunch({
+        recordId: 'setup-tb-1',
+        workspacePath: '/ws',
+        intent: 'Build a team',
+        previews: [
+          {
+            skillName: 'owner/repo/one',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash',
+          },
+          {
+            skillName: 'owner/repo/two',
+            files: [],
+            scriptFiles: [],
+            hasScripts: false,
+            contentHash: 'hash-2',
+          },
+        ],
+        guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
+        guidanceFacts: [],
+        ownerDecision: null,
+        attachmentSnapshot: makeSnapshot(),
+      });
+
+      const installParams = rpcCall.mock.calls[0][1];
+      expect(rpcCall).toHaveBeenNthCalledWith(
+        1,
+        'wizard:install-skills-with-consent',
+        {
+          skills: ['owner/repo/one', 'owner/repo/two'],
+          consentRecords: [],
+          workspacePath: '/ws',
+          installRunId: expect.any(String),
+        },
+      );
+      rpcCall.mockResolvedValueOnce({
+        isSuccess: () => true,
+        data: { cancelled: true },
+      });
+      const cancelled = await coordinator.cancel('setup-tb-1');
+      expect(rpcCall).toHaveBeenNthCalledWith(2, 'wizard:cancel-skill-install', {
+        installRunId: installParams.installRunId,
+      });
+      expect(cancelled).toBe(true);
+      // Coordinator stops immediately without waiting for backend install to finish.
+      const outcome = await pending;
+      expect(outcome).toEqual({ kind: 'cancelled' });
+      expect(createTab).not.toHaveBeenCalled();
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(records.get('setup-tb-1')?.status).toBe('cancelled');
+
+      const otherRecord = makeRecord({ id: 'setup-tb-b', workspacePath: '/ws-b' });
+      records.set(otherRecord.id, otherRecord);
+      workspaceRoot.set('/ws-b');
+      TestBed.tick();
+
+      transport.resolveBackend({
+        isSuccess: () => true,
+        data: {
+          success: false,
+          cancelled: true,
+          installed: ['owner/repo/one'],
+          workspacePath: replyWorkspacePath,
+        },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(transport.wasAbortedByTransport()).toBe(false);
+      expect(createTab).not.toHaveBeenCalled();
+      expect(sendOrQueueMessage).not.toHaveBeenCalled();
+      expect(records.get('setup-tb-1')?.status).toBe('cancelled');
+      expect(records.get('setup-tb-1')?.teamBuilder?.installed).toEqual(
+        expectedInstalled,
+      );
+      expect(coordinator.hasCompletedInstall('setup-tb-1')).toBe(false);
+      expect(records.get(otherRecord.id)).toEqual(otherRecord);
+    },
+  );
+
+  it('records a cancelled install reply for an active run without launching chat', async () => {
+    rpcCall.mockResolvedValueOnce({
+      isSuccess: () => true,
+      data: {
+        success: false,
+        cancelled: true,
+        installed: ['owner/repo/one'],
+        workspacePath: '/ws',
+      },
+    });
+
+    const outcome = await coordinator.installAndLaunch({
       recordId: 'setup-tb-1',
       workspacePath: '/ws',
       intent: 'Build a team',
-      previews: [
-        {
-          skillName: 'owner/repo/one',
-          files: [],
-          scriptFiles: [],
-          hasScripts: false,
-          contentHash: 'hash',
-        },
-      ],
+      previews: ['one', 'two'].map((name) => ({
+        skillName: `owner/repo/${name}`,
+        files: [],
+        scriptFiles: [],
+        hasScripts: false,
+        contentHash: 'hash',
+      })),
       guidanceAnalysis: { projectType: 'unknown', frameworks: [] },
       guidanceFacts: [],
       ownerDecision: null,
       attachmentSnapshot: makeSnapshot(),
     });
 
-    const cancelled = await coordinator.cancel('setup-tb-1');
-    expect(cancelled).toBe(true);
-    // Coordinator stops immediately without waiting for backend install to finish.
-    const outcome = await pending;
     expect(outcome).toEqual({ kind: 'cancelled' });
-    expect(createTab).not.toHaveBeenCalled();
-    expect(sendOrQueueMessage).not.toHaveBeenCalled();
-    expect(records.get('setup-tb-1')?.status).toBe('cancelled');
-
-    // Backend finishes the already-dispatched install; because the transport
-    // handler was not dropped, confirmed installed names are preserved on the
-    // cancelled record without launching chat.
-    transport.resolveBackend({
-      isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'] },
+    expect(records.get('setup-tb-1')).toMatchObject({
+      status: 'cancelled',
+      teamBuilder: { installed: ['owner/repo/one'] },
     });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(transport.wasAbortedByTransport()).toBe(false);
+    expect(coordinator.hasCompletedInstall('setup-tb-1')).toBe(false);
     expect(createTab).not.toHaveBeenCalled();
-    expect(sendOrQueueMessage).not.toHaveBeenCalled();
-    expect(records.get('setup-tb-1')?.status).toBe('cancelled');
-    expect(records.get('setup-tb-1')?.teamBuilder?.installed).toEqual([
-      'owner/repo/one',
-    ]);
   });
 
   it('retains a successful handoff in its original workspace when switching workspaces while the first send is in flight', async () => {

@@ -15,6 +15,7 @@ import {
   LoggingService,
   type ViewType,
 } from '@ptah-extension/core';
+import type { WizardInstallSkillsWithConsentResponse } from '@ptah-extension/shared';
 import {
   SetupRunStore,
   type SetupRunRecord,
@@ -300,7 +301,7 @@ describe('TeamBuilderStartPage', () => {
     page.state.setStage('consent');
     call.mockResolvedValueOnce({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'] },
+      data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
     });
     sendOrQueueMessage.mockRejectedValueOnce(new Error('navigation failed'));
     await page.install();
@@ -340,7 +341,7 @@ describe('TeamBuilderStartPage', () => {
   it('closes the consent modal on install so Back and Cancel are reachable by mouse and keyboard while installing', async () => {
     let finishInstall!: (value: {
       isSuccess: () => boolean;
-      data: { success: boolean; installed: string[] };
+      data: WizardInstallSkillsWithConsentResponse;
     }) => void;
     call.mockImplementation(async (method: string) => {
       if (method === 'wizard:install-skills-with-consent') {
@@ -414,7 +415,7 @@ describe('TeamBuilderStartPage', () => {
     await fixture.whenStable();
     finishInstall({
       isSuccess: () => true,
-      data: { success: true, installed: [] },
+      data: { success: true, installed: [], workspacePath: '/ws' },
     });
     await fixture.whenStable();
     fixture.detectChanges();
@@ -636,7 +637,7 @@ describe('TeamBuilderStartPage', () => {
   it('keeps installing and launching in the background without stealing focus when the page is destroyed or Back is clicked', async () => {
     let finishInstall!: (value: {
       isSuccess: () => boolean;
-      data: { success: boolean; installed: string[] };
+      data: WizardInstallSkillsWithConsentResponse;
     }) => void;
     call.mockImplementationOnce(
       () =>
@@ -668,7 +669,7 @@ describe('TeamBuilderStartPage', () => {
 
     finishInstall({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'] },
+      data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
     });
     await pending;
 
@@ -689,7 +690,7 @@ describe('TeamBuilderStartPage', () => {
   it('interrupts a detached installing run on workspace switch A -> B -> A and remounts A in interrupted recovery', async () => {
     let finishInstall!: (value: {
       isSuccess: () => boolean;
-      data: { success: boolean; installed: string[] };
+      data: WizardInstallSkillsWithConsentResponse;
     }) => void;
     call.mockImplementationOnce(
       () =>
@@ -724,7 +725,7 @@ describe('TeamBuilderStartPage', () => {
     TestBed.tick();
     finishInstall({
       isSuccess: () => true,
-      data: { success: true, installed: [] },
+      data: { success: true, installed: [], workspacePath: '/ws' },
     });
     await pending;
 
@@ -870,7 +871,7 @@ describe('TeamBuilderStartPage', () => {
 
     call.mockResolvedValueOnce({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'] },
+      data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
     });
     sendOrQueueMessage.mockRejectedValueOnce(new Error('send failed'));
     await page1.install();
@@ -1214,6 +1215,7 @@ describe('TeamBuilderStartPage', () => {
           ? {
               success: false,
               installed: ['first'],
+              workspacePath: '/ws',
               failedSkill: '<broken>',
               reason: 'Copy failed.',
             }
@@ -1313,7 +1315,7 @@ describe('TeamBuilderStartPage', () => {
   it('keeps install state when the consent dialog requests closure', async () => {
     let finish!: (value: {
       isSuccess: () => boolean;
-      data: { success: boolean; installed: string[] };
+      data: WizardInstallSkillsWithConsentResponse;
     }) => void;
     call.mockImplementation(
       () =>
@@ -1338,7 +1340,7 @@ describe('TeamBuilderStartPage', () => {
     expect(page.state.stage()).toBe('installing');
     await page.install();
     expect(call).toHaveBeenCalledTimes(1);
-    finish({ isSuccess: () => true, data: { success: false, installed: [] } });
+    finish({ isSuccess: () => true, data: { success: false, installed: [], workspacePath: '/ws' } });
     await pending;
   });
 
@@ -1482,7 +1484,7 @@ describe('TeamBuilderStartPage', () => {
     ]);
     call.mockResolvedValueOnce({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/skill'] },
+      data: { success: true, installed: ['owner/repo/skill'], workspacePath: '/ws' },
     });
     sendOrQueueMessage.mockRejectedValue(new Error('offline'));
     await page.install();
@@ -1527,7 +1529,7 @@ describe('TeamBuilderStartPage', () => {
 
     call.mockResolvedValueOnce({
       isSuccess: () => true,
-      data: { success: true, installed: ['owner/repo/one'] },
+      data: { success: true, installed: ['owner/repo/one'], workspacePath: '/ws' },
     });
     sendOrQueueMessage.mockRejectedValueOnce(new Error('send failed'));
     await page1.install();
