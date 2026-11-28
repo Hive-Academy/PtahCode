@@ -14,6 +14,7 @@ import type {
   ProviderSessionChatPorts,
   ProviderSessionReleaseReason,
 } from './provider-session-chat-ports';
+import { providerSessionRuntimeErrorCode } from './provider-session-error-mapping';
 import type { ProviderSessionChatSession as Session } from './provider-session-turn-stream';
 
 /** An open in progress, keyed by its tab id (and its session id on resume). */
@@ -240,10 +241,20 @@ export class ProviderSessionSessionControls {
         );
       }
       if (session.inheritedPermission === permission) return;
-      await this.apply(session, 'permission', (live) =>
-        live.setPermission(permission),
-      );
       session.inheritedPermission = permission;
+      const live = this.deps.current(session);
+      if (!live) return;
+      try {
+        await live.setPermission(permission);
+      } catch (error) {
+        // A later attach must apply the new level before it can reuse a process.
+        session.live = undefined;
+        session.approvals.cancelAll('superseded');
+        const failure = this.deps.failure(error, 'permission');
+        if (providerSessionRuntimeErrorCode(error) !== 'process-exited')
+          throw failure;
+        await this.deps.ports.release(session.id, 'broken');
+      }
     });
   }
 
@@ -253,7 +264,11 @@ export class ProviderSessionSessionControls {
   ): Promise<void> {
     // Attaching, refreshing, and toggling can target the same session.
     const previous = this.permissionChanges.get(session) ?? Promise.resolve();
-    const pending = previous.catch(() => undefined).then(change);
+    const pending = previous
+      .catch(() => {
+        // degradation-audit: reported - the earlier caller receives its own rejection.
+      })
+      .then(change);
     this.permissionChanges.set(session, pending);
     return pending;
   }

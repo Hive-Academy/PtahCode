@@ -901,6 +901,65 @@ describe('ProviderSessionChatAdapter', () => {
     },
   );
 
+  it.each([
+    { result: 'prompts after applying the new level', rejectPermission: false },
+    {
+      result: 'fails closed if permission is rejected',
+      rejectPermission: true,
+    },
+  ])(
+    'replaces a process that exited before permission refresh and $result',
+    async ({ rejectPermission }) => {
+      const h = setup({ readSavedPermissionLevel: () => 'ask' });
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'yolo',
+      });
+      const { id, live } = await startCompleted(h);
+      live.setPermission.mockRejectedValue(
+        Object.assign(new Error('Provider exited'), { code: 'process-exited' }),
+      );
+      const replacement = new FakeProviderSession(
+        live.nativeSessionId,
+        2,
+        live.approvals,
+      );
+      if (rejectPermission)
+        replacement.setPermission.mockRejectedValue(
+          new Error('Permission refused'),
+        );
+      h.acquire.mockImplementationOnce(async (request) => {
+        expect(h.pool.has(request.sessionId)).toBe(false);
+        h.pool.set(request.sessionId, replacement);
+        return replacement;
+      });
+
+      const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+      const events = collect(stream);
+      if (rejectPermission) {
+        await expectCode(events, 'runtime-failed');
+        expect(replacement.prompt).not.toHaveBeenCalled();
+      } else {
+        await promptedTurn(replacement);
+        expect(
+          replacement.setPermission.mock.invocationCallOrder[0],
+        ).toBeLessThan(replacement.prompt.mock.invocationCallOrder[0]);
+        replacement.emit({
+          type: 'terminal',
+          status: 'completed',
+          disposition: 'reusable',
+        });
+        await events;
+      }
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+      expect(live.setPermission).toHaveBeenLastCalledWith('ask');
+      expect(h.ports.release).toHaveBeenCalledWith(id, 'broken');
+      expect(h.acquire.mock.lastCall?.[0].permission).toBe('ask');
+      expect(replacement.setPermission).toHaveBeenCalledWith('ask');
+      expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+    },
+  );
+
   it('applies a permission toggle queued during replacement attach before prompting', async () => {
     const h = setup({ readSavedPermissionLevel: () => 'yolo' });
     const { id, live } = await startCompleted(h);
@@ -949,28 +1008,28 @@ describe('ProviderSessionChatAdapter', () => {
     await events;
   });
 
-  it('applies explicit permissionLevel on open and reports it via getPermissionLevel', async () => {
-    const h = setup();
-    const stream = await h.adapter.startChatSession({
-      tabId: 'tab-yolo',
-      prompt: 'hello',
-      permissionLevel: 'yolo',
-    });
-    const events = collect(stream);
-    const live = h.lives[0];
-    await promptedTurn(live);
-    live.emit({
-      type: 'terminal',
-      status: 'completed',
-      disposition: 'reusable',
-    });
-    await events;
-    const id = h.resolved.mock.calls[0][1] as SessionId;
+  it.each([
+    { config: { permissionLevel: 'yolo' as const }, expected: 'yolo' },
+    { config: {}, expected: 'ask' },
+  ])(
+    'passes $expected on first acquisition and applies it on open',
+    async ({ config, expected }) => {
+      const h = setup();
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'ask',
+      });
+      await collect(
+        await h.adapter.startChatSession({ tabId: 'tab', ...config }),
+      );
+      const id = h.resolved.mock.calls[0][1] as SessionId;
 
-    expect(live.setPermission).toHaveBeenCalledTimes(1);
-    expect(live.setPermission).toHaveBeenCalledWith('yolo');
-    expect(h.adapter.getPermissionLevel(id)).toBe('yolo');
-  });
+      expect(h.acquire.mock.calls[0][0].permission).toBe(expected);
+      expect(h.lives[0].setPermission).toHaveBeenCalledTimes(1);
+      expect(h.lives[0].setPermission).toHaveBeenCalledWith(expected);
+      expect(h.adapter.getPermissionLevel(id)).toBe(expected);
+    },
+  );
 
   it('skips setPermission on open when permissionLevel is omitted and reads the live default', async () => {
     const h = setup();

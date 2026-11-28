@@ -311,8 +311,12 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       });
       // Read alongside the attach; never rejects.
       const restoring = resumeId ? this.usage.restore(id) : undefined;
-      await this.attach(session, opening.abort.signal, 'tab-closed', () =>
-        this.checkOpening(opening, generation),
+      await this.attach(
+        session,
+        opening.abort.signal,
+        'tab-closed',
+        () => this.checkOpening(opening, generation),
+        session.settings.permission ?? session.inheritedPermission,
       );
       if (restoring)
         session.usage ??= createProviderSessionUsageLedger(

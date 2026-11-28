@@ -97,3 +97,39 @@ prompt.
 - `npx eslint` on all nine changed TypeScript files passed with zero errors and
   one `max-lines` warning for the adapter (770 lines counted, limit 700).
   Resolving the warning would require a larger refactor.
+
+## Round 3
+
+- Marked the permission queue's rejection handler as `reported` for the
+  degradation audit. The earlier caller still receives its rejection, and
+  later changes can run.
+- The first provider acquisition now receives the explicit session permission
+  or the prepared workspace default. Adapter specs cover both inputs.
+- A retained session records the refreshed inherited permission before
+  applying it. If the process has exited, the adapter releases it before
+  acquiring a replacement. The resume specs verify that the replacement
+  applies the refreshed level before prompting and that a rejected application
+  prevents the prompt.
+
+### Round 3 checks
+
+- Focused agent-sdk Jest passed all 61 tests in
+  `provider-session-chat-adapter.spec.ts`. Node emitted the existing ES module
+  configuration warning.
+- `npx tsc --noEmit --project libs/backend/agent-sdk/tsconfig.lib.json` passed.
+- ESLint passed on the three changed TypeScript files with zero errors and one
+  existing `max-lines` warning for the adapter (774 lines, limit 700).
+- `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`
+  reported `TOTAL 0 unsuppressed site(s)`.
+
+### PR reply for the initial acquisition thread
+
+The initial attach now passes the explicit permission or the prepared
+workspace default to the open request. An explicit level skips the saved
+default read, and the adapter spec covers both first-acquisition paths.
+
+### PR reply for the exited process thread
+
+Permission refresh now saves the new level and drops an exited process before
+re-acquiring. The replacement receives the refreshed level before the prompt.
+The regression spec also verifies that a rejected permission prevents prompting.
