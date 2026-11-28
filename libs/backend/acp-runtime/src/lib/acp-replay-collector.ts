@@ -12,8 +12,10 @@
  *   of payload across them: text (merged user chunks included, so one long
  *   chunked message is still one event), serialized tool input and plan
  *   entries. A tool input over {@link ACP_MAX_REPLAY_TOOL_INPUT_CHARS} is
- *   compacted to its short top-level fields first. Beyond either bound the
- *   oldest events are dropped, and payload that still does not fit is cut;
+ *   compacted to its short top-level fields first, except that Edit and
+ *   FileChange presentations are kept whole within the replay text budget.
+ *   Beyond either bound the oldest events are dropped as needed, and payload
+ *   that still does not fit is cut;
  *   one leading `info` says the history was truncated.
  */
 import type {
@@ -99,7 +101,12 @@ function textLength(body: ProviderSessionEventBody): number {
     case 'toolCompleted':
       return body.output.length;
     case 'toolStarted':
-      return body.input ? serializedLength(body.input) : 0;
+      return (
+        (body.input ? serializedLength(body.input) : 0) +
+        (body.presentation?.input ? serializedLength(body.presentation.input) : 0)
+      );
+    case 'toolUpdated':
+      return body.presentation?.input ? serializedLength(body.presentation.input) : 0;
     case 'plan':
       return body.entries.reduce((sum, entry) => sum + entry.content.length, 0);
     default:
@@ -120,9 +127,18 @@ function cutText(
       return { ...body, delta: body.delta.slice(0, chars) };
     case 'toolCompleted':
       return { ...body, output: body.output.slice(0, chars) };
+    case 'toolUpdated':
+      // A dropped snapshot must not replace the last complete presentation.
+      return { ...body, presentation: undefined };
     case 'toolStarted':
       // JSON cannot be cut in part: an input that does not fit is left out.
-      return { ...body, input: undefined };
+      return {
+        ...body,
+        input: undefined,
+        ...(body.presentation
+          ? { presentation: { toolName: body.presentation.toolName } }
+          : {}),
+      };
     case 'plan': {
       let left = chars;
       return {
@@ -179,21 +195,41 @@ export function createAcpReplayCollector(
 
   /** A tool input over the per-input bound is compacted before it is counted. */
   const compacted = (body: ProviderSessionEventBody): ProviderSessionEventBody => {
+    if (body.type !== 'toolStarted' && body.type !== 'toolUpdated') return body;
     if (
-      body.type !== 'toolStarted' ||
-      !body.input ||
-      serializedLength(body.input) <= ACP_MAX_REPLAY_TOOL_INPUT_CHARS
+      body.type === 'toolStarted' &&
+      body.input &&
+      serializedLength(body.input) > ACP_MAX_REPLAY_TOOL_INPUT_CHARS
     ) {
-      return body;
+      compactedInputs++;
+      body = { ...body, input: compactInput(body.input) };
     }
-    compactedInputs++;
-    return { ...body, input: compactInput(body.input) };
+    const presentation = body.presentation;
+    if (
+      presentation?.input &&
+      presentation.toolName !== 'Edit' &&
+      presentation.toolName !== 'FileChange' &&
+      serializedLength(presentation.input) > ACP_MAX_REPLAY_TOOL_INPUT_CHARS
+    ) {
+      compactedInputs++;
+      body = {
+        ...body,
+        presentation: { ...presentation, input: compactInput(presentation.input) },
+      };
+    }
+    return body;
   };
 
   const push = (incoming: ProviderSessionEventBody): void => {
     const body = compacted(incoming);
     const length = textLength(body);
-    const room = makeRoom(length, 0);
+    // Tool input is atomic. If it could never fit, keep older events and
+    // retain the tool metadata so an oversized update cannot evict its start.
+    const room =
+      length > maxTextChars &&
+      (body.type === 'toolStarted' || body.type === 'toolUpdated')
+        ? 0
+        : makeRoom(length, 0);
     const fitted = room < length ? cutText(body, room) : body;
     const kept = room < length ? textLength(fitted) : length;
     cutChars += length - kept;
@@ -281,7 +317,24 @@ export function createAcpReplayCollector(
         type: 'info',
         message: notice(dropped + collected.length - kept.length),
       };
-      return [truncated, ...kept];
+      // A retained full presentation can open its card when the original start
+      // fell outside the replay window. Reuse the update's slot and payload.
+      const starts = new Set<string>();
+      const events = kept.map((event): ProviderSessionEvent => {
+        if (event.type !== 'toolStarted' && event.type !== 'toolUpdated' &&
+            event.type !== 'toolCompleted') return event;
+        const key = JSON.stringify([event.turnId, event.toolId]);
+        if (event.type === 'toolCompleted') {
+          starts.delete(key);
+        } else if (event.type === 'toolStarted') {
+          starts.add(key);
+        } else if (event.presentation && !starts.has(key)) {
+          starts.add(key);
+          return { ...event, type: 'toolStarted', toolName: event.presentation.toolName };
+        }
+        return event;
+      });
+      return [truncated, ...events];
     },
   };
 }

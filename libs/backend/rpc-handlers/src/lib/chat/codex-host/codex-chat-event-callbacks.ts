@@ -118,17 +118,29 @@ export function createCodexChatEventCallbacks(
           event.type === 'approvalSettled'
         )
           return;
-        const route = { sessionId: deps.sessionId, tabId: deps.tabId };
-        // Reuse the existing tool-output channel for file and image artifacts.
+        if (event.type === 'file') {
+          // The native fileChange tool already owns the patch and result.
+          await deps.webviewManager.broadcastMessage(
+            MESSAGE_TYPES.FILE_CONTENT_CHANGED,
+            {
+              sessionId: deps.sessionId,
+              tabId: deps.tabId,
+              filePaths: [event.path],
+              truncated: false,
+            },
+          );
+          return;
+        }
+        // Standalone image artifacts have no native fileChange tool.
         const toolCallId = `codex:${event.itemId}`;
         const start = publish({
           ...base(),
           messageId: JSON.stringify([event.threadId, event.turnId]),
           eventType: 'tool_start',
           toolCallId,
-          toolName: event.type === 'file' ? 'Edit' : 'Image',
+          toolName: 'Image',
           isTaskTool: false,
-          toolInput: event.type === 'file' ? { file_path: event.path } : {},
+          toolInput: {},
         });
         const finish = publish({
           ...base(),
@@ -136,30 +148,18 @@ export function createCodexChatEventCallbacks(
           eventType: 'tool_result',
           toolCallId,
           isError: false,
-          output:
-            event.type === 'file'
-              ? {
-                  file_path: event.path,
-                  operation: event.operation,
-                  diff: event.diff,
-                }
-              : [
-                  {
-                    type: 'image',
-                    source: {
-                      type: 'base64',
-                      data: event.image.data,
-                      media_type: event.image.mediaType,
-                    },
-                  },
-                ],
+          output: [
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                data: event.image.data,
+                media_type: event.image.mediaType,
+              },
+            },
+          ],
         });
         await Promise.all([start, finish]);
-        if (event.type === 'file')
-          await deps.webviewManager.broadcastMessage(
-            MESSAGE_TYPES.FILE_CONTENT_CHANGED,
-            { ...route, filePaths: [event.path], truncated: false },
-          );
       }),
     error: (message, cwd) => safe(() => cwd !== undefined
       ? deps.delivery.publishTerminal(deps.tabId, MESSAGE_TYPES.SESSION_TURN_FAILED, {

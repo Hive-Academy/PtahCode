@@ -11,6 +11,7 @@ import {
   projectToCliSegments,
 } from '@ptah-extension/provider-session-contracts';
 import { connectAcp, type AcpClientHandlers } from './acp-sdk-loader';
+import { createAcpReplayCollector } from './acp-replay-collector';
 import {
   createAcpSessionUpdateMapper as createEventMapper,
   mapStopReason,
@@ -725,5 +726,214 @@ describe('tool calls across ACP updates (PR #1450 review)', () => {
         } as SessionUpdate),
       ),
     ).toMatchObject({ output: 'final', toolName: 'New title' });
+  });
+});
+
+describe('ACP chat tool cards', () => {
+  function projectUpdates() {
+    const mapper = createEventMapper();
+    const projector = createFlatStreamProjector();
+    let sequence = 0;
+    return (update: SessionUpdate) =>
+      mapper.map(update).flatMap((body) =>
+        projector.project({
+          contextId: 'agent',
+          processGeneration: 1,
+          turnId: 'turn',
+          sequence: ++sequence,
+          ...body,
+        }),
+      );
+  }
+
+  it('presents the agy CommandLine field as Bash input', () => {
+    const project = projectUpdates();
+    expect(
+      project({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'shell',
+        kind: 'execute',
+        title: 'pwd',
+        rawInput: { CommandLine: 'pwd', IsDaemon: false },
+      })[1],
+    ).toMatchObject({ toolName: 'Bash', toolInput: { command: 'pwd' } });
+  });
+
+  it('presents a command on the original Bash card when input arrives late, then completes cancellation', () => {
+    const project = projectUpdates();
+    const [message, start] = project({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'shell',
+      kind: 'execute',
+      title: 'Run',
+    });
+    expect(start).toMatchObject({ eventType: 'tool_start', toolName: 'Bash' });
+    // Some agents send cancellation even though the ACP SDK omits that status.
+    const cancelled: unknown = {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'shell',
+      rawInput: { command: 'pwd', cwd: '/work' },
+      status: 'cancelled',
+    };
+    const [update, result] = project(cancelled as SessionUpdate);
+    expect(update).toMatchObject({
+      eventType: 'tool_start',
+      toolCallId: 'shell',
+      toolName: 'Bash',
+      toolInput: { command: 'pwd' },
+      messageId: message.messageId,
+      timestamp: start.timestamp,
+    });
+    expect(update.id).toBe(start.id);
+    expect(result).toMatchObject({
+      eventType: 'tool_result',
+      toolCallId: 'shell',
+      isError: true,
+      output: 'Tool cancelled.',
+    });
+  });
+
+  it('uses Edit when a late diff supplies the old and new text', () => {
+    const project = projectUpdates();
+    expect(
+      project({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'edit',
+        kind: 'edit',
+        title: 'Edit a.ts',
+        locations: [{ path: 'a.ts' }],
+      })[1],
+    ).toMatchObject({
+      toolName: 'FileChange',
+      toolInput: {
+        file_path: 'a.ts',
+        changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '' }],
+      },
+    });
+    expect(
+      project({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'edit',
+        status: 'completed',
+        content: [
+          { type: 'diff', path: 'a.ts', oldText: 'before', newText: 'after' },
+        ],
+      }),
+    ).toMatchObject([
+      {
+        eventType: 'tool_start',
+        toolName: 'Edit',
+        toolCallId: 'edit',
+        toolInput: {
+          file_path: 'a.ts',
+          old_string: 'before',
+          new_string: 'after',
+        },
+      },
+      { eventType: 'tool_result', isError: false },
+    ]);
+  });
+
+  it('keeps multiple diff blocks on one FileChange card', () => {
+    const project = projectUpdates();
+    expect(
+      project({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'delete',
+        kind: 'delete',
+        title: 'Delete files',
+        content: [
+          { type: 'diff', path: 'a.ts', oldText: 'before', newText: '' },
+          { type: 'diff', path: 'b.ts', oldText: 'other', newText: '' },
+        ],
+      })[1],
+    ).toMatchObject({
+      toolName: 'FileChange',
+      toolInput: {
+        changes: [
+          { path: 'a.ts', kind: { type: 'delete' }, diff: 'before' },
+          { path: 'b.ts', kind: { type: 'delete' }, diff: 'other' },
+        ],
+      },
+    });
+  });
+
+  it('replaces the displayed paths when tool content is replaced or cleared', () => {
+    const project = projectUpdates();
+    const first = { type: 'diff', path: 'a.ts', oldText: 'old', newText: 'new' } as const;
+    const second = { ...first, path: 'b.ts' };
+    project({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'edit',
+      kind: 'edit',
+      title: 'Edit files',
+      locations: [{ path: first.path }],
+      content: [first, second],
+    });
+    const update = { sessionUpdate: 'tool_call_update', toolCallId: 'edit' } as const;
+    expect(project({ ...update, content: [second] })).toEqual([
+      expect.objectContaining({
+        eventType: 'tool_start', toolName: 'Edit',
+        toolInput: { file_path: second.path, old_string: 'old', new_string: 'new' },
+      }),
+    ]);
+    expect(project({ ...update, status: 'in_progress' })).toEqual([]);
+    expect(project({ ...update, content: [], status: 'completed' })).toEqual([
+      expect.objectContaining({ eventType: 'tool_start', toolName: 'FileChange', toolInput: undefined }),
+      expect.objectContaining({ eventType: 'tool_result' }),
+    ]);
+  });
+
+  it('preserves a diff from an execute update in the Bash result', () => {
+    const project = projectUpdates();
+    project({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'shell',
+      kind: 'execute',
+      title: 'Run',
+      rawInput: { command: 'patch' },
+    });
+    expect(
+      project({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'shell',
+        status: 'completed',
+        content: [
+          { type: 'diff', path: 'a.ts', oldText: 'before', newText: 'after' },
+        ],
+      }),
+    ).toContainEqual(
+      expect.objectContaining({
+        eventType: 'tool_result',
+        toolCallId: 'shell',
+        output: 'a.ts\n@@ -1,1 +1,1 @@\n-before\n+after',
+      }),
+    );
+  });
+
+  it('counts late presentation input against the replay payload budget', () => {
+    const mapper = createEventMapper();
+    const replay = createAcpReplayCollector(
+      { contextId: 'agent', processGeneration: 1, sessionId: 'session' },
+      { maxTextChars: 100 },
+    );
+    replay.add(
+      mapper.map({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'shell',
+        kind: 'execute',
+        title: 'Run',
+      }),
+    );
+    replay.add(
+      mapper.map({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'shell',
+        rawInput: { command: 'x'.repeat(5_000) },
+      }),
+    );
+    const update = replay.events().find((row) => row.type === 'toolUpdated');
+    expect(update).toBeDefined();
+    expect(update?.presentation).toBeUndefined();
   });
 });

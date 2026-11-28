@@ -654,7 +654,9 @@ export class CodexEventTranslator {
             type: 'toolCompleted',
             toolId: item.id,
             status: toolStatus(item.status),
-            output: null,
+            output: item.status === 'completed'
+              ? boundJson({ changes: item.changes })
+              : null,
           },
         ];
         if (item.status === 'completed') {

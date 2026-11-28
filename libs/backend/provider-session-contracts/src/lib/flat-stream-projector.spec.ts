@@ -34,6 +34,48 @@ describe('createFlatStreamProjector', () => {
     sequence = 0;
   });
 
+  it('keeps the same tool start id and timestamp as late input arrives', () => {
+    let timestamp = 1000;
+    const projector = createFlatStreamProjector({ now: () => timestamp });
+    const start = projector.project(event({
+      type: 'toolStarted',
+      toolId: 'shell',
+      toolName: 'Execute',
+      presentation: { toolName: 'Bash' },
+    })).find((row) => row.eventType === 'tool_start');
+    expect(start).toBeDefined();
+    timestamp += 1000;
+
+    const replacements = projector.project(event({
+      type: 'toolUpdated',
+      toolId: 'shell',
+      presentation: { toolName: 'Bash', input: { command: 'exit 7' } },
+    }));
+    expect(replacements).toEqual([{ ...start, toolInput: { command: 'exit 7' } }]);
+  });
+
+  it.each([
+    [7, true],
+    [0, false],
+    [undefined, false],
+  ])('projects completed shell exit code %s with isError %s', (exitCode, isError) => {
+    const projector = createFlatStreamProjector();
+    const rows = projector.project(event({
+      type: 'toolCompleted',
+      toolId: 'shell',
+      kind: 'execute',
+      status: 'completed',
+      exitCode,
+      output: 'shell output',
+    }));
+    expect(rows).toContainEqual(expect.objectContaining({
+      eventType: 'tool_result',
+      toolCallId: 'shell',
+      isError,
+      output: 'shell output',
+    }));
+  });
+
   it('opens one assistant message per turn and streams text, thinking and tools into it', () => {
     const projector = createFlatStreamProjector({ now: () => 1000 });
     const rows = [

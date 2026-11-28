@@ -1148,7 +1148,7 @@ describe('CodexEventTranslator', () => {
       { type: 'toolStarted', toolId: 'f' },
     ]);
     expect(translator.translate(itemFrame(file, true))).toMatchObject([
-      { type: 'toolCompleted', toolId: 'f' },
+      { type: 'toolCompleted', toolId: 'f', output: { changes: file.changes } },
       { type: 'file', operation: 'add', path: 'file.ts', diff: '+test' },
     ]);
     expect(

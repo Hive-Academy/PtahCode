@@ -2,7 +2,7 @@ import type {
   CodexReportedUsage,
   CodexRuntimeEvent,
 } from '@ptah-extension/codex-runtime';
-import type { FlatStreamEventUnion } from '@ptah-extension/shared';
+import { isFileChangeToolInput, type FlatStreamEventUnion } from '@ptah-extension/shared';
 import { z } from 'zod';
 import { CodexChatAdapterError } from './codex-chat-adapter-error';
 import { presentCodexTool, presentCodexToolResult } from './codex-tool-presentation';
@@ -123,8 +123,10 @@ export class CodexChatEvents {
   private usage?: CodexReportedUsage;
   private readonly text = new Map<string, string>();
   private readonly blocks = new Map<string, number>();
-  /** Raw native tool names by tool id, from toolStarted to toolCompleted. */
-  private readonly tools = new Map<string, string>();
+  private readonly tools = new Map<string, {
+    name: string;
+    fileStart?: Extract<FlatStreamEventUnion, { eventType: 'tool_start' }>;
+  }>();
   private readonly agentStarts = new Set<string>();
   private readonly nativeCards = new Map<string, Extract<CodexRuntimeEvent, { type: 'subagentActivity' }>>();
   private readonly nativeStarts = new Set<string>();
@@ -370,18 +372,25 @@ export class CodexChatEvents {
           },
         ];
       }
-      case 'toolStarted':
-        this.tools.set(event.toolId, event.toolName);
+      case 'toolStarted': {
+        const start = this.toolStartEvent(
+          event.toolId, event.agentThreadIds !== undefined ? 'Task' : event.toolName,
+          event.agentThreadIds !== undefined, base,
+          typeof event.input === 'object' && event.input !== null && !Array.isArray(event.input)
+            ? Object.fromEntries(Object.entries(event.input)) : undefined,
+        );
+        this.tools.set(event.toolId, {
+          name: event.toolName,
+          fileStart: event.toolName === 'fileChange' ? start : undefined,
+        });
         if (event.agentThreadIds !== undefined && typeof event.input === 'object' &&
           event.input !== null && !Array.isArray(event.input))
           this.agentInputs.set(event.toolId, Object.fromEntries(Object.entries(event.input)));
         return [
-          this.toolStartEvent(event.toolId, event.agentThreadIds !== undefined ? 'Task' : event.toolName,
-            event.agentThreadIds !== undefined, base,
-            typeof event.input === 'object' && event.input !== null && !Array.isArray(event.input)
-              ? Object.fromEntries(Object.entries(event.input)) : undefined),
+          start,
           ...this.agentStartEvents(event, base),
         ];
+      }
       case 'subagentActivity': {
         // A limited child is untracked: no child terminal follows, so it
         // settles now as failed and does not hold the background drain.
@@ -405,7 +414,7 @@ export class CodexChatEvents {
       case 'toolCompleted': {
         // The result is shaped like Claude's tool_result for the tool that
         // started (the runtime completion carries no name).
-        const toolName = this.tools.get(event.toolId);
+        const tool = this.tools.get(event.toolId);
         this.tools.delete(event.toolId);
         const starts = this.agentStartEvents(event, base);
         this.agentInputs.delete(event.toolId);
@@ -414,7 +423,7 @@ export class CodexChatEvents {
           eventType: 'tool_result',
           toolCallId: event.toolId,
           ...presentCodexToolResult({
-            toolName,
+            toolName: tool?.name,
             status: event.status,
             output: event.output,
             ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }),
@@ -430,6 +439,12 @@ export class CodexChatEvents {
           });
           const completed = this.completedAgentResult(event.toolId);
           return completed ? [...starts, completed] : starts;
+        }
+        if (tool?.fileStart && event.status === 'completed' && isFileChangeToolInput(event.output)) {
+          const presentation = presentCodexTool(tool.name, { changes: event.output.changes });
+          if (JSON.stringify(presentation.toolInput) !== JSON.stringify(tool.fileStart.toolInput)) {
+            starts.push({ ...tool.fileStart, ...presentation });
+          }
         }
         return [
           ...starts,

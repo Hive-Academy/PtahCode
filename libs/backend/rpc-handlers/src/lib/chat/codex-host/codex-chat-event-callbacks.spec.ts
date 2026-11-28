@@ -159,7 +159,7 @@ describe('Codex chat event callbacks', () => {
       },
     );
   });
-  it('routes file changes through a tool card and the existing file notification', async () => {
+  it('notifies file changes without duplicating the native tool card', async () => {
     const h = harness();
     h.callbacks.live({
       ...identity,
@@ -170,17 +170,7 @@ describe('Codex chat event callbacks', () => {
       diff: '+a',
     });
     await settle();
-    expect(h.delivery.publish).toHaveBeenCalledWith(
-      'tab',
-      sessionId,
-      expect.objectContaining({
-        eventType: 'tool_result',
-        sessionId,
-        messageId,
-        output: { file_path: '/work/a.ts', operation: 'update', diff: '+a' },
-      }),
-      undefined,
-    );
+    expect(h.delivery.publish).not.toHaveBeenCalled();
     expect(h.webviewManager.broadcastMessage).toHaveBeenCalledWith(
       MESSAGE_TYPES.FILE_CONTENT_CHANGED,
       { sessionId, tabId: 'tab', filePaths: ['/work/a.ts'], truncated: false },
