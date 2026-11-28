@@ -127,12 +127,14 @@ function cutText(
       return { ...body, delta: body.delta.slice(0, chars) };
     case 'toolCompleted':
       return { ...body, output: body.output.slice(0, chars) };
-    case 'toolStarted':
     case 'toolUpdated':
+      // A dropped snapshot must not replace the last complete presentation.
+      return { ...body, presentation: undefined };
+    case 'toolStarted':
       // JSON cannot be cut in part: an input that does not fit is left out.
       return {
         ...body,
-        ...(body.type === 'toolStarted' ? { input: undefined } : {}),
+        input: undefined,
         ...(body.presentation
           ? { presentation: { toolName: body.presentation.toolName } }
           : {}),
@@ -315,7 +317,24 @@ export function createAcpReplayCollector(
         type: 'info',
         message: notice(dropped + collected.length - kept.length),
       };
-      return [truncated, ...kept];
+      // A retained full presentation can open its card when the original start
+      // fell outside the replay window. Reuse the update's slot and payload.
+      const starts = new Set<string>();
+      const events = kept.map((event): ProviderSessionEvent => {
+        if (event.type !== 'toolStarted' && event.type !== 'toolUpdated' &&
+            event.type !== 'toolCompleted') return event;
+        const key = JSON.stringify([event.turnId, event.toolId]);
+        if (event.type === 'toolCompleted') {
+          starts.delete(key);
+        } else if (event.type === 'toolStarted') {
+          starts.add(key);
+        } else if (event.presentation && !starts.has(key)) {
+          starts.add(key);
+          return { ...event, type: 'toolStarted', toolName: event.presentation.toolName };
+        }
+        return event;
+      });
+      return [truncated, ...events];
     },
   };
 }

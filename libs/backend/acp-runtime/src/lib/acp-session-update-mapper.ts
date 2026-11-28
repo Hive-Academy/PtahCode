@@ -146,7 +146,7 @@ function presentTool(details: ToolCallDetails): {
     stringValue(input?.['file_path']) ??
     stringValue(input?.['path']) ??
     details.path;
-  if (diffs.length === 0 && path) {
+  if (details.diffs === undefined && path) {
     diffs.push({
       path,
       oldText:
@@ -283,16 +283,20 @@ export function createAcpSessionUpdateMapper(
     const path =
       (isRecord(location) ? stringValue(location['path']) : undefined) ??
       remembered?.path;
-    const changes = toolDiffs(update['content']);
-    const diffs = changes.length ? new Map(remembered?.diffs) : undefined;
-    for (const change of changes) diffs?.set(change.path, change);
+    const content = update['content'];
+    const changes = toolDiffs(content);
+    const replacesDiffs = Array.isArray(content) &&
+      (changes.length > 0 || remembered?.diffs !== undefined);
+    const diffs = replacesDiffs
+      ? new Map(changes.map((change) => [change.path, change]))
+      : remembered?.diffs;
     const details: ToolCallDetails = {
       kind,
       title,
       output,
       input,
       path,
-      diffs: diffs ?? remembered?.diffs,
+      diffs,
     };
     const events: ProviderSessionEventBody[] = [];
     if (update['sessionUpdate'] === 'tool_call' && title !== undefined) {
@@ -307,7 +311,7 @@ export function createAcpSessionUpdateMapper(
     } else if (
       remembered &&
       (rawInput ||
-        changes.length ||
+        replacesDiffs ||
         path !== remembered.path ||
         kind !== remembered.kind ||
         title !== remembered.title)

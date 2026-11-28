@@ -191,11 +191,11 @@ export function createFlatStreamProjector(
         const { toolStarts } = turnFor(event);
         const start = toolStarts.get(event.toolId);
         if (!start || !event.presentation) return [];
-        // Preserve the card identity, ordering, and last available input.
+        // Replace the full presentation while preserving card identity and order.
         const updated = {
           ...start,
           toolName: event.presentation.toolName,
-          toolInput: event.presentation.input ?? start.toolInput,
+          toolInput: event.presentation.input,
         };
         toolStarts.set(event.toolId, updated);
         return [updated];

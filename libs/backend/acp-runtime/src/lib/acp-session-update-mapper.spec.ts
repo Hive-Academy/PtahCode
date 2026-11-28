@@ -858,6 +858,32 @@ describe('ACP chat tool cards', () => {
     });
   });
 
+  it('replaces the displayed paths when tool content is replaced or cleared', () => {
+    const project = projectUpdates();
+    const first = { type: 'diff', path: 'a.ts', oldText: 'old', newText: 'new' } as const;
+    const second = { ...first, path: 'b.ts' };
+    project({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'edit',
+      kind: 'edit',
+      title: 'Edit files',
+      locations: [{ path: first.path }],
+      content: [first, second],
+    });
+    const update = { sessionUpdate: 'tool_call_update', toolCallId: 'edit' } as const;
+    expect(project({ ...update, content: [second] })).toEqual([
+      expect.objectContaining({
+        eventType: 'tool_start', toolName: 'Edit',
+        toolInput: { file_path: second.path, old_string: 'old', new_string: 'new' },
+      }),
+    ]);
+    expect(project({ ...update, status: 'in_progress' })).toEqual([]);
+    expect(project({ ...update, content: [], status: 'completed' })).toEqual([
+      expect.objectContaining({ eventType: 'tool_start', toolName: 'FileChange', toolInput: undefined }),
+      expect.objectContaining({ eventType: 'tool_result' }),
+    ]);
+  });
+
   it('preserves a diff from an execute update in the Bash result', () => {
     const project = projectUpdates();
     project({
@@ -907,6 +933,7 @@ describe('ACP chat tool cards', () => {
       }),
     );
     const update = replay.events().find((row) => row.type === 'toolUpdated');
-    expect(update?.presentation).toEqual({ toolName: 'Bash' });
+    expect(update).toBeDefined();
+    expect(update?.presentation).toBeUndefined();
   });
 });

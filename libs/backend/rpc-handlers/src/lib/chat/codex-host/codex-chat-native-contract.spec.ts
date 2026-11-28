@@ -58,6 +58,7 @@ import {
   type AskUserQuestionResponse,
 } from '@ptah-extension/shared';
 import { createCodexChatUserQuestions } from './codex-chat-user-questions';
+import { createCodexChatEventCallbacks } from './codex-chat-event-callbacks';
 import {
   createCodexChatHostPorts,
   resolveBillingMode,
@@ -810,6 +811,46 @@ async function eventually(check: () => boolean, what: string): Promise<void> {
 }
 
 describe('Native Codex chat contracts end to end', () => {
+  it('updates the native FileChange card with the final patch before its result', async () => {
+    const h = codexHarness();
+    const callbacks = createCodexChatEventCallbacks({
+      sessionId: SessionId.from(THREAD),
+      tabId: TAB,
+      turn: undefined,
+      delivery: { publish: jest.fn(), publishTerminal: jest.fn() },
+      webviewManager: h.view.manager,
+      logger: h.logger,
+    });
+    jest.mocked(h.callbacks.live).mockImplementation(callbacks.live);
+    const initial = { path: '/workspace/a.ts', diff: '+initial', kind: { type: 'update' } };
+    const changes = [
+      { ...initial, diff: '+final' },
+      { path: '/workspace/b.ts', diff: '+new file', kind: { type: 'add' } },
+    ];
+    h.server.onTurnStart = () =>
+      h.server.notify(
+        turnStarted(),
+        item({ type: 'fileChange', id: 'edit', status: 'inProgress', changes: [initial] }),
+        item({ type: 'fileChange', id: 'edit', status: 'completed', changes }, true),
+        turnCompleted(),
+      );
+    try {
+      await h.start();
+      const cards = rootEvents(h.view).filter(
+        (event) => event.eventType === 'tool_start' || event.eventType === 'tool_result',
+      );
+      expect(cards).toMatchObject([
+        { eventType: 'tool_start', toolCallId: 'edit', toolName: 'FileChange', toolInput: { changes: [initial] } },
+        { id: cards[0]?.id, eventType: 'tool_start', toolCallId: 'edit', toolName: 'FileChange', toolInput: { changes } },
+        { eventType: 'tool_result', toolCallId: 'edit', isError: false },
+      ]);
+      expect(h.view.messages().filter(({ type }) => type === MESSAGE_TYPES.FILE_CONTENT_CHANGED))
+        .toMatchObject(changes.map(({ path }) => ({ payload: { filePaths: [path] } })));
+    } finally {
+      h.dispose();
+    }
+  });
+
   it('delivers a completed turn with the same root lifecycle as a Claude turn', async () => {
     const h = codexHarness();
     h.server.onTurnStart = () =>

@@ -40,28 +40,51 @@ describe('createAcpReplayCollector', () => {
 
   it('keeps the last complete patch when an update exceeds the entire replay budget', () => {
     const collector = createAcpReplayCollector(ids, { maxTextChars: 150 });
-    const input = { changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '+old' }] };
+    const input = { file_path: 'a.ts', old_string: 'old', new_string: 'new' };
     collector.add([
-      { type: 'toolStarted', toolId: 't1', toolName: 'edit', presentation: { toolName: 'FileChange', input } },
+      { type: 'toolStarted', toolId: 't1', toolName: 'edit', presentation: { toolName: 'Edit', input } },
       {
         type: 'toolUpdated',
         toolId: 't1',
         presentation: {
           toolName: 'FileChange',
-          input: { changes: [{ ...input.changes[0], diff: 'x'.repeat(200) }] },
+          input: { changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: 'x'.repeat(200) }] },
         },
       },
     ]);
 
     const events = collector.events();
     expect(events.map((event) => event.type)).toEqual(['info', 'toolStarted', 'toolUpdated']);
-    expect(events[2]).toMatchObject({ presentation: { toolName: 'FileChange' } });
     const projector = createFlatStreamProjector();
     const rows = events.flatMap((event) => projector.project(event));
     expect(rows.filter((row) => row.eventType === 'tool_start')).toEqual([
-      expect.objectContaining({ toolInput: input }),
-      expect.objectContaining({ toolInput: input }),
+      expect.objectContaining({ toolName: 'Edit', toolInput: input }),
     ]);
+  });
+
+  it.each([
+    { maxTextChars: 100 },
+    { maxEvents: 3 },
+  ])('reconstructs a completed card from a retained update with limits %j', (limits) => {
+    const collector = createAcpReplayCollector(ids, limits);
+    const input = { file_path: 'a.ts', old_string: 'old', new_string: 'final' };
+    collector.add([
+      { type: 'info', message: 'Previous event' },
+      {
+        type: 'toolStarted', toolId: 't1', toolName: 'edit',
+        presentation: { toolName: 'Edit', input: { ...input, new_string: 'initial' } },
+      },
+      { type: 'toolUpdated', toolId: 't1', presentation: { toolName: 'Edit', input } },
+      { type: 'toolCompleted', toolId: 't1', status: 'completed', output: '' },
+    ]);
+
+    const projector = createFlatStreamProjector();
+    const rows = collector.events().flatMap((event) => projector.project(event));
+    expect(rows.filter((row) => row.eventType === 'tool_start' || row.eventType === 'tool_result'))
+      .toEqual([
+        expect.objectContaining({ eventType: 'tool_start', toolCallId: 't1', toolName: 'Edit', toolInput: input }),
+        expect.objectContaining({ eventType: 'tool_result', toolCallId: 't1', isError: false }),
+      ]);
   });
 
   it('opens a replay turn per user turn and merges the chunks of one turn', () => {
