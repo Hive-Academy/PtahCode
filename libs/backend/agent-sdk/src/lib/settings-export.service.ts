@@ -49,8 +49,7 @@ export class SettingsExportService {
   ): Promise<PtahSettingsExport> {
     this.logger.info('[SettingsExport] Collecting settings', { source });
 
-    const [licenseKey, apiKey, providerKeys, config] = await Promise.all([
-      this.getSecret(SECRET_KEYS.LICENSE_KEY),
+    const [apiKey, providerKeys, config] = await Promise.all([
       this.getSecret(SECRET_KEYS.API_KEY),
       this.collectProviderKeys(),
       this.collectConfigValues(),
@@ -66,9 +65,6 @@ export class SettingsExportService {
       },
       config,
     };
-    if (licenseKey) {
-      exportData.licenseKey = licenseKey;
-    }
 
     const secretCount = countPopulatedSecrets(exportData);
     const configCount = Object.keys(config).length;

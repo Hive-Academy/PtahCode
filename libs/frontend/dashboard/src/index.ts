@@ -1,5 +1,4 @@
 export { DashboardGridComponent } from './lib/components/dashboard-grid/dashboard-grid.component';
-export { BuildersCardComponent } from './lib/components/builders-card/builders-card.component';
 export { SkillSelectionCardComponent } from './lib/components/skill-selection-card/skill-selection-card.component';
 
 export {

@@ -841,12 +841,6 @@ import type {
   FileViewContentResult,
   FileSaveContentParams,
   FileSaveContentResult,
-  LicenseGetStatusParams,
-  LicenseGetStatusResponse,
-  LicenseSetKeyParams,
-  LicenseSetKeyResponse,
-  LicenseClearKeyParams,
-  LicenseClearKeyResponse,
   CommandExecuteParams,
   CommandExecuteResponse,
   QualityGetAssessmentParams,
@@ -1663,18 +1657,6 @@ export interface RpcMethodRegistry
     params: { filename: string };
     result: MultiPhaseAnalysisResponse;
   };
-  'license:getStatus': {
-    params: LicenseGetStatusParams;
-    result: LicenseGetStatusResponse;
-  };
-  'license:setKey': {
-    params: LicenseSetKeyParams;
-    result: LicenseSetKeyResponse;
-  };
-  'license:clearKey': {
-    params: LicenseClearKeyParams;
-    result: LicenseClearKeyResponse;
-  };
   'command:execute': {
     params: CommandExecuteParams;
     result: CommandExecuteResponse;
@@ -2009,8 +1991,7 @@ export interface RpcMethodRegistry
    * itself calls for every tool permission check — so an out-of-process e2e
    * can populate the REAL `pendingRequests` map without a live model. No-ops
    * with `{success:false, error:'e2e-only'}` unless `PTAH_E2E=1`, the same
-   * flag the e2e launcher already sets and the same gating precedent used by
-   * `apps/ptah-extension-vscode/src/activation/bootstrap.ts`'s license seed.
+   * flag the e2e launcher already sets.
    * Awaits the full permission round trip, so a call with no routable
    * `sessionId`/`tabId` blocks for up to the 60s unroutable-deny timeout.
    */
@@ -3906,9 +3887,6 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:preview-generation': true,
   'wizard:list-analyses': true,
   'wizard:load-analysis': true,
-  'license:getStatus': true,
-  'license:setKey': true,
-  'license:clearKey': true,
   'command:execute': true,
   'llm:getProviderStatus': true,
   'llm:setApiKey': true,

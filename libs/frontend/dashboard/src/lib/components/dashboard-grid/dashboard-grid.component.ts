@@ -1,6 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { AppStateManager } from '@ptah-extension/core';
-import { BuildersCardComponent } from '../builders-card/builders-card.component';
 import { PlanLimitsPanelComponent } from '../plan-limits/plan-limits-panel.component';
 import { SkillSelectionCardComponent } from '../skill-selection-card/skill-selection-card.component';
 import { UsageDashboardComponent } from '../usage-dashboard/usage-dashboard.component';
@@ -12,7 +11,7 @@ import { PtahPageHeaderComponent } from '@ptah-extension/ui';
  *
  * Top-level dashboard surface. Page chrome (header, the one toolbar, "Back"
  * navigation) lives here. Row order: KPI strip, plan limits, daily usage +
- * cost share, breakdown + top sessions, then skills and builders. The usage
+ * cost share, breakdown + top sessions, then skills. The usage
  * dashboard owns the KPI and chart rows and projects the plan-limits panel
  * between them, so limits show even while usage loads or fails.
  */
@@ -24,20 +23,7 @@ import { PtahPageHeaderComponent } from '@ptah-extension/ui';
     PlanLimitsPanelComponent,
     UsageDashboardComponent,
     SkillSelectionCardComponent,
-    BuildersCardComponent,
     PtahPageHeaderComponent,
-  ],
-  styles: [
-    `
-      .dashboard-page {
-        container: dash / inline-size;
-      }
-      @container dash (min-width: 960px) {
-        .dashboard-secondary {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-    `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './dashboard-grid.component.html',

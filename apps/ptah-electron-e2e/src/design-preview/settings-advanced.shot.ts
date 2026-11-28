@@ -87,11 +87,10 @@ test('captures populated Advanced settings and control states', async ({ ui, mai
   await page.getByRole('navigation', { name: 'Settings sections' })
     .getByRole('button', { name: 'Advanced', exact: true }).click();
 
-  for (const selector of ['ptah-license-status-card', 'ptah-agent-behaviour-section', 'ptah-output-style-config', 'ptah-mcp-port-config', 'ptah-claude-builtins-config']) {
+  for (const selector of ['ptah-agent-behaviour-section', 'ptah-output-style-config', 'ptah-mcp-port-config', 'ptah-claude-builtins-config']) {
     await expect(page.locator(selector)).toBeVisible();
   }
   await expect(page.getByTestId('mcp-port-input')).toHaveValue('51820');
-  await expect(page.locator('ptah-license-status-card')).toContainText('Demo User');
   await expect(page.locator('ptah-output-style-config')).toContainText('Team concise');
   const details = page.getByTestId('fine-tuning-details');
   const rows = details.locator('[data-testid^="fine-tuning-row-"]');

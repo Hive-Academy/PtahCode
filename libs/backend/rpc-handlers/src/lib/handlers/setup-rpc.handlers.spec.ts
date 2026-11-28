@@ -1739,7 +1739,7 @@ describe('SetupRpcHandlers', () => {
   //
   // The seeding hook lives inside `wizard:deep-analyze` between
   // `phaseContents` assembly and `return response`. Driving it through the
-  // RPC requires mocking license/MCP gating + the multi-phase service +
+  // RPC requires mocking MCP gating + the multi-phase service +
   // storage service. Builders are also exercised via this RPC path so all
   // fixtures are real LLM-shape markdown blobs (mirroring this workspace's
   // own `.ptah/analysis/<slug>/` outputs).

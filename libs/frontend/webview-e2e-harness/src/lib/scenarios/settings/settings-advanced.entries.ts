@@ -14,60 +14,9 @@ import {
 } from './settings-advanced-search-voice.reach';
 
 const before = (page: Page): number => getFixtureState(page).calls.length;
-const card = (page: Page) => page.locator('ptah-license-status-card');
 const radio = (page: Page, name: string) => styleRow(page, name).getByRole('radio');
 
-/** Membership variants: the license is read once at app start, so they boot a second page. */
-const MEMBER = {
-  valid: true, tier: 'pro', isPremium: true, isCommunity: false, daysRemaining: 120,
-  plan: { name: 'Builders', description: 'Builders membership: every Ptah feature, billed yearly.', features: [] },
-  user: { email: 'j.doe@example.com', firstName: 'Jane', lastName: 'Doe' },
-};
-
-const membership: readonly ReachabilityEntry[] = [
-  { id: 'ADV-1', capability: 'Membership & data: tier badge, status and one primary action (Create Account), Explore Builders', status: 'restored',
-    reach: async (page) => {
-      await advancedTab(page);
-      await expect(card(page)).toContainText('Community');
-      await expect(card(page).locator('.btn-primary')).toHaveCount(1);
-      await expect(card(page).locator('.btn-primary')).toContainText('Create Account');
-      await visibleEnabled(card(page).getByRole('button', { name: /Explore Ptah Builders/ }));
-    } },
-  { id: 'ADV-2', capability: 'Membership key not active: warning, and Re-enter opens the key popover', status: 'restored',
-    reach: (page) => throughAsvVariant(page, (state) => { state.license = { ...state.license, reason: 'expired' }; }, 'Advanced', async (p) => {
-      const alert = p.locator('[data-testid="membership-key-alert"]');
-      await expect(alert).toContainText('Ptah\'s local features remain available either way.');
-      await p.locator('[data-testid="membership-key-alert-action"]').click();
-      await expect(p.locator('[data-testid="membership-key-popover"]')).toBeVisible();
-      await expect(p.locator('[data-testid="membership-key-input"]')).toHaveAttribute('type', 'password');
-    }) },
-  { id: 'ADV-3', capability: 'Member: user identity, plan text, Manage Membership, Log out behind an inline confirm', status: 'restored',
-    reach: (page) => throughAsvVariant(page, (state) => { state.license = MEMBER; }, 'Advanced', async (p) => {
-      const member = p.locator('ptah-license-status-card');
-      await expect(member).toContainText('j.doe@example.com');
-      await expect(member).toContainText(MEMBER.plan.description);
-      await expect(member.locator('.btn-primary')).toHaveCount(1);
-      await expect(member.locator('.btn-primary')).toContainText('Manage Membership');
-      await p.locator('[data-testid="logout-button"]').click();
-      const confirm = p.locator('[data-testid="logout-confirm"]');
-      await expect(confirm).toBeVisible();
-      await visibleEnabled(p.locator('[data-testid="logout-confirm-button"]'));
-      await confirm.getByRole('button', { name: 'Cancel' }).click();
-      await expect(confirm).toHaveCount(0);
-    }) },
-  { id: 'ADV-4', capability: 'Enter membership key: popover with a masked field and the local format check', status: 'restored',
-    reach: async (page) => {
-      await advancedTab(page);
-      const trigger = page.locator('[data-testid="membership-key-trigger"]');
-      await trigger.click();
-      const input = page.locator('[data-testid="membership-key-input"]');
-      await expect(input).toHaveAttribute('type', 'password');
-      await input.fill('not-a-key');
-      await page.locator('[data-testid="membership-key-activate"]').click();
-      await expect(page.locator('[data-testid="membership-key-error"]')).toContainText('Invalid format');
-      await page.keyboard.press('Escape');
-      await expect(page.locator('[data-testid="membership-key-popover"]')).toHaveCount(0);
-    } },
+const dataPortability: readonly ReachabilityEntry[] = [
   { id: 'ADV-5', capability: 'Export settings, and Import settings behind an inline confirm', status: 'restored',
     reach: async (page) => {
       await advancedTab(page);
@@ -395,5 +344,5 @@ const claudeBuiltins: readonly ReachabilityEntry[] = [
 ];
 
 /** Every Advanced entry, in tab order. */
-export const ADVANCED_ENTRIES: readonly ReachabilityEntry[] = [...membership, ...agentBehaviour, ...outputStyle, ...mcpAndLm, ...claudeBuiltins];
+export const ADVANCED_ENTRIES: readonly ReachabilityEntry[] = [...dataPortability, ...agentBehaviour, ...outputStyle, ...mcpAndLm, ...claudeBuiltins];
 

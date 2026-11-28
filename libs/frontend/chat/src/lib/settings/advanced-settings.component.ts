@@ -23,7 +23,6 @@ import {
 } from '@ptah-extension/shared';
 import { AdvancedSettingsGroupComponent } from './advanced/advanced-settings-group.component';
 import { AdvancedOverviewStore } from './advanced/advanced-overview.store';
-import { LicenseStatusCardComponent } from './license/license-status-card.component';
 import { VscodeLmConfigComponent } from './pro-features/vscode-lm-config.component';
 import { McpPortConfigComponent } from './pro-features/mcp-port-config.component';
 import { ClaudeBuiltinsConfigComponent } from './pro-features/claude-builtins-config.component';
@@ -31,6 +30,7 @@ import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-s
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
 import {
+  DatabaseBackup,
   Download,
   LucideAngularModule,
   SlidersHorizontal,
@@ -42,6 +42,7 @@ import {
   PtahFormSectionComponent,
   PtahInlineConfirmComponent,
   PtahInstrumentBandComponent,
+  PtahSettingRowComponent,
 } from '@ptah-extension/ui';
 
 /** The upkeep groups of the Fine-tuning section, in page order. */
@@ -63,10 +64,8 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
  * Advanced tab shell (TASK_2026_555 Advanced / Search & Voice, Batches 39-42).
  *
  * Hosts the existing child components unchanged and owns the Data Portability
- * (Export/Import) actions (rows A8/A9): their buttons and results are projected
- * into the "Membership & data" card (`LicenseStatusCardComponent`) through the
- * `[membership-actions]` / `[membership-notices]` slots, so the whole
- * capability sits in one section card while the writes stay here.
+ * (Export/Import) actions (rows A8/A9) in its own "Import & export" section
+ * card, whose "Settings backup" row holds the buttons and the import confirm.
  *
  * The closed-by-default "Fine-tuning" disclosure at the end holds the advanced
  * upkeep groups (TASK_2026_658), deferred into their own chunk.
@@ -85,7 +84,6 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
   // Page-scoped: each section reports its loaded summary for the instrument band.
   providers: [AdvancedOverviewStore],
   imports: [
-    LicenseStatusCardComponent,
     AgentBehaviourSectionComponent,
     OutputStyleConfigComponent,
     McpPortConfigComponent,
@@ -97,6 +95,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
     PtahDisclosureComponent,
     PtahFormSectionComponent,
     PtahInstrumentBandComponent,
+    PtahSettingRowComponent,
     LucideAngularModule,
   ],
   template: `
@@ -114,58 +113,76 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
         ariaLabel="Advanced overview"
         data-testid="advanced-overview"
       />
-      <ptah-license-status-card>
-        <!--
-          M5: the import confirm takes the place of Export / Import inside the "Settings backup" row of the
-          card, so the membership badges in the aside do not move.
-        -->
-        <div membership-actions class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
-          @if (confirmingImport()) {
-            <ptah-inline-confirm
-              message="Replace your settings from a file?"
-              ariaLabel="Confirm import settings"
-              confirmLabel="Import settings"
-              tone="danger"
-              confirmTestId="import-confirm-button"
-              aria-describedby="import-confirm-detail"
-              [busy]="isImporting()"
-              (confirm)="importSettings()"
-              (cancelled)="cancelImport()"
-              data-testid="import-confirm"
-            />
-            <span id="import-confirm-detail" class="sr-only">
-              Import replaces your current settings, API keys and preferences
-              with the contents of a settings export file you choose next.
-            </span>
-          } @else {
-            <button
-              type="button"
-              ptahButton
-              variant="secondary"
-              [busy]="isExporting()"
-              [disabled]="isExporting()"
-              (click)="exportSettings()"
-              aria-label="Export settings"
+      <!-- Import & export (A8/A9): the import confirm takes the place of Export / Import inside the
+           "Settings backup" row. -->
+      <section data-glass-surface="content" data-testid="data-section">
+        <ptah-form-section
+          id="advanced-data"
+          heading="Import &amp; export"
+          description="A copy of your settings, API keys and preferences."
+          [divider]="true"
+          [wide]="true"
+          [icon]="DataIcon"
+          flushInGlass
+        >
+          <div class="flex flex-col">
+            <ptah-setting-row
+              label="Settings backup"
+              hint="Export a copy of your settings, or import one."
+              controlAlign="end"
+              edgePadding="trim"
+              data-testid="data-backup-row"
             >
-              <lucide-angular [img]="DownloadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
-              Export settings
-            </button>
-            <button
-              #importButton
-              type="button"
-              ptahButton
-              variant="secondary"
-              [busy]="isImporting()"
-              [disabled]="isImporting()"
-              (click)="requestImport()"
-              aria-label="Import settings"
-            >
-              <lucide-angular [img]="UploadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
-              Import settings
-            </button>
-          }
-        </div>
-      </ptah-license-status-card>
+              <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]" data-testid="data-actions">
+                @if (confirmingImport()) {
+                  <ptah-inline-confirm
+                    message="Replace your settings from a file?"
+                    ariaLabel="Confirm import settings"
+                    confirmLabel="Import settings"
+                    tone="danger"
+                    confirmTestId="import-confirm-button"
+                    aria-describedby="import-confirm-detail"
+                    [busy]="isImporting()"
+                    (confirm)="importSettings()"
+                    (cancelled)="cancelImport()"
+                    data-testid="import-confirm"
+                  />
+                  <span id="import-confirm-detail" class="sr-only">
+                    Import replaces your current settings, API keys and preferences
+                    with the contents of a settings export file you choose next.
+                  </span>
+                } @else {
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="secondary"
+                    [busy]="isExporting()"
+                    [disabled]="isExporting()"
+                    (click)="exportSettings()"
+                    aria-label="Export settings"
+                  >
+                    <lucide-angular [img]="DownloadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
+                    Export settings
+                  </button>
+                  <button
+                    #importButton
+                    type="button"
+                    ptahButton
+                    variant="secondary"
+                    [busy]="isImporting()"
+                    [disabled]="isImporting()"
+                    (click)="requestImport()"
+                    aria-label="Import settings"
+                  >
+                    <lucide-angular [img]="UploadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
+                    Import settings
+                  </button>
+                }
+              </div>
+            </ptah-setting-row>
+          </div>
+        </ptah-form-section>
+      </section>
 
       <ptah-agent-behaviour-section />
       <ptah-output-style-config />
@@ -236,6 +253,7 @@ export class AdvancedSettingsComponent {
   protected readonly DownloadIcon = Download;
   protected readonly UploadIcon = Upload;
   protected readonly SlidersIcon = SlidersHorizontal;
+  protected readonly DataIcon = DatabaseBackup;
 
   /** VS Code LM model changes can change which CLIs are usable (#84). */
   readonly modelChanged = output<void>();

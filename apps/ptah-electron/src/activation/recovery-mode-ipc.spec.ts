@@ -81,7 +81,7 @@ describe('recovery-mode IPC responders', () => {
       { sender: { send, isDestroyed: () => false } },
       {
         type: 'rpc:call',
-        payload: { method: 'license:getStatus', correlationId: 'abc-1' },
+        payload: { method: 'auth:getAuthStatus', correlationId: 'abc-1' },
       },
     );
 

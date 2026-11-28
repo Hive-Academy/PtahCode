@@ -181,7 +181,7 @@ describe('ChatSessionService — workspace authorization gate', () => {
 
       const result = await svc.startSession(params);
       // Must not be an "Access denied" error — may fail for other reasons
-      // (license, Ptah CLI dispatch) but not authorization.
+      // (Ptah CLI dispatch) but not authorization.
       if (!result.success) {
         expect((result as { error: string }).error).not.toMatch(
           /Access denied/,

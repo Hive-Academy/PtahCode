@@ -61,7 +61,6 @@ export interface AsvState {
   };
   goVet: { state: 'on' | 'off' | 'stale'; staleReason?: string };
   llm: { defaultProvider: string; defaultModel: string };
-  license: Json;
   /** Next answer per method; consumed by the first call. */
   readonly failures: Map<string, unknown>;
 }
@@ -84,7 +83,6 @@ export function createAsvState(): AsvState {
     },
     goVet: { state: 'off' },
     llm: { defaultProvider: 'vscode-lm', defaultModel: 'copilot-gpt-4o' },
-    license: { valid: true, tier: 'community', isPremium: false, isCommunity: true, daysRemaining: null },
     failures: new Map(),
   };
 }
@@ -126,7 +124,6 @@ function goVetAnswer(state: AsvState): Json {
 /** Reads of the two tabs: every answer comes from `state`. */
 function readFixtures(state: AsvState): Record<string, (params: unknown) => unknown> {
   return {
-    'license:getStatus': () => ({ ...state.license }),
     'enhancedPrompts:getStatus': () => ({
       ...state.prompt, generatedAt: state.prompt.hasGeneratedPrompt ? '2026-09-28T14:12:00.000Z' : null,
       detectedStack: state.prompt.hasGeneratedPrompt ? {

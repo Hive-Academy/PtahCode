@@ -31,12 +31,6 @@ const styles: OutputStyleEntry[] = [
 export const staticMocks = {
   ...lanesMocks,
   'workspace:getInfo': { folders: [WORKSPACE], root: WORKSPACE, activeFolder: WORKSPACE, name: 'demo-workspace' },
-  'license:getStatus': {
-    valid: true, tier: 'builders', isPremium: true, isCommunity: false,
-    daysRemaining: 180, expiryWarning: null,
-    plan: { name: 'Ptah Builders', description: 'Builders membership', features: ['All advanced features', 'Team workflows'] },
-    user: { email: 'demo@example.com', firstName: 'Demo', lastName: 'User' },
-  },
   'auth:getAuthStatus': { ...lanesMocks['auth:getAuthStatus'], copilotUsername: 'demo-user' },
   'auth:getScope': { ...lanesMocks['auth:getScope'], activePath: WORKSPACE },
   'agent:getConfig': {

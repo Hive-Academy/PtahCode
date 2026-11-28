@@ -83,7 +83,7 @@ describe('ChatStore question deciding tab', () => {
         { provide: SessionStatsAggregatorService, useValue: {} },
         {
           provide: ChatLifecycleService,
-          useValue: { licenseStatus: none, bootstrap: jest.fn() },
+          useValue: { bootstrap: jest.fn() },
         },
         { provide: TurnEndHandlerService, useValue: {} },
         {

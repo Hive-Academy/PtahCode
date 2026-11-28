@@ -38,7 +38,7 @@ describe('registerVsCodeCorePlatformAgnostic — BOOT_READINESS default', () => 
     const child = rootContainer.createChildContainer();
 
     registerVsCodeCorePlatformAgnostic(child, createLogger(), {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
 
     expect(child.isRegistered(PLATFORM_TOKENS.BOOT_READINESS)).toBe(true);
@@ -63,7 +63,7 @@ describe('registerVsCodeCorePlatformAgnostic — BOOT_READINESS default', () => 
     });
 
     registerVsCodeCorePlatformAgnostic(child, createLogger(), {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
 
     const resolved = child.resolve<IBootReadinessProvider>(
@@ -80,7 +80,7 @@ describe('registerVsCodeCorePlatformAgnostic — git process gate', () => {
     const logger = createLogger();
 
     registerVsCodeCorePlatformAgnostic(child, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
 
     expect(mockConfigureGitProcessGate).toHaveBeenCalledWith({ logger });

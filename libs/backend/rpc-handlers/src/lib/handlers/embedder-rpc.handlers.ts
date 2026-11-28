@@ -7,7 +7,7 @@
  *   - embedder:status  → snapshot of ready/downloading/progress/error
  *   - embedder:retry   → user-triggered re-warmup after a failed download
  *
- * License-exempt (recovery surface) and Electron-only (better-sqlite3 +
+ * A recovery surface, Electron-only (better-sqlite3 +
  * ONNX worker do not run in the VS Code extension host).
  *
  * Per architecture §7 the status handler MUST NOT throw — it always

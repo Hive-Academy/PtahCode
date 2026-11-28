@@ -71,7 +71,7 @@ import { registerSkillServices } from './di/register';
  * Call exactly once per container, after the dependencies these handlers
  * inject (LOGGER, RPC_HANDLER, MODEL_SETTINGS, SDK_PLUGIN_LOADER,
  * WORKSPACE_PROVIDER, SENTRY_SERVICE, PLATFORM_COMMANDS,
- * SDK_ENHANCED_PROMPTS_SERVICE, LICENSE_SERVICE, SAVE_DIALOG_PROVIDER,
+ * SDK_ENHANCED_PROMPTS_SERVICE, SAVE_DIALOG_PROVIDER,
  * WORKSPACE_STATE_STORAGE and PLATFORM_TOKENS.DI_CONTAINER) have been
  * registered. The lane model listing adapter also needs
  * AUTH_SECRETS_SERVICE, AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_MODELS and

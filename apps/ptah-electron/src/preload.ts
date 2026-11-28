@@ -9,7 +9,7 @@ import { contextBridge, ipcRenderer } from 'electron';
  * - window.vscode.setState(state)   -> ipcRenderer.send('set-state', state)
  *
  * Also sets up window.ptahConfig for Angular app configuration.
- * Startup config (license status, workspace info) is fetched synchronously
+ * Startup config (workspace info) is fetched synchronously
  * from the main process via IPC so it's available before Angular bootstraps.
  *
  * The Angular app (VSCodeService) reads window.vscode in constructor.

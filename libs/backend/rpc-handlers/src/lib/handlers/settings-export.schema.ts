@@ -44,9 +44,6 @@ export const PtahSettingsExportSchema = z
     /** Which platform produced the export. */
     source: z.enum(['vscode', 'electron', 'cli']),
 
-    /** Optional license key. */
-    licenseKey: z.string().optional(),
-
     /** Authentication credentials. */
     auth: z
       .object({

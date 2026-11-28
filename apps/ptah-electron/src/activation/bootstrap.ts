@@ -125,54 +125,6 @@ export function loadCustomProviders(container: DependencyContainer): void {
 }
 
 /**
- * Prime the membership/licence cache for the membership card.
- *
- * NETWORK, and deliberately not on the critical path (TASK_2026_331 B1.T2).
- * This is identity only — it never gates activation or the initial view, and
- * Ptah's local features are available to everyone — so awaiting it put a
- * round-trip (and, on a blocked network, a full request timeout) between the
- * user's click and the window. The renderer renders the membership card from
- * the cache whenever it lands; until then it shows the unresolved state it
- * already had to handle for an offline start.
- *
- * Never rejects: the caller starts it with `void` and has nowhere to put a
- * rejection.
- *
- * `skip` is set from `PTAH_E2E=1`: a harness boot has no licence to prime, and
- * the specs that read licence state call `license:getStatus`, which runs its
- * own `verifyLicense()` (TASK_2026_389).
- */
-export async function startMembershipVerification(
-  container: DependencyContainer,
-  options: { skip?: boolean } = {},
-): Promise<void> {
-  if (options.skip === true) {
-    console.log(
-      '[Ptah Electron] Membership status priming skipped — e2e harness (PTAH_E2E=1)',
-    );
-    return;
-  }
-  try {
-    const licenseService = container.resolve(TOKENS.LICENSE_SERVICE) as {
-      verifyLicense: () => Promise<{
-        valid: boolean;
-        reason?: string;
-        tier?: string;
-      }>;
-    };
-    const licenseStatus = await licenseService.verifyLicense();
-    console.log(
-      `[Ptah Electron] Membership status resolved (valid: ${licenseStatus.valid}, tier: ${licenseStatus.tier ?? 'none'})`,
-    );
-  } catch (error: unknown) {
-    console.warn(
-      '[Ptah Electron] Membership status resolution failed (non-fatal):',
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-}
-
-/**
  * Initialize the agent adapters and, on success, preload the SDK.
  *
  * NETWORK, and deliberately not on the critical path (TASK_2026_331 B1.T2).
@@ -180,8 +132,8 @@ export async function startMembershipVerification(
  * WAITS for it. The renderer shows "not configured" until it completes, which
  * is the exact state it already showed when `initialize()` resolved `false`.
  *
- * Never rejects, for the same reason as
- * {@link startMembershipVerification}.
+ * Never rejects: the caller starts it with `void` and has nowhere to put a
+ * rejection.
  */
 export async function startAgentAdapterInitialization(
   container: DependencyContainer,
@@ -563,14 +515,6 @@ async function runBootstrap(
       throw error;
     },
   );
-
-  // Started, NOT awaited — see `startMembershipVerification`. The settings
-  // migration and `restoreWorkspaces()` above stay awaited because the renderer
-  // reads `workspaceRoot` out of `get-startup-config` the moment it loads; this
-  // one feeds a card that has always had an unresolved state.
-  void startMembershipVerification(container, {
-    skip: process.env['PTAH_E2E'] === '1',
-  });
 
   const ipcBridge = new IpcBridge(
     container,

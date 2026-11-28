@@ -10,7 +10,7 @@ import { injectable, inject } from 'tsyringe';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IPlatformCommands } from '@ptah-extension/rpc-handlers';
-import { MESSAGE_TYPES, resolveEnvironment } from '@ptah-extension/shared';
+import { MESSAGE_TYPES } from '@ptah-extension/shared';
 
 /** Let the RPC response land before the window reloads out from under it. */
 const RELOAD_DEFER_MS = 500;
@@ -21,11 +21,6 @@ interface ElectronWebviewBroadcaster {
 
 @injectable()
 export class ElectronPlatformCommands implements IPlatformCommands {
-  /** Resolved URLs for the current environment (dev vs production). */
-  private readonly urls = resolveEnvironment(
-    process.env['NODE_ENV'] === 'development',
-  ).urls;
-
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(TOKENS.WEBVIEW_MANAGER)
@@ -102,14 +97,6 @@ export class ElectronPlatformCommands implements IPlatformCommands {
     }
 
     switch (command) {
-      case 'ptah.openPricing':
-        await this.openExternal(this.urls.PRICING_URL);
-        return { handled: true };
-
-      case 'ptah.openSignup':
-        await this.openExternal(this.urls.SIGNUP_URL + '?source=electron');
-        return { handled: true };
-
       case 'ptah.openOrchestraCanvas':
         await this.webviewManager.broadcastMessage(MESSAGE_TYPES.SWITCH_VIEW, {
           view: 'orchestra-canvas',
@@ -128,13 +115,5 @@ export class ElectronPlatformCommands implements IPlatformCommands {
           error: `Command not available in Electron: ${command}`,
         };
     }
-  }
-
-  private async openExternal(url: string): Promise<void> {
-    const { shell } = await import('electron');
-    await shell.openExternal(url);
-    this.logger.debug('[ElectronPlatformCommands] opened external URL', {
-      url,
-    });
   }
 }

@@ -23,9 +23,6 @@ export type KnownProviderId = (typeof KNOWN_PROVIDER_IDS)[number];
  * or Electron safeStorage depending on platform).
  */
 export const SECRET_KEYS = {
-  /** License key — stored by LicenseService */
-  LICENSE_KEY: 'ptah.licenseKey',
-
   /** Anthropic API key — stored by AuthSecretsService (KEY_MAP.apiKey) */
   API_KEY: 'ptah.auth.anthropicApiKey',
 } as const;
@@ -135,9 +132,6 @@ export interface PtahSettingsExport {
   /** Which platform produced this export */
   source: 'vscode' | 'electron' | 'cli';
 
-  /** License key (ptah.licenseKey) — may be absent if not configured */
-  licenseKey?: string;
-
   /** Authentication credentials from SecretStorage */
   auth: {
     /** ptah.auth.anthropicApiKey */
@@ -173,7 +167,6 @@ export interface SettingsImportResult {
  */
 export function countPopulatedSecrets(data: PtahSettingsExport): number {
   let count = 0;
-  if (data.licenseKey) count++;
   if (data.auth.apiKey) count++;
   if (data.auth.providerKeys) {
     count += Object.keys(data.auth.providerKeys).length;

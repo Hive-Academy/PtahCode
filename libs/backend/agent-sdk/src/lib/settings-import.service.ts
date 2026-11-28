@@ -82,12 +82,6 @@ export class SettingsImportService {
       errors: [],
     };
     await this.importSecret(
-      SECRET_KEYS.LICENSE_KEY,
-      data.licenseKey,
-      overwrite,
-      result,
-    );
-    await this.importSecret(
       SECRET_KEYS.API_KEY,
       data.auth.apiKey,
       overwrite,

@@ -1,7 +1,7 @@
 /**
  * Miscellaneous RPC Type Definitions
  *
- * Types for context:*, autocomplete:*, file:*, license:*, command:*,
+ * Types for context:*, autocomplete:*, file:*, command:*,
  * quality:*, plugins:* methods
  */
 
@@ -272,81 +272,6 @@ export type FileSaveContentResult =
       reason: FileSaveFailureReason;
       error: string;
     };
-
-/** Parameters for license:getStatus RPC method */
-export type LicenseGetStatusParams = Record<string, never>;
-
-/**
- * License tier values for RPC communication.
- *
- * Open-source + Builders model (exactly three values):
- * - 'community': FREE and open source - always valid, no license required
- * - 'builders': Active Ptah Builders membership (the only premium tier)
- * - 'expired': Revoked or payment failed only (NOT for unlicensed users)
- */
-export type LicenseTier = 'community' | 'builders' | 'expired';
-
-/**
- * Response from license:getStatus RPC method.
- *
- * Open-source + Builders model, plus a `reason` field for context-aware
- * welcome messaging. Freemium model uses `isCommunity` (previously `isBasic`).
- */
-export interface LicenseGetStatusResponse {
-  /** Whether the license is valid (Community = always true) */
-  valid: boolean;
-  /** License tier (community, builders, or expired) */
-  tier: LicenseTier;
-  /** Whether the user has premium features enabled (Builders tier) */
-  isPremium: boolean;
-  /** Whether the user has Community tier (convenience flag) */
-  isCommunity: boolean;
-  /** Days remaining before subscription expires (null if not applicable) */
-  daysRemaining: number | null;
-  /** Plan details (if has valid license) */
-  plan?: {
-    name: string;
-    description: string;
-    features: string[];
-  };
-  /** Reason for invalid license (for context-aware welcome messaging) */
-  reason?: 'expired' | 'no_license';
-  /** User profile data - only present for licensed users */
-  user?: {
-    email: string;
-    firstName: string | null;
-    lastName: string | null;
-  };
-  /**
-   * Defensive expiry warning surfaced when daysRemaining indicates an upcoming
-   * lapse. 'critical' = < 7 days, 'near_expiry' = < 14 days, null/undefined =
-   * no warning. Computed client-side in mapLicenseStatusToResponse so CLI/UI
-   * can render warnings even when the server omits expiry context.
-   */
-  expiryWarning?: 'near_expiry' | 'critical' | null;
-}
-
-/** Parameters for license:setKey RPC method */
-export interface LicenseSetKeyParams {
-  licenseKey: string;
-}
-
-/** Response from license:setKey RPC method */
-export interface LicenseSetKeyResponse {
-  success: boolean;
-  tier?: string;
-  plan?: { name: string };
-  error?: string;
-}
-
-/** Parameters for license:clearKey RPC method (empty - no params needed) */
-export type LicenseClearKeyParams = Record<string, never>;
-
-/** Response from license:clearKey RPC method */
-export interface LicenseClearKeyResponse {
-  success: boolean;
-  error?: string;
-}
 
 /**
  * Parameters for command:execute RPC method.

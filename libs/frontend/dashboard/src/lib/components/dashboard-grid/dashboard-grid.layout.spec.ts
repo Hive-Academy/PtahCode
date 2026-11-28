@@ -17,7 +17,7 @@ describe('dashboard grid layout', () => {
     expect(usage).not.toContain('Usage range in days');
   });
 
-  it('orders the rows: KPI strip, plan limits, charts, tables, then skills and builders', () => {
+  it('orders the rows: KPI strip, plan limits, charts, tables, then skills', () => {
     const kpis = usage.indexOf('<ptah-usage-kpi-strip');
     const limits = usage.indexOf('select="[dashboardLimits]"');
     const charts = usage.indexOf('usage-chart-row');
@@ -30,9 +30,7 @@ describe('dashboard grid layout', () => {
     const usageAt = grid.indexOf('<ptah-usage-dashboard');
     expect(grid.indexOf('<ptah-plan-limits-panel dashboardLimits')).toBeGreaterThan(usageAt);
     expect(grid.indexOf('<ptah-skill-selection-card')).toBeGreaterThan(usageAt);
-    expect(grid.indexOf('<ptah-builders-card')).toBeGreaterThan(
-      grid.indexOf('<ptah-skill-selection-card'),
-    );
+    expect(grid).not.toContain('<ptah-builders-card');
     expect(grid).not.toContain('Open Command Center');
     expect(grid).not.toContain('<ptah-harness-card');
   });

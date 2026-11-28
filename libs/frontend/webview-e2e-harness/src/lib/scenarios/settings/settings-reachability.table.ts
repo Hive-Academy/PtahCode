@@ -1047,11 +1047,14 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
 const other: readonly ReachabilityEntry[] = [
   {
     id: '#80',
-    capability: 'License status card',
+    capability: 'Import & export card',
     status: 'present',
     reach: async (page) => {
       await advancedTab(page);
-      await visibleEnabled(page.locator('ptah-license-status-card'));
+      const section = page.locator('[data-testid="data-section"]');
+      await expect(section).toContainText('Import & export');
+      await visibleEnabled(section.getByRole('button', { name: 'Export settings' }));
+      await visibleEnabled(section.getByRole('button', { name: 'Import settings' }));
     },
   },
   {
@@ -1729,8 +1732,9 @@ export const REACHABILITY_TABLE: readonly ReachabilityEntry[] = [
  * Settings UI polish removed RM-2 and RM-3 with the routing map's Background roles and CLI agents tiles (the Background
  * Model Roles section and the CLI matrix below them show the same data): 138.
  * TASK_2026_853 added ADV-25 for the Claude Code tools & skills card: 139.
+ * TASK_2026_2335 removed ADV-1..4 with the deleted membership card; #80 now checks the Import & export card: 135.
  */
-export const EXPECTED_CAPABILITY_COUNT = 139;
+export const EXPECTED_CAPABILITY_COUNT = 135;
 
 /**
  * The frozen S4 baseline (D14 rule 3): every id that was `'present'` in THIS

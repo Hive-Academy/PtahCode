@@ -16,7 +16,6 @@ import { TOKENS } from './tokens';
 import { RpcHandler } from '../messaging/rpc-handler';
 import { MessageValidatorService } from '../validation/message-validator.service';
 import { SubagentRegistryService } from '../services/subagent-registry.service';
-import { LicenseService } from '../services/license.service';
 import { AuthSecretsService } from '../services/auth-secrets.service';
 import { SentryService } from '../services/sentry.service';
 import { SentryTracerAdapter } from '../services/sentry-tracer.adapter';
@@ -31,11 +30,11 @@ import { configureGitProcessGate } from '../utils/exec-git';
 
 export interface PlatformAgnosticRegistrationOptions {
   /**
-   * When true, LicenseService, AuthSecretsService, and SentryService are registered.
-   * Callers that have custom shims for these (e.g., test harnesses) can pass false
-   * and register their own. Default: true.
+   * When true, AuthSecretsService, SentryService and the Sentry-backed tracer
+   * are registered. Callers that have custom shims for these (e.g., test
+   * harnesses) can pass false and register their own. Default: true.
    */
-  includeLicensingAndAuth?: boolean;
+  includeAuthAndTelemetry?: boolean;
 }
 
 /**
@@ -50,17 +49,18 @@ export interface PlatformAgnosticRegistrationOptions {
  *     expected to register adapters before calling this function.
  *
  * Prerequisites: TOKENS.LOGGER must be registered (for the diagnostic log line).
- * LicenseService, AuthSecretsService, and SentryService resolve their dependencies
- * lazily (singleton + `import type` for vscode), so registration order relative
- * to EXTENSION_CONTEXT / CONFIG_MANAGER shims does not matter — those shims must
- * simply be registered before the first call to `container.resolve(TOKENS.LICENSE_SERVICE)`.
+ * AuthSecretsService and SentryService resolve their dependencies lazily
+ * (singleton + `import type` for vscode), so registration order relative to
+ * EXTENSION_CONTEXT / CONFIG_MANAGER shims does not matter — those shims must
+ * simply be registered before the first call to
+ * `container.resolve(TOKENS.AUTH_SECRETS_SERVICE)`.
  */
 export function registerVsCodeCorePlatformAgnostic(
   container: DependencyContainer,
   logger: Logger,
   options: PlatformAgnosticRegistrationOptions = {},
 ): void {
-  const { includeLicensingAndAuth = true } = options;
+  const { includeAuthAndTelemetry = true } = options;
 
   // The process-wide git gate (TASK_2026_437 C11) is a module instance, not a
   // binding — `execGit` is called as a plain function. Configured here because
@@ -141,12 +141,11 @@ export function registerVsCodeCorePlatformAgnostic(
     });
   }
 
-  if (includeLicensingAndAuth) {
+  if (includeAuthAndTelemetry) {
     container.registerSingleton(TOKENS.SENTRY_SERVICE, SentryService);
     if (!container.isRegistered(PLATFORM_TOKENS.TRACER)) {
       container.registerSingleton(PLATFORM_TOKENS.TRACER, SentryTracerAdapter);
     }
-    container.registerSingleton(TOKENS.LICENSE_SERVICE, LicenseService);
     container.registerSingleton(
       TOKENS.AUTH_SECRETS_SERVICE,
       AuthSecretsService,
@@ -163,11 +162,10 @@ export function registerVsCodeCorePlatformAgnostic(
       'MAIN_LOOP_WATCHDOG',
       'BACKGROUND_WORK_GOVERNOR',
       'DEGRADATION_REPORTER',
-      ...(includeLicensingAndAuth
+      ...(includeAuthAndTelemetry
         ? [
             'SENTRY_SERVICE',
             'PLATFORM_TOKENS.TRACER',
-            'LICENSE_SERVICE',
             'AUTH_SECRETS_SERVICE',
           ]
         : []),

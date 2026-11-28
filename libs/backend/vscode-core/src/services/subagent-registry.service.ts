@@ -65,8 +65,7 @@ export type SubagentRegistration = Omit<
  * Thread safety:
  * - JavaScript single-threaded execution
  * - All operations are synchronous (no race conditions)
- *
- * Pattern Reference: LicenseService (vscode-core)
+
  */
 @injectable()
 export class SubagentRegistryService {

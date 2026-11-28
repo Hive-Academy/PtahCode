@@ -15,8 +15,8 @@
  * - CompactionLifecycleService: SDK session-compaction state machine
  * - MessageDispatchService: Send/queue routing + slash-command guard
  * - SessionStatsAggregatorService: SESSION_STATS aggregation + auto-send re-steering
- * - ChatLifecycleService: Bootstrap, license fetch, agent-summary routing,
- *   session-ID resolution, chat-error handling
+ * - ChatLifecycleService: Bootstrap, agent-summary routing, session-ID
+ *   resolution, chat-error handling
  */
 /** @deprecated Import from `@ptah-extension/chat-streaming` instead. */
 export { StreamingHandlerService } from '@ptah-extension/chat-streaming';

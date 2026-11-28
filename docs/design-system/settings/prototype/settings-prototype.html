@@ -281,7 +281,6 @@ a { color: var(--ptah-link); text-underline-offset: 2px; }
 /* Counts and the ring show only loaded data. */
 .coll:has([data-view]:not([data-view="loaded"])) .coll-head :is(.ring, h2 .badge, h3 .badge) { display: none; }
 .fs:has([data-view]:is([data-view="loading"], [data-view="error"])) .fs-status { display: none; }
-.coll:has([data-view="locked"]) .coll-head .actions { display: none; }
 .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring circle { fill: none; stroke-width: 4; }
 .ring .trk { stroke: color-mix(in oklab, var(--bc) 12%, transparent); }
@@ -638,7 +637,7 @@ html[data-inspect="on"] :is(.btn, .badge, .status, .toggle-wrap, .field, .cellbt
   <strong>Prototype</strong>
   <div class="grp"><span>Theme</span><div class="seg-ctl" data-ctl="theme"><button aria-pressed="true" data-val="dark">Dark</button><button aria-pressed="false" data-val="light">Light</button></div></div>
   <div class="grp"><span>Width</span><div class="seg-ctl" data-ctl="width"><button aria-pressed="true" data-val="1168px">1168</button><button aria-pressed="false" data-val="784px">784</button><button aria-pressed="false" data-val="390px">390</button><button aria-pressed="false" data-val="100%">Fluid</button></div></div>
-  <div class="grp"><span>State</span><div class="seg-ctl" data-ctl="state"><button aria-pressed="true" data-val="loaded">Loaded</button><button aria-pressed="false" data-val="loading">Loading</button><button aria-pressed="false" data-val="empty">Empty</button><button aria-pressed="false" data-val="error">Error</button><button aria-pressed="false" data-val="locked">Locked</button><button aria-pressed="false" data-val="chunk">Tab failed</button></div></div>
+  <div class="grp"><span>State</span><div class="seg-ctl" data-ctl="state"><button aria-pressed="true" data-val="loaded">Loaded</button><button aria-pressed="false" data-val="loading">Loading</button><button aria-pressed="false" data-val="empty">Empty</button><button aria-pressed="false" data-val="error">Error</button><button aria-pressed="false" data-val="chunk">Tab failed</button></div></div>
   <div class="grp"><span>Inspect</span><div class="seg-ctl" data-ctl="inspect"><button aria-pressed="true" data-val="off">Off</button><button aria-pressed="false" data-val="on">On</button></div></div>
   <div class="legend" id="legend"><span><i class="sw" style="background:var(--state-ink-run)"></i>catalog</span><span><i class="sw" style="background:var(--state-ink-done)"></i>settings/shared</span><span><i class="sw" style="background:var(--state-ink-need)"></i>gap</span><span id="inspect-count"></span></div>
 </div>
@@ -873,33 +872,16 @@ html[data-inspect="on"] :is(.btn, .badge, .status, .toggle-wrap, .field, .cellbt
     <div class="tab" data-tab="advanced" hidden>
       <div class="chunk" data-component="ptah-state-panel (shell chunk error)"></div>
 
-      <section class="fs" id="a-member" aria-labelledby="h-a-member" data-editable data-mode="view" data-component="ptah-editable-section">
+      <section class="fs" id="a-data" aria-labelledby="h-a-data" data-component="ptah-form-section">
         <div class="fs-aside">
-          <h3 class="t-section" id="h-a-member">Membership and data</h3>
-          <p class="hint">Your plan, your license key, and a copy of your settings.</p>
-          <div class="fs-status" id="member-status"><span class="status" data-a="pill" data-ink="done" data-component="ptah-status (pill)">Pro, valid</span></div>
+          <h3 class="t-section" id="h-a-data">Import &amp; export</h3>
+          <p class="hint">A copy of your settings, API keys and preferences.</p>
         </div>
-        <div class="fs-body" data-async data-name="membership" data-skel="rows">
-          <div class="es-view" id="member-view">
-            <dl class="dl" data-component="ptah-description-list">
-              <div><dt>Plan</dt><dd id="m-plan">Pro</dd></div>
-              <div><dt>State</dt><dd id="m-state"><span class="status" data-ink="done">Valid</span></dd></div>
-              <div><dt>Renews</dt><dd id="m-renew">12 January</dd></div>
-              <div><dt>License key</dt><dd class="mono" id="m-key">PTAH-DEMO-••••-0000</dd></div>
-            </dl>
+        <div class="fs-body" data-async data-name="settings backup" data-skel="rows">
+          <div class="rows">
+            <div class="srow" data-component="GAP G2: ptah-setting-row"><div><p class="t">Settings backup</p><p class="hint">The file holds your secrets in a readable form. Keep it private.</p></div><div class="ctl"><button class="btn" data-v="secondary" data-s="sm" data-toast="Settings exported to ptah-settings-export.json." data-component="ptah-button">Export</button><button class="btn" data-v="secondary" data-s="sm" data-confirm="cf-import" data-component="ptah-button">Import</button></div></div>
           </div>
-          <div class="es-edit">
-            <div class="field" data-component="ptah-field (revealable)"><div class="field-box"><input id="m-key" type="password" class="mono" placeholder=" " autocomplete="off" data-track data-required data-pattern="^PTAH-" data-err="Enter a key that starts with PTAH-."><label class="field-label" for="m-key">License key</label><button class="btn" data-v="ghost" data-s="xs" data-icon data-reveal="m-key" aria-label="Show key" aria-pressed="false" data-component="ptah-button (reveal)"><svg class="i"><use href="#i-eye"/></svg></button><span class="field-rail"></span></div><p class="field-hint">Find your key in the email that came with your plan.</p><p class="field-error" hidden></p></div>
-            <div class="fs-foot"><button class="btn" data-v="primary" data-s="sm" id="activate" data-component="ptah-button (primary)">Activate</button><button class="btn" data-v="ghost" data-s="sm" data-cancel-edit>Cancel</button></div>
-          </div>
-          <div class="fs-foot">
-            <button class="btn" data-v="secondary" data-s="sm" data-edit id="enter-key" data-component="ptah-button">Enter a new key</button>
-            <button class="btn" data-v="secondary" data-s="sm" data-toast="Settings exported to ptah-settings.json." data-component="ptah-button">Export settings</button>
-            <button class="btn" data-v="secondary" data-s="sm" data-confirm="cf-import" data-component="ptah-button">Import settings</button>
-            <button class="btn" data-v="ghost" data-s="sm" data-tone="danger" data-confirm="cf-logout" style="margin-left:auto" data-component="ptah-button (ghost, tone danger)">Log out</button>
-          </div>
-          <div class="iconfirm" id="cf-import" hidden role="group" aria-label="Confirm import settings" data-component="GAP G3: ptah-inline-confirm (danger)"><span>Replace all settings with the file?</span><button class="btn" data-v="danger" data-s="xs" data-confirm-ok data-done="Settings imported." aria-label="Confirm import settings">Replace settings</button><button class="btn" data-v="ghost" data-s="xs" data-confirm-cancel>Cancel</button></div>
-          <div class="iconfirm" id="cf-logout" hidden role="group" aria-label="Confirm log out" data-component="GAP G3: ptah-inline-confirm (danger)"><span>Log out of Ptah on this device?</span><button class="btn" data-v="danger" data-s="xs" data-confirm-ok data-done="Logged out (prototype).">Log out</button><button class="btn" data-v="ghost" data-s="xs" data-confirm-cancel>Cancel</button></div>
+          <div class="iconfirm" id="cf-import" hidden role="group" aria-label="Confirm import settings" data-component="GAP G3: ptah-inline-confirm (danger)"><span>Replace your settings from a file?</span><button class="btn" data-v="danger" data-s="xs" data-confirm-ok data-done="Settings imported." aria-label="Confirm import settings">Import settings</button><button class="btn" data-v="ghost" data-s="xs" data-confirm-cancel>Cancel</button></div>
         </div>
       </section>
 
@@ -920,7 +902,7 @@ html[data-inspect="on"] :is(.btn, .badge, .status, .toggle-wrap, .field, .cellbt
           <div><h3 class="t-section" id="h-a-style">Output style</h3><p class="hint">How the agent writes its answers. One style is active at a time.</p></div>
           <div class="actions"><button class="btn" data-v="primary" data-s="sm" data-toast="Style editor (prototype)" data-component="ptah-button (primary)"><svg class="i"><use href="#i-plus"/></svg>New style</button></div>
         </header>
-        <div data-async data-premium data-name="output styles" data-skel="cards">
+        <div data-async data-name="output styles" data-skel="cards">
           <div class="grid grid-tight" role="radiogroup" aria-label="Output style" id="styles"></div>
         </div>
       </section>
@@ -950,7 +932,7 @@ html[data-inspect="on"] :is(.btn, .badge, .status, .toggle-wrap, .field, .cellbt
           <p class="hint">Turn off tools you do not use. Each tool costs tokens on every turn.</p>
           <div class="stat" style="margin-top:.5rem" data-component="ptah-stat"><span class="t-label">Saved per turn</span><span class="v" id="tools-saved">2.7k tokens</span></div>
         </div>
-        <div class="fs-body" data-async data-premium data-name="Claude Code tools" data-skel="rows">
+        <div class="fs-body" data-async data-name="Claude Code tools" data-skel="rows">
           <div class="rows" id="tools"></div>
         </div>
       </section>
@@ -959,7 +941,7 @@ html[data-inspect="on"] :is(.btn, .badge, .status, .toggle-wrap, .field, .cellbt
 
       <section class="fs" id="a-tune" aria-labelledby="h-a-tune" data-component="ptah-form-section">
         <div class="fs-aside"><h3 class="t-section" id="h-a-tune">Fine-tuning</h3><p class="hint">Upkeep jobs for memory, skills and the code index.</p></div>
-        <div class="fs-body" data-async data-premium data-name="fine-tuning" data-skel="rows">
+        <div class="fs-body" data-async data-name="fine-tuning" data-skel="rows">
           <div>
             <details class="disc" data-component="GAP G8: ptah-disclosure (other child)"><summary><svg class="i chev"><use href="#i-right"/></svg><span class="t">Memory upkeep</span><span class="hint">Daily</span></summary><div class="disc-body" data-component="settings/shared: ptah-advanced-settings-group"><div class="rows"><div class="srow"><div><p class="t">Merge similar memories</p><p class="hint">Runs when the app is idle.</p></div><div class="ctl"><input type="checkbox" class="toggle" role="switch" checked data-track aria-label="Merge similar memories"></div></div></div></div></details>
             <details class="disc" data-component="GAP G8: ptah-disclosure (other child)"><summary><svg class="i chev"><use href="#i-right"/></svg><span class="t">Skill upkeep</span><span class="hint">Weekly</span></summary><div class="disc-body"><div class="rows"><div class="srow"><div><p class="t">Suggest new skills from finished tasks</p></div><div class="ctl"><input type="checkbox" class="toggle" role="switch" data-track aria-label="Suggest new skills"></div></div></div></div></details>
@@ -1176,7 +1158,7 @@ const TABS = {
   providers: { title: 'Providers', desc: 'Choose which models and CLI agents do the work, and in which order lanes run.' },
   matrix: { title: 'Decision matrix', desc: 'The routing model uses these ratings to suggest a lane.' },
   context: { title: 'Context management', desc: 'Limits that keep chats and lanes inside your budget and plan limits.' },
-  advanced: { title: 'Advanced', desc: 'Membership, agent behaviour, the MCP server, tools and setup.' },
+  advanced: { title: 'Advanced', desc: 'Import and export, agent behaviour, the MCP server, tools and setup.' },
   search: { title: 'Search and voice', desc: 'Web search providers, voice engines and workspace checks.' },
 };
 const BAND = {
@@ -1201,7 +1183,6 @@ const BAND = {
     { t: 'm-ratings', label: 'Last rating', value: '4 days ago', meta: 'Refresh to check again', ink: 'idle' },
   ],
   advanced: [
-    { t: 'a-member', label: 'Membership', value: 'Pro, valid', meta: 'Renews 12 January', ink: 'done', locked: { value: 'Free plan', meta: 'Enter a key for Pro', ink: 'idle' } },
     { t: 'a-behave', label: 'Agent behaviour', value: 'Ultracode on', meta: 'High effort', ink: 'idle' },
     { t: 'a-style', label: 'Output style', value: 'Concise', meta: '3 styles', ink: 'idle' },
     { t: 'a-mcp', label: 'MCP server', value: 'Running', meta: 'Port 4711', ink: 'live' },
@@ -1349,8 +1330,6 @@ function segState(seg) {
   if (v === 'loading') return { ...seg, loading: true, ink: 'idle' };
   if (v === 'error') return { ...seg, value: 'Could not load', meta: 'Retry in the section', ink: 'err', meter: null };
   if (v === 'empty') return { ...seg, value: seg.empty || 'None', meta: 'Nothing set up yet', ink: 'idle', meter: null };
-  if (v === 'locked') return { ...seg, value: 'Pro feature', meta: 'Needs a Pro membership', ink: 'idle', meter: null };
-  if (root.dataset.state === 'locked' && seg.locked) return { ...seg, ...seg.locked };
   return seg;
 }
 function renderBand() {
@@ -1438,7 +1417,6 @@ function altHtml(el, view) {
   if (view === 'loading') return `<div data-component="ptah-skeleton"><span class="sr" role="status">Loading ${esc(name)}</span>${(SKEL[el.dataset.skel] || SKEL.rows)()}</div>`;
   if (view === 'error') return `<div class="alert" data-tone="err" data-component="settings/shared: ptah-settings-section-state (error)">${icon('alert')}<div class="txt">Ptah could not load ${esc(name)}. Check that the app is online, then retry.</div><div class="act"><button class="btn" data-v="ghost" data-s="xs" data-retry>Retry</button></div></div>`;
   if (view === 'empty') return `<div class="state" data-component="ptah-state-panel (empty)"><span class="ico">${icon('plus')}</span><div class="txt"><p class="t-group">${esc(el.dataset.empty || 'Nothing here yet.')}</p><p>${esc(el.dataset.emptyText || '')}</p>${el.dataset.emptyAction ? `<div class="acts"><button class="btn" data-v="${el.hasAttribute('data-empty-primary') ? 'secondary' : 'secondary'}" data-s="sm" data-retry>${esc(el.dataset.emptyAction)}</button></div>` : ''}</div></div>`;
-  if (view === 'locked') return `<div class="state" data-component="ptah-state-panel (no-permission)"><span class="ico">${icon('lock')}</span><div class="txt"><p class="t-group">Pro feature</p><p>${esc(name.charAt(0).toUpperCase() + name.slice(1))} need a Pro membership.</p><div class="acts"><button class="btn" data-v="secondary" data-s="sm" data-goto="advanced:a-member">Enter a license key</button><a class="btn" data-v="link" data-s="sm" href="https://example.com/plans">Compare plans</a></div></div></div>`;
   return '';
 }
 function setView(el, view) {
@@ -1452,22 +1430,10 @@ function applyState(state) {
   root.dataset.state = state;
   for (const el of $$('[data-async]')) {
     let v = 'loaded';
-    if (state === 'locked') v = el.hasAttribute('data-premium') ? 'locked' : 'loaded';
-    else if (state === 'empty') v = el.dataset.empty ? 'empty' : 'loaded';
+    if (state === 'empty') v = el.dataset.empty ? 'empty' : 'loaded';
     else if (state === 'loading' || state === 'error') v = state;
     setView(el, v);
   }
-  // membership block: free plan in locked state
-  const locked = state === 'locked';
-  $('#m-plan').textContent = locked ? 'Free' : 'Pro';
-  $('#m-state').innerHTML = locked ? status('idle', 'No license') : status('done', 'Valid');
-  $('#m-renew').textContent = locked ? 'Not applicable' : '12 January';
-  $('#member-status').innerHTML = locked ? status('idle', 'Free plan', true) : status('done', 'Pro, valid', true);
-  $('#enter-key').textContent = locked ? 'Enter a license key' : 'Enter a new key';
-  // Free plan: the key entry is the one primary action. Locked collections lose their add action.
-  $('#enter-key').dataset.v = locked ? 'primary' : 'secondary';
-  $('#m-key').textContent = locked ? 'Not entered' : 'PTAH-DEMO-••••-0000';
-  $('#m-key').classList.toggle('mono', !locked);
   $$('.chunk').forEach((c) => { c.innerHTML = `<div class="state" style="margin-top:1.5rem"><span class="ico">${icon('alert')}</span><div class="txt"><p class="t-group">This tab did not load.</p><p>A part of the app failed to download. Reload the tab to try again.</p><div class="acts"><button class="btn" data-v="secondary" data-s="sm" data-state-to="loaded">Reload tab</button></div></div></div>`; });
   renderBand();
 }
@@ -1656,7 +1622,7 @@ document.addEventListener('click', (e) => {
   if (ctl) { protoCtl(ctl.parentElement.dataset.ctl, ctl.dataset.val); $$('button', ctl.parentElement).forEach((b) => b.setAttribute('aria-pressed', String(b === ctl))); return; }
   const nav = t.closest('.nav-item'); if (nav) { showTab(nav.dataset.tab); return; }
   const seg = t.closest('.seg'); if (seg) { goSection(seg.dataset.target); return; }
-  const go = t.closest('[data-goto]'); if (go) { const [tab, sec] = go.dataset.goto.split(':'); if (root.dataset.state === 'locked' && tab === 'advanced') { /* keep */ } showTab(tab, sec); return; }
+  const go = t.closest('[data-goto]'); if (go) { const [tab, sec] = go.dataset.goto.split(':'); showTab(tab, sec); return; }
   const st = t.closest('[data-state-to]'); if (st) { protoCtl('state', st.dataset.stateTo); $$('[data-ctl="state"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.val === st.dataset.stateTo))); return; }
   const popBtn = t.closest('[data-pop]'); if (popBtn) { const p = document.getElementById(popBtn.dataset.pop); if (openPop === p) closePops(); else { showPop(p, popBtn); } return; }
   const inner = t.closest('[data-pop-inner]'); if (inner) { const l = document.getElementById(inner.dataset.popInner); l.hidden = !l.hidden; inner.setAttribute('aria-expanded', String(!l.hidden)); if (!l.hidden) l.querySelector('[aria-selected="true"]').focus(); placePop(openPop, popTrigger); return; }
@@ -1675,7 +1641,6 @@ document.addEventListener('click', (e) => {
   const rv = t.closest('[data-reveal]'); if (rv) { const inp = document.getElementById(rv.dataset.reveal); const show = inp.type === 'password'; inp.type = show ? 'text' : 'password'; rv.setAttribute('aria-pressed', String(show)); rv.setAttribute('aria-label', show ? 'Hide key' : 'Show key'); rv.innerHTML = icon(show ? 'eyeoff' : 'eye'); return; }
   const ed = t.closest('[data-edit]'); if (ed) { const s = ed.closest('[data-editable]'); s.dataset.mode = 'edit'; const f = s.querySelector('.es-edit input, .es-edit select'); if (f) f.focus(); return; }
   const ce = t.closest('[data-cancel-edit]'); if (ce) { const s = ce.closest('[data-editable]'); discard(s); s.querySelector('[data-edit]')?.focus(); return; }
-  if (t.closest('#activate')) { const k = $('#m-key'); if (!validate(k)) { k.focus(); return; } k.dataset.initial = k.value; k.closest('[data-editable]').dataset.mode = 'view'; updateSavebar(); toast('License key activated.'); if (root.dataset.state === 'locked') { protoCtl('state', 'loaded'); $$('[data-ctl="state"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.val === 'loaded'))); } return; }
   if (t.closest('#save')) { save(); return; }
   if (t.closest('#discard')) { discard(); toast('Changes discarded.'); return; }
   if (t.closest('#conn-filter-clear')) { $('#conn-filter').value = ''; filterConns(); $('#conn-filter').focus(); return; }

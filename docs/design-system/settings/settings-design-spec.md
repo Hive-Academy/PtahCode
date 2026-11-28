@@ -16,7 +16,7 @@ Status: Phase A3 design (rev 2). No source file is changed. This spec needs user
 | Direction       | `prototype/design-direction.md`: Direction B "Flight deck"                                                                                                                                                                         |
 | Screenshots     | Rev 2: `prototype/screens/rev2-*.jpg` and `rev2b-providers-lanes-*.jpg` (Providers, Context, Decision matrix x dark/light x 1168/784). Rev 1: `prototype/screens/<tab>-<theme>-<width>.jpg` (Providers and Context are superseded) |
 | Revision copies | Each published revision is saved as `prototype/rev-<n>.html`                                                                                                                                                                       |
-| Controls        | Toolbar: theme, width (1168, 784, 390, fluid), state (loaded, loading, empty, error, locked, tab failed), inspect (marks each block as catalog, settings/shared or gap)                                                            |
+| Controls        | Toolbar: theme, width (1168, 784, 390, fluid), state (loaded, loading, empty, error, tab failed), inspect (marks each block as catalog, settings/shared or gap)                                                            |
 
 If the prototype and this text disagree, the prototype wins for layout, spacing, copy and states.
 The tables in section 4 give the component mapping for each block.
@@ -80,8 +80,6 @@ Rules:
    - Counts, rings, badges in a collection header and the aside status show only loaded data.
      They are hidden while the block loads or shows an error.
    - A band bar is idle (neutral) while its block loads.
-   - A locked collection hides its add action. On a Free plan, "Enter a key" is the one primary action
-     of the Advanced tab.
    - An invalid save keeps the edit mode, shows "Fix N field(s) before you save." in the save bar in
      the error ink, and moves focus to the first invalid field.
    - Only overlays and the sticky save bar have a shadow. The drawer opens below the app toolbar.
@@ -223,13 +221,12 @@ Instrument band (4 segments, decision 5): Families, Models rated, Last rating, S
 ### 4.3 Advanced (`pro-features`)
 
 Prototype: `screens/advanced-*.jpg`.
-Instrument band (6 segments): Membership, Agent behaviour, Output style, MCP server, Claude Code
-tools, Setup. "Locked" state: premium collections show `ptah-state-panel` no-permission and hide
-their add action. The license key shows "Not entered" and "Enter a key" becomes the primary action.
+Instrument band (5 segments): Agent behaviour, Output style, MCP server, Claude Code tools, Setup.
+Every block is available to everyone; there is no locked state.
 
 | Block                        | Function                             | Now                                    | Target                                                                                                                                                                                                                          | Change                                                                                          |
 | ---------------------------- | ------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Membership and data          | Status, key, export/import, log out  | `ptah-license-status-card` (670 lines) | `ptah-editable-section`: view = description list (plan, state, reason); key entry = `ptah-field` revealable + primary "Activate"; data actions as secondary Export/Import; "Log out" as danger ghost with `ptah-inline-confirm` | License-locked state: `ptah-state-panel state="no-permission"` where a premium block is locked. |
+| Import & export              | Export/import a settings backup      | Export/Import inside the membership card | `ptah-form-section` "Import & export" (`data-testid="data-section"`): one "Settings backup" `ptah-setting-row` with secondary Export and Import buttons | The import confirm takes the place of the two buttons inside the row. |
 | Import confirm               | Replace settings                     | raw group + `btn`                      | `ptah-inline-confirm` (danger tone)                                                                                                                                                                                             | Keep `import-confirm`, `import-confirm-button`, `aria-label="Confirm import settings"`, Esc.    |
 | Agent behaviour              | Prompt, Ultracode, workflows, effort | raw `table`                            | `ptah-form-section`; one `ptah-setting-row` per setting (checkbox/toggle, value at right, ghost icon "Details")                                                                                                                 | No table needed.                                                                                |
 | System prompt drawer         | View, regenerate                     | `ptah-native-drawer`                   | keep. Regenerate confirm becomes `ptah-inline-confirm`                                                                                                                                                                          | none                                                                                            |

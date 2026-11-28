@@ -26,7 +26,7 @@ export interface RpcCallEnvelope {
  *   - 'rpc'                  : renderer -> main, fire-and-forget RPC dispatch
  *   - 'to-renderer'          : main -> renderer, RPC responses + push events
  *   - 'get-state' / 'set-state' : webview state persistence (sync get, async set)
- *   - 'get-startup-config'   : sync read of license/workspace bootstrap
+ *   - 'get-startup-config'   : sync read of initial view/workspace bootstrap
  *   - 'clipboard:read-text' / 'clipboard:write-text'
  *
  * NOTE: 'rpc' is fire-and-forget at the IPC layer -- responses come back on

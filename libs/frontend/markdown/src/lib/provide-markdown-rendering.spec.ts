@@ -17,7 +17,6 @@ import type { MarkedExtension, Tokens } from 'marked';
 import { parseFileLinkHref } from './file-link-target';
 import {
   provideMarkdownRendering,
-  __resetMemberPurifierForTests,
   MARKDOWN_CONTAINMENT_ROOT_CLASS,
   type MarkdownRenderingConfig,
 } from './provide-markdown-rendering';
@@ -35,27 +34,12 @@ describe('provideMarkdownRendering', () => {
     expect(providers.length).toBeGreaterThan(0);
   });
 
-  it('returns Provider[] for the member preset', () => {
-    const providers = provideMarkdownRendering({ extensions: 'member' });
-    expect(Array.isArray(providers)).toBe(true);
-    expect(providers.length).toBeGreaterThan(0);
-  });
-
   it('produces a different (richer) provider tree for full vs basic', () => {
     const basic = provideMarkdownRendering({ extensions: 'basic' });
     const full = provideMarkdownRendering({ extensions: 'full' });
     // Both arrays exist; their flattened content should differ in size because
     // the full preset wires up the sanitizer + 5 marked extensions.
     expect(JSON.stringify(basic)).not.toBe(JSON.stringify(full));
-  });
-
-  it('gives the member preset its own sanitizer, distinct from full', () => {
-    const member = memberConfig();
-    const full = presetConfig('full');
-    expect(member.sanitize.useFactory).not.toBe(full.sanitize.useFactory);
-    // No marked extensions: those decorate AI output, not forum posts.
-    expect(member.markedExtensions).toBeUndefined();
-    expect(full.markedExtensions).toBeDefined();
   });
 
   it('accepts a config object satisfying MarkdownRenderingConfig', () => {
@@ -75,7 +59,7 @@ interface CapturedMarkdownConfig {
   markedExtensions?: unknown;
 }
 
-function presetConfig(extensions: 'full' | 'member'): CapturedMarkdownConfig {
+function presetConfig(extensions: 'full'): CapturedMarkdownConfig {
   const providers = provideMarkdownRendering({ extensions }) as Array<
     Array<{ provide: string; useValue: CapturedMarkdownConfig }>
   >;
@@ -113,126 +97,6 @@ it('full preset preserves direction on callout cards and titles', () => {
   const out = fullSanitizer()('<div class="callout" dir="auto"><span class="callout-title" dir="ltr">Tip</span><p>عربي</p></div>');
   expect(out).toContain('class="callout" dir="auto"');
   expect(out).toContain('class="callout-title" dir="ltr"');
-});
-
-function memberConfig(): CapturedMarkdownConfig {
-  return presetConfig('member');
-}
-
-describe("the 'member' preset sanitizer (member-authored UGC)", () => {
-  let sanitize: (html: string) => string;
-
-  beforeEach(() => {
-    __resetMemberPurifierForTests();
-    sanitize = memberConfig().sanitize.useFactory();
-  });
-
-  afterAll(() => {
-    __resetMemberPurifierForTests();
-  });
-
-  it('keeps the markdown a composer can actually produce', () => {
-    const out = sanitize(
-      '<h2>Title</h2><p><strong>bold</strong> and <em>italic</em></p>' +
-        '<ul><li>one</li></ul><pre><code class="language-ts">x</code></pre>' +
-        '<blockquote><p>quoted</p></blockquote>' +
-        '<table><tbody><tr><td>cell</td></tr></tbody></table>',
-    );
-    expect(out).toContain('<h2>Title</h2>');
-    expect(out).toContain('<strong>bold</strong>');
-    expect(out).toContain('<li>one</li>');
-    expect(out).toContain('class="language-ts"');
-    expect(out).toContain('<blockquote>');
-    expect(out).toContain('<td>cell</td>');
-  });
-
-  it('preserves direction on lists and blockquotes', () => {
-    const out = sanitize('<ul dir="auto"><li>عربي</li></ul>' +
-      '<ol dir="auto" start="5"><li>عربي</li></ol>' +
-      '<blockquote dir="auto"><p>عربي</p></blockquote>');
-    expect(out).toContain('<ul dir="auto">');
-    expect(out).toContain('<ol dir="auto" start="5">');
-    expect(out).toContain('<blockquote dir="auto">');
-  });
-
-  it('preserves direction on callout titles (div cards are not member markup)', () => {
-    const out = sanitize('<div class="callout" dir="auto"><span class="callout-title" dir="ltr">Tip</span><p>عربي</p></div>');
-    expect(out).not.toContain('<div');
-    expect(out).toContain('class="callout-title" dir="ltr"');
-  });
-
-  it('strips <script>', () => {
-    const out = sanitize('<p>Hi</p><script>alert(1)</script>');
-    expect(out).not.toContain('<script');
-    expect(out).toContain('<p>Hi</p>');
-  });
-
-  it('strips inline event handlers', () => {
-    const out = sanitize('<p onclick="alert(1)">click</p>');
-    expect(out.toLowerCase()).not.toContain('onclick');
-  });
-
-  it('rejects tags even when the full preset allows them', () => {
-    // These are exactly why the member preset is an allowlist: the `'full'`
-    // preset permits SVG and custom elements for AI output, which is right
-    // for a diagram an agent drew and wrong for a post another member wrote.
-    // The two presets have since diverged further (TASK_2026_532): `'full'`
-    // now forbids `<style>` too, while still keeping `<details>`; member
-    // rejects both.
-    const out = sanitize(
-      '<svg><circle r="1" /></svg><details><summary>s</summary></details>' +
-        '<style>body{display:none}</style><ptah-callout>x</ptah-callout>',
-    );
-    expect(out).not.toContain('<svg');
-    expect(out).not.toContain('<details');
-    expect(out).not.toContain('<style');
-    expect(out).not.toContain('<ptah-callout');
-  });
-
-  it('strips style and data-* attributes', () => {
-    const out = sanitize('<p style="position:fixed" data-x="1">t</p>');
-    expect(out).not.toContain('style=');
-    expect(out).not.toContain('data-x');
-  });
-
-  it('blocks javascript: URIs in any casing', () => {
-    const out = sanitize('<a href="JaVaScRiPt:alert(1)">x</a>');
-    expect(out.toLowerCase()).not.toContain('javascript:');
-  });
-
-  it('blocks data: URIs, which the full preset allows', () => {
-    const out = sanitize(
-      '<img src="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" alt="x">',
-    );
-    expect(out).not.toContain('data:text/html');
-  });
-
-  it('forces rel and target on every surviving anchor', () => {
-    const out = sanitize('<a href="https://example.com">x</a>');
-    expect(out).toContain('rel="noopener noreferrer nofollow"');
-    expect(out).toContain('target="_blank"');
-  });
-
-  it('overwrites an author-supplied rel rather than trusting it', () => {
-    const out = sanitize('<a href="https://example.com" rel="dofollow">x</a>');
-    expect(out).not.toContain('dofollow');
-    expect(out).toContain('rel="noopener noreferrer nofollow"');
-  });
-
-  it('leaves relative links usable', () => {
-    const out = sanitize('<a href="/members/hub">hub</a>');
-    expect(out).toContain('href="/members/hub"');
-  });
-
-  it('does not register its anchor hook on the shared DOMPurify instance', () => {
-    // The hook is instance-global. If it had been added to the default export,
-    // the webview's `'full'` preset would silently start rewriting every anchor
-    // it renders. This is the assertion that keeps the two presets independent.
-    const viaDefault = DOMPurify.sanitize(
-      '<a href="https://example.com">x</a>',
-    );
-    expect(viaDefault).not.toContain('nofollow');
-  });
 });
 
 /**
@@ -599,22 +463,10 @@ describe("the 'full' preset class and style policy (TASK_2026_532)", () => {
 
   it('does not leak the hook onto the shared DOMPurify instance', () => {
     // The hook is instance-global. If it had been added to the default export,
-    // every other DOMPurify user in the app would start losing classes. This
-    // is the counterpart of the member preset's non-leak assertion.
+    // every other DOMPurify user in the app would start losing classes.
     const viaDefault = DOMPurify.sanitize('<div class="fixed z-50">x</div>');
     expect(viaDefault).toContain('fixed');
     expect(viaDefault).toContain('z-50');
-  });
-
-  it('does not leak the hook onto the member preset', () => {
-    __resetMemberPurifierForTests();
-    const member = memberConfig().sanitize.useFactory()(
-      '<p class="fixed z-50">x</p>',
-    );
-    // The member instance has no containment hook; its allowlist is the only
-    // defence there, which is a separate contract from this task.
-    expect(member).toContain('fixed');
-    __resetMemberPurifierForTests();
   });
 });
 

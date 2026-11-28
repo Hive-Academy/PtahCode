@@ -24,22 +24,12 @@ import {
 } from '@ptah-extension/core/testing';
 import { AdvancedSettingsComponent } from './advanced-settings.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
-import { LicenseStatusCardComponent } from './license/license-status-card.component';
 import { VscodeLmConfigComponent } from './pro-features/vscode-lm-config.component';
 import { McpPortConfigComponent } from './pro-features/mcp-port-config.component';
 import { ClaudeBuiltinsConfigComponent } from './pro-features/claude-builtins-config.component';
 import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-section.component';
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { AdvancedSettingsGroupComponent } from './advanced/advanced-settings-group.component';
-
-@Component({
-  selector: 'ptah-license-status-card',
-  standalone: true,
-  // Projects the shell's Export/Import slots the way the real card does.
-  changeDetection: ChangeDetectionStrategy.OnPush,
-  template: '<ng-content />',
-})
-class LicenseStub {}
 
 @Component({
   selector: 'ptah-output-style-config',
@@ -141,7 +131,6 @@ describe('AdvancedSettingsComponent', () => {
     }).overrideComponent(AdvancedSettingsComponent, {
       remove: {
         imports: [
-          LicenseStatusCardComponent,
           AgentBehaviourSectionComponent,
           OutputStyleConfigComponent,
           McpPortConfigComponent,
@@ -152,7 +141,6 @@ describe('AdvancedSettingsComponent', () => {
       },
       add: {
         imports: [
-          LicenseStub,
           AgentBehaviourStub,
           OutputStyleStub,
           McpPortStub,
@@ -194,7 +182,7 @@ describe('AdvancedSettingsComponent', () => {
     expect(element.querySelector('ptah-workflows-config')).toBeNull();
     expect(element.querySelector('ptah-enhanced-prompts-config')).toBeNull();
     const selectors = [
-      'ptah-license-status-card',
+      '[data-testid="data-section"]',
       'ptah-agent-behaviour-section',
       'ptah-output-style-config',
       'ptah-mcp-port-config',
@@ -261,14 +249,13 @@ describe('AdvancedSettingsComponent', () => {
   it('starts with the overview band: one idle segment per section until the section reports', async () => {
     await render(false);
     const band = element.querySelector('[data-testid="advanced-overview"]');
-    expect(band?.compareDocumentPosition(element.querySelector('ptah-license-status-card') as Node)).toBe(
+    expect(band?.compareDocumentPosition(element.querySelector('[data-testid="data-section"]') as Node)).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
     const segments = Array.from(band?.querySelectorAll('button') ?? []).map((button) =>
       button.getAttribute('aria-label'),
     );
     expect(segments).toEqual([
-      'Membership Not loaded',
       'Agent behaviour Not loaded',
       'Output style Not loaded',
       'MCP server Not loaded',
@@ -412,7 +399,7 @@ describe('AdvancedSettingsComponent', () => {
     }
   });
 
-  it('M5: renders the import confirm in the header action row, not above the membership badges', async () => {
+  it('M5: renders the import confirm in the Settings backup row of the Import & export card', async () => {
     await render(false);
     element
       .querySelector<HTMLButtonElement>('[aria-label="Import settings"]')
@@ -420,8 +407,13 @@ describe('AdvancedSettingsComponent', () => {
     fixture.detectChanges();
 
     const confirm = element.querySelector('[data-testid="import-confirm"]');
-    expect(confirm?.closest('[membership-actions]')).not.toBeNull();
-    expect(element.querySelector('[membership-notices]')).toBeNull();
+    expect(confirm?.closest('[data-testid="data-backup-row"]')).not.toBeNull();
+    expect(
+      confirm?.closest('[data-testid="data-section"]')?.getAttribute('data-glass-surface'),
+    ).toBe('content');
+    expect(
+      element.querySelector('#advanced-data')?.textContent,
+    ).toContain('Import & export');
     // The full warning stays available to assistive technology.
     const detail = element.querySelector(
       `#${confirm?.getAttribute('aria-describedby')}`,
@@ -484,7 +476,7 @@ describe('AdvancedSettingsComponent', () => {
           imported: [],
           skipped: [],
           errors: [
-            'ptah.licenseKey: host detail EPERM',
+            'ptah.auth.anthropicApiKey: host detail EPERM',
             'config:llm.defaultProvider: host detail',
           ],
         },

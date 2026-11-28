@@ -88,8 +88,6 @@ export const DEPENDENCY_GRAPH_SERVICE = Symbol.for('DependencyGraphService');
 export const AGENT_PROCESS_MANAGER = Symbol.for('AgentProcessManager');
 export const CLI_DETECTION_SERVICE = Symbol.for('CliDetectionService');
 export const AUTH_SECRETS_SERVICE = Symbol.for('AuthSecretsService');
-export const LICENSE_SERVICE = Symbol.for('LicenseService');
-export const LICENSE_COMMANDS = Symbol.for('LicenseCommands');
 
 export const PTAH_API_BUILDER = Symbol.for('PtahAPIBuilder');
 export const CODE_EXECUTION_MCP = Symbol.for('CodeExecutionMCP');
@@ -261,8 +259,6 @@ export const TOKENS = {
   AGENT_PROCESS_MANAGER,
   CLI_DETECTION_SERVICE,
   AUTH_SECRETS_SERVICE,
-  LICENSE_SERVICE,
-  LICENSE_COMMANDS,
   PTAH_API_BUILDER,
   CODE_EXECUTION_MCP,
   PERMISSION_PROMPT_SERVICE,

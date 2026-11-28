@@ -3,7 +3,7 @@ title: First launch
 description: Open your first workspace and see what Ptah does on the first run.
 ---
 
-Ptah is free and open source. The first launch asks for no account, no sign-up, and no license key.
+Ptah is free and open source. The first launch asks for no account and no sign-up.
 
 ## Get ready
 
@@ -54,10 +54,6 @@ Ptah looks for installed agent CLIs and registers the ones that it finds. The CL
 ## Import of existing sessions
 
 When you open a workspace, Ptah reads your Claude Code session history in `~/.claude/projects/`. It imports up to 50 recent sessions for that workspace. There is no prompt. The session list is short at first and fills while the import runs. The import reads local files only and uploads nothing.
-
-## Optional: Ptah Builders membership
-
-Ptah Builders is an optional paid membership. It does not unlock local features. If you have a membership key, attach it in **Settings → Advanced**. See [Connect a provider](/getting-started/signing-in/#membership-key).
 
 ## Next step
 

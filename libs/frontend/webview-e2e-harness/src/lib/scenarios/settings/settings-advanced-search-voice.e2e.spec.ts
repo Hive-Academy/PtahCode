@@ -36,10 +36,6 @@ async function bottomOf(locator: Locator): Promise<number> {
   return Math.round((box?.y ?? 0) + (box?.height ?? 0));
 }
 
-async function heightOf(locator: Locator): Promise<number> {
-  return Math.round((await locator.first().boundingBox())?.height ?? 0);
-}
-
 /** Nothing on the page or in its scroll containers is scrolled (the fold is measured on a fresh tab). */
 async function scrollTops(page: Page): Promise<number> {
   return page.evaluate(() => Math.max(window.scrollY, ...Array.from(document.querySelectorAll('*'))
@@ -56,23 +52,18 @@ async function waitForDrawer(page: Page): Promise<void> {
 
 
 /**
- * Map §2.2: header, tab bar, the Membership card and the Agent behaviour card with all 4 rows end above the
- * fold; the Membership card is at most ~140 px in the community state.
+ * Map §2.2: header, tab bar and the Agent behaviour card with all 4 rows end above the fold.
  */
 async function assertAdvancedFold(page: Page, host: Host, theme: string): Promise<void> {
-  const membership = page.locator('ptah-license-status-card');
   const rows = page.locator('[data-testid^="agent-behaviour-row-"]');
   const measured = {
     scroll: await scrollTops(page),
     tabs: await bottomOf(page.locator('[data-testid="settings-tabs"]')),
-    membership: await bottomOf(membership),
-    membershipHeight: await heightOf(membership),
     behaviour: await bottomOf(page.locator('[data-testid="agent-behaviour-card"]')),
     rowHeights: await rows.evaluateAll((all) => all.map((row) => Math.round(row.getBoundingClientRect().height))),
   };
   console.log(`B49 fold advanced ${host}/${theme}: ${JSON.stringify(measured)}`);
   expect(measured.scroll).toBe(0);
-  expect(measured.membershipHeight, 'Membership card height').toBeLessThanOrEqual(140);
   expect(measured.behaviour, 'Agent behaviour card bottom').toBeLessThanOrEqual(FOLD);
 }
 
@@ -205,7 +196,6 @@ for (const host of HOSTS) {
     const escape = (name: string, opener: () => Promise<Locator> | Locator, opened: Locator, cleanup?: () => Promise<void>) =>
       attempt(findings, name, async () => expectEscReturnsFocus(page, await opener(), opened), cleanup);
     await escape('Advanced: system prompt drawer (D-SP)', () => promptDetailsButton(page), by('system-prompt-drawer'));
-    await escape('Advanced: membership key popover', () => by('membership-key-trigger'), by('membership-key-popover'));
     await escape('Advanced: import confirm', () => page.getByRole('button', { name: 'Import settings' }), by('import-confirm'),
       () => by('import-confirm').getByRole('button', { name: 'Cancel' }).click());
     await escape('Advanced: effort popover', () => by('agent-behaviour-effort-value').getByRole('combobox'),

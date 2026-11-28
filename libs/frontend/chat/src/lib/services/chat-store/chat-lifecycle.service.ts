@@ -1,10 +1,6 @@
-import { Injectable, signal, inject } from '@angular/core';
-import {
-  ClaudeRpcService,
-  AuthStateService,
-  VSCodeService,
-} from '@ptah-extension/core';
-import { LicenseGetStatusResponse, SessionId } from '@ptah-extension/shared';
+import { Injectable, inject } from '@angular/core';
+import { AuthStateService, VSCodeService } from '@ptah-extension/core';
+import { SessionId } from '@ptah-extension/shared';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { SessionLoaderService } from './session-loader.service';
 import { CompactionLifecycleService } from './compaction-lifecycle.service';
@@ -21,9 +17,8 @@ import {
  *
  * Responsibilities:
  * - bootstrap: kick off async initialization (loadSessions,
- *   restoreCliSessionsForActiveTab, loadAuthStatus, fetchLicenseStatus)
- *   after services are ready; flips ChatStore._servicesReady via callback
- * - License status fetch with 3-attempt linear backoff
+ *   restoreCliSessionsForActiveTab, loadAuthStatus) after services are
+ *   ready; flips ChatStore._servicesReady via callback
  * - handleSessionIdResolved: replace placeholder tab IDs with real SDK UUIDs
  * - handleChatError: 3-tier tab routing, error presentation + queue drop only
  *   (the ordered `turn_state` owns finalization / status / spinner)
@@ -33,7 +28,6 @@ import {
  */
 @Injectable({ providedIn: 'root' })
 export class ChatLifecycleService {
-  private readonly claudeRpcService = inject(ClaudeRpcService);
   private readonly authState = inject(AuthStateService);
   private readonly vscodeService = inject(VSCodeService);
   private readonly tabManager = inject(TabManagerService);
@@ -44,10 +38,6 @@ export class ChatLifecycleService {
     SessionLivenessReconcilerService,
   );
   private readonly carryOver = inject(ProviderCarryOverService);
-  private readonly _licenseStatus = signal<LicenseGetStatusResponse | null>(
-    null,
-  );
-  readonly licenseStatus = this._licenseStatus.asReadonly();
 
   /**
    * Eagerly initialize services via dynamic import
@@ -74,57 +64,8 @@ export class ChatLifecycleService {
       this.authState.loadAuthStatus().catch((err) => {
         console.error('[ChatStore] Failed to load auth status:', err);
       });
-      this.fetchLicenseStatus().catch((err) => {
-        console.error('[ChatStore] Failed to fetch license status:', err);
-      });
     } catch (error) {
       console.error('[ChatStore] Failed to initialize services:', error);
-    }
-  }
-
-  /**
-   * Fetch the current license status from the backend with retry logic.
-   * Called during initialization to populate the membership card (settings
-   * panel) with license/membership identity — there are no trial banners or
-   * gating UI; that surface was removed (licensing is identity-only).
-   *
-   * Linear backoff retry (3 attempts) to handle transient network failures.
-   * Without retry, the membership card would show stale/loading state for
-   * the entire session if the initial fetch fails.
-   *
-   * @param retries - Number of retry attempts (default: 3)
-   */
-  async fetchLicenseStatus(retries = 3): Promise<void> {
-    for (let attempt = 1; attempt <= retries; attempt++) {
-      try {
-        const result = await this.claudeRpcService.call(
-          'license:getStatus',
-          {} as Record<string, never>,
-        );
-
-        if (result.isSuccess()) {
-          this._licenseStatus.set(result.data);
-          return;
-        } else {
-          if (attempt === retries) {
-            console.error(
-              '[ChatStore] Failed to fetch license status after retries:',
-              result.error,
-            );
-            this._licenseStatus.set(null);
-          }
-        }
-      } catch (error) {
-        if (attempt === retries) {
-          console.error(
-            '[ChatStore] Error fetching license status after retries:',
-            error,
-          );
-          this._licenseStatus.set(null);
-        } else {
-          await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
-        }
-      }
     }
   }
 

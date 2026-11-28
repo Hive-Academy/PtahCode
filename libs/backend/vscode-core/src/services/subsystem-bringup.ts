@@ -2,8 +2,7 @@
  * Subsystem bring-up — unconditional activation helper.
  *
  * Starts the Code Execution MCP server once, at activation, for every user.
- * There is no tier or license gate: all local, single-user capabilities are
- * available to everyone.
+ * All local, single-user capabilities are available to everyone.
  *
  * It used to also drive two app-provided CLI fan-out callbacks, one for skills
  * and one for agents. Those are gone: harness propagation is now

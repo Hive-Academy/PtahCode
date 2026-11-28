@@ -13,7 +13,7 @@ import { test, expect } from '../support/fixtures';
  * we only validate that the bridge wires request -> response correctly,
  * preserves correlationIds, and reports errors as data instead of throwing.
  *
- * NOTE: Method names use a colon separator (e.g. 'license:getStatus'), not
+ * NOTE: Method names use a colon separator (e.g. 'auth:getAuthStatus'), not
  * a dot. We cover the envelope behavior with real and intentionally-invalid
  * methods.
  */
@@ -41,14 +41,14 @@ function rpcCall(method: string, params: unknown = {}, correlationId?: string) {
 }
 
 test.describe('rpc channel envelope', () => {
-  test('license:getStatus returns success envelope with data object', async ({
+  test('auth:getAuthStatus returns success envelope with data object', async ({
     rpcBridge,
     mainWindow,
   }) => {
     await mainWindow.waitForLoadState('domcontentloaded');
     const res = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus'),
+      rpcCall('auth:getAuthStatus'),
     )) as RpcResponseEnvelope;
 
     expect(res.type).toBe('rpc:response');
@@ -146,7 +146,7 @@ test.describe('rpc channel envelope', () => {
     await mainWindow.waitForLoadState('domcontentloaded');
     const res = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus', null),
+      rpcCall('auth:getAuthStatus', null),
     )) as RpcResponseEnvelope;
 
     expect(res.type).toBe('rpc:response');
@@ -162,7 +162,7 @@ test.describe('rpc channel envelope', () => {
     const myId = `cid-fixed-${Math.random().toString(36).slice(2)}`;
     const res = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus', {}, myId),
+      rpcCall('auth:getAuthStatus', {}, myId),
     )) as RpcResponseEnvelope;
 
     expect(res.correlationId).toBe(myId);
@@ -178,11 +178,11 @@ test.describe('rpc channel envelope', () => {
 
     const a = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus', {}, idA),
+      rpcCall('auth:getAuthStatus', {}, idA),
     )) as RpcResponseEnvelope;
     const b = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus', {}, idB),
+      rpcCall('auth:getAuthStatus', {}, idB),
     )) as RpcResponseEnvelope;
 
     expect(a.correlationId).toBe(idA);
@@ -217,7 +217,7 @@ test.describe('rpc channel envelope', () => {
     const myId = `cid-push-${Date.now()}`;
     const res = (await rpcBridge.sendRpc(
       'rpc',
-      rpcCall('license:getStatus', {}, myId),
+      rpcCall('auth:getAuthStatus', {}, myId),
     )) as RpcResponseEnvelope;
 
     expect(res.correlationId).toBe(myId);

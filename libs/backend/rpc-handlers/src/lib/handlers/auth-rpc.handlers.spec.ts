@@ -46,7 +46,6 @@ import 'reflect-metadata';
 import type {
   ConfigManager,
   IAuthSecretsService,
-  LicenseService, // used only for structural compatibility assertions
   Logger,
   SentryService,
 } from '@ptah-extension/vscode-core';
@@ -591,10 +590,6 @@ async function call<TResult>(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
-
-// Silence unused-imports: LicenseService alias is documented but not needed;
-// keep as a no-op symbol reference to protect the import-order lint rule.
-void (0 as unknown as LicenseService | undefined);
 
 describe('AuthRpcHandlers', () => {
   describe('register()', () => {
