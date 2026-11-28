@@ -99,3 +99,44 @@
 - **Confidence:** HIGH
 - **Top risk:** The CI-only root cause is still unconfirmed, so if `<dialog>` is genuinely absent in CI, this edit will fail again on CI run 4 without printing the DOM/view state needed to diagnose it.
 - **Required before approval:** Add concise DOM/component diagnostics to the `!consent` and `!dialog` failure throws at `libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts:365,368` (S1).
+
+---
+
+## Re-review (correction)
+
+| Metric              | Value    |
+| ------------------- | -------- |
+| Overall score       | 8/10     |
+| Verdict             | APPROVED |
+| Blocking issues     | 0        |
+| Serious issues      | 0        |
+| Moderate issues     | 0        |
+| Open findings       | 0        |
+
+**Commit verified:** `89f3e36b5c` (`libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`, clean working tree against HEAD for this file) and `fix-report-ci-run3.md` (`## Correction`).
+
+### Finding Resolution
+
+- **S1 — RESOLVED (`team-builder-start.page.spec.ts:376-388, 413-417, 431-435`):**
+  - Missing `StackSkillConsentComponent` now throws with `stage`, `rootChildren`, and bounded `rootHtml` (`slice(0, 500)`).
+  - Missing `<dialog>` inside `consentHost` now queries `consent.query(By.directive(NativeModalComponent))` on the error path and throws with `nativeModal`, `rootDialogs`, `documentDialogs`, and bounded `consentHtml` (`slice(0, 500)`).
+  - Missing `Install` button and missing `Back`/`Cancel` buttons also fail fast with bounded DOM/stage diagnostics (`dialogHtml` / `rootHtml`).
+  - `NativeModalComponent` is imported from `@ptah-extension/ui` (`team-builder-start.page.spec.ts:27`) without violating library boundaries.
+- **M1 — RESOLVED (`team-builder-start.page.spec.ts:368-369, 404-405, 419-420, 446-448, 453-455`):**
+  - All five render checkpoints in the consent modal test now consistently execute `fixture.detectChanges(); TestBed.tick();` (with `await fixture.whenStable();` ahead of the post-cancel and post-`finishInstall` checkpoints).
+- **M2 — RESOLVED (`team-builder-start.page.spec.ts:290-349, 366-461`):**
+  - Both the preceding retry test (`retries a failed launch after successful installation without reinstalling`) and the consent modal test now wrap their bodies in `try { ... } finally { fixture.destroy(); }`, preventing leaked fixtures or DOM/focus residue even when a test throws early.
+
+### Assertion Preservation Check
+
+- **No assertions weakened.** All pre-existing assertions in the retry test (`lines 318-346`) and the consent modal test (`lines 372, 389-391, 406-407, 423-424, 436-438, 457-458`) remain intact. Replacing `expect(installBtn).toBeDefined()` and `expect(backBtn/cancelBtn).not.toBeNull()` with explicit `if (...) throw new Error(...)` guards is strictly fail-fast, preserves exact failure conditions, eliminates optional-chaining hides on subsequent assertions/clicks (`lines 418, 436-444`), and surfaces actionable diagnostics on failure.
+
+### Verification Run
+
+- `ptah_get_diagnostics` scoped to `libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`: **0 diagnostics** in the edited file (15 pre-existing errors in unchanged sibling/shared files).
+- `npx jest --config libs/frontend/onboarding/jest.config.ts --runInBand --coverage=false --runTestsByPath libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`: **46/46 passed** in 5.477 s (`.ptah/tmp/review-ci3-correction-spec.log`).
+
+### Score Rationale & Verdict
+
+- **8/10 (`APPROVED`):** All three findings (S1, M1, M2) are cleanly resolved with zero weakened assertions and clean local verification. Not 9–10 solely because the original CI-only null-dialog failure remains unreproduced locally, leaving CI run 4 as the final confirmation — now backed by bounded DOM/component diagnostics so a repeat failure cannot be blind.
+
