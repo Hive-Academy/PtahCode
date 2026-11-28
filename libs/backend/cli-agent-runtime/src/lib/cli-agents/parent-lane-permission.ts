@@ -43,9 +43,7 @@ export function parentLanePermission(
     codex?.getPermissionLevel(codexId) ??
     options.providerSessions?.getPermissionLevel(providerSessionId) ??
     record?.permissionLevel;
-  if (level === undefined)
-    return options.unknownParent === 'uncapped' ? undefined : 'plan';
-  if (level === 'plan' || level === 'auto-edit' || level === 'yolo')
+  if (level === 'plan' || level === 'ask' || level === 'auto-edit' || level === 'yolo')
     return level;
-  return undefined;
+  return options.unknownParent === 'uncapped' ? undefined : 'plan';
 }

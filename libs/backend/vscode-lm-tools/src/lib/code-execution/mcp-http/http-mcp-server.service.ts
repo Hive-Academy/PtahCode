@@ -39,6 +39,7 @@ import type {
   IMcpServerStatus,
   IMcpCallerCredentials,
   IMcpGateway,
+  LiveChatSessionResolver,
   IMcpSubagentRootRegistrar,
   IUserInteraction,
   McpCallerBinding,
@@ -250,6 +251,8 @@ export class CodeExecutionMCP
      */
     @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
     private readonly gateway?: IMcpGateway,
+    @inject(PLATFORM_TOKENS.LIVE_CHAT_SESSION_RESOLVER, { isOptional: true })
+    private readonly liveChatSessions?: LiveChatSessionResolver,
   ) {
     this.codeOutliner =
       treeSitterParser === undefined
@@ -332,6 +335,7 @@ export class CodeExecutionMCP
           ptahAPI: this.ptahAPI,
           artifactStore: this.artifactStore,
           notifyArtifactPublished: this.notifyArtifactPublished,
+          liveChatSessions: this.liveChatSessions,
           getSessionWorkspace: (id) =>
             this.sessionWorkspaces?.getSessionWorkspace(id),
           getSessionTabId: (id) => this.sessionWorkspaces?.find(id)?.tabId,

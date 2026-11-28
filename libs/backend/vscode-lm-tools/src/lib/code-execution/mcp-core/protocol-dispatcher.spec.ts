@@ -578,6 +578,43 @@ describe('artifact publish dispatch scope', () => {
     );
   });
 
+  it.each(['codex-app-server', 'provider-session', 'claude-sdk'] as const)(
+    'publishes a %s artifact with the host-resolved scope',
+    async (runtime) => {
+      const publish = jest.fn().mockResolvedValue({
+        id: 'abcdefghijklmnop',
+        revision: 1,
+        title: 'Report',
+        sessionId: 'native-tab',
+        viewerUrl: 'ptah-artifact://abcdefghijklmnop/index.html',
+        createdAt: '2026-10-20T12:00:00.000Z',
+        savedPath: '/trusted/workspace/artifacts/index.html',
+      });
+      const deps = buildDeps({
+        artifactStore: { publish, list: jest.fn(), readBytes: jest.fn() },
+        liveChatSessions: {
+          resolve: (id) => id === 'native-session' ? {
+            kind: 'resolved',
+            session: {
+              runtime, sessionId: id, tabId: 'native-tab',
+              workspaceRoot: '/trusted/workspace', cwd: '/trusted/workspace',
+            },
+          } : { kind: 'unresolved' },
+        },
+      });
+      await handleMCPRequest(makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'native-session',
+        _callerWorkspaceRoot: '/untrusted/workspace',
+        params: { name: 'ptah_artifact_publish', arguments: { title: 'Report', html: '<h1>ok</h1>' } },
+      }), deps);
+      expect(publish).toHaveBeenCalledWith(
+        { workspaceRoot: '/trusted/workspace', sessionId: 'native-tab' },
+        { title: 'Report', html: '<h1>ok</h1>' },
+      );
+    },
+  );
+
   it('takes identity from the transport and rejects agent-supplied scope', async () => {
     const publish = jest.fn().mockResolvedValue({
       id: 'abcdefghijklmnop',

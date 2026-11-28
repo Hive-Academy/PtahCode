@@ -14,8 +14,7 @@ import type {
   ProviderSessionEvent,
   ProviderSessionOpenRequest,
 } from '@ptah-extension/provider-session-contracts';
-import type { ProviderSessionProfileId } from '@ptah-extension/shared';
-import { ProviderSessionPool } from './provider-session-pool';
+import { ProviderSessionPool, type ProviderSessionPoolRequest } from './provider-session-pool';
 
 const FIXTURE = resolve(
   __dirname,
@@ -106,12 +105,21 @@ describe('ProviderSessionPool history (recorded grok-p2-session-load-replay)', (
       pidLedger: { record: jest.fn(), remove: jest.fn() },
       logger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
     });
-    const request = {
-      profile: 'grok' as ProviderSessionProfileId,
+    const request: ProviderSessionPoolRequest = {
+      profile: 'grok',
       workspaceRoot: 'D:/work',
       nativeSessionId,
-      build: ({ attach }: { attach?: ProviderSessionOpenRequest['attach'] }) =>
-        ({ attach }) as ProviderSessionOpenRequest,
+      build: ({ attach }) => ({
+        profile: 'grok',
+        binaryPath: 'fake-grok',
+        policy: { permission: 'ask', cwd: 'D:/work' },
+        mcp: [],
+        ...(attach ? { attach } : {}),
+        approvals: { request: async () => 'decline' },
+        baseEnv: {},
+        consumer: 'chat',
+        runId: 'chat-1',
+      }),
     };
 
     const history = await pool.acquireForHistory('chat-1', request);

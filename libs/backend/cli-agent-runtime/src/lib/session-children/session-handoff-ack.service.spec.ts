@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { container as rootContainer } from 'tsyringe';
-import type { IStateStorage } from '@ptah-extension/platform-core';
+import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import type { IStateStorage, LiveChatSessionResolver } from '@ptah-extension/platform-core';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
 import { SessionHandoffService } from './session-handoff.service';
@@ -50,11 +51,13 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     const makeService = (
       store: SessionHandoffAckStore,
       logger: { warn: jest.Mock } | null = null,
+      codex?: { resolver: LiveChatSessionResolver; closeSession: () => Promise<void> },
     ) => {
       const scope = rootContainer.createChildContainer();
       scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
         useValue: closer,
       });
+      if (codex) scope.register(SDK_TOKENS.CODEX_CHAT_ADAPTER, { useValue: codex });
       return new SessionHandoffService(
         { isChild: jest.fn(() => false) } as never,
         lifecycle as never,
@@ -69,6 +72,9 @@ describe('SessionHandoffService acknowledgement recovery', () => {
         null,
         null,
         store,
+        null,
+        null,
+        codex?.resolver,
       );
     };
     return { closer, lifecycle, request, makeStore, makeService };
@@ -127,6 +133,130 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
       state: 'closeCompleted',
     });
+  });
+
+  it('keeps closePending across service instances until the Codex close succeeds', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    let live = true;
+    const closeSession = jest
+      .fn(async () => undefined)
+      .mockImplementationOnce(async () => {
+        live = false;
+        throw new Error('Codex teardown failed');
+      });
+    const resolver: LiveChatSessionResolver = {
+      resolve: () =>
+        live
+          ? {
+              kind: 'resolved',
+              session: {
+                runtime: 'codex-app-server',
+                sessionId: predecessorSessionId,
+              },
+            }
+          : { kind: 'unresolved' },
+    };
+    const service = h.makeService(store, null, { resolver, closeSession });
+
+    await armAndFlush(service, h.request);
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    service.onCallerTurnFlushed({
+      tabId: predecessorSessionId,
+      sessionId: predecessorSessionId,
+    });
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+    expect(h.closer.close).not.toHaveBeenCalled();
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeClosePending: 'codex-app-server',
+    });
+
+    const restartedStore = h.makeStore();
+    const restarted = h.makeService(restartedStore, null, {
+      resolver,
+      closeSession,
+    });
+    await armAndFlush(restarted, h.request);
+    expect(await restarted.acknowledge(h.request)).toMatchObject({
+      status: 'retryable-failure',
+    });
+    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+    expect(h.closer.close).not.toHaveBeenCalled();
+    expect(await restartedStore.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeClosePending: 'codex-app-server',
+    });
+
+    live = true;
+    await armAndFlush(restarted, h.request);
+    expect(await restarted.acknowledge(h.request)).toMatchObject({
+      status: 'closed',
+    });
+    expect(closeSession).toHaveBeenCalledTimes(2);
+    expect(h.closer.close).toHaveBeenCalledTimes(1);
+    const completed = await restartedStore.findByPredecessor(predecessorSessionId);
+    expect(completed?.state).toBe('closeCompleted');
+    expect(completed?.runtimeClosePending).toBeUndefined();
+  });
+
+  it('retires a predecessor after its successful runtime close could not be persisted', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    let live = true;
+    const closeSession = jest.fn(async () => {
+      live = false;
+    });
+    const resolver: LiveChatSessionResolver = {
+      resolve: () => live
+        ? {
+            kind: 'resolved',
+            session: { runtime: 'codex-app-server', sessionId: predecessorSessionId },
+          }
+        : { kind: 'unresolved' },
+    };
+    const compareAndSet = store.compareAndSet.bind(store);
+    let failSuccessWrite = true;
+    jest.spyOn(store, 'compareAndSet').mockImplementation(async (...args) => {
+      if (args[2].runtimeCloseSucceeded && failSuccessWrite) {
+        failSuccessWrite = false;
+        throw new Error('Could not persist runtime close');
+      }
+      return compareAndSet(...args);
+    });
+    const service = h.makeService(store, null, { resolver, closeSession });
+
+    await armAndFlush(service, h.request);
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeClosePending: 'codex-app-server',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
+
+    await armAndFlush(service, h.request);
+    h.closer.close.mockResolvedValueOnce({ kind: 'timeout' });
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeCloseSucceeded: true,
+    });
+
+    const restartedStore = h.makeStore();
+    const restarted = h.makeService(restartedStore, null, { resolver, closeSession });
+    await armAndFlush(restarted, h.request);
+    expect(await restarted.acknowledge(h.request)).toMatchObject({ status: 'closed' });
+    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(h.closer.close).toHaveBeenCalledTimes(2);
+    const completed = await restartedStore.findByPredecessor(predecessorSessionId);
+    expect(completed?.state).toBe('closeCompleted');
+    expect(completed?.runtimeClosePending).toBeUndefined();
+    expect(completed?.runtimeCloseSucceeded).toBeUndefined();
   });
 
   it('retries when a record found for acknowledgement disappears during transition', async () => {

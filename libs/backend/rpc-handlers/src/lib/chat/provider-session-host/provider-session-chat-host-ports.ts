@@ -48,7 +48,7 @@ export interface ProviderSessionChatHostPortsDeps
   readonly pool: Pick<
     ProviderSessionPool,
     'acquire' | 'release' | 'releaseAll' | 'holds'
-  >;
+  > & Partial<Pick<ProviderSessionPool, 'initialPermission'>>;
   /** Shared with the history port, so an adopted process routes approvals here. */
   readonly openRequests: ProviderSessionOpenRequests;
   readonly metadata: Pick<
@@ -190,6 +190,7 @@ export function createProviderSessionChatHostPorts(
       }
     },
     holds: (sessionId, session) => deps.pool.holds(sessionId, session),
+    initialPermission: (sessionId, session) => deps.pool.initialPermission?.(sessionId, session),
     async release(sessionId, reason) {
       if (reason !== 'broken') markReleased(sessionId);
       try {

@@ -192,7 +192,7 @@ import {
   handleArtifactPublish,
   type ArtifactNotification,
 } from './artifact-tool-handlers';
-import type { IArtifactStore } from '@ptah-extension/platform-core';
+import type { IArtifactStore, LiveChatSessionResolver } from '@ptah-extension/platform-core';
 import type { McpToolProfile } from '@ptah-extension/shared';
 import {
   APPS_ONLY_TOOL_NAMES,
@@ -389,6 +389,7 @@ export interface ProtocolHandlerDependencies {
    * another session or folder. Absent, or an unknown id: artifact publishing
    * refuses the call.
    */
+  liveChatSessions?: LiveChatSessionResolver;
   getSessionWorkspace?: (idOrTabId: string) => string | undefined;
   /** Resolve an SDK session id to its routing tab id. */
   getSessionTabId?: (idOrTabId: string) => string | undefined;
@@ -2884,17 +2885,20 @@ async function handleIndividualTool(
         const callerSessionId = getCallerSessionId()?.trim() || undefined;
         // Only the caller session's own registered workspace: an unknown
         // session must not fall back to the active session or open folder.
-        const callerWorkspace = callerSessionId
-          ? deps.getSessionWorkspace?.(callerSessionId)
-          : undefined;
+        const live = callerSessionId ? deps.liveChatSessions?.resolve(callerSessionId) : undefined;
+        const session = live?.kind === 'resolved' ? live.session : undefined;
+        const callerWorkspace = session
+          ? session.runtime === 'claude-sdk' ? session.cwd : session.workspaceRoot
+          : callerSessionId && !deps.liveChatSessions
+            ? deps.getSessionWorkspace?.(callerSessionId)
+            : undefined;
+        const sessionId = session ? session.tabId ?? session.sessionId
+          : callerSessionId && !deps.liveChatSessions
+            ? deps.getSessionTabId?.(callerSessionId) ?? callerSessionId
+            : undefined;
         const reply = await handleArtifactPublish(
           args,
-          {
-            workspaceRoot: callerWorkspace,
-            sessionId: callerSessionId
-              ? (deps.getSessionTabId?.(callerSessionId) ?? callerSessionId)
-              : undefined,
-          },
+          { workspaceRoot: callerWorkspace, sessionId },
           deps.artifactStore,
           deps.notifyArtifactPublished,
           logger,

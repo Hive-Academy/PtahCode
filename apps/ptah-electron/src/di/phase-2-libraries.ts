@@ -63,6 +63,9 @@ import {
   type SdkCliAgentOwnerLookup,
   HARNESS_PREFLIGHT_TOKEN,
   type PluginLoaderService,
+  type CodexChatAdapter,
+  type ProviderSessionChatAdapter,
+  type SessionLifecycleManager,
 } from '@ptah-extension/agent-sdk';
 import {
   registerHarnessSyncServices,
@@ -85,6 +88,7 @@ import { CodexRolloutUsageCollector, selectedCodexUsageRoots, listCodexFiles } f
 import { SqliteUsageCursorRepository } from '@ptah-extension/persistence-sqlite';
 import { AUTH_PROVIDERS_TOKENS, type ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
 import { RepositoryIdentityResolver, ReadOnlyGit, TASK_END_TOKENS, type GitReadRunner } from '@ptah-extension/task-end-hook';
+import { createLiveChatSessionResolver, toClaudeLiveChatSession } from './live-chat-session-resolver';
 import { listClaudeProjectFiles } from './claude-project-discovery';
 import {
   registerCliAgentRuntimeServices,
@@ -253,6 +257,20 @@ export function registerPhase2Libraries(
   container: DependencyContainer,
   logger: Logger,
 ): void {
+  container.register(PLATFORM_TOKENS.LIVE_CHAT_SESSION_RESOLVER, {
+    useValue: createLiveChatSessionResolver([
+      (callerId) => container
+        .resolve<SessionLifecycleManager>(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER)
+        .findMatches(callerId)
+        .map(toClaudeLiveChatSession),
+      (callerId) => container
+        .resolve<CodexChatAdapter | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
+        ?.findLiveChatSessions(callerId) ?? [],
+      (callerId) => container
+        .resolve<ProviderSessionChatAdapter | null>(SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER)
+        ?.findLiveChatSessions(callerId) ?? [],
+    ]),
+  });
   // Before workspace-intelligence: its registration resolves the parser,
   // which reads the optional worker factory once, at construction.
   registerElectronTreeSitterWorker(container, logger);

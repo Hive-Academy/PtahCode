@@ -1,3 +1,4 @@
+import type { LiveChatSession } from '@ptah-extension/platform-core';
 import { randomUUID } from 'node:crypto';
 import { realpath as fsRealpath } from 'node:fs/promises';
 import { z } from 'zod';
@@ -228,6 +229,25 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   }
 
   /** Live chat session id for a Ptah MCP caller id (tab id or session id). */
+  findLiveChatSessions(callerId: string): LiveChatSession[] {
+    const matches: LiveChatSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.closing || (session.id !== callerId && session.tabId !== callerId)) continue;
+      const live = this.current(session);
+      matches.push({
+        runtime: 'provider-session',
+        sessionId: session.id,
+        tabId: session.tabId,
+        workspaceRoot: session.prepared.seed.workspacePath,
+        cwd: session.prepared.seed.workspacePath,
+        model: session.settings.model ?? session.prepared.seed.model,
+        permissionLevel: session.settings.permission ??
+          (live ? this.ports.initialPermission?.(session.id, live) : undefined),
+      });
+    }
+    return matches;
+  }
+
   resolveLiveSessionId(callerId: string): SessionId | undefined {
     if (callerId.trim() === '') return undefined;
     if (SessionId.validate(callerId) && this.sessions.has(callerId))

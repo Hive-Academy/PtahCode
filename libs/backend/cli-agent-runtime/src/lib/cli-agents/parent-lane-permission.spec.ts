@@ -63,14 +63,19 @@ describe('parentLanePermission', () => {
     ).toBe('yolo');
   });
 
-  it('does not cap an ask parent', () => {
+  it.each(['plan', 'ask', 'auto-edit', 'yolo'])(
+    'inherits Claude mode %s',
+    (permissionLevel) => {
+      expect(
+        parentLanePermission('other', { find: () => ({ permissionLevel }) }, codex),
+      ).toBe(permissionLevel);
+    },
+  );
+
+  it('caps unrecognized Claude permission metadata to plan on spawn', () => {
     expect(
-      parentLanePermission(
-        'other',
-        { find: () => ({ permissionLevel: 'ask' }) },
-        codex,
-      ),
-    ).toBeUndefined();
+      parentLanePermission('other', { find: () => ({ permissionLevel: 'unknown' }) }, codex),
+    ).toBe('plan');
   });
 
   describe('live provider-session callers (Antigravity)', () => {
@@ -78,7 +83,7 @@ describe('parentLanePermission', () => {
       ['yolo', 'yolo'],
       ['auto-edit', 'auto-edit'],
       ['plan', 'plan'],
-      ['ask', undefined],
+      ['ask', 'ask'],
     ] as const)(
       'resolves live provider-session level %s to %p instead of failing closed to plan',
       (liveLevel, expected) => {

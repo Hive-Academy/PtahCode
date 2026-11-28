@@ -27,6 +27,12 @@ const RecordSchema = z
     state: z.enum(['starting', 'recorded', 'closePending', 'closeCompleted']),
     /** Set when the predecessor holds results the successor never adopted: an ack must not close it. */
     keepPredecessor: z.boolean().optional(),
+    /** Runtime whose close must succeed before the predecessor can be retired. */
+    runtimeClosePending: z
+      .enum(['codex-app-server', 'provider-session'])
+      .optional(),
+    /** The adapter finished closing the runtime, but the tab still needs retirement. */
+    runtimeCloseSucceeded: z.literal(true).optional(),
     generation: z.number().int().nonnegative().optional(),
   })
   .strict();
@@ -385,7 +391,10 @@ export class SessionHandoffAckStore {
     predecessorTabId: string,
     expected: HandoffAckRecord['state'],
     patch: Partial<
-      Pick<HandoffAckRecord, 'state' | 'successorSdkId' | 'keepPredecessor'>
+      Pick<
+        HandoffAckRecord,
+        'state' | 'successorSdkId' | 'keepPredecessor' | 'runtimeClosePending' | 'runtimeCloseSucceeded'
+      >
     >,
     expectedSuccessorTabId?: string,
   ): Promise<boolean> {

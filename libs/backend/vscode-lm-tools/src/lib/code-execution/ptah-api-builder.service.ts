@@ -43,6 +43,7 @@ import type { CodeSymbolIndexer } from '@ptah-extension/workspace-intelligence';
 import { CODE_SYMBOL_INDEXER } from '@ptah-extension/workspace-intelligence';
 import {
   PLATFORM_TOKENS,
+  type LiveChatSessionResolver,
   NON_AUTH_PROVIDER_KEY_SLOT_IDS,
 } from '@ptah-extension/platform-core';
 import type {
@@ -620,9 +621,11 @@ export class PtahAPIBuilder {
     },
     @inject(TASK_END_CLOSE_OUT_SERVICE_TOKEN, { isOptional: true })
     private readonly taskCloseOutService?: TaskCloseOutServiceLike,
+    @inject(PLATFORM_TOKENS.LIVE_CHAT_SESSION_RESOLVER, { isOptional: true })
+    private readonly liveChatSessions?: LiveChatSessionResolver,
     /**
      * Native provider-session chat adapter (e.g. Antigravity), read through the
-     * same narrow port as `codexChatSessions`. Optional and last so existing
+     * same narrow port as `codexChatSessions`. Optional so existing
      * positional constructor calls keep compiling.
      */
     @inject(PROVIDER_SESSION_CHAT_ADAPTER, { isOptional: true })
@@ -792,6 +795,12 @@ export class PtahAPIBuilder {
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           resolveSessionId: (tabIdOrSessionId: string) => {
             try {
+              if (this.liveChatSessions) {
+                const result = this.liveChatSessions.resolve(tabIdOrSessionId);
+                return result.kind === 'resolved'
+                  ? result.session.sessionId
+                  : tabIdOrSessionId;
+              }
               const rec =
                 this.sdkSessionLifecycleManager?.find(tabIdOrSessionId);
               return (
@@ -799,16 +808,25 @@ export class PtahAPIBuilder {
                 this.resolveNativeCallerId(tabIdOrSessionId)
               );
             } catch {
-              return this.resolveNativeCallerId(tabIdOrSessionId);
+              return this.liveChatSessions
+                ? tabIdOrSessionId
+                : this.resolveNativeCallerId(tabIdOrSessionId);
             }
           },
-          getParentLevel: (tabIdOrSessionId: string) =>
-            parentLanePermission(
+          getParentLevel: (tabIdOrSessionId: string) => {
+            if (this.liveChatSessions) {
+              const result = this.liveChatSessions.resolve(tabIdOrSessionId);
+              return result.kind === 'resolved'
+                ? result.session.permissionLevel ?? 'plan'
+                : 'plan';
+            }
+            return parentLanePermission(
               tabIdOrSessionId,
               this.sdkSessionLifecycleManager,
               this.codexChatSessions ?? undefined,
               this.providerSessionChatSessions ?? undefined,
-            ),
+            );
+          },
           getProjectGuidance: async () => {
             if (!this.enhancedPromptsService) return undefined;
             try {
@@ -921,7 +939,7 @@ export class PtahAPIBuilder {
         buildGitNamespace({
           getWorkspaceRoot: getWorkspaceRootLazy,
           onWorktreeChanged: this.buildWorktreeChangeHandler(),
-          resolveCallerSessionId: () => this.resolveCallerSdkSessionId(),
+          resolveCallerSessionId: () => this.resolveCallerLiveSessionId(),
           recordWorktreeForCaller: (record) =>
             this.recordWorktreeForCaller(record),
         }),
@@ -1006,8 +1024,8 @@ export class PtahAPIBuilder {
       cron: this.buildNamespaceSafe('cron', () =>
         buildCronNamespace({
           getService: () => this.resolveCronJobService(),
-          // The caller id can be a tab id; a job records the SDK session.
-          getSessionId: () => this.resolveCallerSdkSessionId(),
+          // The caller id can be a tab id; a job records the canonical session.
+          getSessionId: () => this.resolveCallerLiveSessionId(),
           // Not `getWorkspaceRoot()`: its home-directory fallback must never
           // become the workspace of a scheduled job.
           getWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),
@@ -1015,7 +1033,7 @@ export class PtahAPIBuilder {
       ),
       sessionOrganization: this.buildNamespaceSafe('sessionOrganization', () =>
         buildSessionOrganizationNamespace({
-          resolveCallerSessionId: () => this.resolveCallerSdkSessionId(),
+          resolveCallerSessionId: () => this.resolveCallerLiveSessionId(),
           getRecorder: () => this.sessionOrganizationRecorder,
           getWorkspaceRootHint: () => this.resolveSessionWorkspaceRoot(),
         }),
@@ -1058,7 +1076,7 @@ export class PtahAPIBuilder {
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           // Same root source as `getPluginPaths`: never the home fallback.
           getPolicyWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),
-          getCallerSdkSessionId: () => this.resolveCallerSdkSessionId(),
+          getCallerSdkSessionId: () => this.resolveCallerLiveSessionId(),
           getProposingTurnStartedAt: (sessionId, workspaceRoot) => {
             if (!workspaceRoot) {
               return { release: () => undefined };
@@ -1275,24 +1293,24 @@ export class PtahAPIBuilder {
     }
   }
 
-  /**
-   * Session id of the session that issued the current MCP call. The request
-   * context carries the caller's tab id (or its session id). Only a proved
-   * session id is returned, so a tab id never reaches a recorder: the
-   * lifecycle manager's SDK `realSessionId` first, else the id of a live
-   * native Codex or provider chat session that owns the caller (native
-   * sessions are not in the SDK lifecycle manager). A caller that does not
-   * resolve (unknown tab, SDK id not assigned yet, no lifecycle manager and no
-   * native adapter, a lookup that throws) yields `undefined` and is logged.
-   * Never throws: callers treat an unresolved caller as unattributed.
-   */
-  private resolveCallerSdkSessionId(): string | undefined {
+  /** Resolve the authenticated caller to a canonical id for recorders. */
+  private resolveCallerLiveSessionId(): string | undefined {
     const callerId = getCallerSessionId();
     if (!callerId) {
       return undefined;
     }
     let realSessionId: string | undefined;
     try {
+      if (this.liveChatSessions) {
+        const result = this.liveChatSessions.resolve(callerId);
+        if (result.kind === 'resolved') {
+          if (!result.session.sessionIdIsProvisional) return result.session.sessionId;
+          this.logger.debug(`[PtahAPIBuilder] MCP caller ${callerId} is awaiting a session id`);
+          return undefined;
+        }
+        this.logger.debug(`[PtahAPIBuilder] MCP caller ${callerId} is ${result.kind}`);
+        return undefined;
+      }
       realSessionId =
         this.sdkSessionLifecycleManager?.find(callerId)?.realSessionId ??
         this.codexChatSessions?.resolveLiveSessionId?.(callerId) ??
@@ -1302,14 +1320,14 @@ export class PtahAPIBuilder {
       // degradation-audit: reported - the lookup error is debug-logged below,
       // and undefined becomes an explicit unattributed-caller result for the agent.
       this.logger.debug(
-        `[PtahAPIBuilder] Resolving the SDK session id of MCP caller ${callerId} failed; caller not attributed`,
+        `[PtahAPIBuilder] Resolving the live session id of MCP caller ${callerId} failed; caller not attributed`,
         error,
       );
       return undefined;
     }
     if (!realSessionId) {
       this.logger.debug(
-        `[PtahAPIBuilder] MCP caller ${callerId} has no SDK session id; caller not attributed`,
+        `[PtahAPIBuilder] MCP caller ${callerId} has no live session id; caller not attributed`,
       );
       return undefined;
     }

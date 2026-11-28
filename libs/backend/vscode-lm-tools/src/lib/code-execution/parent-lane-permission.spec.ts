@@ -39,7 +39,7 @@ describe('parentLanePermission', () => {
     ['yolo', 'yolo'],
     ['auto-edit', 'auto-edit'],
     ['plan', 'plan'],
-    ['ask', undefined],
+    ['ask', 'ask'],
   ] as const)(
     'resolves a live provider-session (Antigravity) caller with level %s to %p',
     (liveLevel, expected) => {
