@@ -36,6 +36,7 @@ import {
   type ProviderModelSelection,
 } from '@ptah-extension/ui';
 import {
+  AppStateManager,
   ProvidersSettingsStateService,
   WorkspaceScopeService,
   type ProvidersEditContext,
@@ -61,6 +62,7 @@ import {
   type BackgroundConsumerRow,
   type SettingsPatchConsumerId,
 } from './provider-consumer-rows';
+import { settingsProviderConnections } from './provider-connection-options';
 import { DecisionModelRowComponent } from './decision-model-row.component';
 import { DRAWER_WRITE_NO_CONTEXT } from './connection-drawer/drawer-write';
 const FOCUS =
@@ -271,7 +273,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         [defaultTier]="row.defaultTier"
                         [richSelect]="true"
                         [requiresToolUse]="row.requiresToolUse"
-                        [extraProviders]="extraProviders()"
+                        [connectedProviders]="extraProviders()"
                         [excludedProviders]="row.unsupportedProviders"
                         [disabled]="
                           row.id === 'setup'
@@ -281,6 +283,12 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         (selectionChange)="onDraftChange(row.id, $event)"
                         [attr.data-testid]="'picker-' + row.id"
                       />
+                      @if (state.connections().status === 'ready' && !extraProviders().length) {
+                        <p role="status">No providers connected.</p>
+                        <button type="button" ptahButton variant="link" size="sm" (click)="connectProvider()">
+                          Connect a provider
+                        </button>
+                      }
                       @if (row.id !== 'setup' && !currentDraft().provider && state.route().status === 'loading') {
                         <p role="status" class="px-[var(--ptah-space-2)] text-base-content-muted">Resolving the active provider…</p>
                       }
@@ -687,6 +695,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
 })
 export class ProviderConsumerAssignmentsComponent {
   protected readonly state = inject(ProvidersSettingsStateService);
+  private readonly appState = inject(AppStateManager);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly workspace = inject(WorkspaceScopeService);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -779,9 +788,9 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly extraProviders = computed<
     readonly ProviderIdentityOption[]
   >(() =>
-    (this.state.route().data?.providers ?? []).map((p) => ({
-      id: p.id,
-      name: formatProviderDisplayName(p.id),
+    settingsProviderConnections(this.state.connections().data ?? []).map((connection) => ({
+      id: connection.id,
+      name: connection.name,
     })),
   );
   protected readonly timeoutMeta = computed(
@@ -919,6 +928,11 @@ export class ProviderConsumerAssignmentsComponent {
     });
     if (id !== 'setup') void this.saveDraft(id);
   }
+  protected connectProvider(): void {
+    this.cancelEdit();
+    this.appState.requestSettingsTab({ tab: 'providers', section: 'more-providers' });
+  }
+
   protected onSetupProvider(providerId: string): void {
     this.setupProviderRequested.emit(providerId);
   }

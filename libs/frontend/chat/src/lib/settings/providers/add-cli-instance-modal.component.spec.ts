@@ -3,6 +3,7 @@ import { By as SelectBy } from '@angular/platform-browser';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
+  AppStateManager,
   ProvidersSettingsStateService,
   type ProvidersConnection,
   type ProvidersExternalAuth,
@@ -42,7 +43,7 @@ const connection = (
   id,
   name,
   authMode,
-  hasKey: false,
+  hasKey: authMode === 'apiKey',
   configured: true,
   custom: false,
   defaultsResolvable: true,
@@ -58,6 +59,7 @@ const CONNECTIONS: ProvidersConnection[] = [
   connection('ollama', 'Ollama', 'local-native'),
   connection('github-copilot', 'GitHub Copilot', 'oauth'),
   connection('openai-codex', 'OpenAI Codex', 'oauth'),
+  { ...connection('openrouter', 'OpenRouter', 'apiKey'), hasKey: false, configured: false },
 ];
 
 class StateStub {
@@ -182,6 +184,7 @@ describe('AddCliInstanceModalComponent', () => {
       imports: [Host],
       providers: [
         { provide: ProvidersSettingsStateService, useValue: state },
+        { provide: AppStateManager, useValue: { requestSettingsTab: jest.fn() } },
         SettingsSaveFeedbackService,
       ],
     });
@@ -296,13 +299,24 @@ describe('AddCliInstanceModalComponent', () => {
       );
     });
 
-    it('requires a separate Claude API key when the saved key is unavailable', async () => {
+    it('offers provider setup when all connections are unavailable', () => {
+      state.connections.set(ready([]));
+      fixture.detectChanges();
+      expect(selectControl('add-cli-instance-provider').options()).toHaveLength(1);
+      const connect = Array.from(el().querySelectorAll('button')).find(
+        (button) => button.textContent?.trim() === 'Connect a provider',
+      );
+      expect(connect).toBeDefined();
+      connect?.click();
+      expect(TestBed.inject(AppStateManager).requestSettingsTab).toHaveBeenCalledWith({
+        tab: 'providers',
+        section: 'more-providers',
+      });
+    });
+
+    it('supports a separate instance key for a connected Claude API provider', async () => {
       type('add-cli-instance-name', 'Claude-lane');
       choose('anthropic');
-      expect(submit()?.disabled).toBe(true);
-      expect(q('add-cli-instance-claude-source')?.textContent).toContain(
-        'Connect Claude API first',
-      );
       const separate = el().querySelectorAll<HTMLInputElement>(
         'input[name="claude-source"]',
       )[1];

@@ -857,6 +857,12 @@ describe('LanesTableComponent', () => {
       expect(
         header().querySelectorAll('[data-testid="lanes-defaults-action"]'),
       ).toHaveLength(1);
+      expect(
+        Array.from(
+          host.querySelectorAll('[data-testid="lanes-instance-header"] dt'),
+          (label) => label.textContent?.trim(),
+        ),
+      ).toEqual(['Name', 'Provider', 'Model / Effort', 'Permission', 'Network']);
       expect(header().querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(
         1,
       );

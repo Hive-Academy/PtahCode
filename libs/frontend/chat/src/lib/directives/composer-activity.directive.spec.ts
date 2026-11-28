@@ -80,7 +80,8 @@ describe('ComposerActivityDirective', () => {
     expect(activity().popoverOpen()).toBe(true);
     expect(composer().contains(document.activeElement)).toBe(false);
 
-    (document.getElementById('outside') as HTMLButtonElement).focus();
+    const outside = document.getElementById('outside') as HTMLButtonElement;
+    outside.focus();
     await Promise.resolve();
     expect(activity().focusWithin()).toBe(false);
     expect(activity().popoverOpen()).toBe(true);
@@ -89,15 +90,16 @@ describe('ComposerActivityDirective', () => {
     await render();
     expect(panels()).toHaveLength(1);
     expect(activity().popoverOpen()).toBe(true);
+    expect(document.activeElement).toBe(outside);
 
+    const lastPanel = panels()[0];
+    lastPanel.focus();
+    expect(activity().focusWithin()).toBe(true);
     host.second.set(false);
     await render();
     expect(panels()).toHaveLength(0);
     expect(activity().popoverOpen()).toBe(false);
-    // Closing the first menu restores the focus it captured (the write
-    // button). The second menu's captured focus was the first panel, which
-    // is already gone, so focus stays inside the composer.
-    expect(composer().contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById('menu-b'));
     expect(activity().focusWithin()).toBe(true);
   });
 

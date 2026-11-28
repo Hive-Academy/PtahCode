@@ -220,10 +220,7 @@ export class LaneRotationSettingComponent implements OnInit {
       );
       if (response.isSuccess()) {
         this.lastPicks.set([...(response.data.lastPicks ?? [])].reverse());
-        this.lastPicksUnavailable.set(
-          response.data.lastPicksUnavailable === true ||
-            response.data.lastPicks === undefined,
-        );
+        this.lastPicksUnavailable.set(response.data.lastPicksUnavailable === true);
       } else {
         this.lastPicksUnavailable.set(true);
       }

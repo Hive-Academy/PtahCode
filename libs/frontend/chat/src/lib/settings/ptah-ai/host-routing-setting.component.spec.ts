@@ -133,6 +133,19 @@ describe('HostRoutingSettingComponent', () => {
     expect(host.writes()).toEqual([]);
   });
 
+  it('reads the saved decision model when returning from Background models', async () => {
+    host.decisionModel = MODEL_UNSET;
+    await create();
+    expect(byTestId('host-routing-needs-model')).not.toBeNull();
+    fixture.destroy();
+
+    host.decisionModel = MODEL_SET;
+    await create();
+    expect(byTestId('host-routing-needs-model')).toBeNull();
+    expect(toggle()?.checked).toBe(true);
+    expect(host.call.mock.calls.filter(([method]) => method === 'agent:getConfig')).toHaveLength(2);
+  });
+
   it('shows a stored false as off', async () => {
     host.stored = false;
     await create();

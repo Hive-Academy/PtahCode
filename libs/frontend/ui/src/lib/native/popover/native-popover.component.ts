@@ -7,11 +7,11 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  effect,
   ElementRef,
   inject,
   Injector,
   input,
+  OnChanges,
   OnDestroy,
   output,
   untracked,
@@ -88,7 +88,7 @@ import { restorePopoverFocus } from '../../overlays/shared/restore-popover-focus
     }
   `,
 })
-export class NativePopoverComponent implements OnDestroy {
+export class NativePopoverComponent implements OnChanges, OnDestroy {
   readonly isOpen = input.required<boolean>();
   readonly placement = input<Placement>('bottom');
   /** Optional external positioning anchor. */
@@ -119,16 +119,13 @@ export class NativePopoverComponent implements OnDestroy {
   private readonly overlay = viewChild(CdkConnectedOverlay);
   private readonly trigger = viewChild<ElementRef<HTMLElement>>('trigger');
   private readonly injector = inject(Injector);
-  private previousFocus: HTMLElement | null = null;
+  private returnFocus: HTMLElement | null = null;
   private attachedPanel?: HTMLElement;
   private unregisterChild?: () => void;
   private owned?: OwnedOverlayRegistration;
   private stopScroll?: () => void;
 
   constructor() {
-    effect(() => {
-      if (!this.isOpen()) this.releasePanel();
-    });
     afterRenderEffect((onCleanup) => {
       const trigger = this.trigger()?.nativeElement;
       const overlayRef = this.overlay()?.overlayRef;
@@ -144,17 +141,21 @@ export class NativePopoverComponent implements OnDestroy {
     });
   }
 
+  ngOnChanges(): void {
+    // Release focus before the conditional view detaches the CDK portal.
+    if (!this.isOpen()) this.releasePanel();
+  }
+
   protected connectedAnchor(trigger: HTMLElement): HTMLElement {
     const anchor = this.anchor();
     return anchor?.isConnected ? anchor : trigger;
   }
 
   protected onAttach(trigger: HTMLElement): void {
-    const anchor = this.connectedAnchor(trigger);
-    const active = anchor.ownerDocument.activeElement;
-    this.previousFocus = active instanceof HTMLElement && active !== anchor.ownerDocument.body
+    const active = trigger.ownerDocument.activeElement;
+    this.returnFocus = active instanceof HTMLElement && trigger.contains(active)
       ? active
-      : anchor.querySelector<HTMLElement>('button, a[href], [tabindex]') ?? anchor;
+      : trigger.querySelector<HTMLElement>('button, a[href], [tabindex]') ?? this.connectedAnchor(trigger);
     // Keep ownership tied to the trigger in the composer.
     this.owned?.unregister();
     this.owned = registerOwnedOverlay(trigger);
@@ -212,8 +213,8 @@ export class NativePopoverComponent implements OnDestroy {
     this.attachedPanel = undefined;
     // Restore focus while the panel is still owned, so a composer that treats
     // the portaled panel as inside does not see a gap before the trigger.
-    const restore = this.previousFocus;
-    this.previousFocus = null;
+    const restore = this.returnFocus;
+    this.returnFocus = null;
     if (this.restoreFocus()) restorePopoverFocus(restore, panel);
     this.owned?.unregister();
     this.owned = undefined;

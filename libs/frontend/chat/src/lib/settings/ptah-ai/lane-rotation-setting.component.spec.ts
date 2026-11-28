@@ -134,6 +134,18 @@ describe('LaneRotationSettingComponent', () => {
       TIMEOUT,
     );
   });
+  it.each([
+    { profiles: [] },
+    { profiles: [], lastPicks: [], lastPicksUnavailable: false },
+  ])('shows an empty history for %j', async (result) => {
+    host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
+      ? rpcSuccess(result) : rpcSuccess({ success: true, value: true }));
+    await create();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('No recent picks yet');
+    expect(root.querySelector('ptah-alert [role="status"]')).toBeNull();
+  });
+
   it('announces that recent picks remain unavailable after retry', async () => {
     host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
       ? rpcError('unavailable') : rpcSuccess({ success: true, value: true }));

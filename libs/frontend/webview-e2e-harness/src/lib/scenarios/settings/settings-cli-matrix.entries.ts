@@ -609,37 +609,15 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
           },
           'Providers',
           async (variant) => {
-            // Signed out: Create stays disabled; "Login with GitHub" runs the login and the re-read still says not signed in.
             const dialog = await openMatrixModal(
               variant,
               variant.locator('[data-testid="cli-matrix-add"]'),
               'add-cli-instance-modal',
             );
-            await dialog
-              .locator('[data-testid="add-cli-instance-name"]')
-              .fill('Copilot-agent');
-            await choosePtahSelect(
-              dialog.locator('[data-testid="add-cli-instance-provider"]'),
-              'GitHub Copilot · OAuth',
-            );
-            const create = dialog.locator(
-              '[data-testid="add-cli-instance-submit"]',
-            );
-            await expect(
-              dialog.locator('[data-testid="add-cli-instance-copilot-state"]'),
-            ).toHaveText('Awaiting sign-in');
-            await expect(create).toBeDisabled();
-            const login = dialog.locator(
-              '[data-testid="add-cli-instance-copilot-login"]',
-            );
-            await visibleEnabled(login);
-            await login.click();
-            await expect(
-              dialog.locator(
-                '[data-testid="add-cli-instance-copilot-message"]',
-              ),
-            ).toContainText('Login has not been confirmed');
-            await expect(create).toBeDisabled();
+            await dialog.getByRole('combobox', { name: 'Provider connection' }).click();
+            const options = variant.getByRole('listbox').filter({ visible: true });
+            await expect(options.getByRole('option', { name: 'Kimi Code · OAuth' })).toBeVisible();
+            await expect(options.getByRole('option', { name: 'GitHub Copilot · OAuth' })).toHaveCount(0);
           },
         ),
       ),

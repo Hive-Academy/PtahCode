@@ -80,7 +80,7 @@
           data-testid="add-cli-instance-provider-fixed"
         >
           <ptah-provider-mark [providerId]="target.providerId" fallback="Bot" />
-          <span>{{ target.providerName }}</span>
+          <span>{{ target.providerName }}{{ editingProviderUnavailable() ? ' (unavailable)' : '' }}</span>
         </p>
       } @else {
         <span class="flex items-center gap-2">
@@ -99,6 +99,12 @@
             data-testid="add-cli-instance-provider"
           />
         </span>
+        @if (state.connections().status === 'ready' && !providerOptions().length) {
+          <p role="status">No providers connected.</p>
+          <button type="button" ptahButton variant="link" size="sm" (click)="connectProvider()">
+            Connect a provider
+          </button>
+        }
         @if (state.connections().status === 'error') {
           <p
             role="alert"

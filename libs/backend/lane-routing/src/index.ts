@@ -67,7 +67,7 @@ export type {
   MatrixViewUnknown,
   MatrixViewValue,
 } from './lib/matrix/capability-matrix.store';
-export type { RotationPick } from './lib/ranking/rotation.store';
+export type { RotationPick, RotationStore } from './lib/ranking/rotation.store';
 export type { RotationStateReader } from './lib/route-decide.service';
 export type { RouteRecordReader } from './lib/route/route-record.registry';
 export { RoutingEvidenceService } from './lib/evidence/routing-evidence.service';

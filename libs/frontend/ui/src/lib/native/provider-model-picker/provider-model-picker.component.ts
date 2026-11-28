@@ -482,6 +482,15 @@ export class ProviderModelPickerComponent implements OnDestroy {
    */
   readonly extraProviders = input<readonly ProviderIdentityOption[]>([]);
 
+  /** When supplied, only these connections can be selected. */
+  readonly connectedProviders = input<readonly ProviderIdentityOption[]>();
+
+  private readonly unavailableProvider = computed(() => {
+    const connected = this.connectedProviders();
+    const pinned = this.fixedProvider() || this.provider();
+    return connected !== undefined && !!pinned && !connected.some(({ id }) => id === pinned);
+  });
+
   /**
    * Provider ids this consumer cannot run on. They are dropped from the
    * registry and supplied options, so they cannot be chosen. The one
@@ -526,20 +535,21 @@ export class ProviderModelPickerComponent implements OnDestroy {
   protected readonly providerOptions = computed<readonly ProviderOption[]>(
     () => {
       void this._registryVersion();
-      const registry = getAllAnthropicProviders().map((p) => ({
+      const connected = this.connectedProviders();
+      const registry = (connected ?? getAllAnthropicProviders()).map((p) => ({
         id: p.id,
         name: p.name,
       }));
       const known = new Set(registry.map((r) => r.id));
       const supplied: ProviderOption[] = [];
-      for (const extra of this.extraProviders()) {
+      for (const extra of connected === undefined ? this.extraProviders() : []) {
         if (extra.id === '' || known.has(extra.id)) continue;
         known.add(extra.id);
         supplied.push({ id: extra.id, name: extra.name });
       }
       const all = [...registry, ...supplied];
       const excluded = this.excludedProviders();
-      if (excluded.length === 0) return all;
+      if (excluded.length === 0 && !this.unavailableProvider()) return all;
       const pinned = this.fixedProvider() || this.provider();
       const options: ProviderOption[] = [];
       for (const opt of all) {
@@ -555,7 +565,9 @@ export class ProviderModelPickerComponent implements OnDestroy {
       if (pinned && !options.some((option) => option.id === pinned)) {
         options.push({
           id: pinned,
-          name: excluded.includes(pinned) ? `${pinned}${EXCLUDED_PROVIDER_SUFFIX}` : pinned,
+          name: this.unavailableProvider()
+            ? (getAnthropicProvider(pinned)?.name ?? pinned) + ' (unavailable)'
+            : excluded.includes(pinned) ? pinned + EXCLUDED_PROVIDER_SUFFIX : pinned,
         });
       }
       return options;
@@ -619,7 +631,8 @@ export class ProviderModelPickerComponent implements OnDestroy {
   );
 
   protected readonly modelEditsDisabled = computed(
-    () => this.disabled() || !!this.fallbackProviderId(),
+    () => this.disabled() || !!this.fallbackProviderId() ||
+      (this.unavailableProvider() && this._provider() === this.provider()),
   );
 
   protected readonly richProviderOptions = computed<readonly PtahSelectOption<string>[]>(
@@ -862,6 +875,8 @@ export class ProviderModelPickerComponent implements OnDestroy {
 
   private catalogueId(): string | null {
     const provider = this.displayProviderId();
+    if (this.unavailableProvider() && this._provider() === this.provider() && !this.fallbackProviderId())
+      return null;
     const hasRouteContext = this.inheritedProvider() !== undefined;
     if (!hasRouteContext) return provider;
     return provider && !this.excludedProviders().includes(provider) ? provider : null;

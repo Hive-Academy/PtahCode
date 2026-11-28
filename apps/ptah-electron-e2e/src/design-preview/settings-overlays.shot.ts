@@ -11,10 +11,10 @@ const out = resolve(
   process.env['PTAH_SHOT_DIR'] ?? '.ptah/specs/TASK_2026_2329_dd39/screens',
 );
 
-async function openSection(page: Page, name: string): Promise<void> {
+async function openSection(page: Page, name: string, width = 1440): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Emulation.setDeviceMetricsOverride', {
-    width: 1440,
+    width,
     height: 1100,
     deviceScaleFactor: 1,
     mobile: false,
@@ -69,6 +69,7 @@ test('captures the add instance subform and its modal dropdown', async ({
   await provider.click();
   const options = page.getByRole('listbox').filter({ visible: true }).last();
   await expect(options).toBeVisible();
+  await expect(options.getByRole('option', { name: /Requesty/i })).toHaveCount(0);
   await shot(page, 'add-ptah-cli-instance-provider-open');
   await options
     .getByRole('option', { name: /OpenRouter/i })
@@ -76,6 +77,42 @@ test('captures the add instance subform and its modal dropdown', async ({
     .click();
   await shot(page, 'add-ptah-cli-instance-openrouter');
 });
+
+for (const width of [1280, 1440, 1824, 800]) {
+  test('captures the Ptah CLI instance header at ' + width, async ({ ui, mainWindow: page }) => {
+    await ui.mockRpc({ ...staticMocks, ...dynamicMocks });
+    await ui.prepare();
+    await ui.goto('settings');
+    await openSection(page, 'Providers', width);
+    const row = page.getByTestId('cli-matrix-row-preview-openrouter');
+    await expect(row).toBeVisible();
+    const expander = row.getByRole('button', { name: 'Details for OpenRouter team' });
+    if (await expander.isVisible()) {
+      await expander.click();
+    } else {
+      await row.getByRole('button', { name: 'More actions for OpenRouter team' }).click();
+      await page.getByRole('menuitem', { name: 'Details for OpenRouter team' }).click();
+    }
+    const header = page.getByTestId('lanes-instance-header');
+    await expect(header).toBeVisible();
+    await header.scrollIntoViewIfNeeded();
+    await shot(page, 'ptah-cli-instance-header-' + width);
+    const tops = await header.locator(':scope > div').evaluateAll(
+      (fields) => fields.map((field) => Math.round(field.getBoundingClientRect().top)),
+    );
+    if (width === 800) expect(new Set(tops).size).toBeGreaterThan(1);
+    else expect(new Set(tops).size).toBe(1);
+    const heights = await header.locator('dd, dd button').evaluateAll(
+      (values) => values.map((value) => value.getBoundingClientRect().height),
+    );
+    expect(new Set(heights).size).toBe(1);
+    if (width === 1824) {
+      await page.getByTestId('cli-matrix-edit-preview-openrouter').click();
+      await expect(page.getByRole('dialog', { name: 'Edit OpenRouter team' })).toBeVisible();
+      await shot(page, 'ptah-cli-instance-edit-1824');
+    }
+  });
+}
 
 const curatorModels = {
   'claude-cli': { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
@@ -236,7 +273,7 @@ test('captures the routing evidence summary', async ({
     ],
     decisionModels: [
       {
-        decisionModel: 'router-model',
+        decisionModel: 'structured:anthropic/claude-sonnet-4-6',
         proposals: 10,
         accepted: 7,
         meanConfidence: 0.8,
@@ -247,11 +284,32 @@ test('captures the routing evidence summary', async ({
   await ui.mockRpc({
     ...staticMocks,
     ...dynamicMocks,
+    'agent:getConfig': {
+      ...staticMocks['agent:getConfig'],
+      decisionModel: {
+        selection: {
+          kind: 'structured',
+          providerId: 'anthropic',
+          model: 'claude-sonnet-4-6',
+        },
+        locality: 'remote',
+        reportsConfidence: false,
+        state: 'ready',
+        detail: null,
+      },
+    },
+    'agent:getCapabilityMatrix': {
+      profiles: [],
+      lastPicks: [],
+      lastPicksUnavailable: false,
+    },
     'agent:getRoutingEvidence': evidence,
   });
   await ui.prepare();
   await ui.goto('settings');
   await openSection(page, 'Decision matrix');
+  await expect(page.getByText('No recent picks yet')).toBeVisible();
+  await expect(page.getByRole('switch', { name: 'Routing suggestions' })).toBeChecked();
   const summary = page.getByText('Outcomes from the last 30 days', {
     exact: false,
   });

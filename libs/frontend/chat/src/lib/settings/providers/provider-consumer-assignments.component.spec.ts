@@ -9,6 +9,7 @@ import { rpcSuccess } from '@ptah-extension/core/testing';
 import {
   ClaudeRpcService,
   ProvidersSettingsStateService,
+  type ProvidersConnection,
   WorkspaceScopeService,
   type ProvidersEditContext,
   type ProvidersEffectiveRoute,
@@ -44,6 +45,24 @@ import {
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 class MockProvidersSettingsStateService {
+  readonly connections = signal<ProvidersSettingsSection<readonly ProvidersConnection[]>>({
+    status: 'ready',
+    data: ([
+      { id: 'anthropic', name: 'Claude API', authMode: 'apiKey', hasKey: true },
+      { id: 'ollama', name: 'Ollama', authMode: 'local-native', hasKey: false },
+      { id: 'claude-cli', name: 'Claude (Subscription)', authMode: 'cli', hasKey: false },
+      { id: 'openai-codex', name: 'OpenAI Codex', authMode: 'oauth', hasKey: false },
+      { id: 'kimi-code', name: 'Kimi Code', authMode: 'oauth', hasKey: false },
+    ] satisfies Pick<ProvidersConnection, 'id' | 'name' | 'authMode' | 'hasKey'>[]).map((connection) => ({
+      ...connection,
+      configured: true,
+      custom: false,
+      defaultsResolvable: true,
+      accountLabel: null,
+      tokenStale: false,
+    })),
+    error: null,
+  });
   readonly workspacePair = { provider: 'anthropic', model: 'claude-3-5-sonnet' };
   readonly setupModel = signal<ProvidersSettingsSection<ProvidersSetupRowState>>({
     status: 'ready',
@@ -384,6 +403,23 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     fixture = TestBed.createComponent(ProviderConsumerAssignmentsComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
+  });
+
+  it('offers connected providers and keeps a disconnected saved assignment visible', async () => {
+    mockState.memoryStore.set({
+      status: 'ready',
+      data: { curatorProvider: 'openrouter', curatorModel: 'saved-model' },
+      error: null,
+    });
+    fixture.detectChanges();
+    await openRow('memory-curator');
+    const select = providerSelect('memory-curator');
+    expect(selectValue(select)).toBe('openrouter');
+    expect(options(select)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'anthropic', label: 'Claude API' }),
+      expect.objectContaining({ value: 'openrouter', label: 'OpenRouter (unavailable)' }),
+    ]));
+    expect(options(select).some(({ value }) => value === 'requesty')).toBe(false);
   });
 
   it('renders Setup first, followed by the other consumer rows and the decision model', async () => {

@@ -9,6 +9,7 @@ import {
   PtahRichSelectComponent,
 } from '@ptah-extension/ui';
 import {
+  AppStateManager,
   ClaudeRpcService,
   LoggingService,
   ProvidersSettingsStateService,
@@ -42,6 +43,7 @@ describe('DecisionModelRowComponent', () => {
   let call: jest.Mock;
   let listModels: jest.Mock;
   let warn: jest.Mock;
+  const requestSettingsTab = jest.fn<AppStateManager['requestSettingsTab']>();
   let feedback: SettingsSaveFeedbackService;
   let current: DecisionModelStatusDto;
   let setConfigResult: { success: boolean; error?: string };
@@ -109,6 +111,7 @@ describe('DecisionModelRowComponent', () => {
   }
 
   beforeEach(() => {
+    requestSettingsTab.mockClear();
     setConfigResult = { success: true };
     call = jest.fn(async (method: string) => {
       if (method === 'agent:getConfig')
@@ -140,6 +143,7 @@ describe('DecisionModelRowComponent', () => {
     TestBed.configureTestingModule({
       imports: [DecisionModelRowComponent],
       providers: [
+        { provide: AppStateManager, useValue: { requestSettingsTab } },
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: PROVIDER_MODELS_LOADER, useValue: { listModels } },
         { provide: LoggingService, useValue: { warn } },
@@ -167,6 +171,41 @@ describe('DecisionModelRowComponent', () => {
     expect(byTestId('consumer-row-decision')?.className).toContain(
       'border-base-content/10',
     );
+  });
+
+  it('keeps a disconnected saved provider selected with its saved model', async () => {
+    await create(status({
+      selection: { kind: 'structured', providerId: 'openrouter', model: 'saved-model' },
+      locality: 'remote',
+      state: 'no-credential',
+    }));
+    await open();
+
+    const provider = selectControl('decision-provider');
+    expect(provider.options()).toEqual([
+      { value: '', label: 'Choose a provider' },
+      { value: 'anthropic', label: 'Anthropic' },
+      { value: 'openrouter', label: 'OpenRouter (unavailable)' },
+    ]);
+    expect(provider.value()).toBe('openrouter');
+    expect(byTestId<HTMLInputElement>('decision-model')?.value).toBe('saved-model');
+    expect(byTestId('decision-connect-provider')).toBeNull();
+    expect(setConfigCalls()).toEqual([]);
+  });
+
+  it('opens the provider connection section from the empty structured provider list', async () => {
+    await create(status(), []);
+    await open();
+    await pickKind('structured');
+
+    expect(text('decision-no-providers')).toBe('No providers connected.');
+    const connect = byTestId<HTMLButtonElement>('decision-connect-provider');
+    expect(connect?.textContent?.trim()).toBe('Connect a provider');
+    connect?.click();
+    await flush();
+    expect(requestSettingsTab).toHaveBeenCalledWith({ tab: 'providers', section: 'more-providers' });
+    expect(byTestId('consumer-edit-decision')?.getAttribute('aria-expanded')).toBe('false');
+    expect(setConfigCalls()).toEqual([]);
   });
 
   describe('the five states (Req 1.5), with the host detail as plain text', () => {

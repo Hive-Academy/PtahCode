@@ -408,8 +408,8 @@ function checkConnectionResolver(state: FixtureState): RpcFixtureResolver {
 
 /**
  * `llm:getProviderBaseUrl` resolver — most local/native providers have no
- * override; Ollama Cloud is the only BRIEF connection whose base URL is
- * queried for setup. Resolver, not a static map, because
+ * override. The fixture has a configured, keyless Ollama endpoint for instance creation.
+ * Use a resolver because
  * `ProvidersSettingsStateService.refreshConnections` calls it once per LOCAL
  * registry entry with a different `params.provider` each time.
  */
@@ -417,7 +417,7 @@ export function llmProviderBaseUrlResolver(): RpcFixtureResolver {
   return (params) => {
     const provider = (params as { provider?: string } | null)?.provider ?? '';
     return {
-      baseUrl: null,
+      baseUrl: provider === 'ollama' ? 'http://localhost:11434' : null,
       defaultBaseUrl: provider ? `https://${provider}.example` : null,
     };
   };

@@ -16,6 +16,7 @@ import { expandMatrixDetail } from './settings-matrix-detail';
 
 import { test, expect } from '../../test-fixtures';
 import {
+  AUTH_STATUS_FIXTURE,
   bootSettings,
   getFixtureState,
   waitForSettled,
@@ -482,16 +483,12 @@ for (const host of HOSTS) {
   });
 
   test.describe(`webview > settings > orchestration scenes, changed reads (${host})`, () => {
-    test('adding a Copilot-backed instance requires a GitHub sign-in before Create is enabled', async ({
+    test('adding a Copilot-backed instance uses an existing GitHub sign-in', async ({
       page,
       fixtureServer,
     }) => {
-      // The shared fixture answers no Copilot login: this boot does, and the next auth read reports the sign-in.
       await bootOrchestration(page, fixtureServer.url, host, {
-        'auth:copilotLogin': () => {
-          getFixtureState(page).authStatus.copilotAuthenticated = true;
-          return { success: true };
-        },
+        'auth:getAuthStatus': { ...AUTH_STATUS_FIXTURE, copilotAuthenticated: true },
       });
       const modal = MODALS[0];
       const dialog = await open(page, modal);
@@ -506,11 +503,6 @@ for (const host of HOSTS) {
       const signIn = dialog.locator(
         '[data-testid="add-cli-instance-copilot-state"]',
       );
-      await expect(signIn).toHaveText('Awaiting sign-in');
-      await expect(create).toBeDisabled();
-      await dialog
-        .locator('[data-testid="add-cli-instance-copilot-login"]')
-        .click();
       await expect(signIn).toHaveText('Signed in');
       await expect(create).toBeEnabled();
       const before = getFixtureState(page).calls.length;
