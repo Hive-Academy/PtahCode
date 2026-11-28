@@ -76,7 +76,6 @@ export * from './lib/utils/agent-budget-policy';
 export * from './lib/types/advanced-settings.types';
 export * from './lib/type-guards/guards';
 export * from './lib/cli-version-label';
-export * from './lib/local-command';
 export * from './lib/utils/message-normalizer';
 export * from './lib/utils';
 export * from './lib/utils/pricing.utils';

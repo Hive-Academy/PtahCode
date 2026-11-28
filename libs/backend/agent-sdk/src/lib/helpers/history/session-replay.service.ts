@@ -30,11 +30,11 @@ import type {
 } from '@ptah-extension/shared';
 import {
   calculateMessageCost,
-  formatLocalCommandOutput,
   isAgentDispatchTool,
   laneEnvelopePeerLabel,
   parseLaneEnvelope,
 } from '@ptah-extension/shared';
+import { formatLocalCommandOutput } from '@ptah-extension/shared/mcp-apps-contracts';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { inject, injectable } from 'tsyringe';
 import { SDK_TOKENS } from '../../di/tokens';

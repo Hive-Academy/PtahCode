@@ -15,8 +15,8 @@ import {
   ToolResultEvent,
   SessionId,
   isAgentTaskType,
-  formatLocalCommandOutput,
 } from '@ptah-extension/shared';
+import { formatLocalCommandOutput } from '@ptah-extension/shared/mcp-apps-contracts';
 
 import type {
   SDKMessage,
