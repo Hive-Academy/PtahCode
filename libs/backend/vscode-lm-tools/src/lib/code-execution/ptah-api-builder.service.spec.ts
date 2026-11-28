@@ -105,7 +105,10 @@ jest.mock('./namespace-builders/route-namespace.builder', () => {
   const actual = jest.requireActual<
     typeof import('./namespace-builders/route-namespace.builder')
   >('./namespace-builders/route-namespace.builder');
-  return { ...actual, buildRouteNamespace: jest.fn(actual.buildRouteNamespace) };
+  return {
+    ...actual,
+    buildRouteNamespace: jest.fn(actual.buildRouteNamespace),
+  };
 });
 
 jest.mock('./namespace-builders/cron-namespace.builder', () => {
@@ -205,14 +208,14 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   McpInstallService: class McpInstallServiceStub {},
   SmitheryRegistrySource: class SmitheryRegistrySourceStub {},
   SkillsShApiClient: class SkillsShApiClientStub {},
-  // The `getParentLevel` wiring delegates here. The resolver rules have their
-  // own spec (`parent-lane-permission.spec.ts`); this stub only lets the
-  // wiring test prove that the Codex reader reaches the resolver.
-  parentLanePermission: (
-    callerId: string,
-    _lifecycle: unknown,
-    codex: { getPermissionLevel(id: string): string | undefined } | undefined,
-  ) => codex?.getPermissionLevel(callerId),
+  // The resolver rules are covered by parent-lane-permission.spec.ts.
+  parentLanePermission: jest.fn(
+    (
+      callerId: string,
+      _lifecycle: unknown,
+      codex: NativePermissionReader | undefined,
+    ) => codex?.getPermissionLevel(callerId),
+  ),
   // A VALUE, not a type: the constructor's `@inject` decorator dereferences
   // `CLI_AGENT_RUNTIME_TOKENS.AGENT_REPORT_ROUTER` at class-definition time,
   // so the mocked barrel has to carry it (TASK_2026_402).
@@ -262,10 +265,11 @@ import type {
   TreeSitterParserService,
   AstAnalysisService,
 } from '@ptah-extension/workspace-intelligence';
-import type {
-  AgentProcessManager,
-  AgentRoleResolver,
-  CliDetectionService,
+import {
+  parentLanePermission as resolveParentLanePermission,
+  type AgentProcessManager,
+  type AgentRoleResolver,
+  type CliDetectionService,
 } from '@ptah-extension/cli-agent-runtime';
 import type { AgentNamespaceDependencies } from './namespace-builders/agent-namespace.builder';
 
@@ -443,11 +447,13 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
     runWithMcpRequestContext({ callerSessionId: tabId }, () => {
       expect(harness?.getCallerSdkSessionId?.()).toBe(sessionId);
       expect(cron?.getSessionId()).toBe(sessionId);
+      expect(agent?.resolveSessionId?.(tabId)).toBe(sessionId);
       expect(agent?.getParentLevel?.(tabId)).toBe('auto-edit');
     });
     runWithMcpRequestContext({ callerSessionId: 'ambiguous-tab' }, () => {
       expect(harness?.getCallerSdkSessionId?.()).toBeUndefined();
       expect(cron?.getSessionId()).toBeUndefined();
+      expect(agent?.resolveSessionId?.('ambiguous-tab')).toBe('ambiguous-tab');
       expect(agent?.getParentLevel?.('ambiguous-tab')).toBe('plan');
     });
   });
@@ -506,11 +512,21 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
       ),
     };
     const builder = buildTestBuilder(
-      makeRawWorkspaceProvider(), makeSessionManager(), undefined, undefined,
-      undefined, undefined, undefined, makeLogger(), codexSessions,
+      makeRawWorkspaceProvider(),
+      makeSessionManager(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      codexSessions,
     );
     Object.assign(builder, {
-      container: { isRegistered: jest.fn().mockReturnValue(true), resolve: () => spawner },
+      container: {
+        isRegistered: jest.fn().mockReturnValue(true),
+        resolve: () => spawner,
+      },
     });
     const session = builder.build().session;
     for (const [callerId, expectedId] of [
@@ -537,11 +553,21 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
       ),
     };
     const builder = buildTestBuilder(
-      makeRawWorkspaceProvider(), makeSessionManager(), undefined, undefined,
-      undefined, undefined, undefined, makeLogger(), codexSessions,
+      makeRawWorkspaceProvider(),
+      makeSessionManager(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      makeLogger(),
+      codexSessions,
     );
     Object.assign(builder, {
-      container: { isRegistered: jest.fn().mockReturnValue(true), resolve: () => spawner },
+      container: {
+        isRegistered: jest.fn().mockReturnValue(true),
+        resolve: () => spawner,
+      },
     });
     builder.build();
     const routeDeps = jest.mocked(buildRouteNamespace).mock.calls.at(-1)?.[0];
@@ -549,9 +575,12 @@ describe('PtahAPIBuilder harness proposal wiring', () => {
       ['codex-tab', 'codex-thread-1'],
       ['claude-tab', 'claude-tab'],
     ]) {
-      await runWithMcpRequestContext({ callerSessionId: callerId }, async () => {
-        expect(routeDeps?.childSession?.canStart()).toEqual({ ok: true });
-      });
+      await runWithMcpRequestContext(
+        { callerSessionId: callerId },
+        async () => {
+          expect(routeDeps?.childSession?.canStart()).toEqual({ ok: true });
+        },
+      );
       expect(spawner.canStart).toHaveBeenLastCalledWith(expectedId);
     }
   });
@@ -748,6 +777,13 @@ function spyOnEveryNamespaceBuilder(): jest.Mock[] {
   );
 }
 
+type NativePermissionReader = {
+  getPermissionLevel(
+    sessionId: string,
+  ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+  resolveLiveSessionId?(callerId: string): string | undefined;
+};
+
 function buildTestBuilder(
   rawProvider: IWorkspaceProvider,
   sessionManager: ReturnType<typeof makeSessionManager>,
@@ -757,11 +793,9 @@ function buildTestBuilder(
   webviewManager?: WebviewManager,
   sessionOrganizationRecorder?: ISessionOrganizationRecorder,
   logger: Logger = makeLogger(),
-  codexPermissionReader?: {
-    getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
-    resolveLiveSessionId?(callerId: string): string | undefined;
-  },
+  codexPermissionReader?: NativePermissionReader,
   liveChatSessions?: LiveChatSessionResolver,
+  providerSessionPermissionReader?: NativePermissionReader,
 ): PtahAPIBuilder {
   return new PtahAPIBuilder(
     {} as unknown as WorkspaceAnalyzerService,
@@ -822,6 +856,7 @@ function buildTestBuilder(
     undefined, // taskSessionStore
     undefined, // taskCloseOutService
     liveChatSessions,
+    providerSessionPermissionReader,
   );
 }
 
@@ -849,7 +884,10 @@ describe('PtahAPIBuilder.build() — help lists every namespace', () => {
 
   const builtNamespaces = (): string[] =>
     Object.keys(
-      buildTestBuilder(makeRawWorkspaceProvider(), makeSessionManager()).build(),
+      buildTestBuilder(
+        makeRawWorkspaceProvider(),
+        makeSessionManager(),
+      ).build(),
     ).filter((name) => name !== 'help');
 
   it('names every built namespace in the overview', () => {
@@ -978,7 +1016,8 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
 
   function buildAgentDeps(
     agentRoleResolver?: AgentRoleResolver,
-    codexPermissionReader?: { getPermissionLevel(sessionId: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined },
+    codexPermissionReader?: NativePermissionReader,
+    providerSessionPermissionReader?: NativePermissionReader,
   ): AgentNamespaceDependencies {
     const builder = buildTestBuilder(
       makeRawWorkspaceProvider(),
@@ -990,6 +1029,8 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
       undefined,
       makeLogger(),
       codexPermissionReader,
+      undefined, // liveChatSessions
+      providerSessionPermissionReader,
     );
     builder.build();
     const mockedBuilder =
@@ -999,7 +1040,11 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
   }
 
   it('uses the live native Codex level when the SDK lifecycle has no caller session', () => {
-    const reader = { getPermissionLevel: jest.fn((id: string) => id === 'native' ? 'plan' as const : undefined) };
+    const reader = {
+      getPermissionLevel: jest.fn((id: string) =>
+        id === 'native' ? ('plan' as const) : undefined,
+      ),
+    };
     const deps = buildAgentDeps(undefined, reader);
     expect(deps.getParentLevel?.('native')).toBe('plan');
     expect(reader.getPermissionLevel).toHaveBeenCalledWith('native');
@@ -1015,6 +1060,30 @@ describe('PtahAPIBuilder.build() — agent role resolver wiring', () => {
     const deps = buildAgentDeps(undefined, reader);
     expect(deps.resolveSessionId?.('codex-tab')).toBe('codex-thread-1');
     expect(deps.resolveSessionId?.('unknown-tab')).toBe('unknown-tab');
+  });
+
+  it('resolves an Antigravity tab to its live session and uses its live lane permission', () => {
+    const reader = {
+      getPermissionLevel: jest.fn((id: string) =>
+        id === 'agy-session-1' ? ('yolo' as const) : undefined,
+      ),
+      resolveLiveSessionId: jest.fn((id: string) =>
+        id === 'agy-tab' || id === 'agy-session-1'
+          ? 'agy-session-1'
+          : undefined,
+      ),
+    };
+    const deps = buildAgentDeps(undefined, undefined, reader);
+
+    expect(deps.resolveSessionId?.('agy-tab')).toBe('agy-session-1');
+    jest.mocked(resolveParentLanePermission).mockReturnValueOnce('yolo');
+    expect(deps.getParentLevel?.('agy-tab')).toBe('yolo');
+    expect(resolveParentLanePermission).toHaveBeenCalledWith(
+      'agy-tab',
+      expect.anything(),
+      undefined,
+      { providerSessions: reader },
+    );
   });
 
   it('resolveAgentRole delegates to the injected resolver', async () => {

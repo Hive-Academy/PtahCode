@@ -59,8 +59,7 @@ import type { SessionUsageSink } from '../session-stats/session-usage-sink';
 import type { IPricingProvider } from '../pricing.port';
 
 /** Host ports plus what agent-sdk composition adds (logger, approval router). */
-export interface ProviderSessionChatAdapterDependencies
-  extends ProviderSessionChatPorts {
+export interface ProviderSessionChatAdapterDependencies extends ProviderSessionChatPorts {
   readonly logger: Logger;
   readonly approvals: Pick<SessionApprovalRouter, 'register' | 'cancelPrompt'>;
   /** Canonicalises a turn's file references; `fs.promises.realpath` when absent. */
@@ -122,8 +121,12 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       failure: (error, operation) => this.failure(error, operation),
       rejectQueued: (session) => this.followUps.rejectAll(session),
     });
-    const realpath = this.ports.realpath ?? ((path: string) => fsRealpath(path));
-    this.usage = createProviderSessionUsagePersistence(ports.usageSink, ports.logger);
+    const realpath =
+      this.ports.realpath ?? ((path: string) => fsRealpath(path));
+    this.usage = createProviderSessionUsagePersistence(
+      ports.usageSink,
+      ports.logger,
+    );
     // Started now so the catalog wait overlaps the first turn, not its end.
     const pricingReady = createPricingGate(ports.pricing, ports.logger);
     void pricingReady();
@@ -139,7 +142,8 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       turnState,
       logger: this.ports.logger,
       realpath,
-      live: (session) => this.live(session),
+      live: (session, refreshInheritedPermission) =>
+        this.live(session, refreshInheritedPermission),
       stats: (payload) => this.stats?.(payload),
       usage: this.usage,
       pricingReady,
@@ -211,6 +215,19 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     });
   }
 
+  /** Trusted live level for a provider-session chat, including runtime changes. */
+  getPermissionLevel(
+    sessionId: string,
+  ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined {
+    if (!SessionId.validate(sessionId)) return undefined;
+    const session = this.sessions.get(sessionId);
+    return (
+      session?.settings.permission ??
+      session?.inheritedPermission ??
+      session?.live?.getPermission?.()
+    );
+  }
+
   /** Live chat session id for a Ptah MCP caller id (tab id or session id). */
   findLiveChatSessions(callerId: string): LiveChatSession[] {
     const matches: LiveChatSession[] = [];
@@ -273,7 +290,11 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       config.images,
       session,
     );
-    return isEmptyTurn(input) ? emptyStream() : this.turn(session, input, {});
+    return isEmptyTurn(input)
+      ? emptyStream()
+      : this.turn(session, input, {
+          refreshInheritedPermission: config.permissionLevel === undefined,
+        });
   }
 
   private async open(
@@ -310,11 +331,18 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       });
       // Read alongside the attach; never rejects.
       const restoring = resumeId ? this.usage.restore(id) : undefined;
-      await this.attach(session, opening.abort.signal, 'tab-closed', () =>
-        this.checkOpening(opening, generation),
+      await this.attach(
+        session,
+        opening.abort.signal,
+        'tab-closed',
+        () => this.checkOpening(opening, generation),
+        session.settings.permission ?? session.inheritedPermission,
       );
       if (restoring)
-        session.usage ??= createProviderSessionUsageLedger(session, await restoring);
+        session.usage ??= createProviderSessionUsageLedger(
+          session,
+          await restoring,
+        );
       if (this.sessions.has(id)) {
         await this.releaseQuietly(id, 'tab-closed');
         throw new ProviderSessionChatAdapterError('busy', 'open');
@@ -353,6 +381,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     signal: AbortSignal,
     failReason: ProviderSessionReleaseReason,
     check?: () => void,
+    openingPermission?: Session['settings']['permission'],
   ): Promise<ProviderSession> {
     const nativeSessionId = session.nativeSessionId || undefined;
     const seed = session.prepared.seed;
@@ -368,6 +397,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
           : {}),
         approvals: session.approvals,
         ...(session.prepared.open ? { open: session.prepared.open } : {}),
+        ...(openingPermission ? { permission: openingPermission } : {}),
       },
       signal,
     );
@@ -388,13 +418,21 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       check?.();
       if (session.settings.effort !== undefined)
         await live.setEffort(session.settings.effort);
-      if (session.settings.permission !== undefined)
-        await live.setPermission(session.settings.permission);
-      // A process the pool opened for a history read carries no model; an
-      // attach to an existing native session sets the session's model.
-      const model = session.settings.model ?? seed.model;
-      if (nativeSessionId && model && live.capabilities().setModel)
-        await live.setModel(model);
+      await this.controls.changePermission(session, async () => {
+        const permission =
+          session.settings.permission ?? session.inheritedPermission;
+        if (permission !== undefined) await live.setPermission(permission);
+        // An adopted history process needs the session's model.
+        const model = session.settings.model ?? seed.model;
+        if (nativeSessionId && model && live.capabilities().setModel)
+          await live.setModel(model);
+        check?.();
+        // Publish the replacement before queued toggles can update it.
+        if (previous) session.approvals.cancelAll('superseded');
+        session.nativeSessionId = live.nativeSessionId;
+        session.contextId = randomUUID();
+        session.live = live;
+      });
     } catch (error) {
       // A session closed while its process opened is released for good, so
       // the host forgets its routing instead of keeping it for a re-acquire.
@@ -404,11 +442,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       );
       throw error;
     }
-    // Prompts of the process the pool replaced cannot be answered any more.
-    if (previous) session.approvals.cancelAll('superseded');
-    session.nativeSessionId = live.nativeSessionId;
-    session.contextId = randomUUID();
-    session.live = live;
+    await this.controls.waitForPermissionChanges(session);
     return live;
   }
 
@@ -417,13 +451,26 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
    * re-acquire after a break (respawn + attach), or the process the pool
    * opened after closing the cached one.
    */
-  private async live(session: Session): Promise<ProviderSession> {
+  private async live(
+    session: Session,
+    refreshInheritedPermission = false,
+  ): Promise<ProviderSession> {
+    if (refreshInheritedPermission)
+      await this.controls.refreshInheritedPermission(session);
     if (session.closing || this.disposed)
       throw new ProviderSessionChatAdapterError('unavailable', 'turn');
-    return this.attach(session, session.abort.signal, 'broken', () => {
-      if (session.closing || this.disposed)
-        throw new ProviderSessionChatAdapterError('cancelled', 'turn');
-    });
+    return this.attach(
+      session,
+      session.abort.signal,
+      'broken',
+      () => {
+        if (session.closing || this.disposed)
+          throw new ProviderSessionChatAdapterError('cancelled', 'turn');
+      },
+      refreshInheritedPermission
+        ? (session.settings.permission ?? session.inheritedPermission)
+        : undefined,
+    );
   }
 
   /** One notice per break; the session stays addressable. */
@@ -432,13 +479,18 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     session.live = undefined;
     session.approvals.cancelAll('turn-ended');
     void this.releaseQuietly(session.id, 'broken');
-    void this.ports.publishNotice(session.id, brokenSessionNotice(session.id)).catch((error: unknown) => {
-      // degradation-audit: reported - the notice is best effort; the failed
-      // turn row already shows the error.
-      this.ports.logger.warn('[ProviderSessionChatAdapter] broken-session notice failed', {
-        error: error instanceof Error ? error.message : 'unknown',
+    void this.ports
+      .publishNotice(session.id, brokenSessionNotice(session.id))
+      .catch((error: unknown) => {
+        // degradation-audit: reported - the notice is best effort; the failed
+        // turn row already shows the error.
+        this.ports.logger.warn(
+          '[ProviderSessionChatAdapter] broken-session notice failed',
+          {
+            error: error instanceof Error ? error.message : 'unknown',
+          },
+        );
       });
-    });
   }
 
   private turn(
@@ -466,7 +518,9 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
         new ProviderSessionChatAdapterError('unavailable', 'turn'),
       );
     if (session.busy)
-      return Promise.reject(new ProviderSessionChatAdapterError('busy', 'turn'));
+      return Promise.reject(
+        new ProviderSessionChatAdapterError('busy', 'turn'),
+      );
     return publishProviderSessionTurn(session, input, options, this.turnDeps, {
       publish: (id, stream) => this.ports.publish(id, stream),
       unreserve: () => {
@@ -505,11 +559,19 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
         throw new SessionAdmissionRefusedError('busy', id);
     }
     const session = this.session(id);
-    const input = this.turnInput(text, options?.files, options?.images, session);
+    const input = this.turnInput(
+      text,
+      options?.files,
+      options?.images,
+      session,
+    );
     const held = session.busy || this.followUps.hasHeld(session);
     if (options?.queueIntent === 'next-turn' && !inboundPeer && !requireIdle) {
       if (!clientMessageId)
-        throw this.failure(new Error('clientMessageId required'), 'messageOptions');
+        throw this.failure(
+          new Error('clientMessageId required'),
+          'messageOptions',
+        );
       // A retried send of the same follow-up is already held.
       if (this.followUps.isQueued(session, clientMessageId)) return;
       const followUp: QueuedFollowUpSnapshot = {
@@ -571,7 +633,8 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     clientMessageId: string,
   ): Promise<SteerQueuedFollowUpResult> {
     const session = this.sessions.get(id);
-    if (!session || session.closing) return { ok: false, code: 'SESSION_ENDED' };
+    if (!session || session.closing)
+      return { ok: false, code: 'SESSION_ENDED' };
     return this.followUps.steer(session, clientMessageId);
   }
 
@@ -579,7 +642,8 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     sessionId: SessionId,
   ): Promise<readonly AgentModelInfo[]> {
     const live = this.current(this.session(sessionId));
-    if (!live) throw new ProviderSessionChatAdapterError('unavailable', 'listModels');
+    if (!live)
+      throw new ProviderSessionChatAdapterError('unavailable', 'listModels');
     try {
       return (await live.listModels()).map((model) => ({
         value: model.id,
@@ -676,10 +740,14 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   ): ProviderSessionTurnInput {
     const parsedImages = turnImagesSchema.safeParse(images ?? []);
     if (!parsedImages.success)
-      throw new ProviderSessionChatAdapterError('unsupported-option', 'images', {
-        option: 'images',
-        cause: parsedImages.error,
-      });
+      throw new ProviderSessionChatAdapterError(
+        'unsupported-option',
+        'images',
+        {
+          option: 'images',
+          cause: parsedImages.error,
+        },
+      );
     const parsedFiles = turnFilesSchema.safeParse(files ?? []);
     if (!parsedFiles.success)
       throw new ProviderSessionChatAdapterError('unsupported-option', 'files', {
@@ -691,9 +759,13 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       session &&
       this.current(session)?.capabilities().images === false
     )
-      throw new ProviderSessionChatAdapterError('unsupported-option', 'images', {
-        option: 'images',
-      });
+      throw new ProviderSessionChatAdapterError(
+        'unsupported-option',
+        'images',
+        {
+          option: 'images',
+        },
+      );
     return {
       text: text ?? '',
       ...(parsedImages.data.length > 0
@@ -716,7 +788,10 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     }
   }
 
-  private checkOpening(opening: ProviderSessionOpening, generation: number): void {
+  private checkOpening(
+    opening: ProviderSessionOpening,
+    generation: number,
+  ): void {
     if (opening.cancelled || this.disposed || generation !== this.generation)
       throw new ProviderSessionChatAdapterError('cancelled', 'open');
   }

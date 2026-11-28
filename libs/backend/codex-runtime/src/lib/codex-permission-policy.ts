@@ -18,6 +18,8 @@ export function codexPermissionPolicy(
   if (kind === 'userInput') return 'present';
   // Approval requests can carry effects. A remembered grant cannot exit plan mode.
   if (level === 'plan') return 'decline';
+  // Yolo auto-approves all non-question requests, including widened file-change grants.
+  if (level === 'yolo') return ruleStoreHit ? 'acceptForSession' : 'accept';
   // Missing details cannot prove a file-only grant. Unknown fields fail closed too.
   if (
     kind === 'fileChange' &&
@@ -38,7 +40,7 @@ export function codexPermissionPolicy(
   )
     return 'present';
   if (ruleStoreHit) return 'acceptForSession';
-  if (level === 'yolo' || (level === 'auto-edit' && kind === 'fileChange')) {
+  if (level === 'auto-edit' && kind === 'fileChange') {
     return 'accept';
   }
   return 'present';

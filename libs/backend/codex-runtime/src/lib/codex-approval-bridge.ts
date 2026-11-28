@@ -280,8 +280,7 @@ export class CodexApprovalBridge {
       ...(typeof params['itemId'] === 'string' && params['itemId']
         ? { toolId: params['itemId'] }
         : {}),
-      expiresAt:
-        this.options.clock.now() + this.approvalTimeout(kinds[method]),
+      expiresAt: this.options.clock.now() + this.approvalTimeout(kinds[method]),
       message:
         typeof params['message'] === 'string'
           ? params['message']
@@ -297,7 +296,9 @@ export class CodexApprovalBridge {
           code: 'codex-elicitation-unanswerable',
           mode: typeof params['mode'] === 'string' ? params['mode'] : 'unknown',
           serverName:
-            typeof params['serverName'] === 'string' ? params['serverName'] : '',
+            typeof params['serverName'] === 'string'
+              ? params['serverName']
+              : '',
         },
       );
       const response = validateCodexResult(method, { action: 'decline' });
@@ -323,14 +324,14 @@ export class CodexApprovalBridge {
     const target = this.target(request, params);
     let reply: unknown = 'decline';
     if (current() && !signal.aborted) {
-      const policy = isChild()
-        ? 'present'
-        : codexPermissionPolicy(
-            this.options.permissionLevel(),
-            request.kind,
-            target !== undefined && this.options.rules.matches(identity, target),
-            request.details,
-          );
+      const policy = codexPermissionPolicy(
+        this.options.permissionLevel(),
+        request.kind,
+        !isChild() &&
+          target !== undefined &&
+          this.options.rules.matches(identity, target),
+        request.details,
+      );
       reply = await this.interact(request, signal, policy);
     }
     const edited = record(reply);
@@ -345,14 +346,12 @@ export class CodexApprovalBridge {
           'followUpMessage',
         ].some((key) => Object.hasOwn(edited, key)));
     const live = current() && !signal.aborted;
-    const isChildRequest = isChild();
     const decision: CodexApprovalDecision = this.disposed
       ? 'decline'
       : !live
         ? 'cancel'
         : isEdit ||
-            (!isChildRequest &&
-              request.kind !== 'userInput' &&
+            (request.kind !== 'userInput' &&
               this.options.permissionLevel() === 'plan')
           ? 'decline'
           : reply === 'accept' ||

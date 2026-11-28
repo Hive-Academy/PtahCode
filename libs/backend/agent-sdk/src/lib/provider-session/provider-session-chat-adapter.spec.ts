@@ -9,6 +9,7 @@ import type {
   ProviderSessionCapabilities,
   ProviderSessionEvent,
   ProviderSessionEventBody,
+  ProviderSessionPermission,
   ProviderTurnInput,
 } from '@ptah-extension/provider-session-contracts';
 import {
@@ -114,12 +115,18 @@ class FakeProviderSession implements ProviderSession {
   });
   steer?: jest.Mock;
   readonly interrupt = jest.fn(async (turnId: string) => {
-    this.emit({ type: 'terminal', status: 'interrupted', disposition: 'reusable' }, turnId);
+    this.emit(
+      { type: 'terminal', status: 'interrupted', disposition: 'reusable' },
+      turnId,
+    );
     return true;
   });
   readonly setModel = jest.fn(async (_model: string) => applied);
   readonly setEffort = jest.fn(async (_effort: string | undefined) => applied);
   readonly setPermission = jest.fn(async (_permission: string) => applied);
+  readonly getPermission = jest.fn<ProviderSessionPermission | undefined, []>(
+    () => undefined,
+  );
   readonly listModels = jest.fn(
     async (): Promise<readonly ProviderModelInfo[]> => [
       { id: 'gemini-pro', name: 'Gemini Pro', isDefault: true },
@@ -178,13 +185,19 @@ async function collect(
 }
 
 /** Wait until the fake has a subscriber and a prompted turn, then return it. */
-async function promptedTurn(live: FakeProviderSession, turns = 1): Promise<void> {
+async function promptedTurn(
+  live: FakeProviderSession,
+  turns = 1,
+): Promise<void> {
   for (let i = 0; i < 50 && live.turns < turns; i++) await flush();
   expect(live.turns).toBe(turns);
 }
 
 function setup(
-  extra: Pick<ProviderSessionChatAdapterDependencies, 'usageSink' | 'pricing'> = {},
+  extra: Pick<
+    ProviderSessionChatAdapterDependencies,
+    'usageSink' | 'pricing' | 'readSavedPermissionLevel'
+  > = {},
 ) {
   const logger: Logger = Object.assign(
     Object.create(Logger.prototype),
@@ -256,7 +269,8 @@ function setup(
   const links = new Map<string, string>();
   const missing = new Set<string>();
   const realpath = jest.fn(async (path: string) => {
-    if (missing.has(path)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    if (missing.has(path))
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     return links.get(path) ?? path;
   });
   const adapter = new ProviderSessionChatAdapter(
@@ -292,7 +306,11 @@ type Harness = ReturnType<typeof setup>;
 /** Start a session and run its first turn to completion. */
 async function startCompleted(h: Harness) {
   // The chat service adds clientMessageId beside the typed start config.
-  const config = { tabId: 'tab-1', prompt: 'hello', clientMessageId: 'client-1' };
+  const config = {
+    tabId: 'tab-1',
+    prompt: 'hello',
+    clientMessageId: 'client-1',
+  };
   const stream = await h.adapter.startChatSession(config);
   const events = collect(stream);
   const live = h.lives[0];
@@ -365,7 +383,10 @@ describe('ProviderSessionChatAdapter', () => {
       'message_complete',
       'turn_state', // settled
     ]);
-    expect(events[0]).toMatchObject({ role: 'user', clientMessageId: 'client-1' });
+    expect(events[0]).toMatchObject({
+      role: 'user',
+      clientMessageId: 'client-1',
+    });
     expect(events[5]).toMatchObject({ consumedClientMessageId: 'client-1' });
     expect(h.adapter.owns(id)).toBe(true);
     expect(h.adapter.canSendFollowUp(id)).toBe(true);
@@ -384,6 +405,39 @@ describe('ProviderSessionChatAdapter', () => {
     await collect(await h.adapter.resumeSession(id, { tabId: 'tab-r' }));
     expect(h.acquire.mock.calls[0][0].seed.model).toBe('gemini-4-hydrogen-low');
     expect(h.lives[0].setModel).toHaveBeenCalledWith('gemini-4-hydrogen-low');
+  });
+
+  it('applies the prepared saved permission to the process a history read adopted on resume', async () => {
+    // Live test: the history read opened agy in Full Auto; the user then
+    // turned Full Auto off, and the follow-up kept auto-approving tools.
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed,
+      resume: { nativeSessionId: 'native-stored' },
+      permission: 'ask',
+    }));
+    const id = SessionId.create();
+    await collect(await h.adapter.resumeSession(id, { tabId: 'tab-r' }));
+    expect(h.lives[0].setPermission).toHaveBeenCalledWith('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+  });
+
+  it('prefers an explicit permissionLevel over the prepared saved permission', async () => {
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed,
+      resume: { nativeSessionId: 'native-stored' },
+      permission: 'ask',
+    }));
+    const id = SessionId.create();
+    await collect(
+      await h.adapter.resumeSession(id, {
+        tabId: 'tab-r',
+        permissionLevel: 'yolo',
+      }),
+    );
+    expect(h.lives[0].setPermission).toHaveBeenCalledTimes(1);
+    expect(h.lives[0].setPermission).toHaveBeenCalledWith('yolo');
   });
 
   it('resumes the stored native session and fails a mismatched attach as resume-failed', async () => {
@@ -443,7 +497,10 @@ describe('ProviderSessionChatAdapter', () => {
     const h = setup();
     (h.ports.prepare as jest.Mock).mockResolvedValueOnce({ seed });
     await expectCode(
-      h.adapter.resumeSession(SessionId.create(), { tabId: 'tab', prompt: 'hi' }),
+      h.adapter.resumeSession(SessionId.create(), {
+        tabId: 'tab',
+        prompt: 'hi',
+      }),
       'resume-failed',
     );
     expect(h.acquire).not.toHaveBeenCalled();
@@ -451,7 +508,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('routes an approval round trip through the router and the host presentation', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'edit' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'edit',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -479,17 +539,28 @@ describe('ProviderSessionChatAdapter', () => {
     expect(
       h.approvals.respond(address, {
         kind: 'provider-session',
-        response: { ...address, contextId: prompt.contextId, decision: 'accept' },
+        response: {
+          ...address,
+          contextId: prompt.contextId,
+          decision: 'accept',
+        },
       }),
     ).toBe(true);
     await expect(decision).resolves.toBe('accept');
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
   });
 
   it('cancels an open approval when the turn ends, never authorizing it', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'edit' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'edit',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -497,7 +568,11 @@ describe('ProviderSessionChatAdapter', () => {
       { requestId: 'req-2', title: 'Run command' },
       new AbortController().signal,
     );
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
     await expect(decision).resolves.toBe('cancel');
     expect(h.cancelled).toHaveBeenCalledWith(
@@ -507,7 +582,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('interrupts the running turn and keeps the process', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'long' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'long',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -522,7 +600,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('releases the session when an interrupt is refused', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'long' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'long',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -537,7 +618,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('queues a follow-up sent during a running turn and delivers it next', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -558,7 +642,11 @@ describe('ProviderSessionChatAdapter', () => {
       h.adapter.sendMessageToSession(id, 'peer', { admission: 'require-idle' }),
     ).rejects.toBeInstanceOf(SessionAdmissionRefusedError);
 
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
     await promptedTurn(live, 2);
     expect(live.prompt).toHaveBeenLastCalledWith({ text: 'second' });
@@ -569,15 +657,24 @@ describe('ProviderSessionChatAdapter', () => {
       state: 'delivered',
     });
     expect(h.adapter.listQueuedFollowUps(id)).toEqual([]);
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     for (let i = 0; i < 10; i++) await flush();
-    expect(h.published.some((event) => event.eventType === 'turn_state')).toBe(true);
+    expect(h.published.some((event) => event.eventType === 'turn_state')).toBe(
+      true,
+    );
     expect(h.adapter.canSendFollowUp(id)).toBe(true);
   });
 
   it('withdraws a queued follow-up and steers only when the provider can steer', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -593,7 +690,9 @@ describe('ProviderSessionChatAdapter', () => {
     });
     live.caps = { ...live.caps, steer: true };
     live.steer = jest.fn(async () => ({ turnId: 'turn-1' }));
-    await expect(h.adapter.steerQueuedFollowUp(id, 'a')).resolves.toEqual({ ok: true });
+    await expect(h.adapter.steerQueuedFollowUp(id, 'a')).resolves.toEqual({
+      ok: true,
+    });
     expect(live.steer).toHaveBeenCalledWith({ text: 'a' }, 'turn-1');
     await expect(h.adapter.withdrawQueuedFollowUp(id, 'b')).resolves.toBe(true);
     expect(h.followUps.map((change) => change.state)).toEqual([
@@ -602,14 +701,21 @@ describe('ProviderSessionChatAdapter', () => {
       'steered',
       'withdrawn',
     ]);
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
     expect(live.prompt).toHaveBeenCalledTimes(1);
   });
 
   it('publishes one notice on a broken turn and re-acquires on the next send', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const first = h.lives[0];
     await promptedTurn(first);
@@ -621,7 +727,9 @@ describe('ProviderSessionChatAdapter', () => {
       error: { code: 'process-exited', message: 'agy exited' },
     });
     const out = await events;
-    expect(out.some((event) => event.eventType === 'message_complete')).toBe(true);
+    expect(out.some((event) => event.eventType === 'message_complete')).toBe(
+      true,
+    );
     expect(h.ports.release).toHaveBeenCalledWith(id, 'broken');
     expect(h.ports.publishNotice).toHaveBeenCalledTimes(1);
     expect(h.adapter.owns(id)).toBe(true);
@@ -641,14 +749,21 @@ describe('ProviderSessionChatAdapter', () => {
     );
     const second = h.lives[1];
     expect(second.prompt).toHaveBeenCalledWith({ text: 'again' });
-    second.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    second.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     for (let i = 0; i < 10; i++) await flush();
     expect(h.ports.publishNotice).toHaveBeenCalledTimes(1);
   });
 
   it('treats an event stream that ends without a terminal as a broken process', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -661,7 +776,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('reports usage to the result stats callback once per turn', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'hi',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -720,6 +838,282 @@ describe('ProviderSessionChatAdapter', () => {
     await expectCode(h.adapter.setSessionModel(id, 'x'), 'unsupported-option');
   });
 
+  it.each([
+    { scenario: 'the default changed' },
+    { scenario: 'the read failed', readFailed: true },
+    {
+      scenario: 'the read failed after eviction',
+      readFailed: true,
+      evicted: true,
+    },
+    { scenario: 'the tab made an explicit choice', explicit: true },
+  ])(
+    'uses the correct permission before prompting a retained session when $scenario',
+    async ({ readFailed, evicted, explicit }) => {
+      const readSavedPermissionLevel = jest.fn(
+        (): ProviderSessionPermission => {
+          if (readFailed) throw new Error('Settings unavailable');
+          return 'ask';
+        },
+      );
+      const h = setup({ readSavedPermissionLevel });
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'yolo',
+      });
+      const { id, live } = await startCompleted(h);
+      expect(h.adapter.getPermissionLevel(id)).toBe('yolo');
+      if (explicit) await h.adapter.setSessionPermissionLevel(id, 'yolo');
+      live.setPermission.mockClear();
+
+      await h.adapter.interruptSession(id, 'stream-exit');
+      if (evicted) h.pool.delete(id);
+      const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+      const events = collect(stream);
+      await flush();
+      const resumed = h.lives[h.lives.length - 1];
+      await promptedTurn(resumed, evicted ? 1 : 2);
+      resumed.emit({
+        type: 'terminal',
+        status: 'completed',
+        disposition: 'reusable',
+      });
+      await events;
+
+      expect(h.ports.prepare).toHaveBeenCalledTimes(1);
+      expect(h.adapter.getPermissionLevel(id)).toBe(explicit ? 'yolo' : 'ask');
+      if (evicted) {
+        expect(resumed).not.toBe(live);
+        expect(h.acquire.mock.lastCall?.[0].permission).toBe('ask');
+      }
+      if (explicit) {
+        expect(readSavedPermissionLevel).not.toHaveBeenCalled();
+        expect(resumed.setPermission).not.toHaveBeenCalled();
+      } else {
+        expect(readSavedPermissionLevel).toHaveBeenCalledWith(
+          seed.workspacePath,
+        );
+        expect(resumed.setPermission).toHaveBeenCalledWith('ask');
+        expect(resumed.setPermission.mock.invocationCallOrder[0]).toBeLessThan(
+          resumed.prompt.mock.invocationCallOrder[evicted ? 0 : 1],
+        );
+      }
+    },
+  );
+
+  it.each([
+    { result: 'prompts after applying the new level', rejectPermission: false },
+    {
+      result: 'fails closed if permission is rejected',
+      rejectPermission: true,
+    },
+  ])(
+    'replaces a process that exited before permission refresh and $result',
+    async ({ rejectPermission }) => {
+      const h = setup({ readSavedPermissionLevel: () => 'ask' });
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'yolo',
+      });
+      const { id, live } = await startCompleted(h);
+      live.setPermission.mockRejectedValue(
+        Object.assign(new Error('Provider exited'), { code: 'process-exited' }),
+      );
+      const replacement = new FakeProviderSession(
+        live.nativeSessionId,
+        2,
+        live.approvals,
+      );
+      if (rejectPermission)
+        replacement.setPermission.mockRejectedValue(
+          new Error('Permission refused'),
+        );
+      h.acquire.mockImplementationOnce(async (request) => {
+        expect(h.pool.has(request.sessionId)).toBe(false);
+        h.pool.set(request.sessionId, replacement);
+        return replacement;
+      });
+
+      const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+      const events = collect(stream);
+      if (rejectPermission) {
+        await expectCode(events, 'runtime-failed');
+        expect(replacement.prompt).not.toHaveBeenCalled();
+      } else {
+        await promptedTurn(replacement);
+        expect(
+          replacement.setPermission.mock.invocationCallOrder[0],
+        ).toBeLessThan(replacement.prompt.mock.invocationCallOrder[0]);
+        replacement.emit({
+          type: 'terminal',
+          status: 'completed',
+          disposition: 'reusable',
+        });
+        await events;
+      }
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+      expect(live.setPermission).toHaveBeenLastCalledWith('ask');
+      expect(h.ports.release).toHaveBeenCalledWith(id, 'broken');
+      expect(h.acquire.mock.lastCall?.[0].permission).toBe('ask');
+      expect(replacement.setPermission).toHaveBeenCalledWith('ask');
+      expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+    },
+  );
+
+  it('reuses the pooled process after an inherited permission refresh fails', async () => {
+    const h = setup({ readSavedPermissionLevel: () => 'ask' });
+    jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+      seed,
+      permission: 'yolo',
+    });
+    const { id, live } = await startCompleted(h);
+    live.prompt.mockClear();
+    live.setPermission.mockClear();
+    live.setPermission.mockRejectedValueOnce(new Error('Permission refused'));
+    const decision = live.approvals.request(
+      { requestId: 'refresh-approval', title: 'Edit file' },
+      new AbortController().signal,
+    );
+
+    const failed = await h.adapter.resumeSession(id, { prompt: 'continue' });
+    await expectCode(collect(failed), 'runtime-failed');
+    expect(live.setPermission).toHaveBeenNthCalledWith(1, 'ask');
+    expect(live.prompt).not.toHaveBeenCalled();
+    expect(h.ports.release).not.toHaveBeenCalled();
+    expect(h.cancelled).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'refresh-approval',
+        reason: 'superseded',
+      }),
+    );
+    await expect(decision).resolves.toBe('cancel');
+
+    let finishPermission!: () => void;
+    const applying = new Promise<void>((resolve) => {
+      finishPermission = resolve;
+    });
+    live.setPermission.mockImplementationOnce(async () => {
+      await applying;
+      return applied;
+    });
+    const retry = await h.adapter.resumeSession(id, { prompt: 'retry' });
+    const events = collect(retry);
+    await flush();
+    expect(h.pool.get(id)).toBe(live);
+    expect(live.setPermission).toHaveBeenNthCalledWith(2, 'ask');
+    expect(live.prompt).not.toHaveBeenCalled();
+    finishPermission();
+
+    await promptedTurn(live, 2);
+    expect(live.prompt).toHaveBeenCalledWith({ text: 'retry' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
+    await events;
+  });
+
+  it('applies a permission toggle queued during replacement attach before prompting', async () => {
+    const h = setup({ readSavedPermissionLevel: () => 'yolo' });
+    const { id, live } = await startCompleted(h);
+    h.pool.delete(id);
+    const replacement = new FakeProviderSession(
+      live.nativeSessionId,
+      2,
+      live.approvals,
+    );
+    let finishAttach!: () => void;
+    const attaching = new Promise<void>((resolve) => (finishAttach = resolve));
+    let finishToggle!: () => void;
+    const toggling = new Promise<void>((resolve) => (finishToggle = resolve));
+    replacement.setPermission.mockImplementation(async (permission) => {
+      await (permission === 'yolo' ? attaching : toggling);
+      replacement.getPermission.mockReturnValue(
+        permission === 'yolo' ? 'yolo' : 'ask',
+      );
+      return applied;
+    });
+    h.acquire.mockImplementationOnce(async (request) => {
+      h.pool.set(request.sessionId, replacement);
+      return replacement;
+    });
+
+    const stream = await h.adapter.resumeSession(id, { prompt: 'continue' });
+    const events = collect(stream);
+    await flush();
+    expect(replacement.setPermission).toHaveBeenNthCalledWith(1, 'yolo');
+    const toggle = h.adapter.setSessionPermissionLevel(id, 'ask');
+    finishAttach();
+    await flush();
+    expect(replacement.setPermission).toHaveBeenNthCalledWith(2, 'ask');
+    expect(replacement.prompt).not.toHaveBeenCalled();
+
+    finishToggle();
+    await toggle;
+    await promptedTurn(replacement);
+    expect(replacement.getPermission()).toBe('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+    replacement.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
+    await events;
+  });
+
+  it.each([
+    { config: { permissionLevel: 'yolo' as const }, expected: 'yolo' },
+    { config: {}, expected: 'ask' },
+  ])(
+    'passes $expected on first acquisition and applies it on open',
+    async ({ config, expected }) => {
+      const h = setup();
+      jest.mocked(h.ports.prepare).mockResolvedValueOnce({
+        seed,
+        permission: 'ask',
+      });
+      await collect(
+        await h.adapter.startChatSession({ tabId: 'tab', ...config }),
+      );
+      const id = h.resolved.mock.calls[0][1] as SessionId;
+
+      expect(h.acquire.mock.calls[0][0].permission).toBe(expected);
+      expect(h.lives[0].setPermission).toHaveBeenCalledTimes(1);
+      expect(h.lives[0].setPermission).toHaveBeenCalledWith(expected);
+      expect(h.adapter.getPermissionLevel(id)).toBe(expected);
+    },
+  );
+
+  it('skips setPermission on open when permissionLevel is omitted and reads the live default', async () => {
+    const h = setup();
+    const { id, live } = await startCompleted(h);
+
+    expect(live.setPermission).not.toHaveBeenCalled();
+    expect(h.adapter.getPermissionLevel(id)).toBeUndefined();
+
+    live.getPermission.mockReturnValue('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+  });
+
+  it('updates getPermissionLevel via setSessionPermissionLevel and returns undefined for invalid or unknown session ids', async () => {
+    const h = setup();
+    const { id, live } = await startCompleted(h);
+    live.getPermission.mockReturnValue('ask');
+    expect(h.adapter.getPermissionLevel(id)).toBe('ask');
+
+    await h.adapter.setSessionPermissionLevel(id, 'auto-edit');
+    expect(h.adapter.getPermissionLevel(id)).toBe('auto-edit');
+
+    await h.adapter.setSessionPermissionLevel(id, 'yolo');
+    expect(h.adapter.getPermissionLevel(id)).toBe('yolo');
+
+    expect(
+      h.adapter.getPermissionLevel('not-a-valid-session-id'),
+    ).toBeUndefined();
+    expect(h.adapter.getPermissionLevel(SessionId.create())).toBeUndefined();
+  });
+
   it('sends images and file references with the prompt when the provider takes images', async () => {
     const h = setup();
     h.acquire.mockImplementationOnce(async (request) => {
@@ -748,7 +1142,11 @@ describe('ProviderSessionChatAdapter', () => {
         },
       ],
     });
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
 
     // A follow-up with only an image is a turn, not an empty send.
@@ -791,7 +1189,9 @@ describe('ProviderSessionChatAdapter', () => {
     // Files are resource links (ACP baseline) and need no capability.
     await h.adapter.sendMessageToSession(id, 'read', { files: ['a.ts'] });
     expect(h.lives[0].prompt).toHaveBeenCalledWith(
-      expect.objectContaining({ files: [expect.objectContaining({ name: 'a.ts' })] }),
+      expect.objectContaining({
+        files: [expect.objectContaining({ name: 'a.ts' })],
+      }),
     );
   });
 
@@ -839,7 +1239,11 @@ describe('ProviderSessionChatAdapter', () => {
     // An adopted (history-loaded) process gets the session's model.
     expect(second.setModel).toHaveBeenCalledWith('gemini-flash');
     expect(h.ports.release).not.toHaveBeenCalled();
-    second.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    second.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
   });
 
   it('acquires through the pool before every turn so it counts as activity (S-2)', async () => {
@@ -852,19 +1256,28 @@ describe('ProviderSessionChatAdapter', () => {
     expect(h.lives).toHaveLength(1);
     // The same process is not attached again.
     expect(h.ports.identity.save).toHaveBeenCalledTimes(1);
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
   });
 
   it('withdraws an open approval card while the session is still owned (M-1)', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'edit' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'edit',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
     const id = h.resolved.mock.calls[0][1] as SessionId;
     const ownedAtCancel: boolean[] = [];
     // register.ts routes the cancellation to the provider-session host by owns().
-    h.cancelled.mockImplementation(() => ownedAtCancel.push(h.adapter.owns(id)));
+    h.cancelled.mockImplementation(() =>
+      ownedAtCancel.push(h.adapter.owns(id)),
+    );
     const decision = live.approvals.request(
       { requestId: 'req-9', title: 'Edit file' },
       new AbortController().signal,
@@ -882,14 +1295,20 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('keeps the session when a Stop races the end of the turn (M-3)', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'long' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'long',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
     const id = h.resolved.mock.calls[0][1] as SessionId;
     // The turn ended before the interrupt arrived: the provider answers false.
     live.interrupt.mockImplementationOnce(async (turnId: string) => {
-      live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' }, turnId);
+      live.emit(
+        { type: 'terminal', status: 'completed', disposition: 'reusable' },
+        turnId,
+      );
       return false;
     });
     await h.adapter.interruptSession(id, 'user-stop');
@@ -900,7 +1319,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('fails a follow-up whose steer is refused after the session closed (M-5)', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -918,7 +1340,10 @@ describe('ProviderSessionChatAdapter', () => {
     await flush();
     h.adapter.endSession(id);
     refuse(new Error('turn gone'));
-    await expect(steering).resolves.toEqual({ ok: false, code: 'TURN_CHANGED' });
+    await expect(steering).resolves.toEqual({
+      ok: false,
+      code: 'TURN_CHANGED',
+    });
     expect(h.followUps.at(-1)).toEqual({
       sessionId: id,
       clientMessageId: 'c2',
@@ -931,7 +1356,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('re-queues a refused steer into the live queue and delivers it when idle (M-5)', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -948,13 +1376,24 @@ describe('ProviderSessionChatAdapter', () => {
     const steering = h.adapter.steerQueuedFollowUp(id, 'c2');
     await flush();
     // The turn ends (and drains an empty queue) while the steer is in flight.
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
     await events;
     refuse(new Error('turn gone'));
-    await expect(steering).resolves.toEqual({ ok: false, code: 'TURN_CHANGED' });
+    await expect(steering).resolves.toEqual({
+      ok: false,
+      code: 'TURN_CHANGED',
+    });
     await promptedTurn(live, 2);
     expect(live.prompt).toHaveBeenLastCalledWith({ text: 'next' });
-    live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+    });
   });
 
   it('releases the session on endSession with reason tab-closed', async () => {
@@ -983,7 +1422,10 @@ describe('ProviderSessionChatAdapter', () => {
 
   it('fails queued follow-ups when the session closes', async () => {
     const h = setup();
-    const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
+    const stream = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'first',
+    });
     const events = collect(stream);
     const live = h.lives[0];
     await promptedTurn(live);
@@ -1019,7 +1461,11 @@ describe('ProviderSessionChatAdapter', () => {
       (request) =>
         new Promise((resolve) => {
           finish = () => {
-            const live = new FakeProviderSession('native-1', 1, request.approvals);
+            const live = new FakeProviderSession(
+              'native-1',
+              1,
+              request.approvals,
+            );
             h.lives.push(live);
             resolve(live);
           };
@@ -1032,7 +1478,10 @@ describe('ProviderSessionChatAdapter', () => {
     h.adapter.endSession(tabId);
     finish();
     await expectCode(opening, 'cancelled');
-    expect(h.ports.release).toHaveBeenCalledWith(expect.any(String), 'tab-closed');
+    expect(h.ports.release).toHaveBeenCalledWith(
+      expect.any(String),
+      'tab-closed',
+    );
     expect(h.ports.identity.save).not.toHaveBeenCalled();
   });
 
@@ -1043,16 +1492,19 @@ describe('ProviderSessionChatAdapter', () => {
       ['an absolute path outside the workspace', outside],
       ['a relative path that leaves it', '../secret.txt'],
       ['a NUL byte', 'src/a\0.ts'],
-    ])('refuses a file reference with %s before the prompt', async (_label, file) => {
-      const h = setup();
-      const { id, live } = await startCompleted(h);
-      const error = await expectCode(
-        h.adapter.sendMessageToSession(id, 'read', { files: [file] }),
-        'unsupported-option',
-      );
-      expect(error.option).toBe('files');
-      expect(live.prompt).toHaveBeenCalledTimes(1);
-    });
+    ])(
+      'refuses a file reference with %s before the prompt',
+      async (_label, file) => {
+        const h = setup();
+        const { id, live } = await startCompleted(h);
+        const error = await expectCode(
+          h.adapter.sendMessageToSession(id, 'read', { files: [file] }),
+          'unsupported-option',
+        );
+        expect(error.option).toBe('files');
+        expect(live.prompt).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it('refuses a missing file and a link that leaves the workspace', async () => {
       const h = setup();
@@ -1075,16 +1527,25 @@ describe('ProviderSessionChatAdapter', () => {
       // re-resolves a link swapped after the check.
       const inner = resolve(seed.workspacePath, 'docs/link.md');
       h.links.set(inner, resolve(seed.workspacePath, 'docs/real.md'));
-      await h.adapter.sendMessageToSession(id, 'read', { files: ['src/a.ts', 'docs/link.md'] });
+      await h.adapter.sendMessageToSession(id, 'read', {
+        files: ['src/a.ts', 'docs/link.md'],
+      });
       await promptedTurn(live, 2);
       expect(live.prompt).toHaveBeenLastCalledWith({
         text: 'read',
         files: [
           { path: resolve(seed.workspacePath, 'src/a.ts'), name: 'a.ts' },
-          { path: resolve(seed.workspacePath, 'docs/real.md'), name: 'link.md' },
+          {
+            path: resolve(seed.workspacePath, 'docs/real.md'),
+            name: 'link.md',
+          },
         ],
       });
-      live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+      live.emit({
+        type: 'terminal',
+        status: 'completed',
+        disposition: 'reusable',
+      });
     });
 
     it('confines a peer session message the same way', async () => {
@@ -1105,21 +1566,32 @@ describe('ProviderSessionChatAdapter', () => {
       ['not whole base64 quads', [{ data: 'AAA', mediaType: 'image/png' }]],
       [
         'larger than the attachment cap',
-        [{ data: 'A'.repeat(((5 * 1024 * 1024) / 3) * 4 + 4), mediaType: 'image/png' }],
+        [
+          {
+            data: 'A'.repeat(((5 * 1024 * 1024) / 3) * 4 + 4),
+            mediaType: 'image/png',
+          },
+        ],
       ],
       [
         'more than ten images',
-        Array.from({ length: 11 }, () => ({ data: 'AAAA', mediaType: 'image/png' })),
+        Array.from({ length: 11 }, () => ({
+          data: 'AAAA',
+          mediaType: 'image/png',
+        })),
       ],
-    ])('refuses images that are %s before anything spawns', async (_label, images) => {
-      const h = setup();
-      const error = await expectCode(
-        h.adapter.startChatSession({ tabId: 'tab', prompt: 'look', images }),
-        'unsupported-option',
-      );
-      expect(error.option).toBe('images');
-      expect(h.acquire).not.toHaveBeenCalled();
-    });
+    ])(
+      'refuses images that are %s before anything spawns',
+      async (_label, images) => {
+        const h = setup();
+        const error = await expectCode(
+          h.adapter.startChatSession({ tabId: 'tab', prompt: 'look', images }),
+          'unsupported-option',
+        );
+        expect(error.option).toBe('images');
+        expect(h.acquire).not.toHaveBeenCalled();
+      },
+    );
 
     it('carries the prepared open options to every acquire', async () => {
       const h = setup();
@@ -1147,9 +1619,13 @@ describe('ProviderSessionChatAdapter', () => {
       for (let i = 0; i < 50 && !saved; i++) await flush();
       const closing = h.adapter.closeSession(id);
       saved();
-      await expect(sending).resolves.toBeInstanceOf(ProviderSessionChatAdapterError);
+      await expect(sending).resolves.toBeInstanceOf(
+        ProviderSessionChatAdapterError,
+      );
       await closing;
-      const reasons = (h.ports.release as jest.Mock).mock.calls.map(([, reason]) => reason);
+      const reasons = (h.ports.release as jest.Mock).mock.calls.map(
+        ([, reason]) => reason,
+      );
       expect(reasons).not.toContain('broken');
       expect(reasons).toContain('tab-closed');
     });
@@ -1200,10 +1676,17 @@ describe('ProviderSessionChatAdapter durable usage', () => {
   it('persists one provider-session contribution per completed turn', async () => {
     const sink = fakeSink();
     const h = setup({ usageSink: sink });
-    const first = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' });
+    const first = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'hi',
+    });
     await usageTurn(first, h.lives[0], 1);
     const id = h.resolved.mock.calls[0][1] as SessionId;
-    await usageTurn(await h.adapter.resumeSession(id, { prompt: 'again' }), h.lives[0], 2);
+    await usageTurn(
+      await h.adapter.resumeSession(id, { prompt: 'again' }),
+      h.lives[0],
+      2,
+    );
 
     expect(sink.recordUsage).toHaveBeenCalledTimes(2);
     const [one, two] = sink.recordUsage.mock.calls.map(([c]) => c);
@@ -1238,11 +1721,19 @@ describe('ProviderSessionChatAdapter durable usage', () => {
 
   it('persists a priced turn in micro-USD as model-priced', async () => {
     updatePricingMap({
-      'gemini-pro': { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheReadCostPerToken: 1e-7 },
+      'gemini-pro': {
+        inputCostPerToken: 1e-6,
+        outputCostPerToken: 2e-6,
+        cacheReadCostPerToken: 1e-7,
+      },
     });
     const sink = fakeSink();
     const h = setup({ usageSink: sink });
-    await usageTurn(await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }), h.lives[0], 1);
+    await usageTurn(
+      await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }),
+      h.lives[0],
+      1,
+    );
     const [contribution] = sink.recordUsage.mock.calls[0];
     const micro = Math.round((120 * 1e-6 + 30 * 2e-6 + 10 * 1e-7) * 1e6);
     expect(contribution.models[0]).toMatchObject({
@@ -1281,9 +1772,15 @@ describe('ProviderSessionChatAdapter durable usage', () => {
       },
     });
     const t = setup({ usageSink: throwing });
-    await usageTurn(await t.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }), t.lives[0], 1);
+    await usageTurn(
+      await t.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }),
+      t.lives[0],
+      1,
+    );
     expect(t.stats).toHaveBeenCalledTimes(1);
-    expect(t.adapter.canSendFollowUp(t.resolved.mock.calls[0][1] as SessionId)).toBe(true);
+    expect(
+      t.adapter.canSendFollowUp(t.resolved.mock.calls[0][1] as SessionId),
+    ).toBe(true);
   });
 
   it('seeds a resumed session with its persisted totals, as partial coverage', async () => {
@@ -1309,7 +1806,10 @@ describe('ProviderSessionChatAdapter durable usage', () => {
     });
     const h = setup({ usageSink: sink });
     const id = SessionId.create();
-    const stream = await h.adapter.resumeSession(id, { tabId: 'tab-r', prompt: 'hi' });
+    const stream = await h.adapter.resumeSession(id, {
+      tabId: 'tab-r',
+      prompt: 'hi',
+    });
     await usageTurn(stream, h.lives[0], 1);
 
     expect(sink.readSessionUsage).toHaveBeenCalledWith(id, 'provider-session');
@@ -1335,7 +1835,11 @@ describe('ProviderSessionChatAdapter durable usage', () => {
     });
     const h = setup({ usageSink: sink });
     const id = SessionId.create();
-    await usageTurn(await h.adapter.resumeSession(id, { tabId: 'tab-r', prompt: 'hi' }), h.lives[0], 1);
+    await usageTurn(
+      await h.adapter.resumeSession(id, { tabId: 'tab-r', prompt: 'hi' }),
+      h.lives[0],
+      1,
+    );
     expect(h.stats.mock.calls[0][0].sessionStats).toMatchObject({
       coverage: 'partial',
       tokens: { input: 120 },
@@ -1361,21 +1865,34 @@ describe('ProviderSessionChatAdapter durable usage', () => {
     hydrate(true);
     await events;
     expect(h.stats.mock.calls[0][0].duration).toBeLessThan(150);
-    expect(sink.recordUsage.mock.calls[0][0].coverageEndMs).toBeLessThan(hydratedAt);
+    expect(sink.recordUsage.mock.calls[0][0].coverageEndMs).toBeLessThan(
+      hydratedAt,
+    );
   });
 
   it('waits once for the price catalog before pricing the first turn', async () => {
     const ensureHydrated = jest.fn(async () => {
       updatePricingMap({
-        'gemini-pro': { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheReadCostPerToken: 1e-7 },
+        'gemini-pro': {
+          inputCostPerToken: 1e-6,
+          outputCostPerToken: 2e-6,
+          cacheReadCostPerToken: 1e-7,
+        },
       });
       return true;
     });
     const h = setup({ pricing: { ensureHydrated } });
-    const first = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' });
+    const first = await h.adapter.startChatSession({
+      tabId: 'tab',
+      prompt: 'hi',
+    });
     await usageTurn(first, h.lives[0], 1);
     const id = h.resolved.mock.calls[0][1] as SessionId;
-    await usageTurn(await h.adapter.resumeSession(id, { prompt: 'again' }), h.lives[0], 2);
+    await usageTurn(
+      await h.adapter.resumeSession(id, { prompt: 'again' }),
+      h.lives[0],
+      2,
+    );
     expect(h.stats.mock.calls[0][0].turnCost).not.toBeNull();
     expect(ensureHydrated).toHaveBeenCalledTimes(1);
   });

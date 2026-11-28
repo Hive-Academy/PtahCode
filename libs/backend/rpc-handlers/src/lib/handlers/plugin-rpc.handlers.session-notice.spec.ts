@@ -40,7 +40,8 @@ import { PluginRpcHandlers } from './plugin-rpc.handlers';
 import { EXTERNAL_PLUGIN_MCP_TOKEN } from './external-plugin-mcp.service';
 
 const SESSION_ID = '11111111-1111-4111-8111-111111111111';
-const ROOT = resolve('/tmp/ptah-plugin-notice-project');
+// The handler normalizes the open folder to the enclosing repository root.
+const ROOT = resolve(__dirname, '../../../../../..');
 const FOLDER = join(ROOT, 'child');
 const CONFIG = {
   enabledPluginIds: [],

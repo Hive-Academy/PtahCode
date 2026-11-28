@@ -1,7 +1,9 @@
 import type { LanePermissionMode } from '@ptah-extension/shared';
 
 type Lifecycle = {
-  find(id: string): { realSessionId?: string | null; permissionLevel?: string } | undefined;
+  find(
+    id: string,
+  ): { realSessionId?: string | null; permissionLevel?: string } | undefined;
 };
 type CodexPermissionSource = {
   getPermissionLevel(id: string): string | undefined;
@@ -20,13 +22,28 @@ export function parentLanePermission(
   callerId: string | undefined,
   lifecycle: Lifecycle | null | undefined,
   codex: CodexPermissionSource | null | undefined,
-  options: { unknownParent?: 'plan' | 'uncapped' } = {},
+  options: {
+    unknownParent?: 'plan' | 'uncapped';
+    providerSessions?: CodexPermissionSource | null;
+  } = {},
 ): LanePermissionMode | undefined {
   if (!callerId?.trim()) return undefined;
   const record = lifecycle?.find(callerId);
-  const codexId = codex?.resolveLiveSessionId?.(record?.realSessionId ?? callerId)
-    ?? record?.realSessionId ?? callerId;
-  const level = codex?.getPermissionLevel(codexId) ?? record?.permissionLevel;
-  if (level === 'plan' || level === 'ask' || level === 'auto-edit' || level === 'yolo') return level;
+  const codexId =
+    codex?.resolveLiveSessionId?.(record?.realSessionId ?? callerId) ??
+    record?.realSessionId ??
+    callerId;
+  const providerSessionId =
+    options.providerSessions?.resolveLiveSessionId?.(
+      record?.realSessionId ?? callerId,
+    ) ??
+    record?.realSessionId ??
+    callerId;
+  const level =
+    codex?.getPermissionLevel(codexId) ??
+    options.providerSessions?.getPermissionLevel(providerSessionId) ??
+    record?.permissionLevel;
+  if (level === 'plan' || level === 'ask' || level === 'auto-edit' || level === 'yolo')
+    return level;
   return options.unknownParent === 'uncapped' ? undefined : 'plan';
 }

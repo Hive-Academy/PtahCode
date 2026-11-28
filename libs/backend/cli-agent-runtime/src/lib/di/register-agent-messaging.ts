@@ -10,8 +10,14 @@
  */
 import { type DependencyContainer, instanceCachingFactory } from 'tsyringe';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
-import { SDK_TOKENS, type SessionMetadataStore } from '@ptah-extension/agent-sdk';
-import { PLATFORM_TOKENS, type IStateStorage } from '@ptah-extension/platform-core';
+import {
+  SDK_TOKENS,
+  type SessionMetadataStore,
+} from '@ptah-extension/agent-sdk';
+import {
+  PLATFORM_TOKENS,
+  type IStateStorage,
+} from '@ptah-extension/platform-core';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
 import { CLI_AGENT_RUNTIME_TOKENS } from './tokens';
 import type { AgentProcessManager } from '../cli-agents/agent-process-manager.service';
@@ -41,9 +47,13 @@ import type { ParentLaneLevel } from '../cli-agents/messaging/parent-lane-level'
 import { parentLanePermission } from '../cli-agents/parent-lane-permission';
 
 const envelopeStore = (c: DependencyContainer): AgentMessageEnvelopeStore =>
-  c.resolve<AgentMessageEnvelopeStore>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE);
-const isParentFrozen = (c: DependencyContainer) => (parentSessionId: string): boolean =>
-  c.resolve(ParentEnvelopeStoreService).isParentFrozen(parentSessionId);
+  c.resolve<AgentMessageEnvelopeStore>(
+    CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE,
+  );
+const isParentFrozen =
+  (c: DependencyContainer) =>
+  (parentSessionId: string): boolean =>
+    c.resolve(ParentEnvelopeStoreService).isParentFrozen(parentSessionId);
 
 /**
  * Held images go when their envelope ends (settled, cancelled, expired); a
@@ -56,23 +66,32 @@ function withAttachmentRelease(
   const attachments = c.resolve<AgentMessageAttachmentStore>(
     CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE,
   );
-  store.setTerminalListener((envelope) => attachments.releaseForTerminal(envelope));
+  store.setTerminalListener((envelope) =>
+    attachments.releaseForTerminal(envelope),
+  );
   return store;
 }
 
 /** Attachment side store, envelope store and the router's dispatch journal over it. */
-export function registerAgentMessageJournal(container: DependencyContainer): void {
+export function registerAgentMessageJournal(
+  container: DependencyContainer,
+): void {
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE, {
-    useFactory: instanceCachingFactory((c) => new AgentMessageAttachmentStore(
-      c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) => new AgentMessageAttachmentStore(c.resolve<Logger>(TOKENS.LOGGER)),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ENVELOPE_STORE, {
-    useFactory: instanceCachingFactory((c) => withAttachmentRelease(c, AgentMessageEnvelopeStore.fromStateStorage(
-      c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
-      lazyReceiptSink(c),
-      c.resolve<Logger>(TOKENS.LOGGER),
-    ))),
+    useFactory: instanceCachingFactory((c) =>
+      withAttachmentRelease(
+        c,
+        AgentMessageEnvelopeStore.fromStateStorage(
+          c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
+          lazyReceiptSink(c),
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+      ),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_DISPATCH_JOURNAL, {
     useFactory: instanceCachingFactory((c): AgentMessageDispatchJournal => ({
@@ -87,7 +106,9 @@ export function registerAgentMessageJournal(container: DependencyContainer): voi
  * Running-output journal (Component 16). BEFORE the manager, which injects it
  * optionally. Its output source resolves the manager lazily at tick time.
  */
-export function registerAgentOutputJournal(container: DependencyContainer): void {
+export function registerAgentOutputJournal(
+  container: DependencyContainer,
+): void {
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_OUTPUT_JOURNAL, {
     useFactory: instanceCachingFactory((c) => {
       const manager = (): AgentProcessManager =>
@@ -111,24 +132,36 @@ export function registerAgentOutputJournal(container: DependencyContainer): void
 }
 
 /** Alias registry, limit gate, lane policy, scheduler, purge, resume, ack and the coordinator. */
-export function registerAgentMessagingServices(container: DependencyContainer): void {
+export function registerAgentMessagingServices(
+  container: DependencyContainer,
+): void {
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY, {
-    useFactory: instanceCachingFactory((c) => new AgentIdAliasRegistry(
-      c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
-      c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new AgentIdAliasRegistry(
+          c.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE, {
-    useFactory: instanceCachingFactory((c) => new LaneDeliveryLimitGate(
-      c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP, true)
-        ? c.resolve<LaneLimitLookupService>(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP)
-        : null,
-      c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new LaneDeliveryLimitGate(
+          c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP, true)
+            ? c.resolve<LaneLimitLookupService>(
+                CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP,
+              )
+            : null,
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY, {
     useFactory: instanceCachingFactory((c) => {
-      const manager = c.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER);
+      const manager = c.resolve<AgentProcessManager>(
+        TOKENS.AGENT_PROCESS_MANAGER,
+      );
       return new LaneMessagePolicy({
         findAgentInfo: (agentId) => manager.findAgentInfo(agentId),
         events: manager.events,
@@ -137,29 +170,44 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
     }),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_SCHEDULER, {
-    useFactory: instanceCachingFactory((c) => new AgentMessageDeliveryScheduler(
-      envelopeStore(c),
-      c.resolve<Logger>(TOKENS.LOGGER),
-      {
-        isParentFrozen: isParentFrozen(c),
-        limitGate: c.resolve<LaneDeliveryLimitGate>(CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE),
-        findAgentInfo: (agentId) => c.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER).findAgentInfo(agentId),
-      },
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new AgentMessageDeliveryScheduler(
+          envelopeStore(c),
+          c.resolve<Logger>(TOKENS.LOGGER),
+          {
+            isParentFrozen: isParentFrozen(c),
+            limitGate: c.resolve<LaneDeliveryLimitGate>(
+              CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE,
+            ),
+            findAgentInfo: (agentId) =>
+              c
+                .resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER)
+                .findAgentInfo(agentId),
+          },
+        ),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE, {
-    useFactory: instanceCachingFactory((c) => new ParentSessionPurgeService(
-      c.resolve(ParentEnvelopeStoreService),
-      envelopeStore(c),
-      createParentSessionExistence(c),
-      c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ParentSessionPurgeService(
+          c.resolve(ParentEnvelopeStoreService),
+          envelopeStore(c),
+          createParentSessionExistence(c),
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_LANE_RESUME, {
     useFactory: instanceCachingFactory((c) => {
-      const manager = c.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER);
+      const manager = c.resolve<AgentProcessManager>(
+        TOKENS.AGENT_PROCESS_MANAGER,
+      );
       const registry = (): PtahCliRegistry =>
-        c.resolve<PtahCliRegistry>(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY);
+        c.resolve<PtahCliRegistry>(
+          CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY,
+        );
       const metadata = (): SessionMetadataStore =>
         c.resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE);
       const parentLevel: ParentLaneLevel = (parentSessionId) => {
@@ -176,36 +224,71 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
                 | undefined;
             }>(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER)
           : undefined;
+        type NativePermissionAdapter = {
+          getPermissionLevel(
+            id: string,
+          ): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined;
+          resolveLiveSessionId?(callerId: string): string | undefined;
+        } | null;
         const codex = c.isRegistered(SDK_TOKENS.CODEX_CHAT_ADAPTER, true)
-          ? c.resolve<{ getPermissionLevel(id: string): 'ask' | 'auto-edit' | 'yolo' | 'plan' | undefined; resolveLiveSessionId?(callerId: string): string | undefined } | null>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
+          ? c.resolve<NativePermissionAdapter>(SDK_TOKENS.CODEX_CHAT_ADAPTER)
+          : undefined;
+        const providerSessions = c.isRegistered(
+          SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+          true,
+        )
+          ? c.resolve<NativePermissionAdapter>(
+              SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+            )
           : undefined;
         // Resume: a parent that is not live (app restart) is unknown, not plan (TASK_2026_2324_efc4).
-        return parentLanePermission(parentSessionId, lifecycle, codex, { unknownParent: 'uncapped' });
+        return parentLanePermission(parentSessionId, lifecycle, codex, {
+          unknownParent: 'uncapped',
+          providerSessions,
+        });
       };
-      return new AgentLaneResumeService(manager, new PtahCliLaneResumer(
+      return new AgentLaneResumeService(
         manager,
-        {
-          spawnAgent: (...args: Parameters<PtahCliRegistry['spawnAgent']>) => registry().spawnAgent(...args),
-          getMcpPort: () => registry().getMcpPort(),
-        },
-        {
-          createChild: (...args: Parameters<SessionMetadataStore['createChild']>) =>
-            metadata().createChild(...args),
-        },
-        c.resolve<Logger>(TOKENS.LOGGER),
+        new PtahCliLaneResumer(
+          manager,
+          {
+            spawnAgent: (...args: Parameters<PtahCliRegistry['spawnAgent']>) =>
+              registry().spawnAgent(...args),
+            getMcpPort: () => registry().getMcpPort(),
+          },
+          {
+            createChild: (
+              ...args: Parameters<SessionMetadataStore['createChild']>
+            ) => metadata().createChild(...args),
+          },
+          c.resolve<Logger>(TOKENS.LOGGER),
+          parentLevel,
+        ),
         parentLevel,
-      ), parentLevel, laneResumeModelLookup(
-        (agentId, cursor, sessionId) => metadata().getAgentOutputPage(agentId, cursor, undefined, sessionId),
-        c.resolve<Logger>(TOKENS.LOGGER),
-      ));
+        laneResumeModelLookup(
+          (agentId, cursor, sessionId) =>
+            metadata().getAgentOutputPage(
+              agentId,
+              cursor,
+              undefined,
+              sessionId,
+            ),
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+      );
     }),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ACK, {
-    useFactory: instanceCachingFactory((c) => new AgentMessageAckService({
-      store: envelopeStore(c),
-      aliases: c.resolve<AgentIdAliasRegistry>(CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY),
-      logger: c.resolve<Logger>(TOKENS.LOGGER),
-    })),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new AgentMessageAckService({
+          store: envelopeStore(c),
+          aliases: c.resolve<AgentIdAliasRegistry>(
+            CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY,
+          ),
+          logger: c.resolve<Logger>(TOKENS.LOGGER),
+        }),
+    ),
   });
   container.register(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_COORDINATOR, {
     useFactory: instanceCachingFactory((c) => {
@@ -214,21 +297,41 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
         manager: c.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER),
         detection: c.resolve<CliDetectionService>(TOKENS.CLI_DETECTION_SERVICE),
         store: envelopeStore(c),
-        aliases: c.resolve<AgentIdAliasRegistry>(CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY),
-        resume: c.resolve<AgentLaneResumeService>(CLI_AGENT_RUNTIME_TOKENS.AGENT_LANE_RESUME),
-        scheduler: c.resolve<AgentMessageDeliveryScheduler>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_SCHEDULER),
-        ack: c.resolve<AgentMessageAckService>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ACK),
-        limitGate: c.resolve<LaneDeliveryLimitGate>(CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE),
-        purge: c.resolve<ParentSessionPurgeService>(CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE),
+        aliases: c.resolve<AgentIdAliasRegistry>(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_ID_ALIAS_REGISTRY,
+        ),
+        resume: c.resolve<AgentLaneResumeService>(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_LANE_RESUME,
+        ),
+        scheduler: c.resolve<AgentMessageDeliveryScheduler>(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_SCHEDULER,
+        ),
+        ack: c.resolve<AgentMessageAckService>(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ACK,
+        ),
+        limitGate: c.resolve<LaneDeliveryLimitGate>(
+          CLI_AGENT_RUNTIME_TOKENS.LANE_DELIVERY_LIMIT_GATE,
+        ),
+        purge: c.resolve<ParentSessionPurgeService>(
+          CLI_AGENT_RUNTIME_TOKENS.PARENT_SESSION_PURGE,
+        ),
         isParentFrozen: isParentFrozen(c),
-        lanePolicy: c.resolve<LaneMessagePolicy>(CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY),
-        attachments: c.resolve<AgentMessageAttachmentStore>(CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE),
+        lanePolicy: c.resolve<LaneMessagePolicy>(
+          CLI_AGENT_RUNTIME_TOKENS.LANE_MESSAGE_POLICY,
+        ),
+        attachments: c.resolve<AgentMessageAttachmentStore>(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE,
+        ),
         logger,
       });
       // Purge recovery decides before the scheduler delivers anything (Component 10).
       void coordinator.start().catch((error: unknown) => {
-        logger.error('[CliAgentRuntime] Agent message startup failed',
-          error instanceof Error ? error : new Error('Agent message startup failed'));
+        logger.error(
+          '[CliAgentRuntime] Agent message startup failed',
+          error instanceof Error
+            ? error
+            : new Error('Agent message startup failed'),
+        );
       });
       return coordinator;
     }),
@@ -236,24 +339,39 @@ export function registerAgentMessagingServices(container: DependencyContainer): 
 }
 
 /** Parent session metadata existence (A7). Unknown → throws, which keeps the parent frozen. */
-export function createParentSessionExistence(c: DependencyContainer): ParentSessionExistence {
+export function createParentSessionExistence(
+  c: DependencyContainer,
+): ParentSessionExistence {
   return {
     async exists(sessionId: string): Promise<boolean> {
       if (!c.isRegistered(SDK_TOKENS.SDK_SESSION_METADATA_STORE, true))
-        throw new Error('Session metadata store is not registered in this host.');
-      const metadata = await c.resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE).get(sessionId);
+        throw new Error(
+          'Session metadata store is not registered in this host.',
+        );
+      const metadata = await c
+        .resolve<SessionMetadataStore>(SDK_TOKENS.SDK_SESSION_METADATA_STORE)
+        .get(sessionId);
       return metadata !== null && metadata !== undefined;
     },
   };
 }
 
 /** The push sink is registered by the host wiring, possibly after the store exists. */
-function lazyReceiptSink(c: DependencyContainer): AgentDeliveryReceiptEventSink {
+function lazyReceiptSink(
+  c: DependencyContainer,
+): AgentDeliveryReceiptEventSink {
   return {
     changed(receipt: AgentDeliveryReceipt): void {
-      if (!c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_EVENT_SINK, true)) return;
-      c.resolve<AgentDeliveryReceiptEventSink>(CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_EVENT_SINK)
-        .changed(receipt);
+      if (
+        !c.isRegistered(
+          CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_EVENT_SINK,
+          true,
+        )
+      )
+        return;
+      c.resolve<AgentDeliveryReceiptEventSink>(
+        CLI_AGENT_RUNTIME_TOKENS.AGENT_DELIVERY_RECEIPT_EVENT_SINK,
+      ).changed(receipt);
     },
   };
 }

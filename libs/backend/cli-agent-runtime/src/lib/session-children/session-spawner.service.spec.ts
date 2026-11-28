@@ -14,9 +14,8 @@ import { ampleFreeMemory } from '../__fixtures__/memory-probe';
 // real unless a suite sets `sessionSpawnerFsAccess.current` (succession and
 // start-guard): a second `jest.mock` in those files would replace this factory.
 jest.mock('node:fs/promises', () => {
-  const actual = jest.requireActual<typeof import('node:fs/promises')>(
-    'node:fs/promises',
-  );
+  const actual =
+    jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises');
   const accessHolder = jest.requireActual<
     typeof import('./__fixtures__/session-spawner-fs-access')
   >('./__fixtures__/session-spawner-fs-access');
@@ -147,6 +146,10 @@ export function makeHarness(
     resolveLiveSessionId: jest.fn((id: string) =>
       nativeIds.has(id) ? id : undefined,
     ),
+    /** Live level of a native (Codex or provider-session) chat. */
+    getPermissionLevel: jest.fn(
+      (_id: string): PermissionLevel | undefined => undefined,
+    ),
     sendMessageToSession: jest.fn().mockResolvedValue(undefined),
     claimHeldPeerMessages: jest.fn().mockReturnValue([]),
     interruptCurrentTurn: jest.fn().mockResolvedValue(true),
@@ -160,12 +163,14 @@ export function makeHarness(
   };
   const host = {
     wasStoppedSince: options.wasStoppedSince,
-    recoverAfterWatchdogStop: jest.fn(async (
-      input: WatchdogRecoveryInput,
-    ): Promise<WatchdogRecoveryOutcome> => {
-      active.add(input.tabId);
-      return { recovered: true };
-    }),
+    recoverAfterWatchdogStop: jest.fn(
+      async (
+        input: WatchdogRecoveryInput,
+      ): Promise<WatchdogRecoveryOutcome> => {
+        active.add(input.tabId);
+        return { recovered: true };
+      },
+    ),
     listChildModels: jest.fn(async () => ['claude-haiku-4', 'claude-opus-4']),
     resolveChildModel: jest.fn(
       async ({
@@ -221,7 +226,9 @@ export function makeHarness(
     ),
   };
   const environment = {
-    scopedWorkspaceRoot: jest.fn(() => (options.root ?? ROOT) as string | undefined),
+    scopedWorkspaceRoot: jest.fn(
+      () => (options.root ?? ROOT) as string | undefined,
+    ),
   };
   const lanes: AgentProcessInfo[] = [];
   const agents = {
@@ -285,7 +292,10 @@ export function makeHarness(
   /** A real child container holding `hostValue` (none when `null`). */
   const containerWith = (hostValue: unknown): DependencyContainer => {
     const scope = rootContainer.createChildContainer();
-    scope.registerInstance(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, dispositions);
+    scope.registerInstance(
+      SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION,
+      dispositions,
+    );
     if (options.closer) {
       scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
         useValue: options.closer,
@@ -437,7 +447,9 @@ describe('registered same-task attach', () => {
   it('delivers resolved phase discipline and skill text once through SDK options', async () => {
     const h = makeHarness();
     h.host.startChildSession.mockImplementationOnce(async () => ({
-      started: true as const, uiAnnounced: true, toolProfileApplied: true,
+      started: true as const,
+      uiAnnounced: true,
+      toolProfileApplied: true,
     }));
     const definition = {
       version: 1 as const,
@@ -446,7 +458,8 @@ describe('registered same-task attach', () => {
       deliverable: ['change'],
       verdict: ['done'],
       acceptanceStep: ['check'],
-      requiredCapabilities: [], machineCapabilities: [],
+      requiredCapabilities: [],
+      machineCapabilities: [],
       toolProfile: { disallowedTools: ['Bash'], permission: 'allow' as const },
       discipline: {
         method: 'Follow the plan.',
@@ -469,13 +482,18 @@ describe('registered same-task attach', () => {
       }),
     );
     if (started.ok) {
-      expect(h.registry.get(started.child.childSessionId)?.toolProfileApplied).toBe(true);
+      expect(
+        h.registry.get(started.child.childSessionId)?.toolProfileApplied,
+      ).toBe(true);
     } else {
       throw new Error(`Child start failed: ${started.refusal}`);
     }
-    expect(h.host.startChildSession.mock.calls[0][0].prompt).not.toContain('Phase discipline: follow the plan.');
+    expect(h.host.startChildSession.mock.calls[0][0].prompt).not.toContain(
+      'Phase discipline: follow the plan.',
+    );
     expect(h.host.startChildSession.mock.calls[0][0].phase).toMatchObject({
-      kind: 'implement', toolProfile: { disallowedTools: ['Bash'] },
+      kind: 'implement',
+      toolProfile: { disallowedTools: ['Bash'] },
     });
     expect(h.host.startChildSession.mock.calls[0][0].phase?.skills).toEqual([
       { name: 'coding', text: 'Run focused checks.' },
@@ -503,11 +521,15 @@ describe('registered same-task attach', () => {
     const h = makeHarness({ root: directory });
     try {
       writeFileSync(join(directory, 'SKILL.md'), 'Run focused checks.');
-      const result = await h.spawner.start(h.request({
-        skills: [{ name: 'coding', path: 'SKILL.md' }],
-      }));
+      const result = await h.spawner.start(
+        h.request({
+          skills: [{ name: 'coding', path: 'SKILL.md' }],
+        }),
+      );
       expect(result.ok).toBe(true);
-      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain('Run focused checks.');
+      expect(h.host.startChildSession.mock.calls[0][0].prompt).toContain(
+        'Run focused checks.',
+      );
     } finally {
       h.spawner.dispose();
       rmSync(directory, { recursive: true, force: true });
@@ -547,7 +569,9 @@ describe('registered same-task attach', () => {
     expect(second.child.branch).toBe(first.child.branch);
     expect(h.provisioner.create).toHaveBeenCalledTimes(1);
     expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
-    expect(h.registry.findByCwd(first.child.worktreePath)?.childSessionId).toBe(first.child.childSessionId);
+    expect(h.registry.findByCwd(first.child.worktreePath)?.childSessionId).toBe(
+      first.child.childSessionId,
+    );
     h.spawner.dispose();
   });
   it('refuses an attach retry with a different target ID', async () => {
@@ -631,7 +655,10 @@ describe('registered same-task attach', () => {
       worktree: string | null,
       kind: 'file' | 'directory' = 'file',
     ): void => {
-      const expected = worktree === null ? null : join(worktree, '.ptah', 'specs', TASK, 'task.md');
+      const expected =
+        worktree === null
+          ? null
+          : join(worktree, '.ptah', 'specs', TASK, 'task.md');
       sessionSpawnerFsKind.current = (path) =>
         expected !== null && String(path) === expected ? kind : 'missing';
     };
@@ -648,12 +675,21 @@ describe('registered same-task attach', () => {
       const h = makeHarness();
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
-      expect(h.registry.get(first.child.childSessionId)?.taskId).toBeUndefined();
-      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      expect(
+        h.registry.get(first.child.childSessionId)?.taskId,
+      ).toBeUndefined();
+      h.registry.markEnded(
+        first.child.childSessionId,
+        'failed',
+        'ended by the watchdog',
+      );
       h.active.delete(first.child.childSessionId);
       taskFolderPresent(first.child.worktreePath);
       const second = await h.spawner.start(
-        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+        h.request({
+          taskId: TASK,
+          attachToSessionId: first.child.childSessionId,
+        }),
       );
       expect(second.ok).toBe(true);
       if (!second.ok) return;
@@ -697,7 +733,10 @@ describe('registered same-task attach', () => {
       if (!first.ok) throw new Error('first start failed');
       taskFolderPresent(null);
       const result = await h.spawner.start(
-        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+        h.request({
+          taskId: TASK,
+          attachToSessionId: first.child.childSessionId,
+        }),
       );
       expect(result).toMatchObject({
         ok: false,
@@ -713,7 +752,10 @@ describe('registered same-task attach', () => {
       if (!first.ok) throw new Error('first start failed');
       taskFolderPresent(first.child.worktreePath);
       const result = await h.spawner.start(
-        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+        h.request({
+          taskId: TASK,
+          attachToSessionId: first.child.childSessionId,
+        }),
       );
       expect(result).toMatchObject({
         ok: false,
@@ -728,9 +770,16 @@ describe('registered same-task attach', () => {
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
       // The record is ended, but its session is active: the user resumed it.
-      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      h.registry.markEnded(
+        first.child.childSessionId,
+        'failed',
+        'ended by the watchdog',
+      );
       taskFolderPresent(first.child.worktreePath);
-      const attach = h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
+      const attach = h.request({
+        taskId: TASK,
+        attachToSessionId: first.child.childSessionId,
+      });
       expect(await h.spawner.start(attach)).toMatchObject({
         ok: false,
         refusal: 'branch-exists',
@@ -749,7 +798,10 @@ describe('registered same-task attach', () => {
       h.active.delete(first.child.childSessionId);
       taskFolderPresent(first.child.worktreePath, 'directory');
       const result = await h.spawner.start(
-        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+        h.request({
+          taskId: TASK,
+          attachToSessionId: first.child.childSessionId,
+        }),
       );
       expect(result).toMatchObject({
         ok: false,
@@ -763,11 +815,21 @@ describe('registered same-task attach', () => {
       const h = makeHarness();
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
-      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      h.registry.markEnded(
+        first.child.childSessionId,
+        'failed',
+        'ended by the watchdog',
+      );
       h.active.delete(first.child.childSessionId);
       taskFolderPresent(first.child.worktreePath);
-      const attach = h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
-      const results = await Promise.all([h.spawner.start(attach), h.spawner.start(attach)]);
+      const attach = h.request({
+        taskId: TASK,
+        attachToSessionId: first.child.childSessionId,
+      });
+      const results = await Promise.all([
+        h.spawner.start(attach),
+        h.spawner.start(attach),
+      ]);
       expect(results.filter((result) => result.ok)).toHaveLength(1);
       expect(results.find((result) => !result.ok)).toMatchObject({
         refusal: 'branch-exists',
@@ -783,12 +845,19 @@ describe('registered same-task attach', () => {
       h.registry.markEnded(first.child.childSessionId, 'failed', 'ended');
       h.active.delete(first.child.childSessionId);
       taskFolderPresent(first.child.worktreePath);
-      jest.mocked(realpath).mockImplementation(async (path) =>
-        String(path).endsWith(join('specs', TASK, 'task.md')) ? join('/outside', TASK, 'task.md') : String(path),
-      );
+      jest
+        .mocked(realpath)
+        .mockImplementation(async (path) =>
+          String(path).endsWith(join('specs', TASK, 'task.md'))
+            ? join('/outside', TASK, 'task.md')
+            : String(path),
+        );
       try {
         const result = await h.spawner.start(
-          h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+          h.request({
+            taskId: TASK,
+            attachToSessionId: first.child.childSessionId,
+          }),
         );
         expect(result).toMatchObject({
           ok: false,
@@ -807,7 +876,10 @@ describe('registered same-task attach', () => {
       if (!first.ok) throw new Error('first start failed');
       sessionSpawnerFsAccess.current = async () => undefined;
       const result = await h.spawner.start(
-        h.request({ taskId: '../../etc', attachToSessionId: first.child.childSessionId }),
+        h.request({
+          taskId: '../../etc',
+          attachToSessionId: first.child.childSessionId,
+        }),
       );
       expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
       expect(h.provisioner.attach).not.toHaveBeenCalled();
@@ -815,9 +887,14 @@ describe('registered same-task attach', () => {
     });
     it('names the failed check in the refusal', async () => {
       const h = makeHarness();
-      const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+      const first = await h.spawner.start(
+        h.request({ taskId: 'TASK_2026_584' }),
+      );
       if (!first.ok) throw new Error('first start failed');
-      const cases: readonly [Partial<Parameters<typeof h.request>[0]>, string][] = [
+      const cases: readonly [
+        Partial<Parameters<typeof h.request>[0]>,
+        string,
+      ][] = [
         [{ taskId: 'TASK_2026_585' }, 'another task'],
         [{ attachToSessionId: randomUUID() }, 'not a registered child'],
         [{ branch: 'feat/unrelated' }, 'another branch'],
@@ -830,7 +907,10 @@ describe('registered same-task attach', () => {
             ...changes,
           }),
         );
-        expect(result).toMatchObject({ ok: false, detail: expect.stringContaining(text) });
+        expect(result).toMatchObject({
+          ok: false,
+          detail: expect.stringContaining(text),
+        });
       }
       h.spawner.dispose();
     });
@@ -840,11 +920,13 @@ describe('registered same-task attach', () => {
     const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
     if (!first.ok) throw new Error('first start failed');
     h.active.add(OTHER);
-    const result = await h.spawner.start(h.request({
-      callerSessionId: OTHER,
-      taskId: 'TASK_2026_584',
-      attachToSessionId: first.child.childSessionId,
-    }));
+    const result = await h.spawner.start(
+      h.request({
+        callerSessionId: OTHER,
+        taskId: 'TASK_2026_584',
+        attachToSessionId: first.child.childSessionId,
+      }),
+    );
     expect(result).toMatchObject({ ok: false, refusal: 'branch-exists' });
     expect(h.provisioner.attach).not.toHaveBeenCalled();
     h.spawner.dispose();
@@ -863,18 +945,39 @@ describe('SessionSpawnerService.start — guards in order', () => {
   });
   it('shares read-only eligibility refusals with start', async () => {
     const cases = [
-      { name: 'no host', setup: (h: ReturnType<typeof makeHarness>) => h.build({ host: null }), caller: PARENT, code: 'chat-runtime-unavailable' },
-      { name: 'unattributed', setup: (h: ReturnType<typeof makeHarness>) => h.spawner, caller: undefined, code: 'unattributed-caller' },
-      { name: 'MCP unavailable', setup: (h: ReturnType<typeof makeHarness>) => h.build({ mcpStatus: { getPort: () => null } }), caller: PARENT, code: 'mcp-unavailable' },
+      {
+        name: 'no host',
+        setup: (h: ReturnType<typeof makeHarness>) => h.build({ host: null }),
+        caller: PARENT,
+        code: 'chat-runtime-unavailable',
+      },
+      {
+        name: 'unattributed',
+        setup: (h: ReturnType<typeof makeHarness>) => h.spawner,
+        caller: undefined,
+        code: 'unattributed-caller',
+      },
+      {
+        name: 'MCP unavailable',
+        setup: (h: ReturnType<typeof makeHarness>) =>
+          h.build({ mcpStatus: { getPort: () => null } }),
+        caller: PARENT,
+        code: 'mcp-unavailable',
+      },
     ] as const;
     for (const entry of cases) {
       const h = makeHarness();
       const spawner = entry.setup(h);
       const before = h.registry.liveCount();
-      expect(spawner.canStart(entry.caller)).toMatchObject({ ok: false, code: entry.code });
+      expect(spawner.canStart(entry.caller)).toMatchObject({
+        ok: false,
+        code: entry.code,
+      });
       expect(h.registry.liveCount()).toBe(before);
       expect(h.provisioner.create).not.toHaveBeenCalled();
-      expect(await spawner.start(h.request({ callerSessionId: entry.caller }))).toMatchObject({ ok: false, refusal: entry.code });
+      expect(
+        await spawner.start(h.request({ callerSessionId: entry.caller })),
+      ).toMatchObject({ ok: false, refusal: entry.code });
       spawner.dispose();
     }
   });
@@ -909,6 +1012,27 @@ describe('SessionSpawnerService.start — guards in order', () => {
       ([input]) => input.permissionLevel,
     );
     expect(levels).toEqual(['yolo', 'auto-edit']);
+  });
+  it('passes the live level of a native parent that is not in the SDK lifecycle', async () => {
+    const h = makeHarness();
+    // A Codex or Antigravity parent has no SDK lifecycle record.
+    h.lifecycleIds.delete(PARENT);
+    h.adapter.getPermissionLevel.mockImplementation((id: string) =>
+      id === PARENT ? 'yolo' : undefined,
+    );
+    await h.startChild();
+    expect(h.adapter.getPermissionLevel).toHaveBeenCalledWith(PARENT);
+    expect(h.host.startChildSession.mock.calls[0][0].permissionLevel).toBe(
+      'yolo',
+    );
+  });
+  it('passes no level when neither the lifecycle nor the adapter knows the parent', async () => {
+    const h = makeHarness();
+    h.lifecycleIds.delete(PARENT);
+    await h.startChild();
+    expect(
+      h.host.startChildSession.mock.calls[0][0].permissionLevel,
+    ).toBeUndefined();
   });
   it('refuses chat-runtime-unavailable first, even for an unattributed caller', async () => {
     const h = makeHarness();
@@ -986,7 +1110,10 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses a child calling start as depth-exceeded', async () => {
     const h = makeHarness();
     const child = await h.startChild();
-    expect(h.spawner.canStart(child.childSessionId)).toMatchObject({ ok: false, code: 'depth-exceeded' });
+    expect(h.spawner.canStart(child.childSessionId)).toMatchObject({
+      ok: false,
+      code: 'depth-exceeded',
+    });
     const result = await h.spawner.start(
       h.request({
         callerSessionId: child.childSessionId,
@@ -998,7 +1125,10 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('refuses mcp-unavailable when the server has no port, before reserving', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     h.mcpStatus.getPort.mockReturnValue(null);
-    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'mcp-unavailable' });
+    expect(h.spawner.canStart(PARENT)).toMatchObject({
+      ok: false,
+      code: 'mcp-unavailable',
+    });
     const result = await h.spawner.start(h.request());
     expect(result).toMatchObject({ ok: false, refusal: 'mcp-unavailable' });
     expect(h.registry.reserveSlot(1)).not.toBeNull();
@@ -1016,7 +1146,10 @@ describe('SessionSpawnerService.start — guards in order', () => {
   it('reads a full cap without reserving another slot', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxConcurrent': 1 } });
     await h.startChild();
-    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'cap-reached' });
+    expect(h.spawner.canStart(PARENT)).toMatchObject({
+      ok: false,
+      code: 'cap-reached',
+    });
     expect(h.registry.liveCount()).toBe(1);
     expect(h.registry.reserveSlot(1)).toBeNull();
   });
@@ -1095,7 +1228,7 @@ describe('SessionSpawnerService.start — success', () => {
   it('uses the routed model and effort and stores their sources on the snapshot', async () => {
     const h = makeHarness();
     const router = {
-      route: jest.fn().mockResolvedValue({ 
+      route: jest.fn().mockResolvedValue({
         reason: { rule: 'code-work-kind', input: 'workKind: code' },
         candidates: [],
         model: 'claude-opus-4',
@@ -1104,8 +1237,12 @@ describe('SessionSpawnerService.start — success', () => {
         effortSource: 'ranking',
       }),
     };
-    const result = await h.build({ router }).start(h.request({ workKind: 'code' }));
-    expect(router.route).toHaveBeenCalledWith(expect.objectContaining({ workKind: 'code' }));
+    const result = await h
+      .build({ router })
+      .start(h.request({ workKind: 'code' }));
+    expect(router.route).toHaveBeenCalledWith(
+      expect.objectContaining({ workKind: 'code' }),
+    );
     expect(result).toMatchObject({
       ok: true,
       child: {
@@ -1127,7 +1264,7 @@ describe('SessionSpawnerService.start — success', () => {
       message: 'not admitted',
     });
     const router = {
-      route: jest.fn().mockResolvedValue({ 
+      route: jest.fn().mockResolvedValue({
         reason: { rule: 'code-work-kind', input: 'workKind: code' },
         candidates: [],
         model: 'claude-opus-4',
@@ -1169,7 +1306,7 @@ describe('SessionSpawnerService.start — success', () => {
     const scope = h.containerWith(h.host);
     const spawner = h.build({ container: scope });
     const router = {
-      route: jest.fn().mockResolvedValue({ 
+      route: jest.fn().mockResolvedValue({
         reason: { rule: 'code-work-kind', input: 'workKind: code' },
         candidates: [],
         model: 'claude-opus-4',
@@ -1220,11 +1357,12 @@ describe('SessionSpawnerService.start — success', () => {
   it('routes before provisioner.create', async () => {
     const h = makeHarness();
     const router = {
-      route: jest
-        .fn()
-        .mockResolvedValue({ 
+      route: jest.fn().mockResolvedValue({
         reason: { rule: 'code-work-kind', input: 'workKind: code' },
-        candidates: [], modelSource: 'default', effortSource: 'default' }),
+        candidates: [],
+        modelSource: 'default',
+        effortSource: 'default',
+      }),
     };
     await h.build({ router }).start(h.request());
     expect(router.route.mock.invocationCallOrder[0]).toBeLessThan(
@@ -1235,7 +1373,7 @@ describe('SessionSpawnerService.start — success', () => {
   it('opened payload carries model, effort, modelSource and effortSource', async () => {
     const h = makeHarness();
     const router = {
-      route: jest.fn().mockResolvedValue({ 
+      route: jest.fn().mockResolvedValue({
         reason: { rule: 'code-work-kind', input: 'workKind: code' },
         candidates: [],
         model: 'claude-opus-4',
@@ -2019,7 +2157,10 @@ describe('SessionSpawnerService.send', () => {
       delivered: true,
       effect: 'interrupted-and-started',
     });
-    expect(h.adapter.interruptCurrentTurn).toHaveBeenCalledWith(child.childSessionId, 'parent-steer');
+    expect(h.adapter.interruptCurrentTurn).toHaveBeenCalledWith(
+      child.childSessionId,
+      'parent-steer',
+    );
   });
 
   it.each([
@@ -2289,15 +2430,20 @@ describe('SessionSpawnerService.stop - hard stop verification (D13)', () => {
     const child = await h.startChild();
     let recordedCause: string | undefined;
     let sessionEndStarted = false;
-    h.adapter.interruptCurrentTurn.mockImplementation(async (_id: string, cause: string) => {
-      recordedCause = cause;
-      return true;
-    });
+    h.adapter.interruptCurrentTurn.mockImplementation(
+      async (_id: string, cause: string) => {
+        recordedCause = cause;
+        return true;
+      },
+    );
     h.adapter.interruptSession.mockImplementation(async () => {
       sessionEndStarted = true;
     });
 
-    await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
 
     expect(sessionEndStarted).toBe(true);
     expect(recordedCause).toBe('host-stop');
@@ -2381,78 +2527,93 @@ describe('SessionSpawnerService — child session end grace', () => {
 
   // Incident f7ea7de9: turn 1 settled, the watchdog ended turn 2. First-turn
   // recovery does not apply, and the phase may already read `failed`.
-  describe.each(['generating', 'failed'] as const)('a watchdog end in turn 2 (phase %s)', (phase) => {
-    async function endTurnTwo(cause: 'provider-no-response' | 'no-activity-timeout') {
-      const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
-      const child = await h.startChild();
-      h.markRan(child.childSessionId);
-      h.turnEnded(child.childSessionId, { timestamp: 1 });
-      await flush();
-      expect(h.registry.get(child.childSessionId)?.turnsSettled).toBe(1);
-      h.notifier.signalSessionChild.mockClear();
-      h.phases.set(child.childSessionId, phase);
-      h.active.delete(child.childSessionId);
-      h.sessionEnd.notifyAll({
-        sessionId: child.childSessionId,
-        workspaceRoot: WORKTREE,
-        cause,
-        startedAt: Date.now(),
-        zeroOutwardEvents: false,
-      });
-      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
-      await flush();
-      return { h, child };
-    }
-
-    it.each(['provider-no-response', 'no-activity-timeout'] as const)(
-      'tells the parent the Ptah provider-hang reason and the kept worktree (%s)',
-      async (cause) => {
-        const { h, child } = await endTurnTwo(cause);
-        expect(h.host.recoverAfterWatchdogStop).not.toHaveBeenCalled();
-        expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
-        expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
-        const [subject, settle] = h.notifier.signalSessionChild.mock.calls[0];
-        expect(settle).toMatchObject({ status: 'failed', turn: 2 });
-        expect(subject).toMatchObject({
-          childSessionId: child.childSessionId,
-          worktreePath: WORKTREE,
-          lastRecap: formatProviderHang(undefined),
+  describe.each(['generating', 'failed'] as const)(
+    'a watchdog end in turn 2 (phase %s)',
+    (phase) => {
+      async function endTurnTwo(
+        cause: 'provider-no-response' | 'no-activity-timeout',
+      ) {
+        const h = makeHarness({
+          config: { 'agentSessions.maxSuccessions': 0 },
         });
-        expect(h.registry.get(child.childSessionId)).toMatchObject({
-          terminalStatus: 'ended',
-          endReason: expect.stringContaining(`uncommitted work is kept in ${WORKTREE}`),
+        const child = await h.startChild();
+        h.markRan(child.childSessionId);
+        h.turnEnded(child.childSessionId, { timestamp: 1 });
+        await flush();
+        expect(h.registry.get(child.childSessionId)?.turnsSettled).toBe(1);
+        h.notifier.signalSessionChild.mockClear();
+        h.phases.set(child.childSessionId, phase);
+        h.active.delete(child.childSessionId);
+        h.sessionEnd.notifyAll({
+          sessionId: child.childSessionId,
+          workspaceRoot: WORKTREE,
+          cause,
+          startedAt: Date.now(),
+          zeroOutwardEvents: false,
         });
-      },
-    );
+        jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+        await flush();
+        return { h, child };
+      }
 
-    it('holds the failed completion when the parent is not active', async () => {
-      const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
-      h.notifier.signalSessionChild.mockImplementation(async (_subject, { turn }) => ({
-        delivered: false,
-        reason: 'parent-session-not-active',
-        envelope: envelope(turn),
-      }));
-      const child = await h.startChild();
-      h.markRan(child.childSessionId);
-      h.turnEnded(child.childSessionId, { timestamp: 1 });
-      await flush();
-      h.phases.set(child.childSessionId, phase);
-      h.active.delete(child.childSessionId);
-      h.active.delete(PARENT);
-      h.sessionEnd.notifyAll({
-        sessionId: child.childSessionId,
-        workspaceRoot: WORKTREE,
-        cause: 'provider-no-response',
-        startedAt: Date.now(),
-      });
-      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
-      await flush();
-      expect(h.registry.get(child.childSessionId)?.heldCompletion?.envelope.turn).toBe(2);
-      expect(h.lines.join('\n')).toContain(
-        `${child.childSessionId} turn 2 settled (unverified); held for the parent (parent-session-not-active)`,
+      it.each(['provider-no-response', 'no-activity-timeout'] as const)(
+        'tells the parent the Ptah provider-hang reason and the kept worktree (%s)',
+        async (cause) => {
+          const { h, child } = await endTurnTwo(cause);
+          expect(h.host.recoverAfterWatchdogStop).not.toHaveBeenCalled();
+          expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+          expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+          const [subject, settle] = h.notifier.signalSessionChild.mock.calls[0];
+          expect(settle).toMatchObject({ status: 'failed', turn: 2 });
+          expect(subject).toMatchObject({
+            childSessionId: child.childSessionId,
+            worktreePath: WORKTREE,
+            lastRecap: formatProviderHang(undefined),
+          });
+          expect(h.registry.get(child.childSessionId)).toMatchObject({
+            terminalStatus: 'ended',
+            endReason: expect.stringContaining(
+              `uncommitted work is kept in ${WORKTREE}`,
+            ),
+          });
+        },
       );
-    });
-  });
+
+      it('holds the failed completion when the parent is not active', async () => {
+        const h = makeHarness({
+          config: { 'agentSessions.maxSuccessions': 0 },
+        });
+        h.notifier.signalSessionChild.mockImplementation(
+          async (_subject, { turn }) => ({
+            delivered: false,
+            reason: 'parent-session-not-active',
+            envelope: envelope(turn),
+          }),
+        );
+        const child = await h.startChild();
+        h.markRan(child.childSessionId);
+        h.turnEnded(child.childSessionId, { timestamp: 1 });
+        await flush();
+        h.phases.set(child.childSessionId, phase);
+        h.active.delete(child.childSessionId);
+        h.active.delete(PARENT);
+        h.sessionEnd.notifyAll({
+          sessionId: child.childSessionId,
+          workspaceRoot: WORKTREE,
+          cause: 'provider-no-response',
+          startedAt: Date.now(),
+        });
+        jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+        await flush();
+        expect(
+          h.registry.get(child.childSessionId)?.heldCompletion?.envelope.turn,
+        ).toBe(2);
+        expect(h.lines.join('\n')).toContain(
+          `${child.childSessionId} turn 2 settled (unverified); held for the parent (parent-session-not-active)`,
+        );
+      });
+    },
+  );
 
   it('does not signal a second completion when the turn settled during the grace', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
@@ -2614,12 +2775,19 @@ describe('SessionSpawnerService — runtime cap', () => {
     jest.advanceTimersByTime(6 * 60_000);
     await flush();
     expect(h.sessionBudget.release).not.toHaveBeenCalled();
-    expect(h.dispositions.lookup({ tabId: child.childSessionId })?.phase).toBe('paused');
+    expect(h.dispositions.lookup({ tabId: child.childSessionId })?.phase).toBe(
+      'paused',
+    );
     expect(h.dispositions.lookup({ sdkSessionId })?.phase).toBe('paused');
 
-    await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
+    await h.spawner.stop({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
     expect(h.sessionBudget.release).toHaveBeenCalledWith(child.childSessionId);
-    expect(h.dispositions.lookup({ tabId: child.childSessionId })).toBeUndefined();
+    expect(
+      h.dispositions.lookup({ tabId: child.childSessionId }),
+    ).toBeUndefined();
     expect(h.dispositions.lookup({ sdkSessionId })).toBeUndefined();
   });
 });
@@ -2751,7 +2919,11 @@ describe('SessionSpawnerService.dispose', () => {
     h.spawner.dispose();
     h.spawner.dispose();
 
-    expect(h.spawner.canStart(PARENT)).toMatchObject({ ok: false, code: 'chat-runtime-unavailable', reason: 'the host is shutting down' });
+    expect(h.spawner.canStart(PARENT)).toMatchObject({
+      ok: false,
+      code: 'chat-runtime-unavailable',
+      reason: 'the host is shutting down',
+    });
 
     expect(h.idResolved.size + h.sessionEnd.size).toBe(listenersBefore - 2);
     expect(h.permissionListeners.size).toBe(0);
@@ -2875,10 +3047,16 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
         childSessionId: child.childSessionId,
       }),
     ).toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
-    expect(h.spawner.status({ callerSessionId: PARENT_SDK, childSessionId: child.childSessionId }))
-      .toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
-    expect(h.spawner.status({ callerSessionId: PARENT_SDK }))
-      .toMatchObject({ ok: true, children: [] });
+    expect(
+      h.spawner.status({
+        callerSessionId: PARENT_SDK,
+        childSessionId: child.childSessionId,
+      }),
+    ).toMatchObject({ ok: false, reason: 'not-a-child-of-caller' });
+    expect(h.spawner.status({ callerSessionId: PARENT_SDK })).toMatchObject({
+      ok: true,
+      children: [],
+    });
     // The new session does, by its tab id alone.
     expect(
       h.spawner.status({
@@ -2889,16 +3067,32 @@ describe('SessionSpawnerService — after ptah_session_handoff', () => {
       ok: true,
       children: [{ childSessionId: child.childSessionId }],
     });
-    expect(h.spawner.status({ callerSessionId: successor }))
-      .toMatchObject({ ok: true, children: [{ childSessionId: child.childSessionId }] });
-    expect(await h.spawner.read({ callerSessionId: successor, childSessionId: child.childSessionId }))
-      .toMatchObject({ ok: true });
-    expect(await h.spawner.send({ callerSessionId: successor, childSessionId: child.childSessionId,
-      message: 'continue', mode: 'queue' })).toMatchObject({ delivered: true });
+    expect(h.spawner.status({ callerSessionId: successor })).toMatchObject({
+      ok: true,
+      children: [{ childSessionId: child.childSessionId }],
+    });
+    expect(
+      await h.spawner.read({
+        callerSessionId: successor,
+        childSessionId: child.childSessionId,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await h.spawner.send({
+        callerSessionId: successor,
+        childSessionId: child.childSessionId,
+        message: 'continue',
+        mode: 'queue',
+      }),
+    ).toMatchObject({ delivered: true });
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([envelope(1)]);
     expect(h.spawner.takeHeldCompletions(successor)).toEqual([]);
-    expect(await h.spawner.stop({ callerSessionId: successor, childSessionId: child.childSessionId }))
-      .toMatchObject({ ok: true });
+    expect(
+      await h.spawner.stop({
+        callerSessionId: successor,
+        childSessionId: child.childSessionId,
+      }),
+    ).toMatchObject({ ok: true });
   });
 });
 

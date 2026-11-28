@@ -320,7 +320,8 @@ describe('CodexApprovalBridge', () => {
 
   it('fails closed for a terminal native child turn', async () => {
     const { bridge, request } = setup({
-      isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn-live',
+      isChildTurn: (thread, turn) =>
+        thread === 'child' && turn === 'cturn-live',
     });
     const result = await bridge.handle(
       frame(command, 4, { threadId: 'child', turnId: 'cturn-terminal' }),
@@ -678,22 +679,29 @@ describe('CodexApprovalBridge', () => {
       properties: { mode: { type: 'string', default: 'bad', enum: ['good'] } },
       required: ['mode'],
     },
-  ])('declines an unfillable MCP form %j without a card', async (requestedSchema) => {
-    const { bridge, request, logger } = setup();
-    request.mockResolvedValue('acceptForSession');
-    expect(
-      await bridge.handle(frame(mcp, 1, { requestedSchema }), 'turn', signal()),
-    ).toEqual({ response: { action: 'decline' } });
-    expect(request).not.toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalledWith(
-      'Codex elicitation cannot be answered without user input.',
-      {
-        code: 'codex-elicitation-unanswerable',
-        mode: 'form',
-        serverName: 'server',
-      },
-    );
-  });
+  ])(
+    'declines an unfillable MCP form %j without a card',
+    async (requestedSchema) => {
+      const { bridge, request, logger } = setup();
+      request.mockResolvedValue('acceptForSession');
+      expect(
+        await bridge.handle(
+          frame(mcp, 1, { requestedSchema }),
+          'turn',
+          signal(),
+        ),
+      ).toEqual({ response: { action: 'decline' } });
+      expect(request).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Codex elicitation cannot be answered without user input.',
+        {
+          code: 'codex-elicitation-unanswerable',
+          mode: 'form',
+          serverName: 'server',
+        },
+      );
+    },
+  );
 
   it('declines a form that needs typed input without a card', async () => {
     const { bridge, request, logger } = setup();
@@ -925,7 +933,8 @@ describe('CodexApprovalBridge', () => {
   describe('Finding 2: terminal child turns', () => {
     it('fails closed when isChildTurn detects a terminal turn', async () => {
       const { bridge, request } = setup({
-        isChildTurn: (thread, turn) => thread === 'child' && turn === 'live-turn',
+        isChildTurn: (thread, turn) =>
+          thread === 'child' && turn === 'live-turn',
       });
       const result = await bridge.handle(
         frame(command, 4, { threadId: 'child', turnId: 'terminal-turn' }),
@@ -941,7 +950,9 @@ describe('CodexApprovalBridge', () => {
       const childTools = new Map<string, string>([['child', 'spawn']]);
       const childTurns = new Map<string, string>([['child', 'cturn']]);
       const isChildTurn = (thread: string, turn: string) =>
-        childTools.has(thread) && childTurns.get(thread) === turn && !terminalTurns.has(turn);
+        childTools.has(thread) &&
+        childTurns.get(thread) === turn &&
+        !terminalTurns.has(turn);
       const { bridge, request } = setup({ isChildTurn });
       request.mockResolvedValue('accept');
 
@@ -967,9 +978,9 @@ describe('CodexApprovalBridge', () => {
     });
   });
 
-  describe('Finding 1: child approvals must reach parent sink', () => {
-    it.each<CodexPermissionLevel>(['plan', 'ask', 'auto-edit', 'yolo'])(
-      'routes child approval to sink in %s permission level',
+  describe('Finding 1: child approvals follow parent policy', () => {
+    it.each<CodexPermissionLevel>(['ask', 'auto-edit'])(
+      'routes child command approval to sink in %s permission level',
       async (permLevel) => {
         const { bridge, request } = setup({
           isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
@@ -990,7 +1001,10 @@ describe('CodexApprovalBridge', () => {
       const { bridge, request } = setup({
         isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
       });
-      request.mockResolvedValue({ decision: 'decline', denialReason: 'safety' });
+      request.mockResolvedValue({
+        decision: 'decline',
+        denialReason: 'safety',
+      });
       const result = await bridge.handle(
         frame(command, 6, { threadId: 'child', turnId: 'cturn' }),
         'cturn',
@@ -998,6 +1012,120 @@ describe('CodexApprovalBridge', () => {
       );
       expect(request).toHaveBeenCalledTimes(1);
       expect(result.response).toEqual({ decision: 'decline' });
+    });
+
+    it('does not let a live native child inherit parent rule-store hits in ask mode', async () => {
+      const { bridge, request, options } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+        permissionLevel: () => 'ask',
+      });
+      options.rules.record(
+        identity,
+        { kind: 'command', command: 'echo safe', cwd: '/workspace' },
+        'acceptForSession',
+      );
+      request.mockResolvedValue('accept');
+      const result = await bridge.handle(
+        frame(command, 7, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(result.response).toEqual({ decision: 'accept' });
+    });
+
+    it.each([
+      ['command', command, { decision: 'accept' }],
+      ['fileChange', file, { decision: 'accept' }],
+      [
+        'permissions',
+        permissions,
+        { permissions: { network: { enabled: true } }, scope: 'turn' },
+      ],
+      ['mcpElicitation', mcp, { action: 'accept', content: { approve: true } }],
+    ] as const)(
+      'auto-accepts live native child %s approval in yolo mode without invoking sink',
+      async (_kind, method, expectedResponse) => {
+        const { bridge, request } = setup({
+          isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+          permissionLevel: () => 'yolo',
+        });
+        const result = await bridge.handle(
+          frame(method, 10, { threadId: 'child', turnId: 'cturn' }),
+          'cturn',
+          signal(),
+        );
+        expect(request).not.toHaveBeenCalled();
+        expect(result).toEqual({ response: expectedResponse });
+      },
+    );
+
+    it('auto-accepts a fileChange carrying grantRoot in yolo mode without invoking sink', async () => {
+      const { bridge, request } = setup({
+        permissionLevel: () => 'yolo',
+      });
+      const result = await bridge.handle(
+        frame(file, 11, { grantRoot: '/outside' }),
+        'turn',
+        signal(),
+      );
+      expect(request).not.toHaveBeenCalled();
+      expect(result).toEqual({ response: { decision: 'accept' } });
+    });
+
+    it('keeps userInput interactive via requestUserInput in yolo mode', async () => {
+      const input = jest.fn(
+        async (_request: CodexApprovalRequest, _signal: AbortSignal) => ({
+          q: { answers: ['yes'] },
+        }),
+      );
+      const { bridge, request } = setup({
+        permissionLevel: () => 'yolo',
+        requestUserInput: input,
+      });
+      const result = await bridge.handle(
+        frame(userInput, 12),
+        'turn',
+        signal(),
+      );
+      expect(input).toHaveBeenCalledTimes(1);
+      expect(request).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        response: { answers: { q: { answers: ['yes'] } } },
+      });
+    });
+
+    it('declines a live native child approval in plan mode without invoking sink (D17)', async () => {
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+        permissionLevel: () => 'plan',
+      });
+      const result = await bridge.handle(
+        frame(command, 13, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      expect(request).not.toHaveBeenCalled();
+      expect(result).toEqual({ response: { decision: 'decline' } });
+    });
+
+    it('declines an in-flight child approval when parent switches to plan mode (D17)', async () => {
+      let level: CodexPermissionLevel = 'ask';
+      const pending = deferred<CodexApprovalDecision>();
+      const { bridge, request } = setup({
+        isChildTurn: (thread, turn) => thread === 'child' && turn === 'cturn',
+        permissionLevel: () => level,
+      });
+      request.mockReturnValue(pending.promise);
+      const result = bridge.handle(
+        frame(command, 14, { threadId: 'child', turnId: 'cturn' }),
+        'cturn',
+        signal(),
+      );
+      await Promise.resolve();
+      level = 'plan';
+      pending.resolve('accept');
+      expect(await result).toEqual({ response: { decision: 'decline' } });
     });
   });
 });
