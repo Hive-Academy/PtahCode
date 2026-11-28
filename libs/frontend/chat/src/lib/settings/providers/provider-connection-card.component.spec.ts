@@ -428,7 +428,7 @@ describe('ProviderConnectionCardComponent', () => {
       ).toBe(false);
     });
 
-    it('gives a long provider name room and lets status wrap below it', () => {
+    it('gives a long provider name room without wrapping the status controls', () => {
       const fixture = createComponent({
         ...KIMI_CODE,
         providerName: 'Claude (Subscription)',
@@ -439,7 +439,29 @@ describe('ProviderConnectionCardComponent', () => {
       expect(name?.parentElement?.className).toContain('min-w-[7rem]');
       expect(name?.parentElement?.className).toContain('flex-1');
       expect(name?.parentElement?.className).toContain('basis-0');
-      expect(status?.parentElement?.className).toContain('flex-wrap');
+      expect(status?.parentElement?.className).toContain('flex-nowrap');
+      expect(fixture.nativeElement.className).toContain('self-start');
+    });
+
+    it('keeps a configured local provider status, action and modality on one line', () => {
+      const fixture = createComponent({
+        providerId: 'ollama',
+        providerName: 'Ollama',
+        authModality: 'local-native',
+        status: 'not-checked',
+        usedByCount: 0,
+      });
+      const name = query(fixture, 'provider-name');
+      const status = query(fixture, 'status-badge');
+      expect(name?.textContent?.trim()).toBe('Ollama');
+      expect(name?.parentElement?.className).toContain('min-w-[7rem]');
+      expect(name?.parentElement?.className).toContain('flex-1');
+      expect(name?.parentElement?.className).toContain('basis-0');
+      expect(status?.parentElement?.className).toContain('flex-nowrap');
+      expect(status?.className).toContain('min-w-0');
+      expect(query(fixture, 'status-copy')?.className).toContain('truncate');
+      expect(query(fixture, 'btn-check-connection')?.className).toContain('shrink-0');
+      expect(query(fixture, 'auth-modality')?.textContent?.trim()).toBe('Local');
       expect(fixture.nativeElement.className).toContain('self-start');
     });
 

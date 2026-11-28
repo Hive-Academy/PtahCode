@@ -594,7 +594,8 @@ export class ProviderModelPickerComponent implements OnDestroy {
   private readonly _registryVersion = signal(0);
 
   protected readonly models = this._models.asReadonly();
-  protected readonly modelsLoading = this._modelsLoading.asReadonly();
+  /** Hosts can defer focus until the enabled model combobox can receive it. */
+  readonly modelsLoading = this._modelsLoading.asReadonly();
   protected readonly modelsError = this._modelsError.asReadonly();
   protected readonly modelsNotice = this._modelsNotice.asReadonly();
 

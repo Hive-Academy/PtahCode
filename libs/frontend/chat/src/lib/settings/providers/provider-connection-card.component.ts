@@ -210,10 +210,10 @@ interface InlineAction {
           </div>
         </div>
         <div
-          class="flex min-w-0 flex-wrap items-center justify-end gap-ptah-inline text-xs"
+          class="flex min-w-0 flex-nowrap items-center justify-end gap-ptah-inline text-xs"
         >
           <span
-            class="flex items-center gap-ptah-inline font-medium text-base-content"
+            class="flex min-w-0 items-center gap-ptah-inline font-medium text-base-content"
             data-testid="status-badge"
           >
             @if (isBlockedMain()) {
@@ -242,7 +242,7 @@ interface InlineAction {
                 keyUnreadableText
               }}</span>
             } @else {
-              <span data-testid="status-copy">{{ statusLabel() }}</span>
+              <span class="truncate" data-testid="status-copy">{{ statusLabel() }}</span>
             }
           </span>
           @if (keyUnreadable()) {
@@ -338,7 +338,7 @@ export class ProviderConnectionCardComponent {
   protected readonly AlertTriangleIcon = AlertTriangle;
   protected readonly keyUnreadableText = KEY_UNREADABLE_TEXT;
   protected readonly inlineActionClass =
-    'pointer-events-auto relative z-20 underline underline-offset-2';
+    'pointer-events-auto relative z-20 shrink-0 underline underline-offset-2';
 
   /** Provider registry or connection identifier (e.g. 'anthropic', 'kimi-code', 'claude-cli'). */
   readonly providerId = input<string>('');

@@ -164,11 +164,15 @@ describe('CapabilityMatrixSettingComponent', () => {
     const original = globalThis.ResizeObserver;
     let resize!: ResizeObserverCallback;
     class MockResizeObserver implements ResizeObserver {
-      constructor(callback: ResizeObserverCallback) {
-        resize = callback;
-      }
-      observe(): void {
-        resize([{ contentRect: { width: 500 } } as ResizeObserverEntry], this);
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target?: Element): void {
+        // The native popover also observes its panel. Only the table's host
+        // observer controls the column visibility under test.
+        if (target?.tagName === 'PTAH-TABLE') resize = this.callback;
+        this.callback(
+          [{ contentRect: { width: 500 }, target } as ResizeObserverEntry],
+          this,
+        );
       }
       unobserve(): void {
         /* No observed nodes to release. */
@@ -203,15 +207,13 @@ describe('CapabilityMatrixSettingComponent', () => {
       fixture.detectChanges();
       expect(trigger.getAttribute('aria-expanded')).toBe('true');
       resize([{ contentRect: { width: 1600 } } as ResizeObserverEntry], {} as ResizeObserver);
-      fixture.detectChanges();
-      fixture.detectChanges();
+      await settle();
       expect(root().querySelector('button[aria-expanded="true"][aria-controls^="detail-"]')).toBeNull();
       const wideTrigger = root().querySelector<HTMLButtonElement>('button[aria-controls^="detail-"]');
       wideTrigger?.click();
-      fixture.detectChanges();
+      await settle();
       resize([{ contentRect: { width: 500 } } as ResizeObserverEntry], {} as ResizeObserver);
-      fixture.detectChanges();
-      fixture.detectChanges();
+      await settle();
       expect(root().querySelector('button[aria-expanded="true"][aria-controls^="detail-"]')).toBeNull();
       expect(root().contains(document.activeElement)).toBe(true);
     } finally {

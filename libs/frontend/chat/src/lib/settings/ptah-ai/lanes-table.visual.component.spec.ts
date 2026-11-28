@@ -775,10 +775,10 @@ describe('LanesTableComponent visual presentation', () => {
       join(__dirname, 'lanes-table.component.css'),
       'utf8',
     );
-    expect(css).toMatch(/col\.lane-network\s*\{[^}]*width:\s*12%;/);
+    expect(css).toMatch(/col\.lane-network\s*\{[^}]*width:\s*13%;/);
     expect(css).toMatch(/col\.lane-model\s*\{[^}]*width:\s*14%;/);
     expect(css).toMatch(
-      /col\.lane-order\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-identity\s*\{[^}]*width:\s*22%;[\s\S]*col\.lane-status\s*\{[^}]*width:\s*18%;[\s\S]*col\.lane-permission\s*\{[^}]*width:\s*14%;[\s\S]*col\.lane-enabled\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-expander\s*\{[^}]*width:\s*2\.5rem;/,
+      /col\.lane-order\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-identity\s*\{[^}]*width:\s*22%;[\s\S]*col\.lane-status\s*\{[^}]*width:\s*18%;[\s\S]*col\.lane-permission\s*\{[^}]*width:\s*13%;[\s\S]*col\.lane-enabled\s*\{[^}]*width:\s*4\.25rem;[\s\S]*col\.lane-expander\s*\{[^}]*width:\s*2\.5rem;/,
     );
     expect(css).toMatch(
       /td\[data-testid='cli-matrix-model'\][\s\S]*?overflow:\s*hidden;/,

@@ -4,6 +4,7 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  afterRenderEffect,
   computed,
   effect,
   inject,
@@ -730,11 +731,12 @@ export class ProviderConsumerAssignmentsComponent {
   private readonly timeoutInputRef =
     viewChild<ElementRef<HTMLInputElement>>('timeoutInput');
   private readonly popovers = viewChildren(NativePopoverComponent);
+  private readonly pickers = viewChildren(ProviderModelPickerComponent);
   private readonly openPopover = computed(() =>
     this.popovers().find((popover) => popover.isOpen()),
   );
   private appliedDeepLinkId: ProviderConsumerId | null = null;
-  private setupFocusTarget: 'cell' | 'provider' | 'model' | null = null;
+  private readonly setupFocusTarget = signal<'cell' | 'provider' | 'model' | null>(null);
   private context: ProvidersEditContext | null = null;
   private editScopeKey: string | null = null;
   constructor() {
@@ -750,6 +752,11 @@ export class ProviderConsumerAssignmentsComponent {
       const observer = new ResizeObserver(() => popover.reposition());
       observer.observe(panel);
       onCleanup(() => observer.disconnect());
+    });
+    afterRenderEffect(() => {
+      // NativePopoverComponent focuses its panel before it emits `opened`.
+      // Cell focus belongs to that event; only field focus needs later retries.
+      if (this.setupFocusTarget() !== 'cell') this.focusSetupTarget();
     });
     // Deep link stays reactive: a later input change still opens the popover.
     // Each new value applies once, so a user cancel is not fought.
@@ -769,7 +776,7 @@ export class ProviderConsumerAssignmentsComponent {
           return;
         this.appliedDeepLinkId = deepLinkId;
         if (deepLinkId === 'setup') {
-          this.setupFocusTarget = 'cell';
+          this.setupFocusTarget.set('cell');
           if (this.activeEditId() === 'setup') {
             afterNextRender(() => this.onPopoverOpened('setup'), {
               injector: this.injector,
@@ -906,7 +913,7 @@ export class ProviderConsumerAssignmentsComponent {
   protected cancelEdit(): void {
     const id = this.activeEditId();
     if (id === 'setup') this.state.clearSetupDraftFeedback();
-    this.setupFocusTarget = null;
+    this.setupFocusTarget.set(null);
     this.activeEditId.set(null);
     if (!id) return;
     afterNextRender(
@@ -937,21 +944,40 @@ export class ProviderConsumerAssignmentsComponent {
     this.setupProviderRequested.emit(providerId);
   }
   protected chooseSetupPart(part: 'provider' | 'model'): void {
-    this.setupFocusTarget = part;
+    this.setupFocusTarget.set(part);
     if (this.activeEditId() !== 'setup') this.toggleEdit('setup');
     else this.onPopoverOpened('setup');
   }
   protected onPopoverOpened(id: ProviderConsumerId): void {
-    const target = this.setupFocusTarget;
-    if (id !== 'setup' || !target || this.activeEditId() !== 'setup') return;
-    this.setupFocusTarget = null;
+    if (id === 'setup') this.focusSetupTarget();
+  }
+  private focusSetupTarget(): void {
+    const target = this.setupFocusTarget();
+    const panel = this.openPopover()?.panel()?.nativeElement;
+    if (!target || this.activeEditId() !== 'setup' || !panel) return;
     if (target === 'cell') {
-      this.element.nativeElement.querySelector<HTMLElement>('[data-testid="consumer-edit-setup"]')?.focus();
-    } else {
-      this.openPopover()?.panel()?.nativeElement
-        .querySelector<HTMLElement>(`[data-testid="provider-model-picker-${target}"] [role="combobox"]`)
-        ?.focus();
+      const control = this.element.nativeElement.querySelector<HTMLElement>(
+        '[data-testid="consumer-edit-setup"]',
+      );
+      control?.focus();
+      if (control && document.activeElement === control) {
+        this.setupFocusTarget.set(null);
+      }
+      return;
     }
+    const picker = this.pickers().at(0);
+    if (!picker || (target === 'model' && picker.modelsLoading())) return;
+    const control = panel.querySelector<HTMLElement>(
+      `[data-testid="provider-model-picker-${target}"] [role="combobox"]`,
+    );
+    if (
+      !control ||
+      control.matches(':disabled') ||
+      control.getAttribute('aria-disabled') === 'true'
+    )
+      return;
+    control.focus();
+    if (document.activeElement === control) this.setupFocusTarget.set(null);
   }
   protected saveSetupDraft(): void {
     if (this.setupDraftComplete()) void this.commitSetup(this.currentDraft());
