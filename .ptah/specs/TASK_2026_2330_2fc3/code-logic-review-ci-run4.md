@@ -114,3 +114,49 @@
 - **Required before approval:**
   1. Check `8995919a` (current `origin/main`) to confirm why `<ptah-native-modal>` rendered `<!--container-->` in CI run 4 (S2).
   2. Remove the silent `else` fallback at `open === true` and assert `<dialog>` rendering, real `Install 1 skill` button click, and post-install closure/inertness (or DOM removal if `main` unmounts closed dialogs) unconditionally (S1, M1).
+
+---
+
+## Re-review (681f30b56d)
+
+### Summary
+
+| Metric          | Value        |
+| --------------- | ------------ |
+| Overall score   | 9/10         |
+| Verdict         | **APPROVED** |
+| Blocking issues | 0            |
+| Serious issues  | 0            |
+| Moderate issues | 0            |
+| Minor notes     | 2 (non-blocking) |
+
+**Score rationale:** Placed at **9/10** (clean, solid fix). All four findings from the CI run 4 review (`S1`, `S2`, `M1`, `m1`) are resolved with zero silent fallbacks remaining, every behavioral check is at least as strong as before `23c3b702c9`, and the test now faithfully supports both the branch's inline `<dialog>` `NativeModalComponent` and `origin/main` (`8995919a61`)'s CDK Dialog portal implementation. Held back from 10/10 only by two tiny non-blocking nitpicks noted below.
+
+**Scope & verification:**
+- Inspected commit `681f30b56d` (`git show 681f30b56d`), full diff from pre-`23c3b702c9` (`git diff 23c3b702c9~1..681f30b56d -- libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`), `origin/main`'s CDK modal (`git show 8995919a61:libs/frontend/ui/src/lib/native/modal/native-modal.component.ts`), `stack-skill-consent.component.html`, and `.ptah/specs/TASK_2026_2330_2fc3/fix-report-ci-run5.md` (+ `.ptah/tmp/ci-run5-portal-jest.log`).
+- `ptah_get_diagnostics` scoped to `libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`: **0 diagnostics** in the edited spec (15 pre-existing errors in unchanged sibling/shared files).
+- Focused Jest run (`npx jest --config libs/frontend/onboarding/jest.config.ts --runInBand --coverage=false --runTestsByPath libs/frontend/onboarding/src/lib/proposal/team-builder-start.page.spec.ts`): **46/46 passed** in 5.524 s (`.ptah/tmp/review-ci5-spec.log`).
+
+### Resolution Check
+
+- **S1 (silent fallback) — RESOLVED (`team-builder-start.page.spec.ts:390-393, 431-451`):** The `if (dialog) ... else { consentComponent.install.emit(); }` fallback is completely removed. Once `viewStage() === 'consent'`, the test unconditionally requires a matching consent dialog in `document` (`dialog[aria-labelledby="skill-consent-title"], [role="dialog"][aria-labelledby="skill-consent-title"]`), rejects missing/closed/inert dialogs with bounded diagnostics (`modalDetails`), unconditionally requires an enabled button with exact text `'Install 1 skill and continue'`, and clicks the real `installBtn`. No synthetic `.emit()` remains.
+- **S2 (`origin/main` divergence) — CONFIRMED & RESOLVED:** Verified in `8995919a61:libs/frontend/ui/src/lib/native/modal/native-modal.component.ts:110-124, 217-231` that `NativeModalComponent` on `origin/main` wraps its panel in `<ng-template #dialog>` and opens it via Angular CDK `Dialog` (`<cdk-dialog-container role="dialog" aria-labelledby="skill-consent-title">`) in `.cdk-overlay-container` only while `isOpen() === true`, explaining CI run 4's `<!--container-->` host DOM. Querying `document` by `aria-labelledby="skill-consent-title"` matches both the branch inline `<dialog>` and `origin/main`'s CDK portal container.
+- **M1 (detached dialog on close) — RESOLVED (`team-builder-start.page.spec.ts:396-405, 457-459`):** `expectConsentClosed` requires any connected dialog to be an `HTMLDialogElement` with `!dialog.open && dialog.inert`, while accepting `null` or a detached node (`!dialog.isConnected`) when closed on the CDK portal implementation (and rejecting any still-connected non-`HTMLDialogElement` `[role="dialog"]`). After Install, lines `457-459` check both the previously opened `dialog` and `findConsentDialog()`, catching both a stuck inline dialog and a reopened portal dialog.
+- **m1 (Enter keydown check) — RESOLVED (`team-builder-start.page.spec.ts:478-485`):** Dispatches `new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })` and asserts `expect(enterEvent.defaultPrevented).toBe(false)` before `cancelBtn.click()`.
+
+### Strength Comparison vs. Pre-`23c3b702c9`
+
+No behavioral assertion is weaker than before `23c3b702c9`:
+- **Strictly stronger:** Checks `consentComponent.open()/busy()/allApproved()`, `modalComponent.isOpen()`, `page.viewStage() === 'installing'`, exact button text `'Install 1 skill and continue'` (was `.includes('Install 1 skill')`), `!installBtn.disabled`, `!dialog.closest('[inert]')` while open, inline `dialog.inert === true` already at `intent`, `backBtn.disabled === false` and `cancelBtn.disabled === false`, post-close re-query via `remainingDialog`, and cancelable Enter `defaultPrevented === false`.
+- **Equivalent adaptation for CDK portal:** Removing `expect(root.contains(dialog)).toBe(true)` and allowing absence at `intent` are required by `origin/main`'s portal architecture (CDK mounts overlays under `document.body` only while open); scoping by `aria-labelledby="skill-consent-title"` preserves dialog identity without losing behavioral coverage.
+
+### Non-blocking Minor Notes
+
+- `team-builder-start.page.spec.ts:435`: `dialog.closest('[inert]')` checks the `inert` attribute; `dialog.inert || dialog.closest('[inert]')` would also catch a property-only `inert = true` if jsdom ever skips attribute reflection (inline `<dialog>` already guards via `dialog.open`).
+- `team-builder-start.page.spec.ts:390-393, 458-459`: `document.querySelector` inspects only the first matching dialog in DOM order; iterating `document.querySelectorAll` in the closed check would also catch a hypothetical second open consent dialog rendered after a closed inline one.
+
+### Verdict
+
+- **Recommendation:** `APPROVED`
+- **Confidence:** HIGH
+- **Summary:** Commit `681f30b56d` cleanly resolves `S1`, `S2`, `M1`, and `m1` with no silent fallbacks, no weakened assertions, 0 TypeScript diagnostics in the spec, and 46/46 passing tests across both inline and CDK portal modal implementations.
