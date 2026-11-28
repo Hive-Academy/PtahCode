@@ -239,7 +239,7 @@ export function deriveChoiceEvidence(
 
   for (const row of dedupeByRun(summaries)) {
     const { family, taskKind } = row;
-    if (taskKind === null || !Number.isFinite(row.endedAt) || row.endedAt < sinceMs) continue;
+    if (!Number.isFinite(row.endedAt) || row.endedAt < sinceMs) continue;
     if (!family.trim() || !row.model.trim()) continue;
 
     const capacity = isCapacityFailure(row.failureClass);
@@ -250,6 +250,7 @@ export function deriveChoiceEvidence(
       laneFunnels.set(laneKey, lane);
     }
     addToFunnel(lane.funnel, row, capacity);
+    if (taskKind === null) continue;
 
     const model = choiceModelOf(row);
     const effort = sentEffortBucket(row.effort);

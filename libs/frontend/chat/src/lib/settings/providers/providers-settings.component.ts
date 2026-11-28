@@ -654,6 +654,7 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   /** Emitted once the wizard was opened for {@link requestedProviderId}. */
   readonly requestedProviderConsumed = output<string>();
   readonly focusTarget = input<ProvidersSettingsFocusTarget | null>(null);
+  readonly focusTargetConsumed = output<void>();
   /** Opens the requested connection drawer once the connection list is ready (Electron only: Accounts is D34). */
   readonly requestedDrawer = input<ProvidersSettingsDrawerRequest | null>(null);
   readonly requestedDrawerConsumed = output<void>();
@@ -1223,7 +1224,10 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
       }
       if (target === 'more-providers') {
         this.focusedTarget = target;
-        untracked(() => this.openWizard(''));
+        untracked(() => {
+          this.openWizard('');
+          this.focusTargetConsumed.emit();
+        });
         return;
       }
       const node = this.element.nativeElement.querySelector<HTMLElement>(

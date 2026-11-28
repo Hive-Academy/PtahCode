@@ -1395,6 +1395,7 @@ describe('SettingsComponent deep-linked provider request', () => {
   })
   class ProvidersPageStub implements OnInit {
     readonly focusTarget = input<unknown>(null);
+    readonly focusTargetConsumed = output<void>();
     readonly requestedProviderId = input<string>('');
     readonly requestedProviderConsumed = output<string>();
     // ngOnInit, not the constructor: the deferred page is created before its inputs are bound.
@@ -1425,7 +1426,7 @@ describe('SettingsComponent deep-linked provider request', () => {
     opened.length = 0;
   });
 
-  it('opens the wizard once and does not reopen it after leaving and returning to Providers', async () => {
+  beforeEach(() => {
     TestBed.configureTestingModule({
       providers: [
         ...provideSurfaceRouterTesting(),
@@ -1458,6 +1459,33 @@ describe('SettingsComponent deep-linked provider request', () => {
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
+  });
+
+  it('passes the same wizard focus target twice while Providers stays active', async () => {
+    const appState = TestBed.inject(AppStateManager);
+    const request = { tab: 'providers', section: 'more-providers' } as const;
+    appState.requestSettingsTab(request);
+    const fixture = TestBed.createComponent(SettingsComponent);
+    await fixture.componentInstance.ngOnInit();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const page: ProvidersPageStub = fixture.debugElement.query(
+      (node) => node.componentInstance instanceof ProvidersPageStub,
+    ).componentInstance;
+    expect(page.focusTarget()).toBe('more-providers');
+    page.focusTargetConsumed.emit();
+    fixture.detectChanges();
+    expect(page.focusTarget()).toBeNull();
+
+    appState.requestSettingsTab(request);
+    TestBed.tick();
+    expect(fixture.componentInstance.activeSettingsTab()).toBe('claude-auth');
+    expect(page.focusTarget()).toBe('more-providers');
+  });
+
+  it('opens the wizard once and does not reopen it after leaving and returning to Providers', async () => {
     const appState = TestBed.inject(AppStateManager);
     appState.requestSettingsTab({
       tab: 'orchestration',

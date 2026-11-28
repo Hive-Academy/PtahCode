@@ -9,7 +9,7 @@ export function settingsProviderConnections(
   return [...unique.values()].filter((entry) => {
     if (showSetupCard) return entry.configured || showSetupCard(entry);
     return entry.configured &&
-      !entry.tokenStale &&
+      (!entry.tokenStale || entry.credentialSource === 'api-key') &&
       !entry.keyUnreadable &&
       (entry.authMode !== 'apiKey' || entry.hasKey);
   });

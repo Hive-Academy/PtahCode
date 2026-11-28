@@ -55,6 +55,7 @@ import {
   type WizardExternalAction,
 } from './provider-setup-wizard.component';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
+import { settingsProviderConnections } from './provider-connection-options';
 
 /** The page toast's current message: drawer and setup outcomes are said there, never inline. */
 const toastMessage = () =>
@@ -1661,13 +1662,34 @@ describe('ProvidersSettingsComponent', () => {
     expect(document.querySelector('[data-read-error="cli-models"]')).toBeNull();
   });
   it('the more-providers route opens a blank wizard and returns focus to Connect provider', async () => {
+    const consumed = jest.fn(() => fixture.componentRef.setInput('focusTarget', null));
+    fixture.componentInstance.focusTargetConsumed.subscribe(consumed);
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
+    expect(consumed).toHaveBeenCalledTimes(1);
     expect(wizard().deepLinkProviderId()).toBe('');
     wizard().closed.emit();
     await render();
     expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     expect(document.activeElement).toBe(button('Connect provider'));
+
+    fixture.componentRef.setInput('focusTarget', 'more-providers');
+    await render();
+    expect(wizard().deepLinkProviderId()).toBe('');
+    expect(consumed).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a key-backed Kimi Code connection when its CLI login is stale', () => {
+    const keyBacked: ProvidersConnection = {
+      ...connection('kimi-code'),
+      authMode: 'cli',
+      tokenStale: true,
+      credentialSource: 'api-key',
+    };
+    expect(settingsProviderConnections([keyBacked])).toEqual([keyBacked]);
+    expect(settingsProviderConnections([{ ...keyBacked, credentialSource: 'cli-login' }])).toEqual([]);
+    expect(settingsProviderConnections([{ ...keyBacked, keyUnreadable: true }])).toEqual([]);
+    expect(settingsProviderConnections([{ ...connection('keyless'), hasKey: false }])).toEqual([]);
   });
 
   it('opens the wizard directly from the header and restores focus on close', async () => {

@@ -36,6 +36,23 @@ function row(runId: string, fields: Partial<LaneOutcomeSummary> = {}): LaneOutco
 }
 
 describe('deriveChoiceEvidence', () => {
+  it('counts unclassified runs in lane funnels only when they pass the window and identity filters', () => {
+    const evidence = deriveChoiceEvidence([
+      row('unclassified', { taskKind: null }),
+      row('old', { taskKind: null, endedAt: NOW - OUTCOME_WINDOW_MS - 1 }),
+      row('invalid-date', { taskKind: null, endedAt: NaN }),
+      row('blank-family', { taskKind: null, family: ' ' }),
+      row('blank-model', { taskKind: null, model: ' ' }),
+    ], NOW);
+
+    expect(evidence.laneFunnels()).toMatchObject([
+      { laneId: 'glm', family: KEY.family, funnel: { spawned: 1, delivered: 1 } },
+    ]);
+    expect(evidence.cells()).toEqual([]);
+    expect(evidence.routedRuns('glm', KEY.taskKind)).toBe(0);
+    expect(evidence.decisionModels()).toEqual([]);
+  });
+
   it('keeps own model ids and rolls native lane defaults into both model and family cells', () => {
     const evidence = deriveChoiceEvidence([
       row('own', { resolvedModel: 'other', resolvedModelProvenance: 'native', effort: 'high' }),
