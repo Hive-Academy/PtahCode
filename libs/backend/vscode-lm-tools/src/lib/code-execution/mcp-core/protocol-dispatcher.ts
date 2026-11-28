@@ -688,7 +688,6 @@ const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_agent_list',
   'ptah_agent_spawn',
   'ptah_agent_read',
-  'ptah_agent_wait',
   'ptah_agent_status',
   'ptah_session_handoff_ack',
 ]);

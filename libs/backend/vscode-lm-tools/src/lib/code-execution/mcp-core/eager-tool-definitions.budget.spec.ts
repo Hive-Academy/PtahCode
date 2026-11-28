@@ -18,8 +18,8 @@ import {
  * makes an eager tool longer, or makes another tool eager, must raise it with
  * a measured reason in the same change.
  */
-const EAGER_TOOL_COUNT = 20;
-const EAGER_TOOL_CHAR_BUDGET = 27_334;
+const EAGER_TOOL_COUNT = 19;
+const EAGER_TOOL_CHAR_BUDGET = 26_463;
 
 const deps: ProtocolHandlerDependencies = {
   ptahAPI: {} as PtahAPI,

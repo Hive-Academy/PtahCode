@@ -1729,13 +1729,13 @@ describe('protocol-handlers › tools/list eager _meta marking', () => {
       'ptah_agent_message_status',
       'ptah_route_decide',
       'ptah_outcome_report',
+      'ptah_agent_wait',
     ]) {
       expect(isEager(tools.find((tool) => tool.name === name))).toBe(false);
     }
     for (const name of [
       'ptah_agent_read',
       'ptah_agent_status',
-      'ptah_agent_wait',
       'ptah_session_handoff_ack',
     ]) {
       expect(isEager(tools.find((tool) => tool.name === name))).toBe(true);
