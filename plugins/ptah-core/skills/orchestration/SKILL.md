@@ -1,6 +1,6 @@
 ---
 name: orchestration
-description: 'Default workflow for any engineering task (feature, bugfix, refactor, docs, research, devops, SaaS init, creative) — phased plan with user checkpoints on subagents or CLI lanes, including X plans, Y implements, Z reviews. Not for multi-vendor second opinions — use tribunal.'
+description: "Default workflow for Ptah engineering tasks. Use for feature, bugfix, refactor, docs, research, DevOps, or SaaS work."
 ---
 
 # Orchestration
@@ -27,6 +27,13 @@ correction in agent-lanes §6; any code you change is independently reviewed bef
 2. **Pick depth**: Full (unclear scope), Partial (known requirements), Minimal (one developer or
    reviewer). Two types equally plausible, or none fits → pick the broader flow, log it in
    `decisions.md` and announce it; the user can redirect.
+
+   | Depth   | When to use                                  | Flow                                                      |
+   | ------- | -------------------------------------------- | --------------------------------------------------------- |
+   | Full    | New features, unclear scope, 5+ files        | Analyze > Plan > Validate with user > Implement > Verify  |
+   | Partial | Known requirements, refactoring, 2-4 files   | Plan > Implement > Verify                                 |
+   | Minimal | Simple fixes, single file, clear scope       | Implement directly > Verify                               |
+
    The host may already have run pre-flight routing. When a `Routing:` system reminder
    is present, use its taskType and depth suggestions unless the user says otherwise;
    do not call stage `pre-flight` again. Otherwise, if `ptah_route_decide` is listed,

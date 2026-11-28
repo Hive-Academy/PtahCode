@@ -1,6 +1,6 @@
 ---
 name: ui-ux-designer
-description: Turns design intent into a visual specification — brand discovery, design tokens, component and asset specs. Use to define a visual identity or design system, design a landing page, plan icons, illustrations or 3D assets, or systematize reference images. Not for writing copy — use technical-content-writer.
+description: "Creates UI visual specifications and design systems. Use for visual identity, layouts, interaction design, or developer handoffs."
 ---
 
 # UI/UX Designer Skill - Visual Design Excellence

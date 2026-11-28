@@ -1,6 +1,6 @@
 ---
 name: saas-workspace-initializer
-description: Bootstraps a new SaaS workspace on Nx, NestJS and Angular or React — discovery, a phased roadmap and a foundation-only scaffold. Use when starting a new SaaS or multi-tenant project. Not for .NET stacks — use dotnet-solution-initializer.
+description: "Bootstraps SaaS workspaces on Nx, NestJS, and Angular or React. Use to start SaaS or multi-tenant projects."
 ---
 
 # SaaS Workspace Initializer

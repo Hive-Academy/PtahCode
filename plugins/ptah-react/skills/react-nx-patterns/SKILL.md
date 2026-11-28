@@ -1,6 +1,6 @@
 ---
 name: react-nx-patterns
-description: React and Next.js in Nx monorepos. Use when setting up React or Next.js in Nx, organizing React libraries and module boundaries, container vs presentational components, Server Components or the app router. Not for Angular or NestJS workspaces — use nx-workspace-architect.
+description: "React and Next.js patterns in Nx. Use for workspace setup, library boundaries, containers, Server Components, or app structure."
 ---
 
 # React NX Patterns

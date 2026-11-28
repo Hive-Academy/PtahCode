@@ -1,6 +1,6 @@
 ---
 name: ddd-architecture
-description: 'Domain-Driven Design for complex business domains. Use when deciding whether DDD is warranted, defining bounded contexts, aggregates, entities and value objects, applying CQRS or domain events, or organizing a domain layer. .NET project and solution layout is dotnet-solution-architect.'
+description: "Domain-Driven Design for complex domains. Use for bounded contexts, aggregates, entities, value objects, CQRS, or domain events."
 ---
 
 # Domain-Driven Design Architecture

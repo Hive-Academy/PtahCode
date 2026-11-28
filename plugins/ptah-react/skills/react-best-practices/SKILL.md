@@ -1,6 +1,6 @@
 ---
 name: react-best-practices
-description: React and Next.js performance rules. Use when writing, reviewing or refactoring React components or Next.js pages for data fetching, waterfalls, bundle size, load time or re-renders. Not for component API design — use composition-patterns.
+description: "React and Next.js performance rules. Use for data fetching, waterfalls, bundle size, load time, or re-render reviews."
 ---
 
 # React Best Practices

@@ -1,6 +1,6 @@
 ---
 name: session-handoff
-description: 'Wrap up this session and continue in a fresh one: finish the current step, write HANDOFF.md, then open a new Ptah session with ptah_session_handoff. Use only when the user, the Ptah session-budget banner, or a child runtime-cap warning asks for /session-handoff.'
+description: "Hands off work to a fresh session. Use when the user, session-budget banner, or child runtime cap requests /session-handoff."
 ---
 
 # Session Handoff

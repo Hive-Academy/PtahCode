@@ -1,6 +1,6 @@
 ---
 name: dotnet-solution-initializer
-description: Bootstraps a new .NET workspace — discovery, a phased roadmap and a foundation-only scaffold. Use when starting a new .NET, ASP.NET Core or Blazor project, or adding .NET to an existing or Nx workspace; Nx setup goes to nx-dotnet-workspace. Not for NestJS and Angular or React SaaS stacks — use saas-workspace-initializer.
+description: "Bootstraps .NET workspaces. Use to start .NET, ASP.NET Core, or Blazor projects, or add .NET to an existing workspace."
 ---
 
 # .NET Solution Initializer

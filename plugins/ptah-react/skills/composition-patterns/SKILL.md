@@ -1,6 +1,6 @@
 ---
 name: composition-patterns
-description: React component composition patterns. Use when refactoring boolean prop proliferation, designing reusable component APIs or libraries, or working with compound components and context providers. Not for performance tuning — use react-best-practices.
+description: "React component composition patterns. Use for boolean-prop refactors, reusable APIs, compound components, or context providers."
 ---
 
 # React Composition Patterns

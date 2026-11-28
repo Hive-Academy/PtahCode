@@ -1,6 +1,6 @@
 ---
 name: researcher-expert
-description: "Answers a bounded technical question with cited evidence and writes research-report.md: the options, what each costs here, the decision it supports, and what is still unknown. Use when a choice depends on facts nobody on the task has yet — an unfamiliar library or API, a version or breaking change, a failure whose cause is not in this repository, a comparison between two approaches — or when the architect needs an answer before it can design. Do not use to design the solution, to write code, or to look up something one file read would settle."
+description: "Answers bounded technical questions with cited evidence and open questions. Use to write research-report.md. Not for implementation plans or task decomposition."
 model: sonnet
 ---
 # Research Expert

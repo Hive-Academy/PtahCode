@@ -1,6 +1,6 @@
 ---
 name: humanize-library
-description: 'Behavior-preserving refactor that makes an existing library, module or folder readable — small focused files, no duplication, clear names, SOLID. Use when asked to humanize, clean up, split large files or remove duplication at a path. Not for new features or bug fixes.'
+description: "Refactors libraries for clarity while preserving behavior. Use to clean up, split files, or remove duplication at a path."
 ---
 
 # Humanize Library

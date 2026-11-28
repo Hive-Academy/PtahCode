@@ -1,6 +1,6 @@
 ---
 name: agent-lanes
-description: 'Contract for background CLI agent lanes via the ptah_agent_* tools. Use when a task spawns or resumes a lane, or checks, messages, recovers or verifies one, even if it never names a tool, orchestration or tribunal. Load before any ptah_agent_spawn. This is the mechanic orchestration and tribunal load for lane work, not a substitute for the engineering workflow or for a multi-vendor panel.'
+description: "Ptah CLI agent-lane contract. Use when spawning, resuming, checking, messaging, recovering, or verifying background lanes."
 ---
 
 # Agent Lanes
@@ -51,12 +51,14 @@ That sample is one machine's output at one moment — yours will differ.
 | `deliverables`        | The files the lane MUST write. Relative to `taskFolder` when set, else to `workingDirectory`. Pass it whenever the lane owes you a file — it is what makes the completion signal (§4) able to say the work was actually done.                                         |
 | `timeout`             | Inactivity window in milliseconds: the lane is stopped after this long with no output. Default one hour, no maximum; `0` disables it. Pass a value well under an hour (20 min, `1200000`, is a good default); a lane that needs more than that is too big — split it. |
 | `resume_session_id`   | Only per §5.                                                                                                                                                                                                                                                          |
+| `accountSelection`    | Claude CLI only: omitted uses stored/login, `ambient` uses login, `named` + `profileId` requires a fresh `cli: "claude"` lane; named selection is refused with `ptahCliId`, other CLIs or resume. |
+| `effort`              | One of `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; overrides the CLI effort setting.                                                                                                           |
 
 A user-pinned spawn args line (lane, model) is passed through unchanged. Before a lane spawn,
 the orchestrator may call `ptah_route_decide` as described at orchestration Gate 0.1. Pass
 `taskKind` and `routingSource` from its chosen row on `ptah_agent_spawn`; omit them when
 no routed row exists. If `ptah_route_decide` is not listed, skip it silently. `ptah_agent_spawn`
-rejects any key not listed here — pass only the documented parameters.
+accepts only documented parameters; advanced controls are listed below.
 Consume the rest of the chosen row too: the one-sentence `explanation`, `candidates[]`
 (every candidate `chosen`, `ranked` or `excluded` with a named rule, `user-rule:<id>`
 for a routing rule), the top-level `excluded` list, and `fallbackCause`
@@ -133,6 +135,13 @@ told where to write dumps its answer into the reply and skips the file.
 
 When the work calls for a role, pass it as the `role` parameter — never paste a role template into
 `task`. Spawning without `role` is valid when the workspace has no roles generated.
+
+Advanced spawn controls: `accountSelection` routes fresh Claude CLI lanes; `route` forwards IDs from
+`ptah_route_decide`; `idempotencyKey` replays an identical in-flight spawn for up to 120 seconds,
+while `force` overrides a reported limit only when it is known to be wrong and always starts a new lane. Permission, network and timeout overrides are
+CLI-specific and unsupported permission or network choices are refused. For HTTP, each wait is
+capped at 45 seconds; repeat while active. If a completion signal is unavailable, recover with
+`ptah_agent_status` and `ptah_agent_read`.
 
 ## 4. Run
 

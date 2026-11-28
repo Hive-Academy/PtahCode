@@ -1,6 +1,6 @@
 ---
 name: backend-developer
-description: "Writes and changes server-side code in this repository — services, request and message handlers, data access, background work, and the contracts between them — following the patterns the repository already uses rather than a preferred stack. Use when a task assigns files in the server, service, API or persistence layers; when the request names a service, controller, handler, repository, migration, queue, scheduled job, dependency registration or boundary validation schema; or when a batch in batches.md is marked for backend-developer. Not for user-interface code, and not for build or delivery pipelines."
+description: "Implements server-side services, APIs, persistence, and background work. Use for backend files or contracts. Not for UI or delivery pipelines."
 model: opus
 disallowedTools: mcp__firecrawl
 ---
