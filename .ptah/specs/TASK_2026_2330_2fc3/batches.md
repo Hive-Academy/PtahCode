@@ -464,6 +464,11 @@ Edge cases:
 ### Task 11.1: `SetupRunsListComponent` and Home wiring — PENDING
 ### Task 11.2: Step link on `stepTarget`; delete resume store, found card, unused banner — PENDING
 
+- User decision 2026-11-28 on Batch 11 proposed removals: B (age hint, .gitignore hint) and C
+  (static `onboardingStepLink` table kept until Batches 12/14) APPROVED. A REJECTED: a completed
+  analysis saved on disk with no run record must get a Home row — add store-side adoption of
+  completed disk analyses in `SetupRunStore` (store split batch or a follow-up before Batch 14).
+
 ## Batch 12: Analysis re-run and team-builder coordinator — PENDING
 
 - Shape: logic
@@ -491,7 +496,7 @@ Edge cases:
 ### Task 12.1: Record-driven analysis page and re-run — PENDING
 ### Task 12.2: `TeamBuilderRunCoordinator` and page adoption — PENDING
 
-## Batch 13: Chat-side entry: launcher, setup status, shell badge — PENDING
+## Batch 13: Chat-side entry: launcher, setup status, shell badge — IMPLEMENTED
 
 - Shape: logic
 - Estimated weight (tokens): ~25k
@@ -518,6 +523,12 @@ Edge cases:
 ### Task 13.1: Remove the launcher; `SetupStatusStore` via the port — PENDING
 ### Task 13.2: Shell Setup badge and `openSetupHub` delegation — PENDING
 ### Task 13.3: Fallback when the token is absent (VS Code, tests) — PENDING
+
+- Result: implementer ollama-cloud; reviewer codex. 6/10 → round 1 8/10 → round 2 8/10 →
+  coordinator correction (router snapshot) 8/10 → user-approved extra correction (last successful
+  navigation id) 9/10 APPROVED. Launcher deleted (no callers left). Checks: lint,typecheck and
+  --related chat-ui + chat; typecheck-templates passed after round 1 — re-run before the push
+  (round 2 changed the back-button binding; onboarding was mid-edit by Batch 9 at commit time).
 
 ## Batch 14: App wiring, validator switch and cleanup — PENDING
 

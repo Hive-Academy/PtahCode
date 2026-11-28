@@ -8,13 +8,11 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import {
-  isActiveWorkspaceTabSet,
-  TabManagerService,
-} from '@ptah-extension/chat-state';
-import {
   ClaudeRpcService,
   ElectronLayoutService,
   PluginCatalogService,
+  SETUP_RUN_ENTRY,
+  SurfaceRouterService,
   VSCodeService,
   WorkspaceScopeService,
 } from '@ptah-extension/core';
@@ -23,7 +21,6 @@ import type {
   SetupStatusGetResponse,
 } from '@ptah-extension/shared';
 import { z } from 'zod';
-import { GenerationWorkflowLauncherService } from '../../services/generation-workflow-launcher.service';
 
 /**
  * The one next step the readiness ring offers. The screen maps it to the
@@ -88,14 +85,14 @@ function toScanFacts(data: unknown): Omit<ScanSnapshot, 'key'> | null {
 export class SetupStatusStore {
   private readonly rpc = inject(ClaudeRpcService);
   private readonly router = inject(Router);
+  private readonly surfaceRouter = inject(SurfaceRouterService);
   private readonly catalog = inject(PluginCatalogService);
   private readonly scope = inject(WorkspaceScopeService);
-  private readonly tabs = inject(TabManagerService);
   private readonly vscode = inject(VSCodeService);
   private readonly electronLayout = inject(ElectronLayoutService);
-  private readonly generationLauncher = inject(
-    GenerationWorkflowLauncherService,
-  );
+  // Optional by design: a host that does not install the port (the VS Code
+  // webview without its provider, a unit test) falls back to bare /onboarding.
+  private readonly setupEntry = inject(SETUP_RUN_ENTRY, { optional: true });
 
   private readonly snapshot = signal<{
     key: string;
@@ -305,22 +302,16 @@ export class SetupStatusStore {
     this.launching.set(true);
     this.launchError.set(null);
     try {
-      const config = this.vscode.config();
-      const workspacePath =
-        this.tabs.activeWorkspacePath ?? config.workspaceRoot;
-      const result = isActiveWorkspaceTabSet(
-        workspacePath,
-        this.tabs.activeWorkspacePath,
-        config.workspaceRoot,
-        config.isVSCode,
-      )
-        ? await this.generationLauncher.open({
-            workspacePath,
-            workflow,
-            origin: 'independent-start',
-          })
-        : { outcome: 'failed' as const };
-      if (result.outcome === 'failed')
+      // The port attaches to the workflow's existing run or opens its entry
+      // step. Without it, the bare onboarding surface is the same fallback
+      // `launchWizard()` uses, requested through the surface router so the
+      // outcome is typed like the port's.
+      const outcome = this.setupEntry
+        ? await this.setupEntry.openWorkflow(workflow, 'independent-start')
+        : await this.surfaceRouter.navigateToSurface('onboarding');
+      // `cancelled` belongs to the newer navigation that superseded this
+      // click; only a typed `failed` outcome is this launch's failure.
+      if (outcome === 'failed')
         this.launchError.set('Could not open generation. Please try again.');
     } catch {
       this.launchError.set('Could not open generation. Please try again.');

@@ -33,7 +33,7 @@ import {
   Injector,
 } from '@angular/core';
 import { DOCUMENT, NgComponentOutlet } from '@angular/common';
-import { RouterOutlet } from '@angular/router';
+import { Router, RouterOutlet } from '@angular/router';
 import {
   LucideAngularModule,
   BarChart3,
@@ -51,6 +51,7 @@ import {
   ElectronLayoutService,
   VSCodeService,
   AppStateManager,
+  SETUP_RUN_ENTRY,
   SurfaceRouterService,
   NOTIFICATION_FOCUS_ROUTER,
 } from '@ptah-extension/core';
@@ -209,6 +210,29 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
       .electron-tabs .tab {
         min-width: 2.5rem;
         padding-inline: 0.65rem;
+      }
+    }
+
+    /* Setup tab running hint (TASK_2026_2330). Same pulse as the ptah-status
+       run glyph: compositor properties only, off under reduced motion. */
+    .setup-running-dot {
+      flex: none;
+      width: 0.375rem;
+      height: 0.375rem;
+      border-radius: 9999px;
+      background-color: var(--ptah-state-info);
+      animation: setup-run-pulse var(--ptah-status-pulse-duration)
+        var(--ptah-ease-standard) infinite;
+    }
+    @keyframes setup-run-pulse {
+      50% {
+        opacity: 0.45;
+        transform: scale(0.75);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .setup-running-dot {
+        animation: none;
       }
     }
   `,
@@ -370,11 +394,30 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
                     : null
                 "
                 title="Setup"
-                aria-label="Setup"
+                [attr.aria-label]="setupTabLabel()"
                 (click)="openSetupHub()"
               >
                 <lucide-angular [img]="WrenchIcon" class="w-3.5 h-3.5" />
                 <span class="tab-label whitespace-nowrap">Setup</span>
+                <!-- A hint, not a button: the tab label names the count. -->
+                @if (setupAttentionCount() > 0) {
+                  <span
+                    ptahBadge
+                    tone="warn"
+                    size="xs"
+                    count
+                    data-testid="setup-tab-attention"
+                    aria-hidden="true"
+                    >{{ setupAttentionCount() }}</span
+                  >
+                }
+                @if (setupRunningCount() > 0) {
+                  <span
+                    class="setup-running-dot"
+                    data-testid="setup-tab-running"
+                    aria-hidden="true"
+                  ></span>
+                }
               </button>
             }
           </div>
@@ -410,7 +453,7 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective } from
                 type="button"
                 ptahIconButton label="Back to welcome"
                 data-test="config-back-to-welcome"
-                (click)="appState.setCurrentView('chat')"
+                (click)="backToWelcome()"
               >
                 <lucide-angular
                   [img]="ArrowLeftIcon"
@@ -606,7 +649,11 @@ export class ElectronShellComponent {
       bell.openPanel();
       return;
     }
+    // No panel yet: remember the request for the effect above. The fallback
+    // is a view switch, so it claims the navigation like every other shell
+    // entry point.
     this.pendingNotificationOpen.set(true);
+    this.beginShellNavigation();
     this.appState.setCurrentView('chat');
   }
 
@@ -615,6 +662,7 @@ export class ElectronShellComponent {
   private readonly vscodeService = inject(VSCodeService);
   protected readonly appState = inject(AppStateManager);
   private readonly surfaceRouter = inject(SurfaceRouterService);
+  private readonly router = inject(Router);
   private readonly injector = inject(Injector);
   private readonly electronTabs =
     viewChild<ElementRef<HTMLElement>>('electronTabs');
@@ -746,6 +794,39 @@ export class ElectronShellComponent {
     return `Machines, ${pending} ${pending === 1 ? 'approval' : 'approvals'} waiting`;
   });
 
+  /**
+   * The Setup entry port (TASK_2026_2330). Optional by design: a host that
+   * does not install it (a unit test, or a host without the provider) makes
+   * both counts read 0 and `openSetupHub` fall back to bare Home.
+   */
+  private readonly setupEntry = inject(SETUP_RUN_ENTRY, { optional: true });
+  /**
+   * Monotonic id of the newest shell navigation intent (a tab click, the back
+   * button, a Setup click). A Setup click whose port settles late compares its
+   * own token against this counter before the Home fallback, so a failure
+   * that arrives after a newer navigation started never replaces that
+   * destination. No timer and no polling: only shell entry points bump it.
+   */
+  private shellNavigationId = 0;
+
+  /** Claims the navigation: bumps {@link shellNavigationId} and returns it. */
+  private beginShellNavigation(): number {
+    return ++this.shellNavigationId;
+  }
+  /** Runs that need input plus terminal runs not opened yet; drives the badge. */
+  protected readonly setupAttentionCount = computed(
+    () => this.setupEntry?.attentionCount() ?? 0,
+  );
+  /** Setup runs still running; drives the tab's pulsing dot. */
+  protected readonly setupRunningCount = computed(
+    () => this.setupEntry?.runningCount() ?? 0,
+  );
+  protected readonly setupTabLabel = computed(() => {
+    const attention = this.setupAttentionCount();
+    if (attention === 0) return 'Setup';
+    return `Setup: ${attention} ${attention === 1 ? 'run needs' : 'runs need'} attention`;
+  });
+
   private readonly document = inject(DOCUMENT);
 
   /** Retry of the deferred welcome: restarts the renderer (see `@error`). */
@@ -756,33 +837,103 @@ export class ElectronShellComponent {
   readonly isMac = this.vscodeService.config().platform === 'darwin';
 
   onCanvasTab(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('chat');
   }
 
   openDashboard(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('analytics');
   }
 
   openTasks(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('tasks');
   }
 
   openReviews(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('review-runs');
   }
 
   openMachines(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('machines');
   }
   openApps(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('apps');
   }
 
   public openCommandCenter(): void {
+    this.beginShellNavigation();
     this.appState.setCurrentView('command-center');
   }
 
-  openSetupHub(): void {
-    this.appState.setCurrentView('onboarding');
+  /** Back to the welcome view: a shell navigation like every tab click. */
+  backToWelcome(): void {
+    this.beginShellNavigation();
+    this.appState.setCurrentView('chat');
+  }
+
+  /**
+   * Opens Setup on the active run's current step through the entry port.
+   *
+   * Outcome contract (`surface-router.service.ts`): `cancelled` belongs to the
+   * newer navigation that superseded this click, so this request must not act
+   * on it; `navigated` and `already-there` need nothing. Only `failed` — or a
+   * port call that throws or rejects, which the port is not required to
+   * convert — falls back to bare Home. Without the port (a test, or a host
+   * that does not install it) the app-state switch is the fallback, as before
+   * the port existed.
+   *
+   * The fallback also carries an ownership token from
+   * {@link beginShellNavigation}: the port may settle long after the click,
+   * and by then a newer shell navigation (another tab, a second Setup click,
+   * the back button) may own the screen. A stale failure must not replace
+   * that destination with Setup Home, so it returns without acting.
+   */
+  async openSetupHub(): Promise<void> {
+    const intent = this.beginShellNavigation();
+    const entry = this.setupEntry;
+    if (!entry) {
+      this.appState.setCurrentView('onboarding');
+      return;
+    }
+    const navigationAtClick = this.router.lastSuccessfulNavigation()?.id;
+    const viewAtClick = this.appState.currentView();
+    try {
+      if ((await entry.openSetup()) !== 'failed') return;
+    } catch {
+      // Not an unhandled rejection: the same failure fallback owns it.
+    }
+    if (intent !== this.shellNavigationId) return;
+    // A navigation that did not pass through a shell handler (the global
+    // config actions, a host SWITCH_VIEW, a direct router call) also owns
+    // the screen once it starts or lands. The failed Setup attempt changed
+    // nothing, so any difference means a newer navigation won. The id of the
+    // last successful navigation (not the URL) also catches a round trip
+    // such as Settings -> Marketplace -> Settings.
+    if (
+      this.router.getCurrentNavigation() !== null ||
+      this.router.lastSuccessfulNavigation()?.id !== navigationAtClick ||
+      this.appState.currentView() !== viewAtClick
+    ) {
+      return;
+    }
+    this.fallBackToSetupHome();
+  }
+
+  /**
+   * The port could not open Setup. `setCurrentView('onboarding')` alone is a
+   * no-op while the workspace already owns the onboarding surface
+   * (`app-state.service.ts` stay branch), so a failed run-step navigation
+   * from a Setup child page would leave that child on screen. Ask the surface
+   * router for the bare onboarding root instead, behind the same
+   * `canSwitchViews` gate every app-state navigation entry point uses.
+   */
+  private fallBackToSetupHome(): void {
+    if (!this.appState.canSwitchViews()) return;
+    void this.surfaceRouter.navigateToSurface('onboarding');
   }
 }

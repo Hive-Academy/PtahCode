@@ -1,9 +1,3 @@
-export {
-  GenerationWorkflowLauncherService,
-  type GenerationWorkflowOpenRequest,
-  type GenerationWorkflowOpenResult,
-} from './lib/services/generation-workflow-launcher.service';
-
 /**
  * @ptah-extension/chat-ui — Reusable presentational chat components.
  *
