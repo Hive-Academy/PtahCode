@@ -19,11 +19,12 @@
 
 /**
  * The MCP namespace that must be enabled for the tool to be listed.
- * `core` tools are always listed. `ide` tools need IDE capabilities, `code` and
- * `browser` are namespaces a host may disable (see `buildToolDefinitions` in
- * `vscode-lm-tools`, which a spec compares with these values).
+ * `core` tools are always listed. `ide` tools need IDE capabilities, and
+ * `code`, `browser`, and `agent` are namespaces a host may disable (see
+ * `buildToolDefinitions` in `vscode-lm-tools`, which a spec compares with
+ * these values).
  */
-export type ToolGuidanceNamespace = 'core' | 'ide' | 'code' | 'browser';
+export type ToolGuidanceNamespace = 'core' | 'ide' | 'code' | 'browser' | 'agent';
 
 /** The three cells of the core prompt table. */
 export interface CoreSubstitutionWording {
@@ -53,6 +54,12 @@ export interface LaneSubstitutionWording {
   readonly order: number;
 }
 
+/** An extra use-case row for a tool that already has a primary row. */
+export interface ToolSubstitutionExtra {
+  readonly core?: CoreSubstitutionWording;
+  readonly lane?: LaneSubstitutionWording;
+}
+
 export interface ToolSubstitution {
   /** The ptah tool name. Unique across rows. */
   readonly tool: string;
@@ -67,6 +74,8 @@ export interface ToolSubstitution {
   readonly shell?: readonly string[];
   readonly core?: CoreSubstitutionWording;
   readonly lane?: LaneSubstitutionWording;
+  /** Additional task-specific rows for this tool (e.g. log/ignored-file usage). */
+  readonly also?: readonly ToolSubstitutionExtra[];
   /** The recorded reason a rendering has no row for this tool. */
   readonly omit?: { readonly core?: string; readonly lane?: string };
   /** When true, the tool description names the shell commands in `shell`. */
@@ -107,20 +116,20 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       call: 'ptah_search_files',
       why: 'Respects .gitignore, workspace-indexed',
     },
-    lane: { need: 'Find files by path', prefer: 'ptah_search_files', order: 2 },
+    lane: { need: 'Find files by path', prefer: 'ptah_search_files (native list/glob; shell find)', order: 2 },
   },
   {
     tool: 'ptah_get_diagnostics',
     namespace: 'core',
     priority: 1,
     core: {
-      insteadOf: 'Build to find errors',
-      call: 'ptah_get_diagnostics',
-      why: 'Workspace type-check; call once after edits, not on every step',
+      insteadOf: 'Build / `tsc --noEmit`',
+      call: 'ptah_get_diagnostics { files }',
+      why: 'Type-check; pass changed `files`; call once after edits, not on every step',
     },
     lane: {
-      need: 'Check errors after editing',
-      prefer: 'ptah_get_diagnostics scoped to changed files',
+      need: 'Check errors / tsc --noEmit',
+      prefer: 'ptah_get_diagnostics { files } (changed files)',
       order: 10,
     },
   },
@@ -136,10 +145,24 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       why: 'Text and constants, grouped by file with the enclosing function; `includeIgnored` + scoped `path` reaches node_modules',
     },
     lane: {
-      need: 'Find text/constant/usage (not grep/rg)',
-      prefer: 'ptah_grep',
+      need: 'Find text/constant/usage',
+      prefer: 'ptah_grep (includeIgnored + scoped path for node_modules)',
       order: 4,
     },
+    also: [
+      {
+        core: {
+          insteadOf: 'Grep ignored / `.ptah/tmp` logs',
+          call: 'ptah_grep { includeIgnored: true, path }',
+          why: 'Searches ignored workspace logs',
+        },
+        lane: {
+          need: 'Grep ignored logs',
+          prefer: 'ptah_grep { includeIgnored: true, path }',
+          order: 14,
+        },
+      },
+    ],
   },
   {
     tool: 'ptah_read_symbol',
@@ -153,10 +176,24 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       why: 'One declaration, or a line range (startLine/endLine); numbered, bounded',
     },
     lane: {
-      need: 'Read function or line range (not sed/cat)',
+      need: 'Read function or line range',
       prefer: 'ptah_read_symbol',
       order: 5,
     },
+    also: [
+      {
+        core: {
+          insteadOf: 'Tail / log range',
+          call: 'ptah_read_symbol { startLine, endLine }',
+          why: 'Bounded lines in logs or text',
+        },
+        lane: {
+          need: 'Read log range',
+          prefer: 'ptah_read_symbol { startLine, endLine }',
+          order: 15,
+        },
+      },
+    ],
   },
   {
     tool: 'ptah_lsp_references',
@@ -210,6 +247,22 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       why: 'Token count, not byte count',
     },
     omit: { lane: LANE_KEPT_SHORT },
+  },
+  {
+    tool: 'ptah_inspect',
+    namespace: 'core',
+    priority: 3,
+    shell: ['cat', 'grep', 'git status', 'git diff --stat', 'git log'],
+    core: {
+      insteadOf: 'Chained reads / grep / git status, diff, log',
+      call: 'ptah_inspect { workspaceRoot?, ops }',
+      why: 'One bounded call; supports worktrees',
+    },
+    lane: {
+      need: 'Batch reads/search and read-only git status/diff/log',
+      prefer: 'ptah_inspect { workspaceRoot?, ops }',
+      order: 17,
+    },
   },
   {
     tool: 'ptah_web_search',
@@ -333,6 +386,21 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       why: 'Map of file → exported symbol names',
     },
     omit: { lane: LANE_KEPT_SHORT },
+  },
+  {
+    tool: 'ptah_run_check',
+    namespace: 'agent',
+    priority: 2,
+    core: {
+      insteadOf: 'Nx `test`/`lint`/`typecheck`/`build` (1 project)',
+      call: 'ptah_run_check { project, targets }',
+      why: 'Workspace-local Nx (`shell: false`), tail + log; Nx targets only, not arbitrary commands',
+    },
+    lane: {
+      need: 'Nx check on 1 project (test/lint/typecheck/build)',
+      prefer: 'ptah_run_check (Nx targets only, not arbitrary commands)',
+      order: 16,
+    },
   },
   {
     tool: 'ptah_browser_navigate',

@@ -1,0 +1,10 @@
+export const INSPECT_TOOL_NAME = 'ptah_inspect';
+export const INSPECT_MAX_OPS = 8;
+export const INSPECT_MAX_SECTION_CHARS = 8_000;
+export const INSPECT_MAX_RESULT_CHARS = 24_000;
+export const INSPECT_DEFAULT_READ_LINES = 120;
+export const INSPECT_MAX_READ_LINES = 400;
+export const INSPECT_DEFAULT_GREP_MATCHES = 30;
+export const INSPECT_MAX_GREP_MATCHES = 100;
+export const INSPECT_DEFAULT_LIST_LIMIT = 50;
+export const INSPECT_MAX_LIST_LIMIT = 200;

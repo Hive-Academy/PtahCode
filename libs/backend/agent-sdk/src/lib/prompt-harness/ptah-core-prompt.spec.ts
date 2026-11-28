@@ -13,7 +13,7 @@ import {
 
 describe('PTAH_CORE_SYSTEM_PROMPT', () => {
   it('stays within the measured token budget plus five percent', () => {
-    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(3645);
+    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(3652);
   });
 
   it('carries the MCP substitution section exactly once', () => {
@@ -35,6 +35,8 @@ describe('PTAH_CORE_SYSTEM_PROMPT', () => {
   });
 
   it('teaches the push signal instead of a polling loop', () => {
+    expect(PTAH_CORE_SYSTEM_PROMPT).toContain('ptah_agent_wait');
+    expect(PTAH_CORE_SYSTEM_PROMPT).toContain('never use shell sleep/poll loops');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('<agent-lane-completed>');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('status is `starting`');
     expect(PTAH_CORE_SYSTEM_PROMPT).toContain('`idempotencyKey` replays that lane');

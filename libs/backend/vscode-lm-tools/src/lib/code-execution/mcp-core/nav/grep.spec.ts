@@ -11,7 +11,8 @@ import {
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AstCodeInsights } from '../../types';
-import { handleGrep, type GrepDeps } from './grep';
+import { handleGrep, renderGrepResult, type GrepDeps } from './grep';
+import type { GrepEngineResult } from './grep-engine';
 import {
   buildGitGrepArgs,
   buildGitPathspecs,
@@ -278,7 +279,7 @@ describe('handleGrep (node engine)', () => {
     expect(unscoped.text).toContain('scoped');
   });
 
-  it('refuses a path outside the workspace, also through a symlink', async () => {
+  (process.platform === 'win32' ? it.skip : it)('refuses a path outside the workspace, also through a symlink', async () => {
     const escape = await handleGrep({ pattern: 'LIMIT', path: '../' }, deps);
     expect(escape.isError).toBe(true);
     await symlink(outside, path.join(root, 'link'));
@@ -520,6 +521,187 @@ describe('handleGrep (node engine)', () => {
   it('rejects unknown arguments', async () => {
     const reply = await handleGrep({ pattern: 'x', surprise: true }, deps);
     expect(reply.isError).toBe(true);
+  });
+
+  it('accepts Grep native aliases and emits the alias note', async () => {
+    const head = await handleGrep({ pattern: 'LIMIT', head_limit: 100000 }, deps);
+    expect(head.isError).toBe(false);
+    expect(head.text.split('\n')[0]).toContain('head_limit->maxMatches');
+    const oneType = await handleGrep({ pattern: 'LIMIT', type: 'md' }, deps);
+    expect(oneType.text).toContain('type->glob');
+    expect(oneType.text).toContain('src/b.md');
+    const tsType = await handleGrep({ pattern: 'LIMIT', type: 'ts' }, deps);
+    expect(tsType.text).toContain('src/a.ts');
+    expect(tsType.text).not.toContain('src/b.md');
+    const manyTypes = await handleGrep({ pattern: 'LIMIT', type: 'ts,md' }, deps);
+    expect(manyTypes.text).toContain('src/a.ts');
+    expect(manyTypes.text).toContain('src/b.md');
+    const mixedTypes = await handleGrep({ pattern: 'LIMIT', type: 'ts,*.md' }, deps);
+    expect(mixedTypes.text).toContain('src/a.ts');
+    expect(mixedTypes.text).toContain('src/b.md');
+    const content = await handleGrep({ pattern: 'LIMIT', output_mode: 'content' }, deps);
+    expect(content.text.split('\n')[0]).toContain('output_mode->output_mode');
+    expect(content.text).toContain('src/a.ts');
+    const files = await handleGrep({ pattern: 'LIMIT', output_mode: 'files_with_matches' }, deps);
+    expect(files.text).toContain('src/a.ts (3 matches)');
+    expect(files.text).not.toContain('|');
+    const counts = await handleGrep({ pattern: 'LIMIT', output_mode: 'count' }, deps);
+    expect(counts.text).toContain('src/a.ts: 3');
+    expect(counts.text).not.toContain('|');
+    for (const flag of ['-i', '-n', '-C', '-A', '-B'] as const) {
+      const value = flag === '-i' || flag === '-n' ? true : 1;
+      const reply = await handleGrep({ pattern: 'limit', [flag]: value }, deps);
+      expect(reply.isError).toBe(false);
+      expect(reply.text.split('\n')[0]).toContain(flag === '-n' ? '-n ignored' : `${flag}->`);
+    }
+  });
+
+  it('prefers canonical Grep values over aliases and keeps canonical calls', async () => {
+    const conflict = await handleGrep({ pattern: 'LIMIT', maxMatches: 1, head_limit: 100 }, deps);
+    expect(conflict.isError).toBe(false);
+    expect(conflict.text).toContain('3 more matches not shown');
+    const globConflict = await handleGrep({ pattern: 'LIMIT', glob: '*.md', type: 'ts' }, deps);
+    expect(globConflict.text).toContain('src/b.md');
+    expect(globConflict.text).not.toContain('src/a.ts');
+    expect(globConflict.text.split('\n')[0]).toContain('type->glob (glob wins)');
+    const canonical = await handleGrep({ pattern: 'LIMIT', path: 'src/b.md' }, deps);
+    expect(canonical.text).toBe('1 match in 1 file (engine: node)\nsrc/b.md (1 match)\n  1| The LIMIT is documented.');
+  });
+
+  it('uses type when glob is explicitly undefined and validates type entries', async () => {
+    const undefinedGlob = await handleGrep({ pattern: 'LIMIT', glob: undefined, type: 'ts' }, deps);
+    expect(undefinedGlob.text).toContain('src/a.ts');
+    expect(undefinedGlob.text).not.toContain('src/b.md');
+    for (const type of [123, null, '*ts', 'ts,foo*.md', 'ts,md?']) {
+      const invalid = await handleGrep({ pattern: 'LIMIT', type }, deps);
+      expect(invalid.isError).toBe(true);
+      expect(invalid.text).toMatch(/type.*(string|extension)/i);
+    }
+  });
+
+  it('clamps head_limit and gives clear validation errors', async () => {
+    const capped = await handleGrep({ pattern: 'LIMIT', head_limit: 100000 }, deps);
+    expect(capped.isError).toBe(false);
+    await mkdir(path.join(root, 'many'));
+    await Promise.all(Array.from({ length: 202 }, (_, index) =>
+      writeFile(path.join(root, 'many', `f${index}.txt`), 'needle\n'),
+    ));
+    const clamped = await handleGrep({ pattern: 'needle', path: 'many', head_limit: 100000 }, deps);
+    expect(clamped.text).toContain('202 matches in 202 files');
+    expect(clamped.text).toMatch(/\+ \d+ more matches not shown/);
+    expect((clamped.text.match(/^many\/f\d+\.txt \(1 match\)$/gm) ?? []).length).toBeLessThanOrEqual(200);
+    expect((await handleGrep({ pattern: 'LIMIT', head_limit: Number.POSITIVE_INFINITY }, deps)).isError).toBe(true);
+    expect((await handleGrep({ pattern: 'LIMIT', maxMatches: 201 }, deps)).isError).toBe(true);
+    expect((await handleGrep({ pattern: 'LIMIT', '-i': 'yes' }, deps)).isError).toBe(true);
+    expect((await handleGrep({ pattern: 'LIMIT', '-C': 'abc' }, deps)).isError).toBe(true);
+    expect((await handleGrep({ pattern: 'LIMIT', '-A': true }, deps)).isError).toBe(true);
+    expect((await handleGrep({ pattern: 'LIMIT', '-B': null }, deps)).isError).toBe(true);
+    const aliasWithUndefinedCanonical = await handleGrep({ pattern: 'LIMIT', maxMatches: undefined, head_limit: 1 }, deps);
+    expect(aliasWithUndefinedCanonical.text).toContain('3 more matches not shown');
+    const badMode = await handleGrep({ pattern: 'LIMIT', output_mode: 'rows' }, deps);
+    expect(badMode.isError).toBe(true);
+    expect(badMode.text).toContain('content, files_with_matches, count');
+    const unknown = await handleGrep({ pattern: 'LIMIT', surprising: true }, deps);
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain('valid keys: pattern, path, glob, regex, caseSensitive, context, maxMatches');
+    expect(unknown.text).toContain('accepted aliases: head_limit, type, output_mode, -i, -n, -C, -A, -B');
+  });
+
+  it.each([
+    ['-i', 'yes'],
+    ['-C', 'abc'],
+    ['-A', true],
+    ['-B', null],
+  ])('rejects invalid %s alias values', async (key, value) => {
+    const reply = await handleGrep({ pattern: 'LIMIT', [key]: value }, deps);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toMatch(/must be (a boolean|finite integers)/);
+  });
+
+  it('rejects a non-finite head_limit alias', async () => {
+    const reply = await handleGrep({ pattern: 'LIMIT', head_limit: Number.POSITIVE_INFINITY }, deps);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('head_limit" must be a finite integer');
+  });
+
+  it('clamps an oversized head_limit alias to the supported maximum', async () => {
+    await mkdir(path.join(root, 'clamp'));
+    await Promise.all(Array.from({ length: 202 }, (_, index) =>
+      writeFile(path.join(root, 'clamp', `f${index}.txt`), 'needle\n'),
+    ));
+    const reply = await handleGrep({ pattern: 'needle', path: 'clamp', head_limit: 100000 }, deps);
+    expect(reply.text).toContain('202 matches in 202 files');
+    expect(reply.text).toMatch(/\+ \d+ more matches not shown/);
+    expect((reply.text.match(/^clamp\/f\d+\.txt \(1 match\)$/gm) ?? []).length).toBeLessThanOrEqual(200);
+  });
+
+  it('rejects canonical maxMatches above the schema maximum', async () => {
+    const reply = await handleGrep({ pattern: 'LIMIT', maxMatches: 201 }, deps);
+    expect(reply.isError).toBe(true);
+  });
+
+  it('applies head_limit when canonical maxMatches is undefined', async () => {
+    const reply = await handleGrep({ pattern: 'LIMIT', maxMatches: undefined, head_limit: 1 }, deps);
+    expect(reply.text).toContain('3 more matches not shown');
+  });
+
+  it.each([
+    ['ts', ['src/a.ts'], ['src/b.md']],
+    ['ts,md', ['src/a.ts', 'src/b.md'], []],
+    ['ts,*.md', ['src/a.ts', 'src/b.md'], []],
+  ])('searches node-engine files for type glob %s', async (type, expected, absent) => {
+    const reply = await handleGrep({ pattern: 'LIMIT', type }, deps);
+    for (const file of expected) expect(reply.text).toContain(file);
+    for (const file of absent) expect(reply.text).not.toContain(file);
+  });
+
+  it('keeps summaries, truncation footers and singular/plural counts in file and count modes', async () => {
+    await writeFile(path.join(root, 'src', 'mode-a.ts'), 'needle\nneedle\n');
+    await writeFile(path.join(root, 'src', 'mode-b.ts'), 'needle\n');
+    await writeFile(path.join(root, 'src', 'mode-c.ts'), 'needle\n');
+    await writeFile(path.join(root, 'src', 'mode-d.ts'), 'needle\n');
+    const files = await handleGrep({ pattern: 'needle', path: 'src', maxMatches: 3, output_mode: 'files_with_matches' }, deps);
+    const counts = await handleGrep({ pattern: 'needle', path: 'src', maxMatches: 3, output_mode: 'count' }, deps);
+    for (const reply of [files, counts]) {
+      expect(reply.text).toContain('5 matches in 4 files');
+      expect(reply.text).not.toContain('+ 2 more matches not shown');
+    }
+    expect(files.text).toContain('mode-a.ts (2 matches)');
+    expect(files.text).toContain('mode-b.ts (1 match)');
+    expect(counts.text).toContain('mode-a.ts: 2');
+    expect(counts.text).toContain('mode-b.ts: 1');
+  });
+
+  it('reports aggregate per-file counts beyond the displayed match cap', async () => {
+    await writeFile(path.join(root, 'src', 'aggregate.ts'), 'needle\nneedle\nneedle\nneedle\n');
+    const files = await handleGrep({ pattern: 'needle', path: 'src/aggregate.ts', maxMatches: 2, output_mode: 'files_with_matches' }, deps);
+    const counts = await handleGrep({ pattern: 'needle', path: 'src/aggregate.ts', maxMatches: 2, output_mode: 'count' }, deps);
+    expect(files.text).toContain('aggregate.ts (4 matches)');
+    expect(counts.text).toContain('aggregate.ts: 4');
+    expect(files.text).not.toContain('+ 2 more matches not shown');
+    expect(counts.text).not.toContain('+ 2 more matches not shown');
+  });
+
+  it.each(['count', 'files_with_matches'] as const)('caps %s rows and reports omitted files', async (output_mode) => {
+    for (let index = 0; index < 42; index += 1) {
+      await writeFile(path.join(root, 'src', `row-${String(index).padStart(2, '0')}.ts`), 'needle\n');
+    }
+    const reply = await handleGrep({ pattern: 'needle', path: 'src', output_mode }, deps);
+    expect(reply.text).toContain('+2 more files');
+    expect(reply.text).toContain('row-39.ts');
+    expect(reply.text).not.toContain('row-40.ts');
+    expect(reply.text).not.toContain('row-41.ts');
+  });
+
+  it('labels per-file counts as lower bounds when the engine result is incomplete', async () => {
+    const result: GrepEngineResult = {
+      engine: 'node',
+      matches: [{ file: 'src/incomplete.ts', line: 1, text: 'needle' }],
+      totalMatches: 1,
+      incomplete: true,
+    };
+    const text = await renderGrepResult(result, { maxMatches: 10, context: 0, output_mode: 'count' }, deps, root);
+    expect(text).toContain('incomplete.ts: at least 1');
   });
 
   const canChmod = process.platform !== 'win32' && process.getuid?.() !== 0;

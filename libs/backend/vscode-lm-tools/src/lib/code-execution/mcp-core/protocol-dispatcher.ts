@@ -227,6 +227,8 @@ import { describeZodIssues, handleRouteToolCall } from './route-tool-handlers';
 import { handleGrep } from './nav/grep';
 import { GREP_TOOL_NAME } from './nav/grep.limits';
 import { handleReadSymbol } from './nav/read-symbol';
+import { handleInspect } from './nav/inspect';
+import { INSPECT_TOOL_NAME } from './nav/inspect.limits';
 import { READ_SYMBOL_TOOL_NAME } from './nav/read-symbol.limits';
 import {
   OUTCOME_REPORT_TOOL_NAME,
@@ -672,6 +674,7 @@ const APPROVAL_PROMPT_TOOL_NAME = 'approval_prompt';
  */
 const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_search_files',
+  INSPECT_TOOL_NAME,
   READ_SYMBOL_TOOL_NAME,
   GREP_TOOL_NAME,
   'ptah_ast_analyze',
@@ -685,6 +688,9 @@ const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_relevance_rank_files',
   'ptah_agent_list',
   'ptah_agent_spawn',
+  'ptah_agent_read',
+  'ptah_agent_status',
+  'ptah_session_handoff_ack',
 ]);
 
 /** Eager only where VS Code IDE capabilities are present. */
@@ -1196,7 +1202,8 @@ async function handleIndividualTool(
       }
 
       case READ_SYMBOL_TOOL_NAME:
-      case GREP_TOOL_NAME: {
+      case GREP_TOOL_NAME:
+      case INSPECT_TOOL_NAME: {
         // Validation, path containment and bounds live in the handlers.
         // The caller-declared root is a URL segment (caller input), so it
         // is used only once it resolves inside an open folder of the host.
@@ -1210,6 +1217,12 @@ async function handleIndividualTool(
           // its worktree, not the main checkout.
           defaultWorkspaceRoot: async () =>
             callerRoot.root ?? (await ptahAPI.workspace.getInfo())?.path,
+          allowedWorkspaceRoots: async () => callerRoot.root
+            ? [callerRoot.root]
+            : [
+                (await ptahAPI.workspace.getInfo())?.path,
+                ...knownWorkspaceFolders(deps),
+              ].filter((root): root is string => !!root && root.trim() !== ''),
         };
         // A supplied `workspaceRoot` is the containment boundary of the
         // handlers, so it must lie inside a root the host or the caller
@@ -1239,8 +1252,9 @@ async function handleIndividualTool(
             );
           }
         }
-        const reply =
-          name === GREP_TOOL_NAME
+        const reply = name === INSPECT_TOOL_NAME
+          ? await handleInspect(args, navDeps)
+          : name === GREP_TOOL_NAME
             ? await handleGrep(args, navDeps)
             : await handleReadSymbol(args, navDeps);
         return reply.isError

@@ -49,7 +49,7 @@ const ELLIPSIS = '...';
 const TOOL_CELL = /^([A-Za-z][A-Za-z0-9_]*)(?:\s*\{[^}]*\})?$/;
 /** A Markdown table separator row, e.g. `|------|:---:|`. */
 const TABLE_SEPARATOR = /^\|(\s*:?-+:?\s*\|)+$/;
-const FALLBACK_LINE = /^Fall back to\b/;
+const FALLBACK_LINE = /^Fall back\b/i;
 
 interface Substitution {
   readonly insteadOf: string;
