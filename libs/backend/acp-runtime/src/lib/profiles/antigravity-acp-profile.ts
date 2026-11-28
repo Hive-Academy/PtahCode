@@ -40,6 +40,7 @@ import type {
   McpServer,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
+import type { ProviderMcpAttachment } from '@ptah-extension/provider-session-contracts';
 import { toAcpMcpServer } from '../acp-mcp-servers';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type {
@@ -233,6 +234,33 @@ function describeAntigravityError(
 const PTAH_MCP_ATTACHMENT_NAME = 'ptah';
 
 /**
+ * The caller identity marker the HTTP MCP gate reads off the URL query
+ * string (`extractCallerCli`, `mcp-http/http-server.handler.ts`) into
+ * `MCPRequest._callerCli`. Keep this literal in sync with the one
+ * `protocol-dispatcher.ts` compares against — the two files do not share an
+ * import so that `vscode-lm-tools` (runtime-agnostic) never depends on
+ * `acp-runtime` (an ACP-specific adapter).
+ */
+const ANTIGRAVITY_CALLER_CLI = 'antigravity';
+
+/**
+ * Tag Ptah's own HTTP MCP attachment's URL with a `cli=antigravity` query
+ * marker so the server can tell this one connection is agy. A stdio
+ * attachment has no URL and is returned unchanged (never reached today:
+ * Ptah's own attachment is always `http`, per the class doc above).
+ */
+function taggedForAntigravity(
+  attachment: ProviderMcpAttachment,
+): ProviderMcpAttachment {
+  if (attachment.type === 'stdio') return attachment;
+  const separator = attachment.url.includes('?') ? '&' : '?';
+  return {
+    ...attachment,
+    url: `${attachment.url}${separator}cli=${ANTIGRAVITY_CALLER_CLI}`,
+  };
+}
+
+/**
  * agy's system-prompt hook: `initialize` advertises
  * `agentCapabilities._meta.antigravity.systemPrompt.append: true`
  * (`antigravity-p2-handshake.ndjson`), and `session/new` then takes
@@ -288,13 +316,26 @@ export const antigravityAcpProfile: AcpVendorProfile = {
    * server named {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME} is dropped: it would
    * collide with Ptah's own entry and take over its `mcp_ptah_lane_` tools,
    * which the plan and auto-edit grants trust.
+   *
+   * Ptah's own entry's URL also gets {@link taggedForAntigravity}'s marker
+   * (TASK_2026_2331): agy silently drops any Ptah MCP tool declaration over
+   * roughly 2.1 KB (name + description + JSON schema), which breaks tools
+   * like `ptah_session_start` and `ptah_agent_spawn` agy needs to run a lane.
+   * `extractCallerCli` (`vscode-lm-tools` `mcp-http/http-server.handler.ts`)
+   * reads the marker back off the URL the same way it already reads
+   * `/session/{id}` into `_callerSessionId`, and `handleToolsList`
+   * (`mcp-core/protocol-dispatcher.ts`) shortens only this caller's oversized
+   * tool descriptions. No other caller's URL carries the marker, so every
+   * other client's tool list is unaffected.
    */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
     return (options.mcp ?? [])
       .filter((attachment) => attachment.name !== ANTIGRAVITY_ACP_PTAH_MCP_NAME)
       .map((attachment) =>
         toAcpMcpServer(
-          attachment,
+          attachment.name === PTAH_MCP_ATTACHMENT_NAME
+            ? taggedForAntigravity(attachment)
+            : attachment,
           attachment.name === PTAH_MCP_ATTACHMENT_NAME
             ? ANTIGRAVITY_ACP_PTAH_MCP_NAME
             : attachment.name,

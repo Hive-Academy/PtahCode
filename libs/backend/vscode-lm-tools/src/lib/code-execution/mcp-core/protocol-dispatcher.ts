@@ -260,6 +260,10 @@ import {
   MCP_CRON_WRITE_DENIED_MESSAGE,
 } from './mcp-caller-policy';
 import { composeEffectiveToolList } from './effective-tool-list';
+import {
+  ANTIGRAVITY_CALLER_CLI,
+  compactToolsForAntigravity,
+} from './antigravity-tool-compaction';
 import { childPhasePolicyRefusal } from './child-phase-policy';
 import {
   MCP_CALLER_FORBIDDEN_CODE,
@@ -592,7 +596,7 @@ async function handleToolsList(
 ): Promise<MCPResponse> {
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
-  const tools = composeEffectiveToolList(
+  let tools = composeEffectiveToolList(
     resolveMcpCaller(request),
     profile,
     capability,
@@ -602,6 +606,14 @@ async function handleToolsList(
 
   markEagerTools(tools, deps, profile);
   declareResultBudgets(tools);
+  // agy silently drops any oversized tool declaration (TASK_2026_2331); shorten
+  // only this caller's descriptions, as a separate post-processing pass. Every
+  // other caller's `tools` array is untouched. Reassigned, not mutated in
+  // place: some tool definitions are module-level singletons shared by every
+  // caller, so compactToolsForAntigravity returns a new array instead.
+  if (request._callerCli === ANTIGRAVITY_CALLER_CLI) {
+    tools = compactToolsForAntigravity(tools);
+  }
   // Appended after the eager and budget passes: gateway tools stay deferred
   // and pass through unchanged, after Ptah's byte-stable list.
   const gatewayTools = await listGatewayToolsForList(

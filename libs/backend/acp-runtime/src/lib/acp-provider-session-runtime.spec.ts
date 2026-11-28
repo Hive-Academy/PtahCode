@@ -702,7 +702,9 @@ describe('createAcpProviderSessionRuntime: MCP attachments', () => {
       {
         type: 'http',
         name: ANTIGRAVITY_ACP_PTAH_MCP_NAME,
-        url: 'http://127.0.0.1:5000/mcp',
+        // Tagged with the `cli` marker (TASK_2026_2331) so the MCP server can
+        // shorten oversized tool declarations for this caller only.
+        url: 'http://127.0.0.1:5000/mcp?cli=antigravity',
         headers: [{ name: 'Authorization', value: 'Bearer t' }],
       },
       {

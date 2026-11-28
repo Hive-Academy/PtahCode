@@ -26,6 +26,13 @@ jest.mock('@ptah-extension/agent-sdk', () => {
 
 describe('Codex chat approval presentation', () => {
   const sessionId = SessionId.from('22222222-2222-4222-8222-222222222222');
+  // A request can only reach `present()` with a real, webview-backed chat
+  // session (`sessionId` is always a validated `SessionId` on this path), so
+  // the truly-unroutable branch — neither `tabId` nor `sessionId` parses as a
+  // UUID — is unreachable from a real chat session after the routability fix.
+  // This constant forces that branch purely to exercise its timeout mechanics;
+  // it does not represent a reachable production state.
+  const forcedInvalidSessionId = 'not-a-real-session' as unknown as SessionId;
   const now = 1_700_000_000_000;
   const choices = ['deny', 'allowOnce', 'allowWithInput', 'alwaysAllow'] as const;
 
@@ -35,10 +42,10 @@ describe('Codex chat approval presentation', () => {
     jest.useRealTimers();
   });
 
-  function request(): CodexApprovalRequest {
+  function request(sid: SessionId = sessionId): CodexApprovalRequest {
     return {
       contextId: 'context', processGeneration: 2,
-      threadId: sessionId, turnId: 'turn', requestId: 5,
+      threadId: sid, turnId: 'turn', requestId: 5,
       toolId: 'native-item-5', kind: 'command',
       normalizedHome: '/workspace', workspaceId: '/workspace',
       providerId: 'openai-codex', message: 'Run command',
@@ -46,7 +53,7 @@ describe('Codex chat approval presentation', () => {
     };
   }
 
-  function harness(tab = 'gw-conversation', expiresAt?: number) {
+  function harness(tab = 'gw-conversation', expiresAt?: number, sid: SessionId = sessionId) {
     const broadcastMessage = jest.fn<Promise<void>, [string, unknown]>()
       .mockResolvedValue(undefined);
     const publish = jest.fn<void, [PermissionPromptLifecycleEvent]>();
@@ -68,7 +75,7 @@ describe('Codex chat approval presentation', () => {
       clearTimer: (timer) => clearTimeout(timer),
     });
     const present = () => {
-      ports.presentation.present(sessionId, { ...request(), expiresAt }, [...choices]);
+      ports.presentation.present(sid, { ...request(sid), expiresAt }, [...choices]);
       const payload = broadcastMessage.mock.calls[0][1];
       if (typeof payload !== 'object' || payload === null || !('id' in payload)) {
         throw new Error('Missing permission request id');
@@ -77,15 +84,20 @@ describe('Codex chat approval presentation', () => {
       return payload.id;
     };
     return { ports, present, respond, publish, broadcastMessage, resolveAttention,
-      logger: Logger.prototype };
+      logger: Logger.prototype, sessionId: sid };
   }
 
   it('denies an unanswered card at 60 seconds and publishes timed-out', () => {
-    const h = harness();
+    // Forces the truly-unroutable branch (neither tabId nor sessionId parses
+    // as a UUID) to prove the 60-second timeout fallback still works when
+    // that branch is reached, even though real chat sessions always carry a
+    // valid SessionId and so cannot trigger it today — see
+    // `forcedInvalidSessionId` above.
+    const h = harness('gw-conversation', undefined, forcedInvalidSessionId);
     const wireId = h.present();
     jest.advanceTimersByTime(60_000);
     expect(h.respond).toHaveBeenCalledWith(
-      { sessionId, threadId: sessionId, requestId: '5' },
+      { sessionId: forcedInvalidSessionId, threadId: forcedInvalidSessionId, requestId: '5' },
       expect.objectContaining({ kind: 'codex', response: expect.objectContaining({
         decision: 'decline',
         reason: buildSystemAbortPermissionMessage('Bash',
@@ -97,6 +109,24 @@ describe('Codex chat approval presentation', () => {
       toolName: 'Bash', outcome: 'timed-out',
     });
     expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(false);
+  });
+
+  it('routes a card inline with no timeout when tabId is empty but sessionId is a valid UUID', () => {
+    // Reproduces the bug: ports.tabId() returns '' (the empty lifecycle().tabId
+    // case), which is non-UUID, but sessionId is a real webview-backed session.
+    // The fix must still take the routable branch, broadcast sessionId, and
+    // (matching Claude's inline "No timeout" card) never auto-decline it.
+    const h = harness('');
+    const wireId = h.present();
+    expect(h.broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.PERMISSION_REQUEST,
+      expect.objectContaining({ id: wireId, sessionId, timeoutAt: 0 }),
+    );
+    expect(h.publish).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+    jest.advanceTimersByTime(60_000);
+    expect(h.respond).not.toHaveBeenCalled();
+    expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(true);
   });
 
   it('denies a routable card at its earlier native deadline after renderer loss', () => {
@@ -117,26 +147,27 @@ describe('Codex chat approval presentation', () => {
     expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(false);
   });
 
-  it('accepts a response, publishes its UI outcome, and clears the timer', () => {
+  it('accepts a response on a routable card with no timer set', () => {
+    // A valid webview session is always routable now, so this never reaches
+    // the notifications-only lifecycle surface — promptLifecycle is only for
+    // the unroutable fallback and must stay untouched here. No expiresAt and
+    // routable means no auto-decline timer at all (the "No timeout" card).
     const h = harness();
     const wireId = h.present();
-    expect(jest.getTimerCount()).toBe(1);
+    expect(jest.getTimerCount()).toBe(0);
     expect(h.ports.handlePermissionResponse({ id: wireId, decision: 'allow' })).toBe(true);
     expect(h.respond).toHaveBeenCalledWith(
       { sessionId, threadId: sessionId, requestId: '5' },
       expect.objectContaining({ response: expect.objectContaining({ decision: 'accept' }) }),
     );
-    expect(h.publish).toHaveBeenLastCalledWith({
-      phase: 'resolved', requestId: wireId, routingHint: 'gw-conversation',
-      toolName: 'Bash', outcome: 'allowed',
-    });
+    expect(h.publish).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
     jest.advanceTimersByTime(60_000);
     expect(h.respond).toHaveBeenCalledTimes(1);
   });
 
   it.each(['rejected', 'throws'] as const)(
-    'consumes a %s reply and publishes aborted', (failure) => {
+    'consumes a %s reply on a routable card without the notification lifecycle', (failure) => {
       const h = harness();
       const wireId = h.present();
       if (failure === 'throws') {
@@ -149,10 +180,7 @@ describe('Codex chat approval presentation', () => {
         MESSAGE_TYPES.PERMISSION_AUTO_RESOLVED,
         { id: wireId, sessionId, toolName: 'command' },
       );
-      expect(h.publish).toHaveBeenLastCalledWith({
-        phase: 'resolved', requestId: wireId, routingHint: 'gw-conversation',
-        toolName: 'Bash', outcome: 'aborted',
-      });
+      expect(h.publish).not.toHaveBeenCalled();
       expect(h.logger.warn).toHaveBeenCalledWith(expect.any(String), {
         code: failure === 'throws' ? 'approval-response-failed' : 'approval-response-rejected',
       });
@@ -162,7 +190,9 @@ describe('Codex chat approval presentation', () => {
   );
 
   it('takes a dismissed prompt out of the timer queue', () => {
-    const h = harness();
+    // A native expiresAt gives this routable card an actual timer to clear;
+    // with no expiresAt a routable card has no timer at all (see above).
+    const h = harness(sessionId, now + 60_000);
     h.present();
     expect(jest.getTimerCount()).toBe(1);
     h.ports.presentation.dismiss(sessionId, request());
