@@ -139,6 +139,7 @@ interface PoolEntry {
   readonly profile: ProviderSessionProfileId;
   readonly session: ProviderSession;
   readonly method: 'new' | 'resume' | 'load';
+  readonly initialPermission: ProviderSessionOpenRequest['policy']['permission'];
   /** Revoke key of this process's MCP credential; unique per open. */
   readonly credentialSubject: string;
   /** The open options it started with (`ProviderSessionPoolRequest.openOptionsKey`). */
@@ -260,6 +261,11 @@ export class ProviderSessionPool {
     return this.entries.get(sessionId)?.session === session;
   }
 
+  initialPermission(sessionId: string, session: ProviderSession): PoolEntry['initialPermission'] | undefined {
+    const entry = this.entries.get(sessionId);
+    return entry?.session === session ? entry.initialPermission : undefined;
+  }
+
   /** Close one entry; a no-op when `sessionId` is not live. */
   release(sessionId: string, reason: ProviderSessionPoolReleaseReason): Promise<void> {
     return this.withLock(sessionId, async () => {
@@ -376,6 +382,7 @@ export class ProviderSessionPool {
         profile: request.profile,
         session,
         method: attach?.method ?? 'new',
+        initialPermission: openRequest.policy.permission,
         credentialSubject,
         openOptionsKey: request.openOptionsKey,
         row,

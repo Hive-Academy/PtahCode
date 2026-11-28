@@ -39,7 +39,10 @@ import type {
 } from '@ptah-extension/provider-session-contracts';
 import type { AppliedSettings } from '@ptah-extension/shared';
 import { createAcpEventHub } from './acp-event-hub';
-import type { AcpCommandPreparer, AcpTransportFactory } from './acp-process-transport';
+import type {
+  AcpCommandPreparer,
+  AcpTransportFactory,
+} from './acp-process-transport';
 import { toAcpPromptContent } from './acp-prompt-content';
 import { createAcpSession } from './acp-session-runtime';
 import type { AcpSessionOptions, AcpVendorProfile } from './acp-vendor-profile';
@@ -111,7 +114,9 @@ async function openAcpProviderSession(
   request: ProviderSessionOpenRequest,
   signal?: AbortSignal,
 ): Promise<ProviderSession> {
-  const profile = deps.profiles.find((candidate) => candidate.vendor === request.profile);
+  const profile = deps.profiles.find(
+    (candidate) => candidate.vendor === request.profile,
+  );
   if (!profile) {
     throw new AcpProviderSessionError(
       'protocol-unsupported',
@@ -119,7 +124,10 @@ async function openAcpProviderSession(
     );
   }
   if (signal?.aborted) {
-    throw new AcpProviderSessionError('cancelled', `${profile.displayName} open was cancelled`);
+    throw new AcpProviderSessionError(
+      'cancelled',
+      `${profile.displayName} open was cancelled`,
+    );
   }
   const { logger } = deps;
   const name = profile.displayName;
@@ -134,7 +142,9 @@ async function openAcpProviderSession(
     agentId: request.runId,
     mcp: request.mcp,
     ...(request.instructions ? { instructions: request.instructions } : {}),
-    ...(request.promptTimeoutMs ? { promptTimeoutMs: request.promptTimeoutMs } : {}),
+    ...(request.promptTimeoutMs
+      ? { promptTimeoutMs: request.promptTimeoutMs }
+      : {}),
     ...(request.attach
       ? {
           resumeSessionId: request.attach.nativeSessionId,
@@ -180,7 +190,10 @@ async function openAcpProviderSession(
     lifetime.abort();
     hub.end();
     if (signal?.aborted) {
-      throw new AcpProviderSessionError('cancelled', `${name} open was cancelled`);
+      throw new AcpProviderSessionError(
+        'cancelled',
+        `${name} open was cancelled`,
+      );
     }
     throw new AcpProviderSessionError(
       setupError?.code ?? 'turn-failed',
@@ -203,10 +216,16 @@ async function openAcpProviderSession(
     revision: ++revision,
   });
   const refused = (what: string): AcpProviderSessionError =>
-    new AcpProviderSessionError('request-failed', `${name} did not apply the ${what}`);
+    new AcpProviderSessionError(
+      'request-failed',
+      `${name} did not apply the ${what}`,
+    );
   const requireOpen = (operation: string): void => {
     if (closing) {
-      throw new AcpProviderSessionError('cancelled', `${name} session is closed (${operation})`);
+      throw new AcpProviderSessionError(
+        'cancelled',
+        `${name} session is closed (${operation})`,
+      );
     }
     if (acp.isClosed()) {
       throw new AcpProviderSessionError(
@@ -232,7 +251,9 @@ async function openAcpProviderSession(
     };
   };
 
-  const prompt = async (input: ProviderTurnInput): Promise<ProviderTurnReceipt> => {
+  const prompt = async (
+    input: ProviderTurnInput,
+  ): Promise<ProviderTurnReceipt> => {
     requireOpen('prompt');
     if (acp.isTurnRunning()) {
       throw new AcpProviderSessionError(
@@ -243,13 +264,19 @@ async function openAcpProviderSession(
     // Refused, never dropped: an agent that did not advertise image input
     // gets no image block (the chat adapter checks first; this is the floor).
     if (input.images?.length && !capabilities().images) {
-      throw new AcpProviderSessionError('turn-failed', `${name} does not accept images`);
+      throw new AcpProviderSessionError(
+        'turn-failed',
+        `${name} does not accept images`,
+      );
     }
     // `done` never rejects; the turn's outcome is its terminal event.
     void acp.prompt(toAcpPromptContent(input));
     const turnId = acp.getTurnId();
     if (!turnId) {
-      throw new AcpProviderSessionError('turn-failed', `${name} did not start the turn`);
+      throw new AcpProviderSessionError(
+        'turn-failed',
+        `${name} did not start the turn`,
+      );
     }
     return { turnId };
   };
@@ -262,16 +289,22 @@ async function openAcpProviderSession(
         const outcome = await Promise.race([
           acp.exited.then(() => 'exited' as const),
           new Promise<'late'>((resolve) => {
-            timer = setTimeout(() => resolve('late'), ACP_PROVIDER_SESSION_CLOSE_MS);
+            timer = setTimeout(
+              () => resolve('late'),
+              ACP_PROVIDER_SESSION_CLOSE_MS,
+            );
           }),
         ]);
         if (outcome === 'late') {
           // The kill was already sent (tree-kill); the exit is only unconfirmed.
-          logger.warn('[AcpProviderSession] agent did not exit within the close bound', {
-            vendor: profile.vendor,
-            runId: request.runId,
-            boundMs: ACP_PROVIDER_SESSION_CLOSE_MS,
-          });
+          logger.warn(
+            '[AcpProviderSession] agent did not exit within the close bound',
+            {
+              vendor: profile.vendor,
+              runId: request.runId,
+              boundMs: ACP_PROVIDER_SESSION_CLOSE_MS,
+            },
+          );
         }
       } finally {
         clearTimeout(timer);
@@ -303,13 +336,15 @@ async function openAcpProviderSession(
     },
     setEffort: async (effort) => {
       requireOpen('setEffort');
-      if (!(await acp.setEffort(effort))) throw refused(`effort ${effort ?? 'default'}`);
+      if (!(await acp.setEffort(effort)))
+        throw refused(`effort ${effort ?? 'default'}`);
       return applied();
     },
     setPermission: async (next) => {
       requireOpen('setPermission');
       const mode = profile.modeFor?.({ ...options, permission: next });
-      if (mode && !(await acp.setMode(mode))) throw refused(`${next} permission`);
+      if (mode && !(await acp.setMode(mode)))
+        throw refused(`${next} permission`);
       // The per-turn start mode follows the permission (Manual re-enters plan).
       acp.trackPermission(next);
       if (next !== permission) {
@@ -324,6 +359,7 @@ async function openAcpProviderSession(
       permission = next;
       return applied();
     },
+    getPermission: () => permission,
     isTurnRunning: () => acp.isTurnRunning(),
     getPid: () => acp.getPid(),
     close,

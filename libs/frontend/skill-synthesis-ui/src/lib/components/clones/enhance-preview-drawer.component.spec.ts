@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 
 import { EnhancePreviewDrawerComponent } from './enhance-preview-drawer.component';
@@ -41,7 +42,7 @@ describe('EnhancePreviewDrawerComponent', () => {
     fixture.componentInstance.save.subscribe(onSave);
     expect(onSave).not.toHaveBeenCalled();
 
-    const button = (fixture.nativeElement as HTMLElement)
+    const button = TestBed.inject(OverlayContainer).getContainerElement()
       .querySelector<HTMLButtonElement>('[data-testid="preview-save-btn"]');
     expect(button).not.toBeNull();
     button?.click();
@@ -59,15 +60,15 @@ describe('EnhancePreviewDrawerComponent', () => {
     );
     fixture.detectChanges();
     expect(
-      (fixture.nativeElement as HTMLElement)
+      TestBed.inject(OverlayContainer).getContainerElement()
         .querySelector('[data-testid="preview-save-error"]')?.textContent,
     ).toContain('Preview it again');
     expect(
-      (fixture.nativeElement as HTMLElement)
+      TestBed.inject(OverlayContainer).getContainerElement()
         .querySelector('[data-testid="preview-verdict"]'),
     ).not.toBeNull();
     expect(
-      (fixture.nativeElement as HTMLElement)
+      TestBed.inject(OverlayContainer).getContainerElement()
         .querySelector<HTMLButtonElement>('[data-testid="preview-save-btn"]')?.disabled,
     ).toBe(false);
   });

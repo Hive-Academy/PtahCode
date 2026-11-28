@@ -78,6 +78,12 @@ function harness(
   const compact = jest.fn().mockResolvedValue(undefined);
   const interruptSession = jest.fn().mockResolvedValue(undefined);
   const closeSession = jest.fn().mockResolvedValue(undefined);
+  const isSessionActive = jest.fn().mockReturnValue(true);
+  const resumeSession = jest.fn().mockResolvedValue(undefined);
+  const resumeSessionForSkillLookup = jest.fn().mockResolvedValue(undefined);
+  const setSessionModel = jest.fn().mockResolvedValue(undefined);
+  const setSessionEffort = jest.fn().mockResolvedValue(undefined);
+  const invokeSkillCommand = jest.fn().mockResolvedValue(false);
   const broadcastMessage = jest.fn().mockResolvedValue(undefined);
   const executeSlashCommand = jest.fn().mockResolvedValue([]);
   const resolveProviderProfileForWorkspace = jest.fn(() => {
@@ -93,8 +99,8 @@ function harness(
     {
       logger: { info: jest.fn(), warn: jest.fn() },
       modelSettings: { selectedModel: { get: () => 'default' } },
-      sdkAdapter: { executeSlashCommand, interruptSession, isSessionActive: () => true },
-      nativeAdapter: { owns: () => true, closeSession },
+      sdkAdapter: { executeSlashCommand, interruptSession, setSessionModel, setSessionEffort, isSessionActive, resumeSession },
+      nativeAdapter: { owns: () => true, closeSession, invokeSkillCommand, resumeSessionForSkillLookup },
       webviewManager: { broadcastMessage },
       slashCommandInterceptor: {
         intercept: () => commandName === 'clear'
@@ -117,13 +123,13 @@ function harness(
       },
     },
   );
-  const route = () =>
+  const route = (settings: Pick<Parameters<ChatSlashCommandRouterService['routeFollowUpSlashCommand']>[4], 'model' | 'effort'> = {}) =>
     service.routeFollowUpSlashCommand(
       '/' + commandName,
       sessionId,
       'tab',
       '/workspace',
-      { prompt: '/' + commandName, sessionId, tabId: 'tab' },
+      { prompt: '/' + commandName, sessionId, tabId: 'tab', ...settings },
     );
   return {
     service,
@@ -133,6 +139,12 @@ function harness(
     compact,
     interruptSession,
     closeSession,
+    invokeSkillCommand,
+    isSessionActive,
+    resumeSession,
+    resumeSessionForSkillLookup,
+    setSessionModel,
+    setSessionEffort,
     broadcastMessage,
     executeSlashCommand,
     resolveProviderProfileForWorkspace,
@@ -263,35 +275,92 @@ describe('native slash runtime routing', () => {
     );
   });
 
-  it('prepares slash relaunch before calling the routing adapter', async () => {
-    const h = harness(native, 'review');
-    h.executeSlashCommand.mockImplementation(async () => {
-      expect(h.prepare).toHaveBeenCalledTimes(1);
-      expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
-      return [];
-    });
-    await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-    expect(h.executeSlashCommand).toHaveBeenCalledWith(
+  it.each(['model', 'status', 'clear-style', 'context', 'cost', 'review', 'REVIEW', 'memory', 'deep-research', 'example:skill'])('refuses /%s before launching a Codex turn', async (command) => {
+    const h = harness(native, command);
+    h.invokeSkillCommand.mockResolvedValue(command !== 'example:skill');
+    await expect(h.route()).resolves.toEqual({
+      success: false,
       sessionId,
-      '/review',
-      expect.objectContaining({
-        sessionConfig: expect.objectContaining({ model: 'gpt-5.4' }),
-      }),
-    );
-    expect(h.resolveProviderProfileForWorkspace).not.toHaveBeenCalled();
-    expect(h.publishRuntimeNotices).toHaveBeenCalledTimes(1);
+      errorCode: 'CODEX_UNSUPPORTED_OPTION',
+      error: `Codex app-server does not support /${command} in Ptah chat.`,
+    });
+    expect(h.executeSlashCommand).not.toHaveBeenCalled();
+    expect(h.compact).not.toHaveBeenCalled();
+    expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(command === 'example:skill' ? 1 : 0);
   });
 
-  it('attaches the slash stream and succeeds when the model notice rejects', async () => {
-    const h = harness(native, 'review');
-    h.publishRuntimeNotices.mockRejectedValue(new Error('private broadcast detail'));
-    await expect(h.route()).resolves.toEqual({ success: true, sessionId });
-    expect(h.service['streamBroadcaster'].streamEventsToWebview).toHaveBeenCalledWith(
-      sessionId, await h.executeSlashCommand.mock.results[0].value, 'tab',
-    );
-    expect(h.service['logger'].warn).toHaveBeenCalledWith(
-      '[RPC] Model substitution notice failed; continuing session stream',
-    );
+  it('resumes an inactive Codex session before applying accepted skill settings', async () => {
+    const h = harness(native, 'example:skill');
+    h.isSessionActive.mockReturnValue(false);
+    h.invokeSkillCommand.mockImplementation(async (_id, _command, _options, beforeSend: () => Promise<void>) => {
+      expect(h.resumeSessionForSkillLookup).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+        model: 'gpt-5.4',
+      }));
+      expect(h.setSessionModel).not.toHaveBeenCalled();
+      await beforeSend();
+      expect(h.setSessionModel).toHaveBeenCalledWith(sessionId, 'gpt-5.4');
+      expect(h.setSessionEffort).toHaveBeenCalledWith(sessionId, 'high');
+      return true;
+    });
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toEqual({
+      success: true, sessionId,
+    });
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['orchestration', 'session-handoff', 'example:skill', 'example:review', 'example@local:review'])(
+    'invokes an advertised /%s as a Codex skill',
+    async (command) => {
+      const h = harness(native, command);
+      h.invokeSkillCommand.mockResolvedValue(true);
+      await expect(h.route()).resolves.toEqual({ success: true, sessionId });
+      expect(h.invokeSkillCommand).toHaveBeenCalledWith(sessionId, '/' + command, expect.any(Object), expect.any(Function));
+      expect(h.executeSlashCommand).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])('preserves settings when Codex refuses a skill (active: %s)', async (active) => {
+    const h = harness(native, 'example:skill');
+    h.isSessionActive.mockReturnValue(active);
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toMatchObject({
+      success: false, errorCode: 'CODEX_UNSUPPORTED_OPTION',
+    });
+    expect(h.setSessionModel).not.toHaveBeenCalled();
+    expect(h.setSessionEffort).not.toHaveBeenCalled();
+    expect(h.resumeSession).not.toHaveBeenCalled();
+    expect(h.resumeSessionForSkillLookup).toHaveBeenCalledTimes(active ? 0 : 1);
+  });
+
+  it('preserves settings when inactive Codex skill lookup throws', async () => {
+    const h = harness(native, 'example:skill');
+    h.isSessionActive.mockReturnValue(false);
+    h.invokeSkillCommand.mockRejectedValue(new Error('Skill lookup failed'));
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toMatchObject({
+      success: false, error: 'Skill lookup failed',
+    });
+    expect(h.resumeSessionForSkillLookup).toHaveBeenCalledTimes(1);
+    expect(h.setSessionModel).not.toHaveBeenCalled();
+    expect(h.setSessionEffort).not.toHaveBeenCalled();
+  });
+
+  it('applies model and effort after lookup accepts a skill on an open Codex session', async () => {
+    const h = harness(native, 'example:skill');
+    h.invokeSkillCommand.mockImplementation(async (_id, _command, _options, beforeSend: () => Promise<void>) => {
+      expect(h.setSessionModel).not.toHaveBeenCalled();
+      await beforeSend();
+      expect(h.setSessionModel).toHaveBeenCalledWith(sessionId, 'gpt-5.4');
+      expect(h.setSessionEffort).toHaveBeenCalledWith(sessionId, 'high');
+      return true;
+    });
+
+    await expect(h.route({ model: 'gpt-5.4', effort: 'high' })).resolves.toEqual({
+      success: true, sessionId,
+    });
+    expect(h.invokeSkillCommand).toHaveBeenCalledTimes(1);
   });
 
   it('coalesces a claim acquired while preparation is pending', async () => {
@@ -352,13 +421,6 @@ describe('native slash runtime routing', () => {
     await expect(h.route()).rejects.toBe(refusal);
     expect(h.admitManualCompact).toHaveBeenCalledTimes(1);
     expect(h.releaseManualReservation).toHaveBeenCalledWith(sessionId, 'reservation');
-  });
-
-  it('does not publish when a slash relaunch is rejected as busy', async () => {
-    const h = harness(native, 'review');
-    h.executeSlashCommand.mockRejectedValue(new Error('busy'));
-    await expect(h.route()).resolves.toMatchObject({ success: false, error: 'busy' });
-    expect(h.publishRuntimeNotices).not.toHaveBeenCalled();
   });
 
   it('uses an explicit Claude identity when the metadata service is absent', async () => {

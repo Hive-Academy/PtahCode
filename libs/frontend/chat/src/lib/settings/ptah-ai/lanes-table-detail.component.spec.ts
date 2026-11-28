@@ -72,6 +72,12 @@ class InstanceDetailHost {
 }
 
 describe('LanesTableDetailComponent', () => {
+  afterEach(() => {
+    document
+      .querySelectorAll('.cdk-overlay-container')
+      .forEach((node) => node.replaceChildren());
+  });
+
   function mount(value: LaneTableRow = row()) {
     const fixture = TestBed.createComponent(LanesTableDetailComponent);
     fixture.componentRef.setInput('row', value);
@@ -360,9 +366,9 @@ describe('LanesTableDetailComponent', () => {
         ),
       )?.componentInstance as NativePopoverComponent | undefined;
     popover?.opened.emit();
-    expect(host.querySelector('[data-testid="cursor-credential-key"]')).toBe(
-      document.activeElement,
-    );
+    expect(
+      document.querySelector('[data-testid="cursor-credential-key"]'),
+    ).toBe(document.activeElement);
   });
 
   it('shows Install guide only when uninstalled', () => {
@@ -376,13 +382,16 @@ describe('LanesTableDetailComponent', () => {
     ).not.toBeNull();
   });
 
-  it('emits Re-detect from the install guide', () => {
-    const { fixture, host } = mount(row('cursor', false));
+  it('emits Re-detect from the install guide', async () => {
+    const { fixture } = mount(row('cursor', false));
     const emit = jest.fn();
     fixture.componentInstance.redetect.subscribe(emit);
     fixture.componentRef.setInput('openKind', 'install');
     fixture.detectChanges();
-    Array.from(host.querySelectorAll('button'))
+    await fixture.whenStable();
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.cdk-overlay-pane button'),
+    )
       .find((button) => button.textContent?.trim() === 'Re-detect')
       ?.click();
     expect(emit).toHaveBeenCalledWith('cursor');
@@ -449,17 +458,19 @@ describe('LanesTableDetailComponent', () => {
     expect(host.querySelector('[data-popover-kind="capabilities"]')).toBeNull();
   });
 
-  it('has at most one open popover: the install guide', () => {
-    const { fixture, host } = mount(row('cursor', false));
+  it('has at most one open popover: the install guide', async () => {
+    const { fixture } = mount(row('cursor', false));
     fixture.componentRef.setInput('openKind', 'install');
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(
-      host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
+      document.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
     ).toHaveLength(1);
     fixture.componentRef.setInput('openKind', null);
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(
-      host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
+      document.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
     ).toHaveLength(0);
   });
 

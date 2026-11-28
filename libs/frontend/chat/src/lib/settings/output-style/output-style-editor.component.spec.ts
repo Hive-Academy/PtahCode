@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * OutputStyleEditorComponent specs.
  *
@@ -106,13 +107,17 @@ describe('OutputStyleEditorComponent', () => {
   const instructionsField = (): OutputStyleInstructionsFieldComponent =>
     fixture.debugElement.query(By.directive(OutputStyleInstructionsFieldComponent)).componentInstance;
 
+  function overlay(): HTMLElement {
+    return TestBed.inject(OverlayContainer).getContainerElement();
+  }
+
   function text(): string {
-    return fixture.nativeElement.textContent ?? '';
+    return overlay().textContent ?? '';
   }
 
   function setInputValue(selector: string, value: string): void {
     const element: HTMLInputElement =
-      fixture.nativeElement.querySelector(selector);
+      overlay().querySelector(selector);
     element.value = value;
     element.dispatchEvent(new Event('input'));
     fixture.detectChanges();
@@ -145,17 +150,17 @@ describe('OutputStyleEditorComponent', () => {
 
   describe('Drawer D-OS structure and controls (A25, Gap G6)', () => {
     it('renders drawer header with title and subtitle', () => {
-      const header = fixture.nativeElement.querySelector('[drawer-header]');
+      const header = overlay().querySelector('[drawer-header]');
       expect(header).not.toBeNull();
       expect(text()).toContain('New style');
       expect(text()).toContain('Create a new output style');
     });
 
     it('renders footer buttons for Save and Cancel', () => {
-      const saveBtn = fixture.nativeElement.querySelector(
+      const saveBtn = overlay().querySelector(
         '[data-testid="output-style-save-button"]',
       );
-      const cancelBtn = fixture.nativeElement.querySelector(
+      const cancelBtn = overlay().querySelector(
         '[data-testid="output-style-cancel-button"]',
       );
       expect(saveBtn).not.toBeNull();
@@ -164,11 +169,11 @@ describe('OutputStyleEditorComponent', () => {
 
     it('switches between Edit and Preview tabs (Gap G6)', () => {
       const field = instructionsField();
-      const tabGroup = fixture.nativeElement.querySelector(
+      const tabGroup = overlay().querySelector(
         'ptah-native-tab-group',
       );
       expect(tabGroup).not.toBeNull();
-      const stage = fixture.nativeElement.querySelector('#output-style-body')?.closest('.ptah-motion-stage') as HTMLElement | null;
+      const stage = overlay().querySelector('#output-style-body')?.closest('.ptah-motion-stage') as HTMLElement | null;
       expect(stage).not.toBeNull();
 
       field.onTabChange('preview');
@@ -177,9 +182,9 @@ describe('OutputStyleEditorComponent', () => {
       expect(field.showPreview()).toBe(true);
       expect(stage?.getAttribute('data-motion-dir')).toBe('forward');
       expect(
-        fixture.nativeElement.querySelector('[data-test="body-preview"]'),
+        overlay().querySelector('[data-test="body-preview"]'),
       ).not.toBeNull();
-      expect(fixture.nativeElement.querySelector('[data-test="body-preview"]')?.classList.contains('ptah-motion-panel')).toBe(true);
+      expect(overlay().querySelector('[data-test="body-preview"]')?.classList.contains('ptah-motion-panel')).toBe(true);
       expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
 
       field.onTabChange('edit');
@@ -189,7 +194,7 @@ describe('OutputStyleEditorComponent', () => {
       expect(stage?.getAttribute('data-motion-dir')).toBe('back');
       expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
       expect(
-        fixture.nativeElement.querySelector('#output-style-body'),
+        overlay().querySelector('#output-style-body'),
       ).not.toBeNull();
     });
 
@@ -241,7 +246,7 @@ describe('OutputStyleEditorComponent', () => {
       fixture.detectChanges();
 
       expect(announce).toHaveBeenCalledWith('Could not save the output style.', 'alert');
-      expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
+      expect(overlay().querySelector('[role="alert"]')).toBeNull();
       expect(text()).not.toContain('ENOSPC');
     });
   });
@@ -256,7 +261,7 @@ describe('OutputStyleEditorComponent', () => {
       expect(save).not.toHaveBeenCalled();
       expect(component.showNameError()).toBe(true);
       expect(
-        fixture.nativeElement.querySelector('#output-style-name-error'),
+        overlay().querySelector('#output-style-name-error'),
       ).not.toBeNull();
       expect(text()).toContain('Give the style a name');
     });
@@ -276,7 +281,7 @@ describe('OutputStyleEditorComponent', () => {
       await component.submit();
       fixture.detectChanges();
 
-      const input = fixture.nativeElement.querySelector('#output-style-name');
+      const input = overlay().querySelector('#output-style-name');
       expect(input.getAttribute('aria-invalid')).toBe('true');
     });
 
@@ -300,14 +305,14 @@ describe('OutputStyleEditorComponent', () => {
     it('defaults ON for a new style (Req 6.4)', () => {
       expect(component.keepCodingInstructions()).toBe(true);
 
-      const toggle = fixture.nativeElement.querySelector(
+      const toggle = overlay().querySelector(
         'input[type="checkbox"]',
       );
       expect(toggle.checked).toBe(true);
     });
 
     it('states that the style is ADDED TO normal behaviour while ON (Req 6.2)', () => {
-      const hint = fixture.nativeElement.querySelector(
+      const hint = overlay().querySelector(
         '[data-test="keep-instructions-on-hint"]',
       );
 
@@ -316,7 +321,7 @@ describe('OutputStyleEditorComponent', () => {
         "added to the agent's normal coding behaviour",
       );
       expect(
-        fixture.nativeElement.querySelector(
+        overlay().querySelector(
           '[data-test="keep-instructions-off-warning"]',
         ),
       ).toBeNull();
@@ -326,7 +331,7 @@ describe('OutputStyleEditorComponent', () => {
       component.keepCodingInstructions.set(false);
       fixture.detectChanges();
 
-      const warning = fixture.nativeElement.querySelector(
+      const warning = overlay().querySelector(
         '[data-test="keep-instructions-off-warning"]',
       );
       expect(warning).not.toBeNull();
@@ -347,7 +352,7 @@ describe('OutputStyleEditorComponent', () => {
       expect(copy).not.toMatch(/replaces .*default coding instructions/i);
 
       // Non-blocking: the submit button stays enabled.
-      const submit = fixture.nativeElement.querySelector(
+      const submit = overlay().querySelector(
         'button[type="submit"]',
       );
       expect(isDisabledControl(submit)).toBe(false);
@@ -435,9 +440,9 @@ describe('OutputStyleEditorComponent', () => {
     };
 
     const dialog = (): HTMLElement | null =>
-      fixture.nativeElement.querySelector('[data-testid="output-style-stale-dialog"]');
+      overlay().querySelector('[data-testid="output-style-stale-dialog"]');
     const button = (testId: string): HTMLButtonElement =>
-      fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+      overlay().querySelector(`[data-testid="${testId}"]`);
 
     beforeEach(async () => {
       fixture.componentRef.setInput('draft', EXISTING_STYLE);
@@ -560,7 +565,7 @@ describe('OutputStyleEditorComponent', () => {
       fixture.detectChanges();
 
       expect(dialog()?.textContent).toContain('Ptah could not read the current file');
-      expect(fixture.nativeElement.querySelector('[data-testid="output-style-stale-overwrite"]')).toBeNull();
+      expect(overlay().querySelector('[data-testid="output-style-stale-overwrite"]')).toBeNull();
     });
   });
 
@@ -584,14 +589,14 @@ describe('OutputStyleEditorComponent', () => {
 
       expect(component.conflict()).toBeNull();
       expect(cancelled).not.toHaveBeenCalled();
-      expect(fixture.nativeElement.querySelector('[data-testid="output-style-drawer"]')).not.toBeNull();
+      expect(overlay().querySelector('[data-testid="output-style-drawer"]')).not.toBeNull();
     });
   });
 
   describe('confirm-state guards (2.6)', () => {
     const FRESH: OutputStyleDetail = { ...EXISTING_STYLE, body: '# Style\n\nChanged.', mtime: 1_700_000_999_000, byteLength: 57 };
     const by = <T extends HTMLElement = HTMLElement>(testId: string): T | null =>
-      fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+      overlay().querySelector(`[data-testid="${testId}"]`);
     const panel = (): HTMLElement => by('native-drawer-panel') as HTMLElement;
 
     async function openConfirm(kind: 'discard' | 'conflict' | 'stale'): Promise<string> {
@@ -621,7 +626,7 @@ describe('OutputStyleEditorComponent', () => {
       'the %s confirm renders after the form, is not modal, and turns Save and Cancel off',
       async (kind) => {
         const confirm = by(await openConfirm(kind)) as HTMLElement;
-        const form = fixture.nativeElement.querySelector('#output-style-editor-form') as HTMLElement;
+        const form = overlay().querySelector('#output-style-editor-form') as HTMLElement;
 
         expect(confirm.getAttribute('role')).toBe('alertdialog');
         expect(confirm.getAttribute('aria-modal')).toBe('false');
@@ -640,7 +645,7 @@ describe('OutputStyleEditorComponent', () => {
         save.mockClear();
 
         await component.submit();
-        (fixture.nativeElement.querySelector('#output-style-editor-form') as HTMLFormElement).dispatchEvent(
+        (overlay().querySelector('#output-style-editor-form') as HTMLFormElement).dispatchEvent(
           new Event('submit', { cancelable: true }),
         );
         await fixture.whenStable();
@@ -663,7 +668,7 @@ describe('OutputStyleEditorComponent', () => {
         expect(by(testId)).not.toBeNull();
         expect(by('output-style-discard-confirm')).toBeNull();
 
-        (by('native-drawer-backdrop') as HTMLElement).click();
+        (overlay().querySelector('.cdk-overlay-backdrop.ptah-drawer-backdrop') as HTMLElement).click();
         fixture.detectChanges();
         expect(by(testId)).not.toBeNull();
         expect(by('output-style-discard-confirm')).toBeNull();
@@ -706,24 +711,24 @@ describe('OutputStyleEditorComponent', () => {
       component.cancelled.subscribe(cancelled);
       setInputValue('#output-style-name', 'Half-written');
 
-      const panel = fixture.nativeElement.querySelector('[data-testid="native-drawer-panel"]') as HTMLElement;
+      const panel = overlay().querySelector('[data-testid="native-drawer-panel"]') as HTMLElement;
       panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       fixture.detectChanges();
 
       expect(cancelled).not.toHaveBeenCalled();
-      const confirm = fixture.nativeElement.querySelector('[data-testid="output-style-discard-confirm"]');
+      const confirm = overlay().querySelector('[data-testid="output-style-discard-confirm"]');
       expect(confirm).not.toBeNull();
       expect(document.activeElement?.textContent?.trim()).toBe('Keep editing');
 
       document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       fixture.detectChanges();
-      expect(fixture.nativeElement.querySelector('[data-testid="output-style-discard-confirm"]')).toBeNull();
+      expect(overlay().querySelector('[data-testid="output-style-discard-confirm"]')).toBeNull();
       expect(cancelled).not.toHaveBeenCalled();
       expect(component.name()).toBe('Half-written');
 
-      (fixture.nativeElement.querySelector('[data-testid="native-drawer-backdrop"]') as HTMLElement).click();
+      (overlay().querySelector('.cdk-overlay-backdrop.ptah-drawer-backdrop') as HTMLElement).click();
       fixture.detectChanges();
-      (fixture.nativeElement.querySelector('[data-testid="output-style-discard-button"]') as HTMLButtonElement).click();
+      (overlay().querySelector('[data-testid="output-style-discard-button"]') as HTMLButtonElement).click();
 
       expect(cancelled).toHaveBeenCalledTimes(1);
     });
@@ -735,7 +740,7 @@ describe('OutputStyleEditorComponent', () => {
       fixture.detectChanges();
 
       for (const id of ['#output-style-name-error', '#output-style-description-error']) {
-        const message = fixture.nativeElement.querySelector(id) as HTMLElement;
+        const message = overlay().querySelector(id) as HTMLElement;
         expect(message.classList).toContain('text-base-content');
         expect(message.classList).toContain('text-xs');
         expect(message.classList).not.toContain('text-error');
@@ -747,7 +752,7 @@ describe('OutputStyleEditorComponent', () => {
       component.keepCodingInstructions.set(false);
       fixture.detectChanges();
 
-      const warning = fixture.nativeElement.querySelector('[data-test="keep-instructions-off-warning"]') as HTMLElement;
+      const warning = overlay().querySelector('[data-test="keep-instructions-off-warning"]') as HTMLElement;
       expect(warning.classList).toContain('text-base-content');
       expect(warning.classList).toContain('text-xs');
       expect(warning.className).not.toMatch(/text-warning|text-\[10px\]/);
@@ -757,11 +762,11 @@ describe('OutputStyleEditorComponent', () => {
 
   describe('instructions field (Batch 55b CS-2 split)', () => {
     it('edits the body and toggle values the editor owns, both ways', () => {
-      const textarea = fixture.nativeElement.querySelector('#output-style-body') as HTMLTextAreaElement;
+      const textarea = overlay().querySelector('#output-style-body') as HTMLTextAreaElement;
       textarea.value = '# Typed';
       textarea.dispatchEvent(new Event('input'));
       expect(component.body()).toBe('# Typed');
-      const toggle = fixture.nativeElement.querySelector('input[aria-label="Keep the default coding instructions"]') as HTMLInputElement;
+      const toggle = overlay().querySelector('input[aria-label="Keep the default coding instructions"]') as HTMLInputElement;
       toggle.checked = false;
       toggle.dispatchEvent(new Event('change'));
       expect(component.keepCodingInstructions()).toBe(false);
@@ -777,7 +782,7 @@ describe('OutputStyleEditorComponent', () => {
       instructionsField().showPreview.set(true);
       fixture.detectChanges();
 
-      const preview = fixture.nativeElement.querySelector(
+      const preview = overlay().querySelector(
         '[data-test="body-preview"]',
       );
       expect(preview.querySelector('ptah-markdown-block')).not.toBeNull();

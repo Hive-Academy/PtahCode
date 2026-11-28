@@ -38,7 +38,7 @@ import {
   type IAuthSecretsService,
 } from '@ptah-extension/vscode-core';
 import {
-  CODEX_DEFAULT_TIERS,
+  resolveCodexModel,
   type AuthEnv,
   type ProviderProfile,
   type SessionRuntimeIdentity,
@@ -433,11 +433,8 @@ export class WorkspaceProviderProfileResolver {
   } {
     const requested = requestedModel.trim();
     const tier = requested.toLowerCase();
-    if (tier === 'opus' || tier === 'sonnet' || tier === 'haiku') {
-      return { model: CODEX_DEFAULT_TIERS[tier] };
-    }
+    const model = resolveCodexModel(requested);
     if (!requested || tier === 'default') {
-      const model = CODEX_DEFAULT_TIERS.opus;
       return {
         model,
         modelSubstitution: {
@@ -449,7 +446,7 @@ export class WorkspaceProviderProfileResolver {
     }
     // Dynamic catalogs can contain IDs unknown to this Ptah release. Codex is
     // the authority on a requested ID; never substitute from a static list.
-    return { model: requested };
+    return { model };
   }
 
   /**

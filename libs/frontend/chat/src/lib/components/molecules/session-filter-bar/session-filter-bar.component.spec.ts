@@ -5,6 +5,7 @@
  * (L17), one pending change (an immediate change takes the pending text with
  * it), no duplicate emission, and release of the pending timer on destroy.
  */
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
   SESSION_FILTER_TEXT_DEBOUNCE_MS,
@@ -18,7 +19,12 @@ describe('SessionFilterBarComponent', () => {
   let emitted: SessionFilterQuery[];
 
   const el = <T extends HTMLElement>(testId: string): T => {
-    const found = host.querySelector<T>(`[data-testid="${testId}"]`);
+    const selector = `[data-testid="${testId}"]`;
+    const found =
+      host.querySelector<T>(selector) ??
+      TestBed.inject(OverlayContainer)
+        .getContainerElement()
+        .querySelector<T>(selector);
     if (!found) throw new Error(`Missing ${testId}`);
     return found;
   };

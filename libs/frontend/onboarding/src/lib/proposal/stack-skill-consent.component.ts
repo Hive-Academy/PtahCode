@@ -1,8 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
-  inject,
   input,
   output,
 } from '@angular/core';
@@ -21,7 +19,6 @@ import {
   templateUrl: './stack-skill-consent.component.html',
 })
 export class StackSkillConsentComponent {
-  private readonly element = inject(ElementRef<HTMLElement>);
   readonly open = input.required<boolean>();
   readonly previews = input.required<WizardSkillConsentPreview[]>();
   readonly approvedIds = input.required<ReadonlySet<string>>();
@@ -31,14 +28,7 @@ export class StackSkillConsentComponent {
   readonly install = output<void>();
   readonly cancelRequested = output<void>();
   onClosed(): void {
-    if (!this.busy()) {
-      this.cancelRequested.emit();
-      return;
-    }
-    queueMicrotask(() => {
-      const dialog = this.element.nativeElement.querySelector('dialog');
-      if (this.busy() && this.open() && dialog && !dialog.open) dialog.showModal();
-    });
+    if (!this.busy()) this.cancelRequested.emit();
   }
   allApproved(): boolean {
     return (

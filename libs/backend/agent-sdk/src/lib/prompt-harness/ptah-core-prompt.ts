@@ -59,7 +59,7 @@ Every tool call resends the whole thread, so cost is requests × context. Finish
  */
 const CLI_DELEGATION_PATTERN = `**CLI Delegation Pattern (Spawn → completion signal → Read):**
 1. \`ptah_agent_spawn { task: "..." }\` — save agent ID, even when status is \`starting\`. The same request or \`idempotencyKey\` replays that lane. Use \`cli\` or \`ptahCliId\` from \`ptah_agent_list\`.
-2. **Wait for \`<agent-lane-completed>\`.** It may be pending until parent activity. Work meanwhile; do not poll.
+2. **Wait with \`ptah_agent_wait\` or for \`<agent-lane-completed>\`.** It may be pending until parent activity. Work meanwhile; never use shell sleep/poll loops.
 3. \`ptah_agent_read { agentId: "..." }\` — read after the signal.
 4. Without a signal, check status/read once.
    If starting or running, make at most 5 status checks, at least 60 seconds

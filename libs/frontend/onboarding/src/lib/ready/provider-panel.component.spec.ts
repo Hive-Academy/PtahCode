@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { CodexSignInService } from '@ptah-extension/core';
@@ -25,7 +26,10 @@ function create(view: ProviderReadinessView, role: 'main' | 'information' | 'neu
   fixture.detectChanges();
   return fixture;
 }
-const dialog = (element: HTMLElement) => element.querySelector<HTMLDialogElement>('dialog');
+const overlay = (): HTMLElement =>
+  TestBed.inject(OverlayContainer).getContainerElement();
+const dialog = (_element: HTMLElement) =>
+  overlay().querySelector<HTMLElement>('cdk-dialog-container');
 const openInstall = (fixture: ComponentFixture<ProviderPanelComponent>) => {
   (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-testid="ready-install-open"]')?.click();
   fixture.detectChanges();
@@ -57,7 +61,7 @@ describe('ProviderPanelComponent', () => {
     const trigger = header?.querySelector<HTMLButtonElement>('[data-testid="ready-install-open"]');
     expect(trigger?.textContent).toContain('How to install');
     expect(trigger?.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(dialog(element)?.hasAttribute('open')).toBe(false);
+    expect(dialog(element)).toBeNull();
   });
 
   it.each(['ready', 'signed-out'] as const)('offers no install dialog when the provider is %s', (state) => {
@@ -79,10 +83,10 @@ describe('ProviderPanelComponent', () => {
       openInstall(fixture);
       const element: HTMLElement = fixture.nativeElement;
       const modal = dialog(element);
-      expect(modal?.hasAttribute('open')).toBe(true);
+      expect(modal).not.toBeNull();
       const titleId = modal?.getAttribute('aria-labelledby');
       expect(titleId).toBe(`install-${provider}-title`);
-      expect(element.querySelector(`#${titleId}`)?.textContent?.trim()).toBe(option.install.title);
+      expect(modal?.querySelector(`#${titleId}`)?.textContent?.trim()).toBe(option.install.title);
       const tabs = modal?.querySelectorAll('[role="tab"]');
       expect([...(tabs ?? [])].map((tab) => tab.textContent?.trim())).toEqual(option.install.tabs.map((tab) => tab.label));
       const firstTab = option.install.tabs[0].id;
@@ -127,17 +131,17 @@ describe('ProviderPanelComponent', () => {
   });
 
   it.each([
-    ['Close', (el: HTMLElement) => el.querySelector<HTMLButtonElement>('[data-testid="install-guide-close"]')?.click()],
-    ['Escape', (el: HTMLElement) => el.querySelector('dialog')?.dispatchEvent(new Event('cancel'))],
-    ['the backdrop', (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.modal-backdrop button')?.click()],
+    ['Close', (el: HTMLElement) => dialog(el)?.querySelector<HTMLButtonElement>('[data-testid="install-guide-close"]')?.click()],
+    ['Escape', (el: HTMLElement) => dialog(el)?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))],
+    ['the backdrop', (_el: HTMLElement) => overlay().querySelector<HTMLElement>('.cdk-overlay-backdrop')?.click()],
   ] as const)('closes the install dialog through %s', (_how, act) => {
     const fixture = create(missing('claude-cli'));
     openInstall(fixture);
     const element: HTMLElement = fixture.nativeElement;
-    expect(dialog(element)?.hasAttribute('open')).toBe(true);
+    expect(dialog(element)).not.toBeNull();
     act(element);
     fixture.detectChanges();
-    expect(dialog(element)?.hasAttribute('open')).toBe(false);
+    expect(dialog(element)).toBeNull();
   });
 
   it('Re-check in the install dialog closes it and asks the page to re-read', () => {
@@ -146,10 +150,10 @@ describe('ProviderPanelComponent', () => {
     fixture.componentInstance.recheck.subscribe(recheck);
     openInstall(fixture);
     const element: HTMLElement = fixture.nativeElement;
-    element.querySelector<HTMLButtonElement>('[data-testid="install-guide-recheck"]')?.click();
+    dialog(element)?.querySelector<HTMLButtonElement>('[data-testid="install-guide-recheck"]')?.click();
     fixture.detectChanges();
     expect(recheck).toHaveBeenCalledTimes(1);
-    expect(dialog(element)?.hasAttribute('open')).toBe(false);
+    expect(dialog(element)).toBeNull();
   });
 
   it.each(CONNECTION_OPTIONS.map((option) => [option.name, option.id] as const))(
@@ -158,7 +162,7 @@ describe('ProviderPanelComponent', () => {
       const fixture = create(missing(provider));
       openInstall(fixture);
       const element: HTMLElement = fixture.nativeElement;
-      const tablist = element.querySelector<HTMLElement>(`[role="tablist"][aria-label="${connectionOption(provider).install.tablistLabel}"]`);
+      const tablist = dialog(element)?.querySelector<HTMLElement>(`[role="tablist"][aria-label="${connectionOption(provider).install.tablistLabel}"]`);
       expect(tablist).not.toBeNull();
       const tabs = [...(tablist?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
       expect(tabs.length).toBeGreaterThan(1);

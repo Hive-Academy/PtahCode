@@ -1,0 +1,8 @@
+﻿# Fix round 2
+
+1. Lane skill admission and fresh resolution use case-insensitive names. A missing or disabled skill returns a typed refusal before turn start, and retries recheck the catalog. Changes in `codex-context.ts:996`, `codex-app-server-lane.adapter.ts:1048`, `agent-process-manager.service.ts:3472`, and `agent-message-coordinator.service.ts:603`. Specs in `codex-runtime.spec.ts:383`, `codex-app-server-lane.adapter.spec.ts:697,1975`, `agent-process-manager.service.spec.ts:5418`, and `agent-message-coordinator.lane-messaging.spec.ts:481`.
+2. Codex resolves first-message skills before starting the turn and sends structured input. Changes in `codex-chat-adapter.ts:408,518` and `chat-session.service.ts:1005`. Specs in `chat-continue-slash-before-resume.spec.ts:695,703` and `codex-chat-adapter.spec.ts:572`.
+3. First and follow-up turns share the built-in list. Reserved names keep their existing routing and qualified skill names can resolve. Changes in `chat-builtin-commands.ts:2` and `chat-slash-command-router.service.ts:407`. Specs in `chat-slash-command-router.native.spec.ts:268` and `codex-chat-adapter.spec.ts:583`.
+4. Live and stopped lane catalogs preserve model and effort options when skill discovery fails. Changes in `codex-app-server-lane.adapter.ts:1023` and `codex-app-server-lane-catalog.ts:33`. Spec in `codex-app-server-lane.adapter.spec.ts:1854`.
+
+Focused Jest passed for codex-runtime (148), agent-sdk (128), rpc-handlers (60), and cli-agent-runtime (449). Changed-file ESLint reported zero errors and 13 warnings. Electron retest was excluded by request. CLI skill discovery was unavailable. The local agent-lanes guidance was consulted.

@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ApplicationRef } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -104,6 +105,8 @@ const TWELVE_EXCLUDED: readonly ExcludedTaskFolder[] = [
 ];
 
 const ok = <T>(data: T) => ({ success: true, isSuccess: () => true, data });
+const overlay = (): HTMLElement =>
+  TestBed.inject(OverlayContainer).getContainerElement();
 
 beforeAll(() => {
   // jsdom has no HTMLDialogElement.showModal/close; the native modal needs them.
@@ -713,13 +716,10 @@ describe('TasksViewComponent', () => {
     }
 
     it('lists all twelve excluded folders by name with a typed reason', async () => {
-      const fixture = await openDrawer(
-        board({}, { excluded: TWELVE_EXCLUDED }),
-      );
-      const host = fixture.nativeElement as HTMLElement;
+      await openDrawer(board({}, { excluded: TWELVE_EXCLUDED }));
 
       const rows = Array.from(
-        host.querySelectorAll('[data-testid="tasks-excluded-row"]'),
+        overlay().querySelectorAll('[data-testid="tasks-excluded-row"]'),
       );
       expect(rows).toHaveLength(12);
 
@@ -745,22 +745,20 @@ describe('TasksViewComponent', () => {
     });
 
     it('keeps the drawer closed until the trigger is used', async () => {
-      const fixture = await render(board({}, { excluded: TWELVE_EXCLUDED }));
-      const host = fixture.nativeElement as HTMLElement;
+      await render(board({}, { excluded: TWELVE_EXCLUDED }));
       expect(
-        host.querySelectorAll('[data-testid="tasks-excluded-row"]'),
+        overlay().querySelectorAll('[data-testid="tasks-excluded-row"]'),
       ).toHaveLength(0);
     });
 
     it('says so out loud when the host reports a count but no names', async () => {
-      const fixture = await openDrawer(board({}, { excludedCount: 12 }));
-      const host = fixture.nativeElement as HTMLElement;
+      await openDrawer(board({}, { excludedCount: 12 }));
 
       expect(
-        host.querySelectorAll('[data-testid="tasks-excluded-row"]'),
+        overlay().querySelectorAll('[data-testid="tasks-excluded-row"]'),
       ).toHaveLength(0);
       expect(
-        host.querySelector('[data-testid="tasks-excluded-unnamed"]')
+        overlay().querySelector('[data-testid="tasks-excluded-unnamed"]')
           ?.textContent,
       ).toContain('did not name them');
     });
@@ -774,12 +772,9 @@ describe('TasksViewComponent', () => {
         'TASK_2026_161',
       ] as unknown as readonly ExcludedTaskFolder[];
 
-      const fixture = await openDrawer(
-        board({}, { excludedCount: 5, excluded: malformed }),
-      );
-      const host = fixture.nativeElement as HTMLElement;
+      await openDrawer(board({}, { excludedCount: 5, excluded: malformed }));
 
-      const rows = host.querySelectorAll('[data-testid="tasks-excluded-row"]');
+      const rows = overlay().querySelectorAll('[data-testid="tasks-excluded-row"]');
       expect(rows).toHaveLength(1);
       expect(rows[0].textContent).toContain('TASK_2026_155');
     });
@@ -1974,10 +1969,14 @@ describe('TasksViewComponent', () => {
   // TASK_2026_871 B4 — the split shell keeps every board capability
   // -------------------------------------------------------------------------
   describe('board shell composition', () => {
-    const q = (fixture: ComponentFixture<TasksViewComponent>, id: string) =>
-      (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
-        `[data-testid="${id}"]`,
+    const q = (fixture: ComponentFixture<TasksViewComponent>, id: string) => {
+      const selector = `[data-testid="${id}"]`;
+      return (
+        (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+          selector,
+        ) ?? overlay().querySelector<HTMLElement>(selector)
       );
+    };
 
     it('creates a task in the status the dialog was opened with', async () => {
       const fixture = await render(board({}, { specsDirExists: true }));
@@ -2092,9 +2091,7 @@ describe('TasksViewComponent', () => {
       fixture.detectChanges();
 
       expect(
-        (fixture.nativeElement as HTMLElement).querySelectorAll(
-          '[data-testid="tasks-excluded-row"]',
-        ),
+        overlay().querySelectorAll('[data-testid="tasks-excluded-row"]'),
       ).toHaveLength(1);
     });
 

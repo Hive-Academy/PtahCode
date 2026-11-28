@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * SettingScopeRowComponent specs — TASK_2026_555 Batch 23 (design-spec §3.2, plan D16, RUX-6).
  *
@@ -20,6 +21,10 @@
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
 import { SettingScopeRowComponent } from './setting-scope-row.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 type RowInputs = {
   [K in keyof SettingScopeRowComponent]: unknown;
@@ -51,7 +56,7 @@ function query(
   fixture: ComponentFixture<SettingScopeRowComponent>,
   testId: string,
 ): HTMLElement | null {
-  return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+  return (fixture.nativeElement as HTMLElement).querySelector(`[data-testid="${testId}"]`) ?? overlay().querySelector(`[data-testid="${testId}"]`);
 }
 
 function button(
@@ -121,7 +126,7 @@ describe('SettingScopeRowComponent', () => {
       expect(query(fixture, 'scope-badge')?.className).toContain('border-base-content-muted');
       openPopover(fixture);
       expect(query(fixture, 'scope-mixed-note')).not.toBeNull();
-      expect(fixture.nativeElement.querySelector('[aria-current="true"]')).toBeNull();
+      expect(overlay().querySelector('[aria-current="true"]')).toBeNull();
       expect(button(fixture, 'scope-clear-override')).toBeNull();
     });
 
@@ -155,7 +160,7 @@ describe('SettingScopeRowComponent', () => {
       openPopover(fixture);
       expect(query(fixture, 'scope-badge')?.getAttribute('aria-expanded')).toBe('true');
       expect(query(fixture, 'scope-popover-title')?.textContent?.trim()).toBe('Reasoning effort');
-      const layers = Array.from(fixture.nativeElement.querySelectorAll('[data-layer]')) as HTMLElement[];
+      const layers = Array.from(overlay().querySelectorAll('[data-layer]')) as HTMLElement[];
       expect(layers.map((layer) => layer.getAttribute('data-layer'))).toEqual(['global', 'app', 'workspace']);
       expect(layers[2].textContent).toContain('Workspace · ptah-extension');
       expect(layers[2].getAttribute('aria-current')).toBe('true');
@@ -166,14 +171,14 @@ describe('SettingScopeRowComponent', () => {
     it('lists only the layers that can hold the value', () => {
       const fixture = createComponent({ ...WORKSPACE_OVERRIDE, supportedTargets: ['global', 'workspace'] });
       openPopover(fixture);
-      const layers = Array.from(fixture.nativeElement.querySelectorAll('[data-layer]')) as HTMLElement[];
+      const layers = Array.from(overlay().querySelectorAll('[data-layer]')) as HTMLElement[];
       expect(layers.map((layer) => layer.getAttribute('data-layer'))).toEqual(['global', 'workspace']);
     });
 
     it('marks a cross-app workspace source', () => {
       const fixture = createComponent({ ...WORKSPACE_OVERRIDE, workspaceCrossApp: true });
       openPopover(fixture);
-      expect(fixture.nativeElement.querySelector('[data-layer="workspace"]')?.textContent).toContain('(All Ptah apps)');
+      expect(overlay().querySelector('[data-layer="workspace"]')?.textContent).toContain('(All Ptah apps)');
     });
 
     it('Clear override shows the fallback preview, closes the popover and emits clearRequested', () => {
@@ -192,6 +197,7 @@ describe('SettingScopeRowComponent', () => {
       const labelled = createComponent({ ...WORKSPACE_OVERRIDE, fallbackPreview: { scope: 'global', value: 'apiKey' }, fallbackValueLabel: 'CLI subscription' });
       openPopover(labelled);
       expect(query(labelled, 'scope-clear-preview')?.textContent?.trim()).toBe('Will use CLI subscription from Global.');
+      labelled.destroy();
 
       const nested = createComponent({ ...WORKSPACE_OVERRIDE, fallbackPreview: { scope: 'global', value: { nested: true } } });
       openPopover(nested);
@@ -249,10 +255,10 @@ describe('SettingScopeRowComponent', () => {
     it(`lists Global, "${label}" and the workspace, in that order`, () => {
       const fixture = createComponent(WORKSPACE_OVERRIDE);
       openPopover(fixture);
-      const layers = Array.from(fixture.nativeElement.querySelectorAll('[data-layer]')) as HTMLElement[];
+      const layers = Array.from(overlay().querySelectorAll('[data-layer]')) as HTMLElement[];
       expect(layers.map((layer) => layer.querySelector('span')?.textContent?.trim()))
         .toEqual(['Global · all Ptah apps', label, 'Workspace · ptah-extension']);
-      expect(fixture.nativeElement.querySelector('[data-testid="scope-popover"]')?.textContent)
+      expect(overlay().querySelector('[data-testid="scope-popover"]')?.textContent)
         .not.toContain(isElectron ? 'VS Code' : 'Desktop app');
     });
 
@@ -261,7 +267,7 @@ describe('SettingScopeRowComponent', () => {
         scope: 'app', fallbackPreview: { scope: 'global', value: 'claude-sonnet-4' } });
       expect(badgeText(fixture)).toBe('Model · App');
       openPopover(fixture);
-      const app = fixture.nativeElement.querySelector('[data-layer="app"]') as HTMLElement;
+      const app = overlay().querySelector('[data-layer="app"]') as HTMLElement;
       expect(app.textContent).toContain(label);
       expect(app.getAttribute('aria-current')).toBe('true');
       expect(app.textContent).toContain('In use');
@@ -280,6 +286,7 @@ describe('SettingScopeRowComponent', () => {
       const stored = createComponent({ ...WORKSPACE_OVERRIDE, credentialSource: 'machine-secret-store' });
       openPopover(stored);
       expect(query(stored, 'scope-credential')?.textContent?.trim()).toBe('Credential: stored on this machine');
+      stored.destroy();
 
       const host = createComponent({ ...WORKSPACE_OVERRIDE, credentialSource: 'host-supplied', credentialDescription: 'Credential: managed by the CLI login' });
       openPopover(host);

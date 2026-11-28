@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * PreviousSessionsModalComponent (TASK_2026_679, plan component 7).
  *
@@ -41,6 +42,10 @@ import { SessionOrganizerService } from '../../../services/session-list/session-
 import { ConfirmationDialogComponent } from '../../molecules/confirmation-dialog.component';
 import { SessionOrganizationEditorComponent } from '../../molecules/session-organization-editor/session-organization-editor.component';
 import { PreviousSessionsModalComponent } from './previous-sessions-modal.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function organization(
   overrides: Partial<SessionOrganizationSummary> = {},
@@ -258,7 +263,7 @@ describe('PreviousSessionsModalComponent', () => {
 
   const maybe = <T extends HTMLElement = HTMLElement>(
     selector: string,
-  ): T | null => page.querySelector<T>(selector);
+  ): T | null => page.querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
   const el = <T extends HTMLElement = HTMLElement>(selector: string): T => {
     const found = maybe<T>(selector);
     if (!found) throw new Error(`Missing ${selector}`);
@@ -437,7 +442,9 @@ describe('PreviousSessionsModalComponent', () => {
       el<HTMLButtonElement>('[data-testid="session-filter-toggle"]').click();
       render();
       const filters = el('[data-testid="session-filter-panel"]');
-      expect(panel().contains(filters)).toBe(true);
+      const filterPane = filters?.closest('.cdk-overlay-pane');
+      expect(filterPane).toBeTruthy();
+      expect(filterPane).not.toBe(panel().closest('.cdk-overlay-pane'));
 
       filters.dispatchEvent(keydown('Escape'));
       render();

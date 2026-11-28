@@ -58,7 +58,10 @@ describe('CliTierMappingModalComponent', () => {
   let state: StateStub;
   let loader: { listModels: jest.Mock };
   let feedback: SettingsSaveFeedbackService;
-  const el = () => fixture.nativeElement as HTMLElement;
+  const el = () =>
+    (document.querySelector('.cdk-dialog-container') as HTMLElement | null) ??
+    (fixture.nativeElement as HTMLElement);
+  const dialog = () => document.querySelector('.cdk-dialog-container');
   const q = <T extends HTMLElement = HTMLElement>(id: string) => el().querySelector(`[data-testid="${id}"]`) as T | null;
   const field = (tier: string) => fixture.debugElement.queryAll(By.directive(ProviderModelSearchFieldComponent))
     .find((node) => node.nativeElement.getAttribute('data-testid') === `cli-tier-picker-${tier}`)?.componentInstance as ProviderModelSearchFieldComponent | undefined;
@@ -89,7 +92,7 @@ describe('CliTierMappingModalComponent', () => {
   afterEach(() => { feedback.dismiss(); TestBed.resetTestingModule(); });
 
   it('is the titled tier dialog: one compact searchable field per tier over the instance provider\'s catalogue', () => {
-    expect(el().querySelector('dialog')?.hasAttribute('open')).toBe(true);
+    expect(dialog()).not.toBeNull();
     expect(q('cli-tier-mapping-modal')?.textContent).toContain('Glm Tier Model Mapping');
     expect(loader.listModels).toHaveBeenCalledWith('ollama-cloud');
     for (const tier of ['sonnet', 'opus', 'haiku']) {

@@ -1,10 +1,11 @@
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import {
   AppStateManager, ClaudeAmbientStatusService, ProviderAccountsStateService, ProvidersSettingsStateService,
   type ProvidersConnection,
 } from '@ptah-extension/core';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { ConnectionDetailDrawerComponent } from './connection-detail-drawer.component';
 import { connectionInitials } from './provider-connection-card.state';
@@ -56,17 +57,24 @@ describe('ConnectionDetailDrawerComponent', () => {
   });
   afterEach(() => { fixture.destroy(); TestBed.resetTestingModule(); });
 
-  /** The drawer renders through `NativeDrawerComponent`, fixed-position inside the host. */
-  const query = (selector: string) => (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(selector);
+  /** Queries the attached CDK drawer, with the dialog container for role and dismissal checks. */
+  const root = (): HTMLElement => {
+    const drawer = fixture.debugElement.query(By.directive(NativeDrawerComponent))
+      ?.componentInstance as NativeDrawerComponent | undefined;
+    return drawer?.panel()?.nativeElement ?? (fixture.nativeElement as HTMLElement);
+  };
+  const query = (selector: string) =>
+    root().querySelector<HTMLElement>(selector) ??
+    document.querySelector<HTMLElement>(selector);
   const byTestId = (id: string) => query(`[data-testid="${id}"]`);
-  const tabLabels = () => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('[role="tab"]'))
+  const tabLabels = () => Array.from(root().querySelectorAll('[role="tab"]'))
     .map((tab) => tab.textContent?.trim());
   function render(inputs: Record<string, unknown>) {
     for (const [name, value] of Object.entries(inputs)) fixture.componentRef.setInput(name, value);
     fixture.detectChanges();
   }
   function selectTab(label: string) {
-    Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLElement>('[role="tab"]'))
+    Array.from(root().querySelectorAll<HTMLElement>('[role="tab"]'))
       .find((tab) => tab.textContent?.trim() === label)?.click();
     fixture.detectChanges();
   }
@@ -192,7 +200,7 @@ describe('ConnectionDetailDrawerComponent', () => {
     expect(byTestId('connection-credential-storage')?.textContent?.trim()).toBe('Could not read the stored key.');
     selectTab('Credentials');
     expect(byTestId('credentials-key-unreadable')?.textContent?.trim()).toBe('Could not read the stored key.');
-    const all = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    const all = root().textContent ?? '';
     for (const wording of ['No key stored', 'Not set', 'Add API key', 'Add key']) expect(all).not.toContain(wording);
     const retried = jest.fn();
     fixture.componentInstance.keyRetryRequested.subscribe(retried);
@@ -229,7 +237,7 @@ describe('ConnectionDetailDrawerComponent', () => {
     render({ connection: SOVEREIGNEG, canEdit: true });
     expect(byTestId('connection-edit-in-setup')).toBeNull();
     expect(byTestId('connection-drawer-close')).not.toBeNull();
-    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Save Changes');
+    expect(root().textContent).not.toContain('Save Changes');
 
     // A custom gateway keeps setup (D14) for what its tabs do not hold: its address on Credentials, its
     // own default models on Models & Tiers, its name and protocol on Advanced.

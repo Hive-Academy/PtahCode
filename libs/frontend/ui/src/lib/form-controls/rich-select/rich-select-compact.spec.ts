@@ -41,7 +41,7 @@ function key(target: HTMLElement, k: string): void {
 
 describe('PtahRichSelectComponent compact variant', () => {
   it('takes its name from labelledBy, which wins over label, on the trigger and the listbox', () => {
-    const { fixture, root, triggers } = setup();
+    const { fixture, triggers } = setup();
     const [compact, labelled] = triggers;
     expect(compact.getAttribute('aria-labelledby')).toBe('effort-title');
     expect(compact.hasAttribute('aria-label')).toBe(false);
@@ -50,7 +50,7 @@ describe('PtahRichSelectComponent compact variant', () => {
 
     key(compact, 'ArrowDown');
     fixture.detectChanges();
-    const listbox = root.querySelector('[role="listbox"]') as HTMLElement;
+    const listbox = document.querySelector('[role="listbox"]') as HTMLElement;
     expect(listbox.getAttribute('aria-labelledby')).toBe('effort-title');
     expect(listbox.hasAttribute('aria-label')).toBe(false);
   });
@@ -60,7 +60,7 @@ describe('PtahRichSelectComponent compact variant', () => {
     expect(root.querySelector('select')).toBeNull();
     triggers[0].click();
     fixture.detectChanges();
-    const panel = root.querySelector('.ptah-select__panel') as HTMLElement;
+    const panel = document.querySelector('.ptah-select__panel') as HTMLElement;
     expect(panel).not.toBeNull();
     expect(panel.querySelector('[role="listbox"]')).not.toBeNull();
     expect(panel.querySelectorAll('[role="option"]')).toHaveLength(3);
@@ -76,9 +76,9 @@ describe('PtahRichSelectComponent compact variant', () => {
   });
 
   it('skips the disabled option on End and returns focus to the trigger on Escape', () => {
-    const { fixture, root, triggers } = setup();
+    const { fixture, triggers } = setup();
     const trigger = triggers[0];
-    const active = (): string => root.querySelector('[role="option"][data-active]')?.textContent ?? '';
+    const active = (): string => document.querySelector('[role="option"][data-active]')?.textContent ?? '';
     trigger.focus();
     key(trigger, 'Home');
     fixture.detectChanges();
@@ -88,7 +88,7 @@ describe('PtahRichSelectComponent compact variant', () => {
     expect(active()).toContain(LONG);
     key(trigger, 'Escape');
     fixture.detectChanges();
-    expect(root.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 });
@@ -119,6 +119,6 @@ describe('PtahRichSelectComponent in a setting row', () => {
     expect(root.querySelector('[data-ptah-setting-control] > ptah-select')).not.toBeNull();
     trigger.click();
     fixture.detectChanges();
-    expect(root.querySelector('[role="listbox"]')?.getAttribute('aria-labelledby')).toBe('row-effort-title');
+    expect(document.querySelector('[role="listbox"]')?.getAttribute('aria-labelledby')).toBe('row-effort-title');
   });
 });

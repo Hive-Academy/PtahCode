@@ -1,313 +1,143 @@
+import { DecimalPipe, NgTemplateOutlet, PercentPipe } from '@angular/common';
+import { ChangeDetectionStrategy, Component, computed, output, signal, type OnInit } from '@angular/core';
+import { ArrowLeft, LucideAngularModule, RefreshCw } from 'lucide-angular';
+import { OUTCOME_TASK_KINDS, type OutcomeTaskKind } from '@ptah-extension/shared';
 import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  output,
-  signal,
-  viewChild,
-} from '@angular/core';
-import {
-  ArrowDownWideNarrow,
-  ArrowLeft,
-  ArrowUpNarrowWide,
-  LucideAngularModule,
-  RefreshCw,
-} from 'lucide-angular';
-import {
-  OUTCOME_TASK_KINDS,
-  type AgentGetCapabilityMatrixResult,
-  type OutcomeTaskKind,
-} from '@ptah-extension/shared';
-import {
+  PtahAlertComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
+  PtahDonutComponent,
   PtahIconButtonDirective,
-  PtahInstrumentBandComponent,
-  PtahRichSelectComponent,
   PtahInputDirective,
-  PtahFieldComponent,
-  PtahFieldGridDirective,
-  PtahFormSectionComponent,
-  type PtahInstrumentBandSegment,
+  PtahMeterComponent,
+  PtahRelativeTimeComponent,
+  PtahRingComponent,
+  PtahSkeletonComponent,
+  PtahStackedBarComponent,
+  PtahStatComponent,
 } from '@ptah-extension/ui';
+import { dashboardModel, type DashboardRow } from './decision-matrix-dashboard.model';
+import { DecisionMatrixDashboardStore } from './decision-matrix-dashboard.store';
 import { HostRoutingSettingComponent } from './host-routing-setting.component';
 import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
 import { PerformanceRoutingSettingComponent } from './performance-routing-setting.component';
-import { RoutingEvidenceComponent } from './routing-evidence.component';
-import { CapabilityMatrixSettingComponent } from './capability-matrix-setting.component';
 import { RoutingDisplayNamesStore } from './routing-display-names.store';
+
+type ScoreSource = 'measured' | 'ratings';
 
 @Component({
   selector: 'ptah-decision-matrix-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CapabilityMatrixSettingComponent,
-    LucideAngularModule,
-    PtahButtonDirective,
-    PtahIconButtonDirective,
-    PtahInstrumentBandComponent,
-    PtahRichSelectComponent,
-    PtahInputDirective,
-    PtahFieldComponent,
-    PtahFieldGridDirective,
-    PtahFormSectionComponent,
-    HostRoutingSettingComponent,
-    LaneRotationSettingComponent,
-    PerformanceRoutingSettingComponent,
-    RoutingEvidenceComponent,
+    DecimalPipe, NgTemplateOutlet, PercentPipe, LucideAngularModule, PtahAlertComponent,
+    PtahBadgeDirective, PtahButtonDirective, PtahDonutComponent, PtahIconButtonDirective,
+    PtahInputDirective, PtahMeterComponent, PtahRelativeTimeComponent, PtahRingComponent,
+    PtahSkeletonComponent, PtahStackedBarComponent, PtahStatComponent,
+    HostRoutingSettingComponent, LaneRotationSettingComponent, PerformanceRoutingSettingComponent,
   ],
-  template: `
-    <div
-      class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-controls)]"
-    >
-      <button
-        ptahButton
-        variant="ghost"
-        type="button"
-        (click)="back.emit()"
-        aria-label="Context management"
-      >
-        <lucide-angular [img]="BackIcon" aria-hidden="true" />
-        Context management
-      </button>
-      <div class="flex items-center gap-[var(--ptah-gap-controls)]">
-        <span class="text-xs text-base-content-muted">{{ ratedMeta() }}</span>
-        <button
-          ptahIconButton
-          type="button"
-          label="Refresh ratings"
-          [busy]="busy()"
-          (click)="refresh()"
-        >
-          <lucide-angular [img]="RefreshIcon" aria-hidden="true" />
-        </button>
-      </div>
-    </div>
-    <ptah-instrument-band
-      class="mb-[var(--ptah-gap-heading)]"
-      [segments]="segments()"
-      [loading]="busy()"
-      ariaLabel="Decision matrix overview"
-    />
-    <ptah-host-routing-setting
-      (modelConfiguredChange)="routingModelConfigured.set($event)"
-    />
-    <ptah-lane-rotation-setting />
-    <ptah-performance-routing-setting />
-    <ptah-routing-evidence />
-    <ptah-form-section
-      wide
-      level="2"
-      heading="Model ratings"
-      data-glass-surface="content"
-      description="Select a score to see where it came from."
-    >
-      <p
-        aside
-        class="text-xs tabular-nums text-base-content-muted"
-        data-testid="decision-matrix-result-count"
-      >
-        {{ visibleCount() }}
-        {{ visibleCount() === 1 ? 'result' : 'results' }}
-      </p>
-      <div class="min-w-0 space-y-[var(--ptah-gap-controls)]">
-        <div class="flex min-w-0 items-center gap-[var(--ptah-gap-field)]">
-          <div
-            ptahFieldGrid
-            class="min-w-0 flex-1"
-            style="--ptah-field-grid-min-sm: 8rem"
-          >
-            <ptah-field label="Family">
-              <ptah-select
-                label="Filter by family"
-                [options]="familyOptions()"
-                [value]="family()"
-                (valueChange)="family.set($event ?? '')"
-              />
-            </ptah-field>
-            <ptah-field label="Search models">
-              <input
-                ptahInput
-                type="search"
-                aria-label="Search models"
-                [value]="search()"
-                (input)="setSearch($event)"
-              />
-            </ptah-field>
-            <ptah-field label="Sort by">
-              <ptah-select
-                label="Sort by task kind"
-                [options]="taskOptions"
-                [value]="sortKind()"
-                (valueChange)="setSort($event)"
-              />
-            </ptah-field>
-          </div>
-          <button
-            ptahIconButton
-            type="button"
-            class="shrink-0"
-            [label]="
-              descending()
-                ? 'Sort descending; switch to ascending'
-                : 'Sort ascending; switch to descending'
-            "
-            [selected]="descending()"
-            (click)="descending.set(!descending())"
-          >
-            <lucide-angular
-              [img]="descending() ? SortDescIcon : SortAscIcon"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
-        <ptah-capability-matrix-setting
-          [headingLevel]="2"
-          [familyFilter]="family()"
-          [modelSearch]="search()"
-          [sortKind]="sortKind()"
-          [sortDescending]="descending()"
-          (resultChange)="onResult($event)"
-          (loadingChange)="busy.set($event)"
-          (visibleCountChange)="visibleCount.set($event)"
-        />
-      </div>
-    </ptah-form-section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
-  `,
+  providers: [DecisionMatrixDashboardStore],
+  host: { role: 'region', 'aria-label': 'Decision matrix dashboard' },
+  templateUrl: './decision-matrix-page.component.html',
+  styleUrl: './decision-matrix-page.component.css',
 })
-export class DecisionMatrixPageComponent {
+export class DecisionMatrixPageComponent implements OnInit {
   readonly back = output<void>();
-  protected readonly RefreshIcon = RefreshCw;
   protected readonly BackIcon = ArrowLeft;
-  protected readonly SortDescIcon = ArrowDownWideNarrow;
-  protected readonly SortAscIcon = ArrowUpNarrowWide;
-  private readonly names = inject(RoutingDisplayNamesStore);
-  private readonly matrix = viewChild(CapabilityMatrixSettingComponent);
+  protected readonly RefreshIcon = RefreshCw;
   protected readonly tasks = OUTCOME_TASK_KINDS;
-  protected readonly labels: Record<OutcomeTaskKind, string> = {
-    plan: 'Plan',
-    implement: 'Implement',
-    review: 'Review',
-    research: 'Research',
-    tests: 'Tests',
-    docs: 'Docs',
-  };
+  protected readonly effortSourceLabels = {
+    native: 'Reported by lane',
+    'ptah-fallback': 'Ptah fallback',
+    unknown: 'Unknown',
+  } as const;
   protected readonly routingModelConfigured = signal<boolean | null>(null);
-  protected readonly taskOptions = OUTCOME_TASK_KINDS.map((value) => ({
-    value,
-    label: this.labels[value],
-  }));
-  protected readonly familyOptions = computed(() => [
-    { value: '', label: 'All families' },
-    ...this.families().map((value) => {
-      const name = this.names.executor(value);
-      // An unresolved custom executor has a generic name; its id keeps the options distinct.
-      const generic = name.loading || name.text === 'Unknown executor';
-      return { value, label: generic && name.raw ? name.raw : name.text };
-    }),
-  ]);
-  protected readonly family = signal('');
+  protected readonly source = signal<ScoreSource>('measured');
   protected readonly search = signal('');
-  protected readonly sortKind = signal<OutcomeTaskKind>('plan');
-  protected readonly descending = signal(true);
-  protected readonly busy = signal(true);
-  protected readonly result = signal<AgentGetCapabilityMatrixResult | null>(
-    null,
-  );
-  protected readonly families = computed(() => [
-    ...new Set((this.result()?.profiles ?? []).map((p) => p.family)),
-  ]);
-  protected readonly visibleCount = signal(0);
-  protected readonly latest = computed(() => {
-    let latest: string | null = null;
-    for (const profile of this.result()?.profiles ?? [])
-      for (const kind of OUTCOME_TASK_KINDS) {
-        const cell = profile.cells[kind];
-        if (cell.kind === 'value' && (!latest || cell.asOf > latest))
-          latest = cell.asOf;
-      }
-    return latest;
+  protected readonly selection = signal<{ id: string; task: OutcomeTaskKind } | null>(null);
+  protected readonly evidence = computed(() => {
+    const value = this.store.evidence();
+    return typeof value === 'string' ? null : value;
   });
-  protected readonly ratedMeta = computed(() => {
-    const latest = this.latest();
-    return latest ? `Rated ${this.relative(latest)}` : 'No ratings yet';
+  private readonly ratings = computed(() => {
+    const value = this.store.ratings();
+    return typeof value === 'string' ? null : value;
   });
-  protected readonly segments = computed<readonly PtahInstrumentBandSegment[]>(
-    () => {
-      const profiles = this.result()?.profiles ?? [];
-      const latest = this.latest();
-      // null: the routing model read has not succeeded yet, so make no claim about it.
-      const configured = this.routingModelConfigured();
-      return [
-        {
-          id: 'routing-model',
-          label: 'Routing model',
-          value:
-            configured === null ? 'Unknown' : configured ? 'On' : 'Needs a model',
-          tone: configured === null ? 'idle' : configured ? 'ok' : 'warn',
-        },
-        {
-          id: 'families',
-          label: 'Families',
-          value: String(this.families().length),
-          tone: 'info',
-        },
-        {
-          id: 'models',
-          label: 'Models rated',
-          value: String(
-            new Set(
-              profiles
-                .filter(
-                  (p) =>
-                    p.model !== '*' &&
-                    OUTCOME_TASK_KINDS.some(
-                      (kind) => p.cells[kind].kind !== 'unknown',
-                    ),
-                )
-                .map((p) => p.model),
-            ).size,
-          ),
-          tone: 'info',
-        },
-        {
-          id: 'last',
-          label: 'Last rating',
-          value: latest ? this.relative(latest) : 'None',
-          tone: 'info',
-        },
-      ];
-    },
-  );
-  protected onResult(result: AgentGetCapabilityMatrixResult | null): void {
-    this.result.set(result);
+  protected readonly busy = computed(() => this.store.evidence() === 'loading' || this.store.ratings() === 'loading');
+  protected readonly dashboard = computed(() => dashboardModel(this.evidence(), this.ratings()));
+  protected readonly rows = computed(() => {
+    const dashboard = this.dashboard();
+    const ratingProfiles = new Set(this.ratings()?.profiles.map(({ family, model }) => JSON.stringify([family, model])));
+    const rows = this.source() === 'measured'
+      ? dashboard.measuredRows
+      : dashboard.rows.filter(({ family, model }) => ratingProfiles.has(JSON.stringify([family, model])));
+    const search = this.search().trim().toLowerCase();
+    return search ? rows.filter((row) =>
+      [row.model, row.family, this.laneName(row.laneId, row.family), this.modelName(row.model)]
+        .some((value) => value.toLowerCase().includes(search)),
+    ) : rows;
+  });
+  protected readonly detail = computed(() => {
+    const selection = this.selection();
+    if (!selection) return null;
+    const row = this.dashboard().rows.find((candidate) => candidate.id === selection.id);
+    if (!row) return null;
+    const { task } = selection;
+    const measured = row.measured.get(task);
+    const rating = row.ratings.get(task);
+    const active = this.source() === 'measured' ? measured : rating;
+    return active ? { row, task, measured, rating, active } : null;
+  });
+  protected readonly workloads = computed(() => this.dashboard().workloads.map((workload) => ({
+    ...workload,
+    label: this.laneName(workload.laneId),
+  })));
+
+  /* eslint-disable @angular-eslint/prefer-inject -- This feature uses constructor injection. */
+  constructor(
+    protected readonly store: DecisionMatrixDashboardStore,
+    private readonly names: RoutingDisplayNamesStore,
+  ) {}
+  /* eslint-enable @angular-eslint/prefer-inject */
+
+  ngOnInit(): void {
+    this.store.refresh();
   }
-  protected refresh(): void {
-    if (this.busy()) return;
-    this.busy.set(true);
-    void this.matrix()?.reload();
+
+  protected laneName(laneId: string | null, family = ''): string {
+    const id = laneId ?? family;
+    return id ? this.names.executor(id).text : '';
   }
+
+  protected modelName(model: string): string {
+    return model === '*' ? 'Family default' : this.names.model(model).text;
+  }
+
+  protected cell(row: DashboardRow, task: OutcomeTaskKind, lane: string, model: string) {
+    const measured = this.source() === 'measured' ? row.measured.get(task) : undefined;
+    const rating = this.source() === 'ratings' ? row.ratings.get(task) : undefined;
+    const cell = measured ?? rating;
+    if (!cell) return null;
+    const countText = measured ? `${measured.funnel.spawned} runs`
+      : rating?.sampleCount == null ? 'Rating' : `${rating.sampleCount} samples`;
+    const scoreText = cell.score === null ? 'No score' : `${cell.score} of 100`;
+    const staleText = cell.stale ? ', stale' : '';
+    return {
+      score: cell.score,
+      stale: cell.stale,
+      countText,
+      ariaLabel: `${lane} ${model} ${task}: ${scoreText}, ${countText}${staleText}`,
+    };
+  }
+
+  protected select(id: string, task: OutcomeTaskKind): void {
+    this.selection.set({ id, task });
+  }
+
   protected setSearch(event: Event): void {
-    if (event.target instanceof HTMLInputElement)
+    if (event.target instanceof HTMLInputElement) {
       this.search.set(event.target.value);
-  }
-  protected setSort(value: string | null): void {
-    const kind = OUTCOME_TASK_KINDS.find((k) => k === value);
-    if (kind) this.sortKind.set(kind);
-  }
-  /** "today", "1 day ago" or "N days ago"; a future or unreadable date reads as today. */
-  private relative(date: string): string {
-    const elapsed = Date.now() - Date.parse(date);
-    const days = Number.isFinite(elapsed)
-      ? Math.max(0, Math.floor(elapsed / 86_400_000))
-      : 0;
-    if (days === 0) return 'today';
-    return days === 1 ? '1 day ago' : `${days} days ago`;
+      this.selection.set(null);
+    }
   }
 }

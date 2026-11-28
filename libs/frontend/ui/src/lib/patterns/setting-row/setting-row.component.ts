@@ -21,11 +21,18 @@ let nextSettingRowId = 0;
     // Opt-in toggles only: Angular merges this binding with the static class above.
     '[class]': 'hostToggles()',
   },
+  styles: [`
+    @container (min-width: 17rem) {
+      [data-compact-split] { grid-template-columns: minmax(0, 1fr) auto; }
+      [data-compact-split] > [data-ptah-setting-control] { justify-self: end; }
+    }
+  `],
   template: `
     <div
       class="grid min-w-0 grid-cols-1 items-center gap-x-ptah-group gap-y-ptah-label row-split:grid-cols-[minmax(0,1fr)_auto]"
       [class.py-ptah-field]="density() === 'default'"
       [class.py-ptah-controls]="density() === 'compact'"
+      [attr.data-compact-split]="compactSplit() ? '' : null"
       [attr.data-disabled]="disabled() ? 'true' : null"
       data-testid="setting-row"
     >
@@ -66,6 +73,8 @@ export class PtahSettingRowComponent {
   readonly disabled = input(false, { transform: booleanAttribute });
   readonly disabledReason = input<string | null>(null);
   readonly density = input<'default' | 'compact'>('default');
+  /** Keeps a small control beside the text from 17rem of row content. */
+  readonly compactSplit = input(false, { transform: booleanAttribute });
   /** 'end': the control column is `justify-end`, so controls share the right edge. @default 'start' (today) */
   readonly controlAlign = input<'start' | 'end'>('start');
   /** 'trim': a first row has no top padding and a last row has no bottom padding. @default 'all' (today) */

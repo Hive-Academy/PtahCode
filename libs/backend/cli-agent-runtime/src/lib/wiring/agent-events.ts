@@ -28,7 +28,9 @@ import {
   type AgentPermissionRequest,
   type CliOutputSegment,
   type CliSessionReference,
+  type CliType,
   type FlatStreamEventUnion,
+  type ToolCallSummary,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import {
@@ -117,6 +119,11 @@ interface SdkSessionMetadataStoreLike {
       stdout?: string;
       segments?: readonly CliOutputSegment[];
       streamEvents?: readonly FlatStreamEventUnion[];
+      cli?: CliType;
+      model?: string;
+      startedAt?: string;
+      segmentsTruncated?: boolean;
+      toolCallSummary?: ToolCallSummary;
     },
     sessionId?: string,
   ): Promise<void>;
@@ -735,6 +742,11 @@ export function persistCliSessionReference(
           stdout?: string;
           segments?: readonly CliOutputSegment[];
           streamEvents?: readonly FlatStreamEventUnion[];
+          cli?: CliType;
+          model?: string;
+          startedAt?: string;
+          segmentsTruncated?: boolean;
+          toolCallSummary?: ToolCallSummary;
         }
       | undefined;
 
@@ -863,6 +875,10 @@ export function persistCliSessionReference(
         persistedOutput &&
         metadataStore.saveAgentOutput
       ) {
+        const cli = persistedOutput.cli ?? info.cli;
+        const model =
+          persistedOutput.model ?? info.observedModel ?? info.model;
+        const startedAt = persistedOutput.startedAt ?? info.startedAt;
         await metadataStore.saveAgentOutput(
           info.agentId,
           {
@@ -874,6 +890,15 @@ export function persistCliSessionReference(
               : {}),
             ...(persistedOutput.streamEvents?.length
               ? { streamEvents: persistedOutput.streamEvents }
+              : {}),
+            ...(cli ? { cli } : {}),
+            ...(model ? { model } : {}),
+            ...(startedAt ? { startedAt } : {}),
+            ...(persistedOutput.segmentsTruncated !== undefined
+              ? { segmentsTruncated: persistedOutput.segmentsTruncated }
+              : {}),
+            ...(persistedOutput.toolCallSummary !== undefined
+              ? { toolCallSummary: persistedOutput.toolCallSummary }
               : {}),
           },
           parentSessionId,

@@ -30,6 +30,7 @@ import {
   READ_SYMBOL_RESULT_BUDGET_TOKENS,
   READ_SYMBOL_TOOL_NAME,
 } from './nav/read-symbol.limits';
+import { INSPECT_MAX_RESULT_CHARS, INSPECT_TOOL_NAME } from './nav/inspect.limits';
 import {
   applyOutputBudget,
   reduceOutput,
@@ -124,6 +125,10 @@ export const TOOL_RESULT_BUDGET_OVERRIDES: Readonly<
     tokens: GREP_RESULT_BUDGET_TOKENS,
     chars: GREP_RESULT_BUDGET_CHARS,
   }),
+  [INSPECT_TOOL_NAME]: Object.freeze({
+    chars: INSPECT_MAX_RESULT_CHARS,
+    tokens: 9_000,
+  }),
 });
 
 /**
@@ -144,6 +149,7 @@ export const TOOL_CONTENT_HINTS: Readonly<Record<string, ContentKind>> =
     ptah_get_symbol_index: 'preformatted',
     [READ_SYMBOL_TOOL_NAME]: 'preformatted',
     [GREP_TOOL_NAME]: 'preformatted',
+  [INSPECT_TOOL_NAME]: 'preformatted',
     ptah_agent_spawn: 'preformatted',
     ptah_agent_status: 'preformatted',
     ptah_agent_read: 'preformatted',

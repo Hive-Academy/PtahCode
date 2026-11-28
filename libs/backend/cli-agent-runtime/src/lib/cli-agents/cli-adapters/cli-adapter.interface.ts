@@ -90,6 +90,9 @@ export interface LaneTurnOptionsCatalog {
   readonly unsendableEfforts?: readonly string[];
   readonly currentModel?: string;
   readonly currentEffort?: string;
+  /** Dynamic command discovery failed, so an omitted command may still exist. */
+  readonly commandsUnavailable?: true;
+  readonly unavailableReason?: string;
   readonly commands: readonly LaneComposerCommandOption[];
 }
 
@@ -98,6 +101,14 @@ export interface LaneTurnSettingsResult {
   readonly model?: string;
   readonly reasoningEffort?: string;
   readonly appliesAt: 'next-turn' | 'next-spawn';
+}
+
+/** A provider rejected the turn input before delivery. */
+export class LaneTurnInputRefusal extends Error {
+  constructor(readonly reason: string, options?: ErrorOptions) {
+    super(reason, options);
+    this.name = 'LaneTurnInputRefusal';
+  }
 }
 
 /**
@@ -313,6 +324,11 @@ export interface SdkHandle extends LaneAccountBindingFields {
     message: string,
     content?: LaneTurnContent,
   ) => Promise<ContinuationOutcome>;
+  /** Validate provider input before the manager records a new turn. */
+  readonly prepareContinuation?: (
+    message: string,
+    content?: LaneTurnContent,
+  ) => Promise<() => ContinuationOutcome>;
   /** Send a mid-run steering message to a still-running agent that owns a live
    *  input channel (e.g. Pi RPC mode writes a {"type":"steer"} request to the
    *  child's stdin). AgentProcessManager.steer() routes SDK-based agents here
@@ -428,6 +444,9 @@ export interface StoppedLaneCatalog {
   readonly models: CliModelInfo[];
   readonly efforts: readonly string[];
   readonly unsendableEfforts?: readonly string[];
+  readonly commands?: LaneTurnOptionsCatalog['commands'];
+  readonly commandsUnavailable?: LaneTurnOptionsCatalog['commandsUnavailable'];
+  readonly unavailableReason?: string;
 }
 
 export interface CliAdapter {
@@ -501,7 +520,10 @@ export interface CliAdapter {
    * `laneEfforts`. Rejects when the read fails, so the coordinator reports an
    * error instead of a false empty list.
    */
-  stoppedLaneCatalog?(): Promise<StoppedLaneCatalog>;
+  stoppedLaneCatalog?(workingDirectory?: string): Promise<StoppedLaneCatalog>;
+
+  /** Native commands available independently of provider catalog discovery. */
+  readonly builtinLaneCommands?: LaneTurnOptionsCatalog['commands'];
 
   /**
    * Optional: Ensure OAuth tokens are fresh (for adapters that use OAuth).

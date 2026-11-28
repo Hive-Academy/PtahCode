@@ -192,7 +192,7 @@ import {
   handleArtifactPublish,
   type ArtifactNotification,
 } from './artifact-tool-handlers';
-import type { IArtifactStore } from '@ptah-extension/platform-core';
+import type { IArtifactStore, LiveChatSessionResolver } from '@ptah-extension/platform-core';
 import type { McpToolProfile } from '@ptah-extension/shared';
 import {
   APPS_ONLY_TOOL_NAMES,
@@ -227,6 +227,8 @@ import { describeZodIssues, handleRouteToolCall } from './route-tool-handlers';
 import { handleGrep } from './nav/grep';
 import { GREP_TOOL_NAME } from './nav/grep.limits';
 import { handleReadSymbol } from './nav/read-symbol';
+import { handleInspect } from './nav/inspect';
+import { INSPECT_TOOL_NAME } from './nav/inspect.limits';
 import { READ_SYMBOL_TOOL_NAME } from './nav/read-symbol.limits';
 import {
   OUTCOME_REPORT_TOOL_NAME,
@@ -258,6 +260,10 @@ import {
   MCP_CRON_WRITE_DENIED_MESSAGE,
 } from './mcp-caller-policy';
 import { composeEffectiveToolList } from './effective-tool-list';
+import {
+  ANTIGRAVITY_CALLER_CLI,
+  compactToolsForAntigravity,
+} from './antigravity-tool-compaction';
 import { childPhasePolicyRefusal } from './child-phase-policy';
 import {
   MCP_CALLER_FORBIDDEN_CODE,
@@ -389,6 +395,7 @@ export interface ProtocolHandlerDependencies {
    * another session or folder. Absent, or an unknown id: artifact publishing
    * refuses the call.
    */
+  liveChatSessions?: LiveChatSessionResolver;
   getSessionWorkspace?: (idOrTabId: string) => string | undefined;
   /** Resolve an SDK session id to its routing tab id. */
   getSessionTabId?: (idOrTabId: string) => string | undefined;
@@ -589,7 +596,7 @@ async function handleToolsList(
 ): Promise<MCPResponse> {
   const profile = resolveMcpToolProfile(request);
   const capability = requestCapability(request);
-  const tools = composeEffectiveToolList(
+  let tools = composeEffectiveToolList(
     resolveMcpCaller(request),
     profile,
     capability,
@@ -599,6 +606,14 @@ async function handleToolsList(
 
   markEagerTools(tools, deps, profile);
   declareResultBudgets(tools);
+  // agy silently drops any oversized tool declaration (TASK_2026_2331); shorten
+  // only this caller's descriptions, as a separate post-processing pass. Every
+  // other caller's `tools` array is untouched. Reassigned, not mutated in
+  // place: some tool definitions are module-level singletons shared by every
+  // caller, so compactToolsForAntigravity returns a new array instead.
+  if (request._callerCli === ANTIGRAVITY_CALLER_CLI) {
+    tools = compactToolsForAntigravity(tools);
+  }
   // Appended after the eager and budget passes: gateway tools stay deferred
   // and pass through unchanged, after Ptah's byte-stable list.
   const gatewayTools = await listGatewayToolsForList(
@@ -671,6 +686,7 @@ const APPROVAL_PROMPT_TOOL_NAME = 'approval_prompt';
  */
 const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_search_files',
+  INSPECT_TOOL_NAME,
   READ_SYMBOL_TOOL_NAME,
   GREP_TOOL_NAME,
   'ptah_ast_analyze',
@@ -684,6 +700,9 @@ const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_relevance_rank_files',
   'ptah_agent_list',
   'ptah_agent_spawn',
+  'ptah_agent_read',
+  'ptah_agent_status',
+  'ptah_session_handoff_ack',
 ]);
 
 /** Eager only where VS Code IDE capabilities are present. */
@@ -1195,7 +1214,8 @@ async function handleIndividualTool(
       }
 
       case READ_SYMBOL_TOOL_NAME:
-      case GREP_TOOL_NAME: {
+      case GREP_TOOL_NAME:
+      case INSPECT_TOOL_NAME: {
         // Validation, path containment and bounds live in the handlers.
         // The caller-declared root is a URL segment (caller input), so it
         // is used only once it resolves inside an open folder of the host.
@@ -1209,6 +1229,12 @@ async function handleIndividualTool(
           // its worktree, not the main checkout.
           defaultWorkspaceRoot: async () =>
             callerRoot.root ?? (await ptahAPI.workspace.getInfo())?.path,
+          allowedWorkspaceRoots: async () => callerRoot.root
+            ? [callerRoot.root]
+            : [
+                (await ptahAPI.workspace.getInfo())?.path,
+                ...knownWorkspaceFolders(deps),
+              ].filter((root): root is string => !!root && root.trim() !== ''),
         };
         // A supplied `workspaceRoot` is the containment boundary of the
         // handlers, so it must lie inside a root the host or the caller
@@ -1238,8 +1264,9 @@ async function handleIndividualTool(
             );
           }
         }
-        const reply =
-          name === GREP_TOOL_NAME
+        const reply = name === INSPECT_TOOL_NAME
+          ? await handleInspect(args, navDeps)
+          : name === GREP_TOOL_NAME
             ? await handleGrep(args, navDeps)
             : await handleReadSymbol(args, navDeps);
         return reply.isError
@@ -2884,17 +2911,20 @@ async function handleIndividualTool(
         const callerSessionId = getCallerSessionId()?.trim() || undefined;
         // Only the caller session's own registered workspace: an unknown
         // session must not fall back to the active session or open folder.
-        const callerWorkspace = callerSessionId
-          ? deps.getSessionWorkspace?.(callerSessionId)
-          : undefined;
+        const live = callerSessionId ? deps.liveChatSessions?.resolve(callerSessionId) : undefined;
+        const session = live?.kind === 'resolved' ? live.session : undefined;
+        const callerWorkspace = session
+          ? session.runtime === 'claude-sdk' ? session.cwd : session.workspaceRoot
+          : callerSessionId && !deps.liveChatSessions
+            ? deps.getSessionWorkspace?.(callerSessionId)
+            : undefined;
+        const sessionId = session ? session.tabId ?? session.sessionId
+          : callerSessionId && !deps.liveChatSessions
+            ? deps.getSessionTabId?.(callerSessionId) ?? callerSessionId
+            : undefined;
         const reply = await handleArtifactPublish(
           args,
-          {
-            workspaceRoot: callerWorkspace,
-            sessionId: callerSessionId
-              ? (deps.getSessionTabId?.(callerSessionId) ?? callerSessionId)
-              : undefined,
-          },
+          { workspaceRoot: callerWorkspace, sessionId },
           deps.artifactStore,
           deps.notifyArtifactPublished,
           logger,

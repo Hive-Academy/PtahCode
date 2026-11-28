@@ -67,6 +67,20 @@ export interface MCPRequest {
 
   /** Transport-owned credential binding. Absent off the HTTP socket. */
   _callerBinding?: McpCallerBinding;
+
+  /**
+   * Caller's CLI/provider identity, read from a `cli` query marker on the
+   * MCP URL (`extractCallerCli`, `mcp-http/http-server.handler.ts`) the same
+   * way `_callerSessionId` is read from `/session/{id}`. Set only for the
+   * one caller that tags its own attachment's URL today: Antigravity
+   * (`'antigravity'`, tagged by `AntigravityAcpProfile.buildMcpServers`,
+   * `acp-runtime/src/lib/profiles/antigravity-acp-profile.ts`). Absent for
+   * every other caller (Claude, Codex, stdio, in-process). `handleToolsList`
+   * (TASK_2026_2331) reads it to shorten only Antigravity's oversized tool
+   * descriptions — agy silently drops any MCP tool declaration over roughly
+   * 2.1 KB.
+   */
+  _callerCli?: string;
   /** Authenticated HTTP credential owner; never supplied by the body. */
   _externalOwner?: import('@ptah-extension/shared').ExternalOwnerKey;
 

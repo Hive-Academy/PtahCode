@@ -20,6 +20,7 @@ jest.mock('@floating-ui/dom', () => ({
 }));
 
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import {
   ClaudeRpcService,
   CommandDiscoveryFacade,
@@ -38,6 +39,7 @@ import { VoiceInputService } from '../../../services/voice-input.service';
 import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
+import { ComposerActivityDirective } from '../../../directives/composer-activity.directive';
 import { findLaneModelOption, LaneComposerComponent, laneLastRunModel } from './lane-composer.component';
 
 const agentId = '00000000-0000-4000-8000-000000000001';
@@ -906,6 +908,52 @@ describe('LaneComposerComponent', () => {
     }));
     fixture.detectChanges();
     expect(onPaste).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays expanded while focus is in a portaled attach menu and folds after it closes', async () => {
+    const fixture = await mount({ showLaneControls: true });
+    const stage = root(fixture).querySelector('.ptah-composer-stage') as HTMLElement;
+    expect(stage.hasAttribute('data-compact')).toBe(true);
+    const bar = root(fixture).querySelector('ptah-composer-compact-bar') as HTMLElement;
+    (bar.querySelector('button[aria-expanded]') as HTMLButtonElement).click();
+    await settle(fixture);
+    expect(stage.hasAttribute('data-compact')).toBe(false);
+
+    const activity = fixture.debugElement
+      .query(By.directive(ComposerActivityDirective))
+      .injector.get(ComposerActivityDirective);
+    (root(fixture).querySelector('[data-testid="chat-attach-btn"]') as HTMLButtonElement).click();
+    await settle(fixture);
+    const panel = document.querySelector('.popover-panel');
+    expect(panel).not.toBeNull();
+    expect(stage.contains(panel)).toBe(false);
+    expect(document.activeElement).toBe(panel);
+    expect(activity.popoverOpen()).toBe(true);
+    expect(activity.focusWithin()).toBe(true);
+    expect(stage.hasAttribute('data-compact')).toBe(false);
+
+    panel?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle(fixture);
+    expect(document.querySelector('.popover-panel')).toBeNull();
+    expect(activity.popoverOpen()).toBe(false);
+    // The expand click holds the card until it sits idle for the refold delay.
+    // Focus the page outside the composer so the portaled-panel listener
+    // clears focusWithin before that timer starts.
+    const outside = document.createElement('button');
+    outside.type = 'button';
+    document.body.appendChild(outside);
+    jest.useFakeTimers();
+    try {
+      outside.focus();
+      fixture.detectChanges();
+      expect(activity.focusWithin()).toBe(false);
+      jest.advanceTimersByTime(2000);
+      fixture.detectChanges();
+    } finally {
+      jest.useRealTimers();
+      outside.remove();
+    }
+    expect(stage.hasAttribute('data-compact')).toBe(true);
   });
 
   it('folds into the compact bar while the lane runs idle and expands on click', async () => {

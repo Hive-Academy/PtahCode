@@ -69,6 +69,7 @@ import type {
 import {
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   type AuthEnv,
+  type PermissionLevel,
 } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -189,6 +190,9 @@ interface Harness {
   rpcHandler: MockRpcHandler;
   configManager: MockConfigManager;
   sdkAdapter: MockSdkAdapter;
+  nativePermissions: {
+    getPermissionLevel: jest.Mock<PermissionLevel | undefined, [string]>;
+  };
   providerModels: MockProviderModels;
   permissionHandler: MockPermissionHandler;
   modelResolver: MockModelResolver;
@@ -219,6 +223,9 @@ function makeHarness(
   const rpcHandler = createMockRpcHandler();
   const configManager = createMockConfigManager({ values: opts.configSeed });
   const sdkAdapter = createMockSdkAdapter();
+  const nativePermissions = {
+    getPermissionLevel: jest.fn<PermissionLevel | undefined, [string]>(),
+  };
   const providerModels = createMockProviderModels();
   const permissionHandler = createMockPermissionHandler();
   const modelResolver = createMockModelResolver();
@@ -263,6 +270,7 @@ function makeHarness(
     null,
     opts.scopeResolver ?? null,
     authEnv,
+    nativePermissions,
   );
 
   return {
@@ -273,6 +281,7 @@ function makeHarness(
     rpcHandler,
     configManager,
     sdkAdapter,
+    nativePermissions,
     providerModels,
     permissionHandler,
     modelResolver,
@@ -850,12 +859,21 @@ describe('ConfigRpcHandlers', () => {
 
     it('swallows session-sync failures so the config write still succeeds for missing sessions', async () => {
       const h = makeHarness();
-      h.sdkAdapter.setSessionPermissionLevel.mockRejectedValue(new SessionUnavailableError('session not found'));
+      h.sdkAdapter.setSessionPermissionLevel.mockRejectedValue(
+        new SessionUnavailableError('session not found'),
+      );
       h.handlers.register();
-      await expect(call(h, 'config:autopilot-toggle', {
-        enabled: true, permissionLevel: 'auto-edit', sessionId: 'sess-bad',
-      })).resolves.toEqual({ enabled: true, permissionLevel: 'auto-edit' });
-      expect(h.configManager.set).toHaveBeenCalledWith('autopilot.enabled', true);
+      await expect(
+        call(h, 'config:autopilot-toggle', {
+          enabled: true,
+          permissionLevel: 'auto-edit',
+          sessionId: 'sess-bad',
+        }),
+      ).resolves.toEqual({ enabled: true, permissionLevel: 'auto-edit' });
+      expect(h.configManager.set).toHaveBeenCalledWith(
+        'autopilot.enabled',
+        true,
+      );
       expect(h.configManager.set).toHaveBeenCalledTimes(2);
     });
   });
@@ -922,6 +940,33 @@ describe('ConfigRpcHandlers', () => {
       });
     });
 
+    it('falls back to nativePermissions.getPermissionLevel when lifecycle has no record', async () => {
+      const h = makeHarness({
+        configSeed: {
+          'autopilot.enabled': true,
+          'autopilot.permissionLevel': 'ask',
+        },
+      });
+      h.nativePermissions.getPermissionLevel.mockReturnValue('yolo');
+      h.handlers.register();
+
+      const result = await call<Record<string, unknown>>(
+        h,
+        'config:autopilot-get',
+        { sessionId: 'sess-provider' },
+      );
+
+      expect(h.lifecycle.find).toHaveBeenCalledWith('sess-provider');
+      expect(h.nativePermissions.getPermissionLevel).toHaveBeenCalledWith(
+        'sess-provider',
+      );
+      expect(result).toEqual({
+        enabled: true,
+        permissionLevel: 'ask',
+        sessionPermissionLevel: 'yolo',
+      });
+    });
+
     it('reports null for a session that is not live', async () => {
       const h = makeHarness();
       h.handlers.register();
@@ -932,21 +977,35 @@ describe('ConfigRpcHandlers', () => {
         { sessionId: 'sess-gone' },
       );
 
+      expect(h.lifecycle.find).toHaveBeenCalledWith('sess-gone');
+      expect(h.nativePermissions.getPermissionLevel).toHaveBeenCalledWith(
+        'sess-gone',
+      );
       expect(result['sessionPermissionLevel']).toBeNull();
     });
 
-    it('omits the session level when no session is requested', async () => {
+    it('omits the session level and skips lookup when sessionId is null or omitted', async () => {
       const h = makeHarness();
       h.handlers.register();
 
-      const result = await call<Record<string, unknown>>(
+      const nullResult = await call<Record<string, unknown>>(
         h,
         'config:autopilot-get',
         { sessionId: null },
       );
 
-      expect(result).not.toHaveProperty('sessionPermissionLevel');
+      expect(nullResult).not.toHaveProperty('sessionPermissionLevel');
       expect(h.lifecycle.find).not.toHaveBeenCalled();
+      expect(h.nativePermissions.getPermissionLevel).not.toHaveBeenCalled();
+
+      const omittedResult = await call<Record<string, unknown>>(
+        h,
+        'config:autopilot-get',
+      );
+
+      expect(omittedResult).not.toHaveProperty('sessionPermissionLevel');
+      expect(h.lifecycle.find).not.toHaveBeenCalled();
+      expect(h.nativePermissions.getPermissionLevel).not.toHaveBeenCalled();
     });
   });
 
@@ -958,17 +1017,37 @@ describe('ConfigRpcHandlers', () => {
     it('groups direct SDK aliases and leaves API rows ungrouped', async () => {
       const h = makeHarness({ modelSelected: 'default' });
       h.sdkAdapter.getSupportedModels.mockResolvedValue([
-        { value: 'default', resolvedModel: 'claude-fable-5-2', displayName: 'Default', description: '' },
-        { value: 'fable', resolvedModel: 'claude-fable-5-2', displayName: 'Fable', description: '' },
-        { value: 'claude-fable-5-1', resolvedModel: 'claude-fable-5-1', displayName: 'Fable 5.1', description: '' },
+        {
+          value: 'default',
+          resolvedModel: 'claude-fable-5-2',
+          displayName: 'Default',
+          description: '',
+        },
+        {
+          value: 'fable',
+          resolvedModel: 'claude-fable-5-2',
+          displayName: 'Fable',
+          description: '',
+        },
+        {
+          value: 'claude-fable-5-1',
+          resolvedModel: 'claude-fable-5-1',
+          displayName: 'Fable 5.1',
+          description: '',
+        },
       ]);
       h.sdkAdapter.getApiModels.mockResolvedValue([
         { value: 'claude-haiku-4-5', displayName: 'Haiku', description: '' },
       ]);
       h.handlers.register();
-      const result = await call<{ models: Array<{ id: string; group?: string }> }>(h, 'config:models-list');
+      const result = await call<{
+        models: Array<{ id: string; group?: string }>;
+      }>(h, 'config:models-list');
       expect(result.models.map((model) => model.group)).toEqual([
-        'primary', 'primary', 'other', undefined,
+        'primary',
+        'primary',
+        'other',
+        undefined,
       ]);
       expect(result.models[0]).not.toHaveProperty('isRecommended');
     });
@@ -1115,13 +1194,27 @@ describe('ConfigRpcHandlers', () => {
 
     describe('provider-session provider (Antigravity)', () => {
       const agyCatalog = [
-        { id: 'gemini-4-neon', name: 'Gemini 4 Neon', description: '', contextLength: 0, supportsToolUse: true },
-        { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)', description: '', contextLength: 0, supportsToolUse: true },
+        {
+          id: 'gemini-4-neon',
+          name: 'Gemini 4 Neon',
+          description: '',
+          contextLength: 0,
+          supportsToolUse: true,
+        },
+        {
+          id: 'gemini-4-hydrogen-low',
+          name: 'Gemini 4 Hydrogen (Low)',
+          description: '',
+          contextLength: 0,
+          supportsToolUse: true,
+        },
       ];
 
       function agyHarness(saved: string): Harness {
         const h = makeHarness({ modelSelected: saved });
-        h.providerModels.resolveActiveProviderId.mockReturnValue('antigravity-cli');
+        h.providerModels.resolveActiveProviderId.mockReturnValue(
+          'antigravity-cli',
+        );
         h.providerModels.fetchModels.mockResolvedValue({
           models: agyCatalog,
           totalCount: agyCatalog.length,
@@ -1146,10 +1239,13 @@ describe('ConfigRpcHandlers', () => {
           'gemini-4-hydrogen-low',
         ]);
         expect(result.models[0].name).toBe('Default (chosen by Antigravity)');
-        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual([
-          'gemini-4-hydrogen-low',
-        ]);
-        expect(h.providerModels.fetchModels).toHaveBeenCalledWith('antigravity-cli', null);
+        expect(
+          result.models.filter((m) => m.isSelected).map((m) => m.id),
+        ).toEqual(['gemini-4-hydrogen-low']);
+        expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+          'antigravity-cli',
+          null,
+        );
         expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
       });
 
@@ -1159,7 +1255,9 @@ describe('ConfigRpcHandlers', () => {
         const result = await call<{
           models: Array<{ id: string; isSelected: boolean }>;
         }>(h, 'config:models-list');
-        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual(['default']);
+        expect(
+          result.models.filter((m) => m.isSelected).map((m) => m.id),
+        ).toEqual(['default']);
       });
 
       it('keeps the saved model selectable and warns when the list is unavailable', async () => {
@@ -1189,7 +1287,9 @@ describe('ConfigRpcHandlers', () => {
 
       it('keeps the saved model selectable when the catalog read fails', async () => {
         const h = agyHarness('gemini-4-hydrogen-low');
-        h.providerModels.fetchModels.mockRejectedValue(new Error('agy models timed out'));
+        h.providerModels.fetchModels.mockRejectedValue(
+          new Error('agy models timed out'),
+        );
         h.handlers.register();
         const result = await call<{
           models: Array<{ id: string; isSelected: boolean }>;
@@ -1231,7 +1331,9 @@ describe('ConfigRpcHandlers', () => {
 
         const selected = result.models.filter((m) => m.isSelected);
         expect(selected).toEqual([]);
-        expect(result.models.some((model) => model.id === 'gpt-6-luna')).toBe(false);
+        expect(result.models.some((model) => model.id === 'gpt-6-luna')).toBe(
+          false,
+        );
       });
 
       it('offers a saved model found only in the live catalog', async () => {
@@ -1390,9 +1492,9 @@ describe('ConfigRpcHandlers', () => {
         ]);
 
         expect(workspaceAnswer.workspacePath).toBe(workspacePath);
-        expect(workspaceAnswer.models.find((model) => model.isSelected)?.id).toBe(
-          'gpt-6-sol',
-        );
+        expect(
+          workspaceAnswer.models.find((model) => model.isSelected)?.id,
+        ).toBe('gpt-6-sol');
         expect(globalAnswer.workspacePath).toBeNull();
         expect(globalAnswer.models.find((model) => model.isSelected)?.id).toBe(
           'gpt-6-astra',
@@ -1432,10 +1534,16 @@ describe('ConfigRpcHandlers', () => {
 
         const pending = call<{
           workspacePath: string | null;
-          models: Array<{ id: string; isSelected: boolean; providerModelId: string | null }>;
+          models: Array<{
+            id: string;
+            isSelected: boolean;
+            providerModelId: string | null;
+          }>;
         }>(h, 'config:models-list', { workspacePath: claudeWorkspace });
         h.modelSettings.selectedModel.get.mockReturnValue('gpt-6-astra');
-        h.providerModels.resolveActiveProviderId.mockReturnValue('openai-codex');
+        h.providerModels.resolveActiveProviderId.mockReturnValue(
+          'openai-codex',
+        );
         h.providerModels.getCachedModelIds.mockReturnValue(['gpt-6-astra']);
         releaseCatalog();
 
@@ -1513,7 +1621,9 @@ describe('ConfigRpcHandlers', () => {
           scopeResolver: resolver,
           authEnv,
         });
-        h.providerModels.getCachedModelIds.mockReturnValue(['claude-haiku-4-5']);
+        h.providerModels.getCachedModelIds.mockReturnValue([
+          'claude-haiku-4-5',
+        ]);
         h.sdkAdapter.getSupportedModels.mockResolvedValue([
           {
             value: 'claude-haiku-5-5',
@@ -1536,8 +1646,12 @@ describe('ConfigRpcHandlers', () => {
             name: 'claude-haiku-4-5',
           }),
         ]);
-        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith('claude-cli');
-        expect(h.modelResolver.resolve.mock.calls[0]?.[0]).toBe('claude-haiku-4-5');
+        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith(
+          'claude-cli',
+        );
+        expect(h.modelResolver.resolve.mock.calls[0]?.[0]).toBe(
+          'claude-haiku-4-5',
+        );
         for (const args of h.modelResolver.resolve.mock.calls) {
           expect(args[1]).not.toBe(authEnv);
           expect(args[1]?.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
@@ -1661,7 +1775,9 @@ describe('ConfigRpcHandlers', () => {
         expect(result.models.filter((model) => model.isSelected)).toEqual([
           expect.objectContaining({ id: 'live-derived-haiku' }),
         ]);
-        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith('openrouter');
+        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith(
+          'openrouter',
+        );
         expect(h.modelResolver.resolve.mock.calls[0]?.[0]).toBe('haiku');
         for (const args of h.modelResolver.resolve.mock.calls) {
           expect(args[1]?.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe(
@@ -1722,13 +1838,13 @@ describe('ConfigRpcHandlers', () => {
         }>(h, 'config:models-list', { workspacePath });
 
         const selected = result.models.filter((model) => model.isSelected);
-        expect(selected).toEqual([
-          expect.objectContaining({ id: 'gpt-4o' }),
-        ]);
+        expect(selected).toEqual([expect.objectContaining({ id: 'gpt-4o' })]);
         expect(selected[0]?.description).toContain('covered by subscription');
         expect(h.providerModels.resolveActiveProviderId).not.toHaveBeenCalled();
         expect(h.modelSettings.selectedModel.get).not.toHaveBeenCalled();
-        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith('openai-codex');
+        expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith(
+          'openai-codex',
+        );
         expect(h.modelResolver.resolve.mock.calls[0]?.[0]).toBe('haiku');
         const coverageEnv =
           h.modelResolver.isSubscriptionCovered.mock.calls[0]?.[0];
@@ -1791,9 +1907,7 @@ describe('ConfigRpcHandlers', () => {
 
         expect(result.workspacePath).toBeNull();
         const selected = result.models.filter((model) => model.isSelected);
-        expect(selected).toEqual([
-          expect.objectContaining({ id: 'gpt-4o' }),
-        ]);
+        expect(selected).toEqual([expect.objectContaining({ id: 'gpt-4o' })]);
         expect(selected[0]?.description).toContain('Input:');
         expect(selected[0]?.description).not.toContain(
           'covered by subscription',
@@ -1997,26 +2111,57 @@ describe('ConfigRpcHandlers', () => {
       expect(Object.keys(result.pricing).length).toBeGreaterThan(0);
     });
   });
-  it.each(['model', 'effort'] as const)('saves %s once for a session not found', async (setting) => {
-    const h = makeHarness();
-    h.handlers.register();
-    h.sdkAdapter.setSessionModel.mockRejectedValue(new SessionUnavailableError('Session not found: history'));
-    h.sdkAdapter.setSessionEffort.mockRejectedValue(new SessionUnavailableError('Session not found: history'));
-    await expect(call(h, setting === 'model' ? 'config:model-switch' : 'config:effort-set', {
-      model: 'new', effort: 'high', sessionId: 'history', applyTo: 'workspace',
-    })).resolves.toEqual(setting === 'model' ? { model: 'new' } : { effort: 'high' });
-    const save = setting === 'model' ? h.modelSettings.selectedModel.set : h.reasoningSettings.effort.set;
-    expect(save).toHaveBeenCalledTimes(1);
-    expect(save).toHaveBeenCalledWith(setting === 'model' ? 'new' : 'high', 'workspace');
-  });
+  it.each(['model', 'effort'] as const)(
+    'saves %s once for a session not found',
+    async (setting) => {
+      const h = makeHarness();
+      h.handlers.register();
+      h.sdkAdapter.setSessionModel.mockRejectedValue(
+        new SessionUnavailableError('Session not found: history'),
+      );
+      h.sdkAdapter.setSessionEffort.mockRejectedValue(
+        new SessionUnavailableError('Session not found: history'),
+      );
+      await expect(
+        call(
+          h,
+          setting === 'model' ? 'config:model-switch' : 'config:effort-set',
+          {
+            model: 'new',
+            effort: 'high',
+            sessionId: 'history',
+            applyTo: 'workspace',
+          },
+        ),
+      ).resolves.toEqual(
+        setting === 'model' ? { model: 'new' } : { effort: 'high' },
+      );
+      const save =
+        setting === 'model'
+          ? h.modelSettings.selectedModel.set
+          : h.reasoningSettings.effort.set;
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save).toHaveBeenCalledWith(
+        setting === 'model' ? 'new' : 'high',
+        'workspace',
+      );
+    },
+  );
 
   it('restores live model after a failed save', async () => {
     const h = makeHarness();
     h.handlers.register();
     h.lifecycle.find.mockReturnValue({ currentModel: 'previous' });
-    h.modelSettings.selectedModel.set.mockRejectedValue(new Error('save failed'));
-    await expect(call(h, 'config:model-switch', { model: 'new', sessionId: 'live' })).rejects.toThrow('save failed');
-    expect(h.sdkAdapter.setSessionModel.mock.calls).toEqual([['live', 'new'], ['live', 'previous']]);
+    h.modelSettings.selectedModel.set.mockRejectedValue(
+      new Error('save failed'),
+    );
+    await expect(
+      call(h, 'config:model-switch', { model: 'new', sessionId: 'live' }),
+    ).rejects.toThrow('save failed');
+    expect(h.sdkAdapter.setSessionModel.mock.calls).toEqual([
+      ['live', 'new'],
+      ['live', 'previous'],
+    ]);
   });
 
   it('reports unknown live effort instead of restoring stale launch effort', async () => {
@@ -2024,24 +2169,38 @@ describe('ConfigRpcHandlers', () => {
     h.handlers.register();
     h.lifecycle.find.mockReturnValue({ config: { effort: 'low' } });
     h.reasoningSettings.effort.set.mockRejectedValue(new Error('save failed'));
-    await expect(call(h, 'config:effort-set', { effort: 'high', sessionId: 'live' })).rejects.toThrow('save failed');
+    await expect(
+      call(h, 'config:effort-set', { effort: 'high', sessionId: 'live' }),
+    ).rejects.toThrow('save failed');
     expect(h.sdkAdapter.setSessionEffort).toHaveBeenCalledTimes(1);
-    expect(h.logger.warn).toHaveBeenCalledWith('Cannot restore live setting: previous session value unavailable');
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      'Cannot restore live setting: previous session value unavailable',
+    );
   });
 
   it('keeps the original save error when permission restore fails and restores live permission', async () => {
     const h = makeHarness();
     h.handlers.register();
     h.lifecycle.levels.set('live', 'plan');
-    h.configManager.set.mockResolvedValueOnce(undefined)
+    h.configManager.set
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error('original save'))
       .mockRejectedValueOnce(new Error('restore failed'));
-    await expect(call(h, 'config:autopilot-toggle', {
-      enabled: true, permissionLevel: 'yolo', sessionId: 'live',
-    })).rejects.toThrow('original save');
+    await expect(
+      call(h, 'config:autopilot-toggle', {
+        enabled: true,
+        permissionLevel: 'yolo',
+        sessionId: 'live',
+      }),
+    ).rejects.toThrow('original save');
     expect(h.configManager.set).toHaveBeenCalledTimes(4);
-    expect(h.sdkAdapter.setSessionPermissionLevel.mock.calls).toEqual([['live', 'yolo'], ['live', 'plan']]);
-    expect(h.logger.error).toHaveBeenCalledWith('Permission settings restore failed', expect.objectContaining({ message: 'restore failed' }));
+    expect(h.sdkAdapter.setSessionPermissionLevel.mock.calls).toEqual([
+      ['live', 'yolo'],
+      ['live', 'plan'],
+    ]);
+    expect(h.logger.error).toHaveBeenCalledWith(
+      'Permission settings restore failed',
+      expect.objectContaining({ message: 'restore failed' }),
+    );
   });
-
 });

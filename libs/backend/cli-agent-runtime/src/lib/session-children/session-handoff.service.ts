@@ -27,6 +27,8 @@ import { promises as fs } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import {
   SDK_TOKENS,
+  type CodexChatAdapter,
+  type ProviderSessionChatAdapter,
   type SessionEndCallbackRegistry,
   type SessionIdResolvedCallbackRegistry,
   type SessionIdResolvedPayload,
@@ -37,6 +39,8 @@ import {
   PLATFORM_TOKENS,
   isPathWithinRoots,
   type IMcpServerStatus,
+  type LiveChatSession,
+  type LiveChatSessionResolver,
   type IOutputChannel,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
@@ -56,7 +60,10 @@ import type {
   SessionChildSuccessionRefusalCode,
 } from './session-spawner.port';
 import { safeErrorKind } from './safe-error-kind';
-import { SessionHandoffAckStore } from './session-handoff-ack.store';
+import {
+  SessionHandoffAckStore,
+  type HandoffAckRecord,
+} from './session-handoff-ack.store';
 import { handoffCloseAckResult } from './session-handoff-close-result';
 import { HandoffWatchdogRecovery } from './handoff-watchdog-recovery';
 import type { ISessionHandoffChain } from './session-handoff-chain.port';
@@ -96,7 +103,13 @@ const UNEXPECTED_FAULT_DETAIL = 'an unexpected fault stopped the handoff';
 
 const TIMED_OUT: unique symbol = Symbol('session-handoff-timed-out');
 
-type CallerRecord = NonNullable<ReturnType<SessionLifecycleManager['find']>>;
+type SdkCallerRecord = NonNullable<ReturnType<SessionLifecycleManager['find']>>;
+type CallerRecord = Pick<SdkCallerRecord, 'tabId' | 'realSessionId'> & {
+  currentModel?: string;
+  permissionLevel?: SdkCallerRecord['permissionLevel'];
+  runtime?: LiveChatSession['runtime'];
+  config: Pick<SdkCallerRecord['config'], 'projectPath' | 'workspaceId' | 'sessionName'>;
+};
 type HandoffRefusal = Extract<SessionHandoffResult, { ok: false }>;
 
 /** A child the new session took over, with the parent link it had before. */
@@ -130,6 +143,9 @@ interface PendingChainBind {
 interface ArmedCallerStop {
   readonly callerTabId: string;
   readonly callerSdkId: string | null;
+  readonly successorTabId: string;
+  runtimeClosePending?: HandoffAckRecord['runtimeClosePending'];
+  runtimeCloseSucceeded?: HandoffAckRecord['runtimeCloseSucceeded'];
 }
 
 @injectable()
@@ -222,6 +238,8 @@ export class SessionHandoffService
     private readonly spawner: ISessionSpawner | null = null,
     @inject(SDK_TOKENS.SDK_SESSION_END_CALLBACK_REGISTRY, { isOptional: true })
     sessionEnds: SessionEndCallbackRegistry | null = null,
+    @inject(PLATFORM_TOKENS.LIVE_CHAT_SESSION_RESOLVER, { isOptional: true })
+    private readonly liveChatSessions?: LiveChatSessionResolver,
   ) {
     this.watchdogRecovery = new HandoffWatchdogRecovery({
       findSuccessor: async (id) => (await this.ackStore?.findBySuccessor(id)) ?? undefined,
@@ -470,7 +488,7 @@ export class SessionHandoffService
         const settled = await this.ackStore!.compareAndSet(
           record.predecessorTabId,
           'closePending',
-          { state: 'closeCompleted' },
+          { state: 'closeCompleted', runtimeCloseSucceeded: undefined },
           record.successorTabId,
         );
         if (!settled)
@@ -490,10 +508,22 @@ export class SessionHandoffService
         const stop = new Promise<boolean>((resolveStop) =>
           this.stopWaiters.set(record.predecessorTabId, resolveStop),
         );
-        this.armed.set(record.predecessorTabId, {
-          callerTabId: record.predecessorTabId,
-          callerSdkId: record.predecessorSdkId,
-        });
+        if (!this.stopping.has(record.predecessorTabId)) {
+          const previousArm = this.armed.get(record.predecessorTabId);
+          const existingArm = previousArm?.successorTabId === record.successorTabId
+            ? previousArm
+            : undefined;
+          this.armed.set(record.predecessorTabId, {
+            callerTabId: record.predecessorTabId,
+            callerSdkId: record.predecessorSdkId,
+            successorTabId: record.successorTabId,
+            runtimeClosePending:
+              record.runtimeClosePending ??
+              existingArm?.runtimeClosePending,
+            runtimeCloseSucceeded:
+              record.runtimeCloseSucceeded ?? existingArm?.runtimeCloseSucceeded,
+          });
+        }
         if (
           this.flushed.has(record.predecessorTabId) ||
           (record.predecessorSdkId && this.flushed.has(record.predecessorSdkId))
@@ -520,7 +550,8 @@ export class SessionHandoffService
         await this.ackStore!.compareAndSet(
           record.predecessorTabId,
           'closePending',
-          { state: 'closeCompleted' },
+          { state: 'closeCompleted', runtimeCloseSucceeded: undefined },
+          record.successorTabId,
         );
       } catch (error: unknown) {
         // The predecessor is closed; report that. The next acknowledgement
@@ -587,7 +618,7 @@ export class SessionHandoffService
     request: SessionHandoffRequest,
   ): Promise<SessionHandoffResult> {
     const caller = SessionId.safeParse(request.callerSessionId?.trim());
-    const record = caller ? this.lifecycle.find(caller) : undefined;
+    const record = caller ? this.findLiveCaller(caller) : undefined;
     if (!caller || !record) {
       return this.refuse(
         'unattributed-caller',
@@ -689,7 +720,7 @@ export class SessionHandoffService
       // settles. A late success is a real successor, even after this refusal.
       const timer = setTimeout(() => {
         try {
-          const found = this.lifecycle.find(tabId);
+          const found = this.findLiveCaller(tabId);
           this.log(
             `handoff reconciliation for ${tabId}: ${found ? 'successor found' : 'successor absent; adoption reverted'}`,
           );
@@ -921,6 +952,7 @@ export class SessionHandoffService
         descriptor,
         ...(record.currentModel ? { model: record.currentModel } : {}),
         permissionLevel: record.permissionLevel,
+        ...(record.runtime ? { expectedRuntime: record.runtime } : {}),
       });
     } catch (error: unknown) {
       // degradation-audit: reported - the port's contract is never-throw; a
@@ -1081,6 +1113,27 @@ export class SessionHandoffService
     }
   }
 
+  private findLiveCaller(callerId: string): CallerRecord | undefined {
+    if (!this.liveChatSessions) return this.lifecycle.find(callerId);
+    const result = this.liveChatSessions.resolve(callerId);
+    if (result.kind !== 'resolved') return undefined;
+    const session = result.session;
+    return {
+      runtime: session.runtime === 'claude-sdk' ? undefined : session.runtime,
+      tabId: session.tabId ?? session.sessionId,
+      realSessionId: session.runtime === 'claude-sdk' && session.sessionId === session.tabId
+        ? this.lifecycle.find(session.tabId)?.realSessionId ?? null
+        : session.sessionId,
+      currentModel: session.model,
+      permissionLevel: session.permissionLevel,
+      config: {
+        workspaceId: session.workspaceRoot,
+        projectPath: session.cwd,
+        sessionName: session.sessionName,
+      },
+    };
+  }
+
   /** The caller's cwd and root, both inside an open workspace folder. */
   private resolvePaths(
     record: CallerRecord,
@@ -1171,13 +1224,6 @@ export class SessionHandoffService
     void this.stopCaller(arm);
   }
 
-  private armCallerStop(record: CallerRecord): void {
-    this.armed.set(record.tabId, {
-      callerTabId: record.tabId,
-      callerSdkId: record.realSessionId,
-    });
-  }
-
   private takeArmed(
     notice: HandoffTurnFlushNotice,
   ): ArmedCallerStop | undefined {
@@ -1196,12 +1242,62 @@ export class SessionHandoffService
     return undefined;
   }
 
+  private async retireCaller(arm: ArmedCallerStop): Promise<void> {
+    const result = this.liveChatSessions?.resolve(arm.callerTabId);
+    if (result?.kind === 'ambiguous') throw new Error('Ambiguous handoff predecessor');
+    const session = result?.kind === 'resolved' ? result.session : undefined;
+    // An adapter can remove its live entry before teardown rejects.
+    if (!arm.runtimeCloseSucceeded && arm.runtimeClosePending &&
+        session?.runtime !== arm.runtimeClosePending) {
+      throw new Error('Handoff predecessor runtime is unavailable after a failed close');
+    }
+    const sdkRecord = result?.kind === 'unresolved'
+      ? this.lifecycle.find(arm.callerTabId)
+      : undefined;
+    const currentSessionId = session?.sessionId ?? sdkRecord?.realSessionId;
+    if ((session || sdkRecord) && arm.callerSdkId && currentSessionId !== arm.callerSdkId) {
+      throw new Error('Handoff predecessor no longer owns its tab');
+    }
+    if (arm.runtimeCloseSucceeded) {
+      if (arm.runtimeClosePending) await this.persistRuntimeClose(arm, undefined);
+      return;
+    }
+    if (result?.kind === 'unresolved' && !sdkRecord) return;
+    if (session && session.runtime !== 'claude-sdk') {
+      const token = session.runtime === 'codex-app-server'
+        ? SDK_TOKENS.CODEX_CHAT_ADAPTER
+        : SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER;
+      const adapter = this.container?.resolve<CodexChatAdapter | ProviderSessionChatAdapter>(token);
+      if (!adapter) throw new Error('Handoff predecessor runtime is unavailable');
+      // Persist before calling the adapter, which can drop the live row even
+      // when teardown fails. Keep a confirmed success on the arm if the write fails.
+      await this.persistRuntimeClose(arm, session.runtime);
+      await adapter.closeSession(SessionId.from(session.sessionId));
+      arm.runtimeCloseSucceeded = true;
+      await this.persistRuntimeClose(arm, undefined);
+      return;
+    }
+    await this.lifecycle.endSession(SessionId.from(arm.callerTabId), 'parent-stop');
+  }
+
+  private async persistRuntimeClose(
+    arm: ArmedCallerStop,
+    runtimeClosePending: ArmedCallerStop['runtimeClosePending'],
+  ): Promise<void> {
+    const updated = await this.ackStore?.compareAndSet(
+      arm.callerTabId,
+      'closePending',
+      { runtimeClosePending, runtimeCloseSucceeded: arm.runtimeCloseSucceeded },
+      arm.successorTabId,
+    );
+    if (!updated)
+      throw new Error('Handoff acknowledgement changed during runtime close');
+    arm.runtimeClosePending = runtimeClosePending;
+  }
+
   private async stopCaller(arm: ArmedCallerStop): Promise<void> {
     try {
-      await this.lifecycle.endSession(
-        SessionId.from(arm.callerTabId),
-        'parent-stop',
-      );
+      await this.retireCaller(arm);
     } catch (error: unknown) {
       // degradation-audit: reported - reportError logs the stop failure; the caller is re-armed so the next flush retries.
       this.reportError('handoff caller stop failed', error);
@@ -1317,9 +1413,9 @@ export class SessionHandoffService
       // An uncommitted bind belongs to a start that has not settled yet;
       // the start path deletes it on timeout or refusal.
       if (!bind.committed) continue;
-      let found: ReturnType<SessionLifecycleManager['find']> | undefined;
+      let found: CallerRecord | undefined;
       try {
-        found = this.lifecycle.find(tabId);
+        found = this.findLiveCaller(tabId);
       } catch (error: unknown) {
         this.reportError('handoff successor lookup failed', error);
         continue;

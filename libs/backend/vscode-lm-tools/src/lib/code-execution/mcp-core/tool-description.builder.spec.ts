@@ -11,6 +11,9 @@ import {
   buildAgentStatusTool,
   buildAgentReportTool,
   buildAgentSpawnTool,
+  buildGrepTool,
+  buildInspectTool,
+  buildReadSymbolTool,
   buildAstAnalyzeTool,
   buildCodeReindexTool,
   buildCodeSearchSymbolsTool,
@@ -40,6 +43,22 @@ import {
 } from '@ptah-extension/workspace-intelligence';
 import type { MCPToolDefinition } from '../types';
 import { buildAgentWaitTool } from './agent-wait.tool';
+
+describe('clamped tool limits', () => {
+  it('omits schema maxima for limits that the handlers clamp', () => {
+    const readSchema = buildReadSymbolTool().inputSchema;
+    const grepSchema = buildGrepTool().inputSchema;
+    const inspectSchema = buildInspectTool().inputSchema;
+
+    expect(JSON.stringify(readSchema)).not.toContain('"maximum":400');
+    expect(grepSchema).toMatchObject({
+      properties: { maxMatches: { maximum: 200 } },
+    });
+    expect(JSON.stringify(inspectSchema)).not.toContain('"maximum":400');
+    expect(JSON.stringify(inspectSchema)).not.toContain('"maximum":100');
+    expect(JSON.stringify(inspectSchema)).not.toContain('"maximum":200');
+  });
+});
 
 describe('external completion wording', () => {
   it('names the wait tool for each transport and explains the completion block', () => {

@@ -144,6 +144,8 @@ export class CodexAppServerProcess {
   private readonly unknownNotificationMethods = new Set<string>();
   private failure?: Error;
   private nextId = 0;
+  // A separate sequence lets us recognize late skill replies without keeping expired requests.
+  private lastSkillRequestId = 0;
   private readonly pending = new Map<number, Pending>();
   private readonly approvals = new Map<string | number, Approval>();
   private frameBuffer = Buffer.alloc(OUTBOUND_FRAME_BYTES);
@@ -279,10 +281,11 @@ export class CodexAppServerProcess {
   async request<M extends RequestMethod>(
     method: M,
     params: CodexRequestParams<M>,
+    timeoutMs = REQUEST_TIMEOUT_MS,
   ): Promise<CodexRequestResult<M>> {
     this.assertOpen();
     if (!this.ready) throw new Error('Codex process not initialized');
-    const result = await this.sendRequest(method, params, REQUEST_TIMEOUT_MS);
+    const result = await this.sendRequest(method, params, timeoutMs);
     try {
       if (method === 'model/list') {
         const raw = z.object({ data: z.array(z.unknown()) }).safeParse(result);
@@ -315,14 +318,21 @@ export class CodexAppServerProcess {
     this.assertOpen();
     if (this.pending.size >= MAX_PENDING)
       return Promise.reject(new Error('Codex request limit reached'));
-    const id = ++this.nextId;
+    const id = method === 'skills/list' ? this.lastSkillRequestId - 1 : this.nextId + 1;
     // Reject invalid caller input without putting it on the wire or retaining a timer.
     validateCodexFrame({ id, method, params });
+    if (method === 'skills/list') this.lastSkillRequestId = id;
+    else this.nextId = id;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () => this.fail('Codex request timed out', undefined, method),
-        timeout,
-      );
+      const timer = setTimeout(() => {
+        // Skill discovery is optional and can time out while a live turn is running.
+        if (method === 'skills/list') {
+          this.pending.delete(id);
+          reject(new Error('Codex skill catalog timed out'));
+          return;
+        }
+        this.fail('Codex request timed out', undefined, method);
+      }, timeout);
       this.pending.set(id, { method, resolve, reject, timer });
       try {
         this.write({ id, method, params });
@@ -413,9 +423,11 @@ export class CodexAppServerProcess {
       );
       return;
     }
+    const detachedSkillReply =
+      !pending && typeof id === 'number' && id < 0 && id >= this.lastSkillRequestId;
     let frame: CodexProtocolFrame;
     try {
-      frame = validateCodexFrame(value, pending?.method);
+      frame = validateCodexFrame(value, detachedSkillReply ? 'skills/list' : pending?.method);
     } catch (error) {
       // unknownMethod is raised only after envelope validation. Requests and
       // malformed envelopes must retain their existing failure behaviour.
@@ -439,6 +451,8 @@ export class CodexAppServerProcess {
         }
         return;
       }
+      if (detachedSkillReply && error instanceof CodexProtocolError && error.code === 'invalidResult')
+        return;
       // A known response result is request-local. The validator checks the
       // envelope first, so malformed framing still fails closed in onData.
       if (
@@ -480,6 +494,7 @@ export class CodexAppServerProcess {
       }
       return;
     }
+    if (detachedSkillReply) return;
     if (!pending || typeof frame.id !== 'number')
       throw new Error('Unknown response');
     clearTimeout(pending.timer);

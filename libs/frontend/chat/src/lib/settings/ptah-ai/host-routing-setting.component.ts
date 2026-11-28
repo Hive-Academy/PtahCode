@@ -25,12 +25,11 @@ import {
   PtahSettingRowComponent,
   PtahSkeletonComponent,
   PtahToggleDirective,
-  PtahFormSectionComponent,
 } from '@ptah-extension/ui';
 
 const RPC_TIMEOUT_MS = 5_000;
 const SETTING_KEY = 'agentOrchestration.hostRouting';
-/** The visible label; the checkbox's `aria-label` is the same text. */
+/** Preserve the switch's existing accessible name. */
 const LABEL = 'Routing suggestions';
 /** The toast's field name ("Saved routing suggestions."). */
 const TOAST_LABEL = 'routing suggestions';
@@ -64,26 +63,19 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
     PtahSettingRowComponent,
     PtahSkeletonComponent,
     PtahToggleDirective,
-    PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-form-section
-      wide
-      level="2"
-      heading="Routing suggestions"
-      description="Ptah suggests a lane for each task from its kind and size."
-      data-glass-surface="content"
-      class="flex flex-col gap-3 text-sm text-base-content"
-      aria-labelledby="host-routing-heading"
+    <div
+      class="flex flex-col gap-ptah-controls text-sm text-base-content"
       data-testid="host-routing-setting"
     >
       <div>
-        <span id="host-routing-heading" hidden>{{ label }}</span>
         <ptah-setting-row
+          compactSplit
           label="Suggest a lane for each task"
           hint="Suggestions appear before a lane starts."
-          controlId="host-routing-toggle"
+          [controlId]="load() === 'ready' ? 'host-routing-toggle' : null"
         >
           @if (load() === 'ready') {
             <input
@@ -100,12 +92,12 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
             />
           }
         </ptah-setting-row>
-        <p id="host-routing-help" class="sr-only">
-          Before planning, Ptah checks whether the engineering task is agreed
-          and suggests a task type, depth and available executors. Uses one
-          decision-model call per message.
-        </p>
       </div>
+      <p id="host-routing-help" class="sr-only">
+        Before planning, Ptah checks whether the engineering task is agreed
+        and suggests a task type, depth and available executors. Uses one
+        decision-model call per message.
+      </p>
 
       @switch (load()) {
         @case ('loading') {
@@ -120,7 +112,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           </p>
         }
         @case ('error') {
-          <div class="space-y-1.5">
+          <div class="space-y-ptah-controls">
             <ptah-alert
               tone="error"
               live="assertive"
@@ -162,12 +154,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
           }
         }
       }
-    </ptah-form-section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
+    </div>
   `,
 })
 export class HostRoutingSettingComponent implements OnInit {

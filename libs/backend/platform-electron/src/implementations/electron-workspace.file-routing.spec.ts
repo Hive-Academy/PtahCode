@@ -78,6 +78,29 @@ afterEach(async () => {
 });
 
 describe('ElectronWorkspaceProvider FILE_BASED_SETTINGS_KEYS disk routing', () => {
+  it('reads the saved decision model after recreating the dev workspace provider', async () => {
+    const storage = await makeTempDir();
+    const previousSettingsDir = process.env['PTAH_SETTINGS_DIR'];
+    const settingsDir = path.join(storage, '.ptah-dev');
+    process.env['PTAH_SETTINGS_DIR'] = settingsDir;
+    const key = 'agentOrchestration.decisionModel';
+    const selection = { kind: 'structured', providerId: 'anthropic', model: 'claude-sonnet-4-6' };
+
+    try {
+      const provider = new ElectronWorkspaceProvider(storage);
+      expect(provider.getConfiguration('ptah', key)).toBeNull();
+      await provider.setConfiguration('ptah', key, selection);
+
+      const restarted = new ElectronWorkspaceProvider(storage);
+      expect(restarted.getConfiguration('ptah', key)).toEqual(selection);
+      expect(nodeFs.existsSync(path.join(settingsDir, 'settings.json'))).toBe(true);
+      expect(nodeFs.existsSync(path.join(storage, 'config.json'))).toBe(false);
+    } finally {
+      if (previousSettingsDir === undefined) delete process.env['PTAH_SETTINGS_DIR'];
+      else process.env['PTAH_SETTINGS_DIR'] = previousSettingsDir;
+    }
+  });
+
   it('a file-based key (provider.apiKey.selectedModel) is written to ~/.ptah/settings.json and NOT to config.json', async () => {
     const storage = await makeTempDir();
     const provider = new ElectronWorkspaceProvider(storage);

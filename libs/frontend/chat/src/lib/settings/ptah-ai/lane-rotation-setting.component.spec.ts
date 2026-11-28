@@ -92,7 +92,14 @@ describe('LaneRotationSettingComponent', () => {
       TIMEOUT,
     );
     expect(toggle()?.checked).toBe(true);
-    const chips = (fixture.nativeElement as HTMLElement).querySelectorAll(
+    const root = fixture.nativeElement as HTMLElement;
+    const row = root.querySelector('[data-testid="lane-rotation-setting"]');
+    expect(row).not.toBeNull();
+    expect(row?.matches('ptah-form-section, [data-glass-surface]')).toBe(false);
+    expect(toggle()?.labels?.[0]?.textContent?.trim()).toBe(
+      'Rotate close executors',
+    );
+    const chips = root.querySelectorAll(
       '[data-testid="lane-rotation-last-picks"] span',
     );
     expect(chips[0].textContent?.trim()).toBe('Implement: Codex');
@@ -134,6 +141,18 @@ describe('LaneRotationSettingComponent', () => {
       TIMEOUT,
     );
   });
+  it.each([
+    { profiles: [] },
+    { profiles: [], lastPicks: [], lastPicksUnavailable: false },
+  ])('shows an empty history for %j', async (result) => {
+    host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
+      ? rpcSuccess(result) : rpcSuccess({ success: true, value: true }));
+    await create();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('No recent picks yet');
+    expect(root.querySelector('ptah-alert [role="status"]')).toBeNull();
+  });
+
   it('announces that recent picks remain unavailable after retry', async () => {
     host.call.mockImplementation(async (method: string) => method === 'agent:getCapabilityMatrix'
       ? rpcError('unavailable') : rpcSuccess({ success: true, value: true }));
@@ -142,6 +161,9 @@ describe('LaneRotationSettingComponent', () => {
     expect(root.querySelector('ptah-alert [role="status"]')).not.toBeNull();
     root.querySelector<HTMLButtonElement>('ptah-alert button')?.click();
     await settle();
+    expect(
+      host.call.mock.calls.filter(([method]) => method === 'agent:getCapabilityMatrix'),
+    ).toHaveLength(2);
     expect(root.querySelector('ptah-alert [role="status"]')?.textContent).toContain('Recent picks unavailable');
   });
 

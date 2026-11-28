@@ -92,7 +92,7 @@ export class SlashCommandInterceptor {
     commandName: string;
     args: string;
   } {
-    const spaceIndex = content.indexOf(' ');
+    const spaceIndex = content.search(/\s/);
     if (spaceIndex === -1) {
       return { commandName: content.slice(1), args: '' };
     }

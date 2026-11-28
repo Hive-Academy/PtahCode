@@ -1576,6 +1576,8 @@ const CONTROL_TOOL_EXCEPTIONS: Readonly<Record<string, string>> = {
     'file reader: it reads real workspace files, which the PtahAPI stub of this sweep cannot fake. Its reply is self-bounded at 15,000 chars on a line boundary; asserted in nav/read-symbol.spec.ts, and its pinned budget is checked here',
   ptah_grep:
     'file search: it walks real workspace files (rg or a Node walk), which the PtahAPI stub of this sweep cannot fake. Its reply is self-bounded at 15,000 chars on a line boundary; asserted in nav/grep.spec.ts, and its pinned budget is checked here',
+  ptah_inspect:
+    'batched reader: it inspects real workspace files and invokes fixed read-only git commands; asserted in nav/inspect.spec.ts, and its result is bounded at 24,000 chars',
   ptah_run_check_wait:
     'process-job collector: it only observes or cancels the in-memory run_check job. Its reply is self-bounded at WAIT_SUMMARY_MAX_CHARS (4,000), asserted in run-check job specs.',
 };
@@ -1713,6 +1715,7 @@ const PINNED_BUDGET_OVERRIDES: Readonly<
   // token-dense (about 2.7 chars/token), so the token ceiling is 6,000, not 4,000.
   ptah_read_symbol: { chars: 16_000, tokens: 6_000 },
   ptah_grep: { chars: 16_000, tokens: 6_000 },
+  ptah_inspect: { chars: 24_000, tokens: 9_000 },
 };
 
 function pinnedBudget(budgetName: string): { chars: number; tokens: number } {
@@ -1728,6 +1731,7 @@ const PINNED_PREFORMATTED_TOOLS: ReadonlySet<string> = new Set([
   'ptah_get_diagnostics',
   'ptah_read_symbol',
   'ptah_grep',
+  'ptah_inspect',
   'ptah_get_symbol_index',
   'ptah_agent_spawn',
   'ptah_agent_status',
@@ -2149,7 +2153,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // +1: ptah_session_clear_finished (TASK_2026_932). +4: the ptah_cron_* read
     // tools (issue #1400 Part 1); the 5 write tools need `cronWriteApproval`.
     // +2: ptah_read_symbol and ptah_grep (TASK_2026_2299).
-    expect(namesPerCaller[0]).toHaveLength(80);
+    expect(namesPerCaller[0]).toHaveLength(81);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
   });
 
@@ -2179,7 +2183,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack;
     // TASK_2026_932: +1, ptah_session_clear_finished; TASK_2026_2299: +2,
     // ptah_read_symbol and ptah_grep).
-    expect(namesPerCaller[0]).toHaveLength(77);
+    expect(namesPerCaller[0]).toHaveLength(78);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
     for (const ideOnly of [
       'ptah_lsp_references',
@@ -2223,7 +2227,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
         // TASK_2026_932: +1, ptah_session_clear_finished.
         // Issue #1400 Part 1: +4, the ptah_cron_* read tools. The 5 write tools
         // are hidden from a caller without `cronWriteApproval`.
-        expect(apps).toHaveLength(hasIDECapabilities ? 83 : 80);
+        expect(apps).toHaveLength(hasIDECapabilities ? 84 : 81);
         expect(apps.filter((name) => !APPS_ONLY_TOOL_NAMES.has(name))).toEqual(
           coding,
         );
@@ -2668,7 +2672,9 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       // TASK_2026_2299, measured: 476 and 394 chars; ceil(n * 1.1) + 10.
       // Cue "Use instead of shell grep or rg." and the inline-body sentence: 651 chars; ceil(len * 1.1) + 10.
       ptah_grep: 727,
-      ptah_read_symbol: 444,
+      // 183 chars; ceil(183 * 1.1) + 10.
+      ptah_inspect: 212,
+      ptah_read_symbol: 518,
       ptah_task_create: 498,
       ptah_agent_status: 445,
       ptah_memory_search: 438,

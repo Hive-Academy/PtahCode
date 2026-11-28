@@ -41,6 +41,7 @@ import {
   formatBudgetPauseNotice,
   formatAgentActionNotice,
   formatLaneToolGateUnavailable,
+  isLiveAgentStatus,
   type AgentActionNotice,
 } from '@ptah-extension/shared';
 import type {
@@ -60,6 +61,7 @@ import type {
   ExternalOwnerKey,
   LaneTurnContent,
   LaneTurnRequest,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import {
   killProcessTree,
@@ -99,7 +101,7 @@ import {
   blockedLaneCommandReason,
   isRawCommandDelivery,
 } from './cli-adapters/lane-command-filter';
-import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
+import { LaneTurnInputRefusal, LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
   CliCommandOptions,
   SdkHandle,
@@ -126,6 +128,7 @@ import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-
 import { recordLaneUsageOutcome } from './lane-completion-outcome';
 import { LaneUsageNormalizer } from './lane-usage-normalizer';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
+import { cloneToolCallSummary } from './tool-call-summary';
 import {
   buildLaneHandoffTask,
   collectHandoffCarryOver,
@@ -839,6 +842,7 @@ export class AgentProcessManager {
     clearTimeout(tracked.admissionTimer);
     tracked.info.waitingForMemory = false;
     this.mcpCredentials?.revokeSubject(ticket.agentId);
+    this.outputBuffer.discard(ticket.agentId);
     if (!tracked.spawnReplied) {
       const completedAt = new Date().toISOString();
       tracked.info = { ...tracked.info, status: 'failed', completedAt, lastActivityAt: completedAt };
@@ -1898,6 +1902,13 @@ export class AgentProcessManager {
     usageWorkspaceRoot?: string,
   ): SpawnAgentResult {
     const agentId = info.agentId;
+    const resumedFromId = info.resumedFromAgentId;
+    if (resumedFromId && resumedFromId !== agentId) {
+      const previousTracked = this.agents.get(resumedFromId);
+      if (!previousTracked || !isLiveAgentStatus(previousTracked.info.status)) {
+        this.outputBuffer.discard(resumedFromId);
+      }
+    }
     const handleReference = snapshotLaneAccountReference(
       laneAccountFields(sdkHandle),
     );
@@ -3091,6 +3102,11 @@ export class AgentProcessManager {
         stdout: string;
         segments: CliOutputSegment[];
         streamEvents: FlatStreamEventUnion[];
+        cli: CliType;
+        model?: string;
+        startedAt: string;
+        segmentsTruncated: boolean;
+        toolCallSummary?: ToolCallSummary;
       }
     | undefined {
     const tracked = this.agents.get(agentId);
@@ -3101,6 +3117,7 @@ export class AgentProcessManager {
       stdout = stdout.slice(-MAX_STDOUT_PERSISTENCE_SIZE);
     }
 
+    const model = tracked.info.observedModel ?? tracked.info.model;
     return {
       stdout,
       segments: [...tracked.accumulatedSegments],
@@ -3110,6 +3127,13 @@ export class AgentProcessManager {
           AgentProcessManager.MAX_PERSISTED_STREAM_EVENTS,
         ),
       ],
+      cli: tracked.info.cli,
+      ...(model ? { model } : {}),
+      startedAt: tracked.info.startedAt,
+      segmentsTruncated: tracked.segmentsTruncated === true,
+      ...(tracked.toolCallSummary
+        ? { toolCallSummary: cloneToolCallSummary(tracked.toolCallSummary) }
+        : {}),
     };
   }
 
@@ -3469,17 +3493,24 @@ export class AgentProcessManager {
       throw new AgentContinueError('busy', `Agent ${agentId} is starting another turn.`);
     this.continuationsInFlight.add(tracked);
     let content: LaneTurnContent | undefined;
+    let preparedContinuation: (() => { done: Promise<number> }) | undefined;
     try {
       // Turn input pre-flight, before `turnSeq` or `status` change: a refusal
       // leaves the record exactly as it was.
       content = await this.applyContinuationTurnInput(
         agentId, tracked, sdkHandle, message, turnRequest, rawBody,
       );
+      if (sdkHandle.prepareContinuation)
+        preparedContinuation = await sdkHandle.prepareContinuation(message, content);
       // The await let `stop()`, an idle release or a budget pause run: check
       // admission again before the record turns `running`.
       if (this.agents.get(agentId) !== tracked)
         throw new AgentContinueError('released', 'Lane was replaced while preparing the turn.');
       this.assertLaneAdmitsTurn(agentId, tracked);
+    } catch (error) {
+      if (error instanceof LaneTurnInputRefusal)
+        throw new AgentContinueError('unsupported', error.reason, 'turn-input-unsupported');
+      throw error;
     } finally {
       this.continuationsInFlight.delete(tracked);
     }
@@ -3545,9 +3576,11 @@ export class AgentProcessManager {
       // flush window. Stamp the edge BEFORE the continuation can emit, so the
       // flush-time merge never fuses the two turns (TASK_2026_466 defect 5).
       this.outputBuffer.markTurnBoundary(agentId);
-      outcome = content
-        ? await sdkHandle.continue(message, content)
-        : await sdkHandle.continue(message);
+      outcome = preparedContinuation
+        ? preparedContinuation()
+        : content
+          ? await sdkHandle.continue(message, content)
+          : await sdkHandle.continue(message);
     } catch (error: unknown) {
       if (!this.isCurrentTurn(tracked, turn)) throw error;
       if (accountScoped) {
@@ -3629,6 +3662,7 @@ export class AgentProcessManager {
     if (tracked.info.status === 'starting') {
       clearTimeout(tracked.admissionTimer);
       this.mcpCredentials?.revokeSubject(agentId);
+      this.outputBuffer.discard(agentId);
       const completedAt = new Date().toISOString();
       tracked.info = { ...tracked.info, status: 'stopped', completedAt, lastActivityAt: completedAt };
       this.memoryGate.wake();
@@ -4107,6 +4141,7 @@ export class AgentProcessManager {
     tracked: TrackedAgent,
     reason: AgentReleaseReason,
   ): Promise<void> {
+    this.outputBuffer.discard(agentId);
     if (tracked.subprocessReleased) {
       this.mcpCredentials?.revokeSubject(agentId);
       await this.removeInstructionFiles(agentId);

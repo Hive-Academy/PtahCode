@@ -1,3 +1,4 @@
+import type { LiveChatSession } from '@ptah-extension/platform-core';
 import {
   streamCodexChatTurn,
   type CodexChatSession as Session,
@@ -22,6 +23,7 @@ import {
   type CodexTurnInput,
 } from '@ptah-extension/codex-runtime';
 import {
+  isChatBuiltinCommand,
   SessionId,
   type IAgentAdapter,
   type AgentModelInfo,
@@ -224,6 +226,24 @@ export class CodexChatAdapter implements NativeChatAdapter {
    * (`ptahMcpSessionUrl`). Returns an id only for a session this adapter
    * holds now; an unknown, closed, or ambiguous caller yields `undefined`.
    */
+  findLiveChatSessions(callerId: string): LiveChatSession[] {
+    const matches: LiveChatSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.consumer !== 'chat' || session.abort.signal.aborted) continue;
+      if (session.id !== callerId && session.tabId !== callerId) continue;
+      matches.push({
+        runtime: 'codex-app-server',
+        sessionId: session.id,
+        tabId: session.tabId,
+        workspaceRoot: session.profile.workspaceId,
+        cwd: session.profile.cwd,
+        model: session.settings.model,
+        permissionLevel: session.context.turnPermissionLevel,
+      });
+    }
+    return matches;
+  }
+
   resolveLiveSessionId(callerId: string): SessionId | undefined {
     if (callerId.trim() === '') return undefined;
     if (SessionId.validate(callerId) && this.sessions.has(callerId)) {
@@ -351,9 +371,24 @@ export class CodexChatAdapter implements NativeChatAdapter {
     }
     return this.open(config, id);
   }
+
+  /** Reopens a thread for skill lookup without applying model or effort overrides. */
+  async resumeSessionForSkillLookup(
+    id: SessionId,
+    config: AgentSessionResumeConfig,
+  ): Promise<void> {
+    if (this.sessions.has(id)) return;
+    await this.open(
+      { ...config, model: undefined, effort: undefined, prompt: '' },
+      id,
+      true,
+    );
+  }
+
   private async open(
     config: AgentSessionStartConfig | AgentSessionResumeConfig,
     resumeId?: SessionId,
+    preserveTurnSettings = false,
   ): Promise<AsyncIterable<FlatStreamEventUnion>> {
     const key = config.tabId ?? resumeId;
     if (!key || this.disposed)
@@ -384,7 +419,14 @@ export class CodexChatAdapter implements NativeChatAdapter {
         'clientMessageId' in config
           ? (({ clientMessageId: _clientMessageId, ...rest }) => rest)(config)
           : config;
-      const prepared = await this.prepareProfile(profileConfig, resumeId);
+      const resolved = await this.prepareProfile(profileConfig, resumeId);
+      // Profile resolution may supply a catalog default even for an absent model.
+      const prepared = preserveTurnSettings
+        ? {
+            ...resolved,
+            profile: { ...resolved.profile, model: undefined, effort: undefined },
+          }
+        : resolved;
       this.checkOpening(opening, generation);
       if (resumeId) {
         try {
@@ -400,10 +442,25 @@ export class CodexChatAdapter implements NativeChatAdapter {
         this.checkOpening(opening, generation);
       }
       scope = this.createScope(() => sink);
-      context = await this.openContext(scope, prepared, consumer);
+      context = await this.openContext(
+        scope,
+        prepared,
+        consumer,
+        preserveTurnSettings,
+      );
       const id = SessionId.from(context.identity.threadId);
       if (resumeId && id !== resumeId)
         throw new CodexChatAdapterError('identity-mismatch', 'identity');
+      const text = config.prompt ?? '';
+      const command = !resumeId && consumer === 'chat'
+        ? /^\/([a-z][\w:@.-]*)(?=\s|$)/i.exec(text.trimStart())?.[1]
+        : undefined;
+      const skill = command && !isChatBuiltinCommand(command)
+        ? await context.resolveSkillCommand?.(text)
+        : undefined;
+      if (command && !skill) {
+        throw new CodexChatAdapterError('unsupported-command', 'open', { command });
+      }
       this.checkOpening(opening, generation);
       if (this.sessions.has(id))
         throw new CodexChatAdapterError('busy', 'open');
@@ -428,7 +485,8 @@ export class CodexChatAdapter implements NativeChatAdapter {
         consumer,
       );
       stagedId = id;
-      this.ports.sessions?.opened(id, prepared);
+      // The Electron host associates the resolved profile object with its tab.
+      this.ports.sessions?.opened(id, resolved);
       this.checkOpening(opening, generation);
       await this.persistMetadata(id, context, config);
       this.checkOpening(opening, generation);
@@ -502,8 +560,9 @@ export class CodexChatAdapter implements NativeChatAdapter {
       return this.turn(
         session,
         {
-          text: config.prompt ?? '',
+          text,
           attachments: prepared.profile.attachments,
+          ...(skill && { skill }),
         },
         clientMessageId,
       );
@@ -566,9 +625,18 @@ export class CodexChatAdapter implements NativeChatAdapter {
     scope: CodexChatScope,
     prepared: Awaited<ReturnType<CodexChatAdapterPorts['profile']>>,
     consumer: 'chat' | 'gateway',
+    preserveTurnSettings: boolean,
   ): Promise<CodexContext> {
     const runtime = this.runtimeForScope(scope, consumer);
-    return runtime.open(prepared.profile, prepared.resume, prepared.secrets);
+    return preserveTurnSettings
+      ? runtime.open(
+          prepared.profile,
+          prepared.resume,
+          prepared.secrets,
+          undefined,
+          { preserveTurnSettings },
+        )
+      : runtime.open(prepared.profile, prepared.resume, prepared.secrets);
   }
 
   private runtimeForScope(
@@ -989,8 +1057,32 @@ export class CodexChatAdapter implements NativeChatAdapter {
     return [];
   }
 
+  /** Runs beforeSend after resolving an enabled skill and before starting its turn. */
+  async invokeSkillCommand(
+    id: SessionId,
+    command: string,
+    options?: Parameters<IAgentAdapter['sendMessageToSession']>[2],
+    beforeSend?: () => Promise<void>,
+  ): Promise<boolean> {
+    const session = this.session(id);
+    const skill = await this.safe('skillLookup', async () =>
+      session.context.resolveSkillCommand?.(command),
+    );
+    if (!skill) return false;
+    if (this.sessions.get(id) !== session || session.closing)
+      throw new CodexChatAdapterError('unavailable', 'skillLookup');
+    await beforeSend?.();
+    if (this.sessions.get(id) !== session || session.closing)
+      throw new CodexChatAdapterError('unavailable', 'skillLookup');
+    await this.sendMessageToSession(id, command, options, skill);
+    return true;
+  }
+
   async sendMessageToSession(
-    ...[id, text, options]: Parameters<IAgentAdapter['sendMessageToSession']>
+    ...[id, text, options, skill]: [
+      ...Parameters<IAgentAdapter['sendMessageToSession']>,
+      skill?: CodexTurnInput['skill'],
+    ]
   ): Promise<void> {
     let clientMessageId: string | undefined;
     let inboundPeer: { readonly label: string } | undefined;
@@ -1024,6 +1116,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         ...image,
       })),
     ];
+    const input: CodexTurnInput = { text, attachments, ...(skill && { skill }) };
     const requireIdle = options?.admission === 'require-idle';
     if (requireIdle) {
       const current = this.sessions.get(id);
@@ -1062,7 +1155,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
             (admission) =>
               this.publish(
                 session,
-                { text, attachments },
+                input,
                 clientMessageId,
                 admission,
               ),
@@ -1095,7 +1188,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
             (admission) =>
               this.publish(
                 session,
-                { text, attachments },
+                input,
                 clientMessageId,
                 admission,
                 inboundPeer,
@@ -1113,7 +1206,7 @@ export class CodexChatAdapter implements NativeChatAdapter {
         (admission) =>
           this.publish(
             session,
-            { text, attachments },
+            input,
             clientMessageId,
             admission,
             inboundPeer,

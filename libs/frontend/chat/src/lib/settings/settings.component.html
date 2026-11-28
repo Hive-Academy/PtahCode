@@ -76,6 +76,7 @@
         <ptah-providers-settings
           class="block"
           [focusTarget]="providersTarget()"
+          (focusTargetConsumed)="providersTarget.set(null)"
           [requestedProviderId]="requestedProviderId() ?? ''"
           (requestedProviderConsumed)="consumeRequestedProvider($event)"
           [requestedDrawer]="requestedDrawer()"

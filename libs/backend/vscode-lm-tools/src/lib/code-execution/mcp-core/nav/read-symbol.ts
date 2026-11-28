@@ -37,7 +37,7 @@ export const ReadSymbolArgsSchema = z
       .optional(),
     workspaceRoot: z.string().trim().min(1).optional(),
   })
-  .strict();
+  .passthrough();
 
 export type ReadSymbolArgs = z.infer<typeof ReadSymbolArgsSchema>;
 
@@ -278,13 +278,35 @@ export async function handleReadSymbol(
   rawArgs: unknown,
   deps: ReadSymbolDeps,
 ): Promise<ReadSymbolReply> {
-  const parsed = ReadSymbolArgsSchema.safeParse(rawArgs ?? {});
+  const input: Record<string, unknown> = typeof rawArgs === 'object' && rawArgs !== null && !Array.isArray(rawArgs)
+    ? { ...(rawArgs as Record<string, unknown>) }
+    : {};
+  const used: string[] = [];
+  const alias = (from: string, to: string): void => {
+    if (Object.hasOwn(input, from)) {
+      used.push(`${from}->${to}`);
+      if (input[to] === undefined) input[to] = input[from];
+      delete input[from];
+    }
+  };
+  alias('offset', 'startLine');
+  alias('limit', 'maxLines');
+  alias('file_path', 'file');
+  alias('path', 'file');
+  const clamped = typeof input['maxLines'] === 'number' && input['maxLines'] > READ_SYMBOL_HARD_MAX_LINES;
+  if (typeof input['maxLines'] === 'number') input['maxLines'] = Math.min(input['maxLines'], READ_SYMBOL_HARD_MAX_LINES);
+  const parsed = ReadSymbolArgsSchema.safeParse(input);
+  const validKeys = 'file, name, kind, startLine, endLine, maxLines, workspaceRoot';
+  const acceptedAliases = 'offset, limit, file_path, path';
+  const unknownKeys = Object.keys(input).filter((key) => !validKeys.split(', ').includes(key));
+  if (unknownKeys.length) return fail(`Error: invalid ${READ_SYMBOL_TOOL_NAME} arguments — valid keys: ${validKeys}; accepted aliases: ${acceptedAliases}; unknown: ${unknownKeys.join(', ')}`);
   if (!parsed.success) {
     return fail(
       `Error: invalid ${READ_SYMBOL_TOOL_NAME} arguments — ${describeZodIssues(parsed.error)}`,
     );
   }
   const args = parsed.data;
+  const leadNote = used.length ? `note: accepted native keys ${used.join(', ')}${clamped ? '; maxLines clamped to 400' : ''}` : clamped ? 'note: maxLines clamped to 400' : undefined;
   const { name, startLine } = args;
   if (name === undefined && startLine === undefined) {
     return fail(
@@ -322,23 +344,25 @@ export async function handleReadSymbol(
   const maxLines = args.maxLines ?? READ_SYMBOL_DEFAULT_MAX_LINES;
 
   if (name === undefined) {
-    return readByRange(
+    const reply = await readByRange(
       startLine ?? 1,
       args.endLine,
       target.relativePath,
       lines,
       maxLines,
     );
+    return leadNote && !reply.isError ? { ...reply, text: `${leadNote}\n${reply.text}` } : reply;
   }
 
   const extension = path.extname(target.absolutePath).toLowerCase();
   if (EXTENSION_LANGUAGE_MAP[extension] === undefined) {
     return ok(
+      `${leadNote ? `${leadNote}\n` : ''}` +
       `Symbol lookup is not available for ${extension || 'extensionless'} files (${target.relativePath}); read a line range with startLine/endLine instead.`,
     );
   }
   const outline = await deps.analyze(target.absolutePath);
-  return readByName(
+  const reply = await readByName(
     { ...args, name },
     target.relativePath,
     lines,
@@ -346,4 +370,5 @@ export async function handleReadSymbol(
     maxLines,
     outline.parseStatus !== 'ok',
   );
+  return leadNote && !reply.isError ? { ...reply, text: `${leadNote}\n${reply.text}` } : reply;
 }

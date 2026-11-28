@@ -1,3 +1,4 @@
+import { CdkConnectedOverlay } from '@angular/cdk/overlay';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { By as SelectBy } from '@angular/platform-browser';
 import { Component, signal, type WritableSignal } from '@angular/core';
@@ -341,6 +342,47 @@ describe('MainAgentReassignPopoverComponent', () => {
         configurable: true,
         value: height,
       });
+    }
+  });
+
+  it('repositions a nested provider list when the editor body scrolls and refits when an ancestor scrolls', async () => {
+    const trigger = query('main-agent-provider')?.querySelector('button');
+    expect(trigger).not.toBeNull();
+    trigger?.click();
+    await flush();
+    const list = document.querySelector('.ptah-select__panel');
+    expect(list).not.toBeNull();
+    const provider = query('main-agent-provider');
+    const connected = fixture.debugElement
+      .queryAllNodes(By.directive(CdkConnectedOverlay))
+      .map((node) => node.injector.get(CdkConnectedOverlay))
+      .find((overlay) => {
+        const origin = overlay.origin as HTMLElement | { elementRef?: { nativeElement?: HTMLElement } };
+        const element = origin instanceof HTMLElement ? origin : origin?.elementRef?.nativeElement;
+        return !!element && !!provider?.contains(element) && overlay.overlayRef.hasAttached();
+      });
+    if (!connected) throw new Error('Missing provider overlay');
+    const update = jest.spyOn(connected.overlayRef, 'updatePosition');
+    query('main-agent-popover-body')?.dispatchEvent(new Event('scroll'));
+    await flush();
+    expect(update).toHaveBeenCalled();
+
+    const anchor = document.querySelector<HTMLElement>(
+      'ptah-main-agent-reassign-popover .popover-trigger',
+    );
+    expect(anchor).not.toBeNull();
+    const rect = jest
+      .spyOn(anchor as HTMLElement, 'getBoundingClientRect')
+      .mockReturnValue({ top: 406, bottom: 406 } as DOMRect);
+    const height = window.innerHeight;
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 768 });
+    try {
+      document.documentElement.dispatchEvent(new Event('scroll'));
+      await flush();
+      expect(query('main-agent-popover')?.style.maxHeight).toBe('390px');
+    } finally {
+      rect.mockRestore();
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
     }
   });
 
@@ -903,6 +945,123 @@ describe('MainAgentReassignPopoverComponent', () => {
       expect(fixture.componentInstance.closed).toBe(1);
     });
 
+    describe('Tab and Shift+Tab boundaries', () => {
+      // jsdom does not move focus on Tab. The next stop is focused here, and the
+      // CDK anchors (visible only once elements have client rects) wrap the ends.
+      function tabbables(): HTMLElement[] {
+        return Array.from(
+          document.querySelectorAll<HTMLElement>(
+            'button, input, textarea, select, a[href], [tabindex]',
+          ),
+        ).filter((el) => el.tabIndex >= 0 && !el.hasAttribute('disabled'));
+      }
+
+      function pressTab(shift = false): KeyboardEvent {
+        const order = tabbables();
+        const active = document.activeElement as HTMLElement | null;
+        const index = active ? order.indexOf(active) : -1;
+        const next = order[shift ? index - 1 : index + 1];
+        const event = new KeyboardEvent('keydown', {
+          key: 'Tab',
+          shiftKey: shift,
+          bubbles: true,
+          cancelable: true,
+        });
+        active?.dispatchEvent(event);
+        if (!event.defaultPrevented && next?.isConnected) next.focus();
+        fixture.detectChanges();
+        return event;
+      }
+
+      function withRects(run: () => void): void {
+        const rects = jest
+          .spyOn(Element.prototype, 'getClientRects')
+          .mockReturnValue({
+            length: 1,
+            item: () => null,
+          } as unknown as DOMRectList);
+        try {
+          run();
+        } finally {
+          rects.mockRestore();
+        }
+      }
+
+      const check = () => query<HTMLButtonElement>('main-agent-check');
+      const cancel = () => query<HTMLButtonElement>('main-agent-cancel');
+      const rescope = () =>
+        query<HTMLButtonElement>('main-agent-provider-rescope');
+
+      function openModelList(): HTMLInputElement {
+        const input = modelInput();
+        if (!input) throw new Error('No model input');
+        input.focus();
+        fixture.detectChanges();
+        expect(input.getAttribute('aria-expanded')).toBe('true');
+        return input;
+      }
+
+      it('wraps both parent boundaries while the model list is closed', () => {
+        withRects(() => {
+          const first = check();
+          const last = cancel();
+          expect(first).not.toBeNull();
+          expect(last).not.toBeNull();
+          expect(modelInput()?.getAttribute('aria-expanded')).toBe('false');
+
+          last?.focus();
+          const forward = pressTab(false);
+          expect(forward.defaultPrevented).toBe(false);
+          expect(document.activeElement).toBe(first);
+          expect(modelInput()?.getAttribute('aria-expanded')).toBe('false');
+          expect(fixture.componentInstance.closed).toBe(0);
+
+          first?.focus();
+          const backward = pressTab(true);
+          expect(backward.defaultPrevented).toBe(false);
+          expect(document.activeElement).toBe(last);
+          expect(modelInput()?.getAttribute('aria-expanded')).toBe('false');
+          expect(fixture.componentInstance.closed).toBe(0);
+        });
+      });
+
+      it('wraps the parent while the model list is open, and Tab leaves the list on the neighbouring controls', () => {
+        withRects(() => {
+          const input = openModelList();
+          const first = check();
+          const last = cancel();
+
+          last?.focus();
+          pressTab(false);
+          expect(document.activeElement).toBe(first);
+          expect(input.getAttribute('aria-expanded')).toBe('true');
+          expect(fixture.componentInstance.closed).toBe(0);
+
+          first?.focus();
+          pressTab(true);
+          expect(document.activeElement).toBe(last);
+          expect(input.getAttribute('aria-expanded')).toBe('true');
+          expect(fixture.componentInstance.closed).toBe(0);
+
+          input.focus();
+          fixture.detectChanges();
+          const forward = pressTab(false);
+          expect(forward.defaultPrevented).toBe(false);
+          expect(input.getAttribute('aria-expanded')).toBe('false');
+          expect(document.activeElement).toBe(effortButton('default'));
+          expect(fixture.componentInstance.closed).toBe(0);
+
+          const reopened = openModelList();
+          reopened.focus();
+          const backward = pressTab(true);
+          expect(backward.defaultPrevented).toBe(false);
+          expect(reopened.getAttribute('aria-expanded')).toBe('false');
+          expect(document.activeElement).toBe(rescope());
+          expect(fixture.componentInstance.closed).toBe(0);
+        });
+      });
+    });
+
     it('does not write a model when choosing Provider default on the current provider', async () => {
       // config:model-get represents an empty stored model as "default".
       state.model.set(ready({ model: 'default' }));
@@ -1188,13 +1347,14 @@ describe('MainAgentReassignPopoverComponent', () => {
       await flush();
     });
 
-    it('renders all three Save to choices in the opening click without another render turn', () => {
-      const select = query('main-agent-save-to');
-      select
-        ?.querySelector<HTMLButtonElement>('button[role="combobox"]')
-        ?.click();
+    it('renders all three Save to choices in the connected listbox', async () => {
+      const trigger = query('main-agent-save-to')
+        ?.querySelector<HTMLButtonElement>('button[role="combobox"]');
+      trigger?.click();
+      await flush();
+      const listbox = document.getElementById(trigger?.getAttribute('aria-controls') ?? '');
       expect(
-        Array.from(select?.querySelectorAll('[role="option"]') ?? []).map(
+        Array.from(listbox?.querySelectorAll('[role="option"]') ?? []).map(
           (option) => option.textContent?.trim(),
         ),
       ).toEqual(['Global \u00b7 all apps', label, 'This workspace']);

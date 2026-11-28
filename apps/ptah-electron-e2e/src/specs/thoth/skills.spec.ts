@@ -129,9 +129,9 @@ test.describe('Thoth - Skills Library', () => {
     );
     await expect(
       picker.locator('[data-testid="provider-model-picker-provider"]'),
-    ).toHaveValue('kimi-code');
+    ).toHaveAttribute('data-value', 'kimi-code');
     await expect(
       picker.locator('[data-testid="provider-model-picker-model"]'),
-    ).toHaveValue('k3');
+    ).toHaveAttribute('data-value', 'k3');
   });
 });

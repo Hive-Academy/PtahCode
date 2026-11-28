@@ -45,6 +45,7 @@ class TwoRowsHostComponent {}
       [hintElementId]="hintElementId()"
       [controlAlign]="controlAlign()"
       [edgePadding]="edgePadding()"
+      [compactSplit]="compactSplit()"
     >
       @if (withAction()) {
         <button action type="button" data-testid="action">i</button>
@@ -57,6 +58,7 @@ class OptionsHostComponent {
   readonly hintElementId = signal<string | null>(null);
   readonly controlAlign = signal<'start' | 'end'>('start');
   readonly edgePadding = signal<'all' | 'trim'>('all');
+  readonly compactSplit = signal(false);
   readonly withAction = signal(true);
   readonly row = viewChild.required(PtahSettingRowComponent);
 }
@@ -168,6 +170,14 @@ describe('PtahSettingRowComponent', () => {
       expect(rowHost().classList.contains('first:[&>div]:pt-0')).toBe(true);
       expect(rowHost().classList.contains('last:[&>div]:pb-0')).toBe(true);
       expect(rowHost().classList.contains('last:border-b-0')).toBe(true);
+    });
+
+    it('opts in to the narrower split without changing the default', () => {
+      const row = root.querySelector('[data-testid="setting-row"]');
+      expect(row?.hasAttribute('data-compact-split')).toBe(false);
+      options.componentInstance.compactSplit.set(true);
+      options.detectChanges();
+      expect(row?.hasAttribute('data-compact-split')).toBe(true);
     });
   });
 

@@ -53,9 +53,8 @@ export function splitModelId(id: string): readonly [string, string] | null {
 }
 
 /**
- * The model and effort triggers of one lane, in the table row (`cell`) or in the expanded
- * detail (`detail`). The lanes table owns which popover is open (one at a time) and the
- * focus return; this cell only shows `openField` and reports the clicks.
+ * Model and effort triggers shared by the table row, expanded detail, and instance editor.
+ * The parent coordinates the open field and the cell reports trigger clicks.
  */
 @Component({
   selector: 'ptah-lane-model-effort-cell',
@@ -69,8 +68,9 @@ export function splitModelId(id: string): readonly [string, string] | null {
   // The host takes the place of the former `span.lane-model-value`, so the table styles
   // and the DOM depth stay the same.
   host: {
-    class:
-      'lane-model-value inline-flex min-w-0 items-center gap-ptah-inline text-xs',
+    class: 'lane-model-value inline-flex min-w-0 gap-ptah-inline text-xs',
+    '[class.items-center]': "place() !== 'edit'",
+    '[class.items-start]': "place() === 'edit'",
   },
   template: `
     @let row = this.row();
@@ -81,6 +81,9 @@ export function splitModelId(id: string): readonly [string, string] | null {
       <ptah-native-popover
         [isOpen]="openField() === 'model'"
         [keepInViewport]="true"
+        [class.inline-flex]="place() === 'edit'"
+        [class.min-w-0]="place() === 'edit'"
+        [class]="place() === 'edit' ? '[&>.popover-trigger]:min-w-0 [&>.popover-trigger]:max-w-full' : ''"
         placement="bottom-start"
         [hasBackdrop]="true"
         backdropClass="transparent"
@@ -91,9 +94,10 @@ export function splitModelId(id: string): readonly [string, string] | null {
           type="button"
           ptahButton
           variant="ghost"
-          size="xs"
-          density="compact"
+          [size]="place() === 'edit' ? 'sm' : 'xs'"
+          [density]="place() === 'edit' ? 'default' : 'compact'"
           class="min-w-0 lane-model-trigger"
+          [class.max-w-full]="place() === 'edit'"
           [class.font-mono]="hasModelId()"
           noPadding
           data-popover-kind="model"
@@ -106,11 +110,13 @@ export function splitModelId(id: string): readonly [string, string] | null {
           [title]="model.title"
           (click)="toggled.emit('model')"
         >
-          @if (modelParts(); as parts) {
+          @if (place() !== 'edit' ? modelParts() : null; as parts) {
             <span class="lane-model-id"
               ><span class="lane-model-part">{{ parts[0] }}</span
               ><wbr /><span class="lane-model-part">{{ parts[1] }}</span></span
             >
+          } @else if (place() === 'edit') {
+            <span class="min-w-0 truncate" [title]="model.title" data-testid="cli-instance-edit-model-text">{{ model.label }}</span>
           } @else {
             {{ model.label }}
           }
@@ -127,15 +133,17 @@ export function splitModelId(id: string): readonly [string, string] | null {
     }
     @if (
       hasEffort() &&
-      (place() === 'detail' ||
+      (place() !== 'cell' ||
         (row.kind === 'system' ? row.effort?.value : row.effort))
     ) {
-      @if (place() !== 'detail') {
+      @if (place() === 'cell') {
         <span aria-hidden="true">·</span>
       }
       <ptah-native-popover
         [isOpen]="openField() === 'effort'"
         [keepInViewport]="true"
+        [class.inline-flex]="place() === 'edit'"
+        [class.shrink-0]="place() === 'edit'"
         placement="bottom-start"
         [hasBackdrop]="true"
         backdropClass="transparent"
@@ -145,9 +153,9 @@ export function splitModelId(id: string): readonly [string, string] | null {
           trigger
           type="button"
           ptahButton
-          [variant]="place() === 'detail' ? 'outline' : 'ghost'"
-          size="xs"
-          density="compact"
+          [variant]="place() === 'cell' ? 'ghost' : 'outline'"
+          [size]="place() === 'edit' ? 'sm' : 'xs'"
+          [density]="place() === 'edit' ? 'default' : 'compact'"
           data-popover-kind="effort"
           [disabled]="!interactive() || !canWrite()"
           [attr.data-busy]="busy() ? '' : null"
@@ -158,7 +166,7 @@ export function splitModelId(id: string): readonly [string, string] | null {
           [title]="effort()"
           (click)="toggled.emit('effort')"
         >
-          {{ place() === 'detail' ? 'Effort: ' : '' }}{{ effort() }}
+          {{ place() !== 'cell' ? 'Effort: ' : '' }}{{ effort() }}
         </button>
         @if (openField() === 'effort') {
           <ptah-cli-model-effort-popover
@@ -170,12 +178,14 @@ export function splitModelId(id: string): readonly [string, string] | null {
         }
       </ptah-native-popover>
     }
-    <span class="sr-only" data-testid="lanes-effort-na"></span>
+    @if (place() !== 'edit') {
+      <span class="sr-only" data-testid="lanes-effort-na"></span>
+    }
   `,
 })
 export class LaneModelEffortCellComponent {
   readonly row = input.required<LaneTableRow>();
-  readonly place = input.required<'cell' | 'detail'>();
+  readonly place = input.required<'cell' | 'detail' | 'edit'>();
   /** The field whose popover is open at this place, from the table's one-popover state. */
   readonly openField = input<'model' | 'effort' | null>(null);
   readonly interactive = input(true);

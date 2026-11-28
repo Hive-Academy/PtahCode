@@ -1,3 +1,4 @@
+import { LaneTurnInputRefusal } from '../../cli-adapters/cli-adapter.interface';
 import type { AgentProcessInfo, InlineImageAttachment } from '@ptah-extension/shared';
 import type { AgentProcessManager } from '../../agent-process-manager.service';
 import type { ParentLaneLevel } from '../parent-lane-level';
@@ -53,6 +54,8 @@ export class SystemCliLaneResumer implements LaneResumer {
         resumePolicy: info.effectivePolicy,
       });
     } catch (error: unknown) {
+      if (error instanceof LaneTurnInputRefusal)
+        throw new LaneResumeError('turn-input-refused', error.reason);
       if (
         error instanceof LaneResumeError ||
         error instanceof LaneAccountResumeError

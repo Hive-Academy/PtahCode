@@ -166,6 +166,121 @@ describe('LegacySessionStoreMigrator', () => {
     },
   );
 
+  it('fills missing cli, model, and startedAt from CliSessionReference for headerless async sequences without overwriting stored header values', async () => {
+    const { storage, inner } = asyncLegacy();
+    const legacy = new SessionMetadataStore(storage, logger);
+    await legacy.create(SESS_A, WS_A, 'Alpha');
+    const oldStart = '2025-01-15T12:00:00.000Z';
+    const legacyAgent = '55555555-5555-4555-8555-555555555555' as AgentId;
+    await legacy.saveAgentOutput(legacyAgent, {
+      segments: [{ type: 'tool-call', content: '', toolCallId: 'c1', toolName: 'ptah_grep' }],
+    });
+    // Simulate a pre-header async sequence where no header key existed at all.
+    await inner.update(`ptah.agentOutputHeader:${legacyAgent}`, undefined);
+    await legacy.addCliSession(SESS_A, {
+      cliSessionId: 'cli-legacy',
+      cli: 'opencode',
+      model: 'openai/gpt-5',
+      agentId: legacyAgent,
+      task: 'legacy task',
+      startedAt: oldStart,
+      status: 'completed',
+    } as CliSessionReference);
+
+    // Also test a sequence whose header explicitly sets cli/startedAt (must not be overwritten by ref).
+    const headerAgent = '66666666-6666-4666-8666-666666666666' as AgentId;
+    const headerStart = '2026-02-01T08:00:00.000Z';
+    await legacy.saveAgentOutput(headerAgent, {
+      cli: 'claude',
+      startedAt: headerStart,
+      segments: [{ type: 'text', content: 'hi' }],
+    });
+    await legacy.addCliSession(SESS_A, {
+      cliSessionId: 'cli-header',
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      agentId: headerAgent,
+      task: 'header task',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      status: 'completed',
+    } as CliSessionReference);
+    await legacy.flush();
+
+    const t = target();
+    const result = await t.migrator.migrate([
+      { sourcePath: '/legacy/alpha', storage },
+    ]);
+
+    expect(result).toMatchObject({ copied: 1, failed: 0 });
+    expect(t.blobs.__blobs.get(`${SESS_A}/agent-output.${legacyAgent}`)).toMatchObject({
+      agentId: legacyAgent,
+      cli: 'opencode',
+      model: 'openai/gpt-5',
+      startedAt: oldStart,
+    });
+    expect(t.blobs.__blobs.get(`${SESS_A}/agent-output.${headerAgent}`)).toMatchObject({
+      agentId: headerAgent,
+      cli: 'claude',
+      model: 'gpt-5-codex',
+      startedAt: headerStart,
+    });
+  });
+
+  it('copies async agent output header metadata including summary-only outputs', async () => {
+    const { storage } = asyncLegacy();
+    const legacy = new SessionMetadataStore(storage, logger);
+    await legacy.create(SESS_A, WS_A, 'Alpha');
+    const summaryOnlyAgent = '44444444-4444-4444-8444-444444444444' as AgentId;
+    const summary = {
+      totalCalls: 2,
+      ptahCalls: 1,
+      nativeCalls: 1,
+      otherMcpCalls: 0,
+      discoveryCalls: 0,
+      ptahErrors: 0,
+      nativeErrors: 0,
+      unknownOutcomes: 0,
+      callsBeforeFirstPtahSuccess: 0,
+      substitutableNative: {
+        textSearch: 0,
+        fileRead: 1,
+        pathListing: 0,
+        gitRead: 0,
+      },
+      byTool: {
+        ptah_grep: { calls: 1, errors: 0 },
+        Read: { calls: 1, errors: 0 },
+      },
+      byToolOverflow: 0,
+    };
+    await legacy.saveAgentOutput(summaryOnlyAgent, {
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      startedAt: '2026-11-27T01:00:00.000Z',
+      segmentsTruncated: true,
+      toolCallSummary: summary,
+    });
+    await legacy.addCliSession(SESS_A, ref(summaryOnlyAgent));
+    await legacy.flush();
+
+    const t = target();
+    const result = await t.migrator.migrate([
+      { sourcePath: '/legacy/alpha', storage },
+    ]);
+
+    expect(result).toMatchObject({ copied: 1, failed: 0 });
+    await expect(
+      t.store().getAgentOutputHeader(summaryOnlyAgent, SESS_A),
+    ).resolves.toMatchObject({
+      agentId: summaryOnlyAgent,
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      startedAt: '2026-11-27T01:00:00.000Z',
+      segmentsTruncated: true,
+      toolCallSummary: summary,
+    });
+  });
+
   it('leaves the legacy store exactly as it was', async () => {
     const { storage, inner } = asyncLegacy();
     await writeLegacy(storage, SESS_A, WS_A, 'Alpha');

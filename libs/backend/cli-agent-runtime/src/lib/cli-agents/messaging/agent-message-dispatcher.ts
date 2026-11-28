@@ -74,7 +74,7 @@ export interface AgentMessageDispatcherDeps {
    * The command and skill names the lane advertises (bounded lookup, cached
    * per lineage), or undefined when no list is known.
    */
-  readonly advertisedCommands?: (laneId: AgentId, lineage: AgentId) => Promise<readonly string[] | undefined>;
+  readonly advertisedCommands?: (laneId: AgentId, lineage: AgentId, refresh: boolean, body: string) => Promise<readonly string[] | undefined>;
 }
 
 /** The text a delivery sends and how it is routed. */
@@ -95,6 +95,9 @@ export class AgentMessageDispatcher {
       return this.refuseHeld(attempt, 'turn-input-unsupported', blockedLaneCommandReason(blocked));
     const form = await this.deliveryForm(attempt);
     if ('refusal' in form) return this.refuseHeld(attempt, form.refusal, form.lastError);
+    if ('catalogUnavailable' in form) {
+      return this.refuseHeld(attempt, 'delivery-failed', 'The lane command catalog is unavailable.', 'blocked-retryable');
+    }
     // The command name only (an advertised name), never its arguments.
     if (form.raw)
       this.deps.logger.info('[AgentMessageCoordinator] Delivering a raw lane command', {
@@ -102,8 +105,8 @@ export class AgentMessageDispatcher {
       });
     let dispatching: AgentMessageEnvelope;
     try {
-      // The raw decision is written with the journal record, once, so a retry
-      // or re-offer delivers it raw again; a failed write sends nothing.
+      // Record the delivery form for receipt and ack reconciliation. Every
+      // subsequent attempt still checks the catalog before reusing that form.
       dispatching = await this.deps.store.markDispatching(envelope.id, [envelope.state],
         form.raw && envelope.rawDelivery?.raw !== true ? { rawDelivery: { raw: true } } : {});
     } catch (error: unknown) {
@@ -127,7 +130,7 @@ export class AgentMessageDispatcher {
    */
   private async deliveryForm(
     attempt: DispatchAttempt,
-  ): Promise<DeliveryForm | { refusal: ReasonCode; lastError?: string }> {
+  ): Promise<DeliveryForm | { refusal: ReasonCode; lastError?: string } | { catalogUnavailable: true }> {
     const { envelope } = attempt;
     const imageCount = envelope.turn?.imageCount ?? 0;
     const images = imageCount > 0 ? this.deps.attachments?.take(envelope.id) : undefined;
@@ -142,34 +145,38 @@ export class AgentMessageDispatcher {
       ...(stored?.files?.length ? { files: stored.files } : {}),
       ...(images?.length ? { images } : {}),
     } : undefined;
-    return { raw: await this.deliversRaw(attempt), ...(turn ? { turn } : {}) };
+    const raw = await this.deliversRaw(attempt);
+    if (raw === undefined) return { catalogUnavailable: true };
+    if (!raw && envelope.rawDelivery?.raw) {
+      return { refusal: 'turn-input-unsupported', lastError: 'This lane command is no longer advertised.' };
+    }
+    return { raw: raw ?? false, ...(turn ? { turn } : {}) };
   }
 
   /**
    * Raw command delivery (decisions.md 15): only a user's message whose first
    * token is an advertised `/command` or skill. Parent and lane senders always
    * keep the header, so an agent can never issue provider commands into a
-   * lane. With no known list nothing goes raw: the text keeps its header, so
-   * a message such as `/usr/bin is missing` is never run as a command.
+   * lane. An unavailable catalog holds a possible command for retry.
    */
-  private async deliversRaw(attempt: DispatchAttempt): Promise<boolean> {
+  private async deliversRaw(attempt: DispatchAttempt): Promise<boolean | undefined> {
     const { envelope } = attempt;
-    if (envelope.rawDelivery?.raw === true) return true;
     if (envelope.sender.kind !== 'user' || leadingLaneCommand(attempt.body) === undefined) return false;
     let names: readonly string[] | undefined;
     try {
-      names = await this.deps.advertisedCommands?.(attempt.laneId, envelope.laneLineageId);
+      if (!this.deps.advertisedCommands) return false;
+      names = await this.deps.advertisedCommands(attempt.laneId, envelope.laneLineageId, envelope.rawDelivery?.raw === true, attempt.body);
     } catch (error: unknown) {
-      // degradation-audit: reported - logged; with no list the message keeps its header.
+      // degradation-audit: reported - the caller holds the delivery for retry.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane command list unavailable', {
         error: error instanceof Error ? error.name : 'unknown',
       });
     }
-    return names ? matchesLaneCommand(attempt.body, names) : false;
+    return names && matchesLaneCommand(attempt.body, names);
   }
 
   /**
-   * Fail a held envelope before dispatch; its body stays recoverable. Nothing
+   * Record a refusal or retryable hold before dispatch. Nothing
    * was sent, so a failed write leaves the envelope in its prior state and
    * returns `storage-unavailable` instead of throwing.
    */
@@ -177,11 +184,12 @@ export class AgentMessageDispatcher {
     attempt: DispatchAttempt,
     reason: ReasonCode,
     lastError?: string,
+    state: 'failed' | 'blocked-retryable' = 'failed',
   ): Promise<AgentMessageOutcome> {
-    let failed: AgentMessageEnvelope | undefined;
+    let updated: AgentMessageEnvelope | undefined;
     try {
-      failed = await this.deps.store.transition(attempt.envelope.id, {
-        state: 'failed', reason, nextRetryAt: undefined,
+      updated = await this.deps.store.transition(attempt.envelope.id, {
+        state, reason, nextRetryAt: undefined,
         ...(lastError ? { lastError: lastError.slice(0, 200) } : {}),
       }, [attempt.envelope.state]);
     } catch (error: unknown) {
@@ -189,7 +197,7 @@ export class AgentMessageDispatcher {
         asError(error));
       return this.unsupported(attempt, attempt.envelope, 'storage-unavailable');
     }
-    return { ...this.unsupported(attempt, failed ?? attempt.envelope, reason), ...(lastError ? { detail: lastError } : {}) };
+    return { ...this.unsupported(attempt, updated ?? attempt.envelope, reason), ...(lastError ? { detail: lastError } : {}) };
   }
 
   /** Where a raw `/command` must not steer (R3-2): interrupt-resume when confirmed, else queue. */
@@ -291,7 +299,8 @@ export class AgentMessageDispatcher {
         reason, everDispatched: envelope.everDispatched ?? false,
         ...(shownError ? { lastError: shownError } : {}),
       }, ['dispatching']);
-      return this.unsupported(attempt, next ?? dispatching, reason);
+      const outcome = this.unsupported(attempt, next ?? dispatching, reason);
+      return shownError ? { ...outcome, detail: shownError } : outcome;
     }
     if (result.mode === 'queue-next-turn') return this.parked(attempt, dispatching, result);
     const current = this.deps.manager.findAgentInfo(laneId);
@@ -341,7 +350,8 @@ export class AgentMessageDispatcher {
     const next = await this.deps.store.transition(dispatching.id, patch, ['dispatching']);
     const outcome = this.unsupported(attempt, next ?? dispatching, reason);
     // Fixed host text (a policy refusal) reaches the composer as the detail.
-    return patch.lastError && error instanceof LaneResumeError && error.code === 'policy-refused'
+    return patch.lastError && (reason === 'turn-input-unsupported' ||
+      (error instanceof LaneResumeError && error.code === 'policy-refused'))
       ? { ...outcome, detail: patch.lastError } : outcome;
   }
 

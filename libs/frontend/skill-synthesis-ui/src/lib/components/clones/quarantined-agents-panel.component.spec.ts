@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ChangeDetectionStrategy, Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ClaudeRpcService } from '@ptah-extension/core';
@@ -171,10 +172,21 @@ describe('QuarantinedAgentsPanelComponent', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   const root = (): HTMLElement => fixture.nativeElement as HTMLElement;
-  const q = <T extends HTMLElement = HTMLElement>(testId: string): T | null =>
-    root().querySelector<T>(`[data-testid="${testId}"]`);
-  const all = (testId: string): HTMLElement[] =>
-    Array.from(root().querySelectorAll(`[data-testid="${testId}"]`));
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
+  const q = <T extends HTMLElement = HTMLElement>(testId: string): T | null => {
+    const selector = `[data-testid="${testId}"]`;
+    return (
+      root().querySelector<T>(selector) ?? overlay().querySelector<T>(selector)
+    );
+  };
+  const all = (testId: string): HTMLElement[] => {
+    const selector = `[data-testid="${testId}"]`;
+    return [
+      ...root().querySelectorAll<HTMLElement>(selector),
+      ...overlay().querySelectorAll<HTMLElement>(selector),
+    ];
+  };
 
   /** One macrotask turn drains the mocked RPCs and the async chains. */
   async function settle(): Promise<void> {

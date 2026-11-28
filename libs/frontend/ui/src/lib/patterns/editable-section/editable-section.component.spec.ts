@@ -5,20 +5,6 @@ import {
   PtahEditTemplateDirective,
 } from './editable-section.component';
 
-/** jsdom has no HTMLDialogElement methods. The stub reflects the `open` attribute. */
-beforeAll(() => {
-  if (!HTMLDialogElement.prototype.showModal) {
-    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
-      this.setAttribute('open', '');
-    } as HTMLDialogElement['showModal'];
-  }
-  if (!HTMLDialogElement.prototype.close) {
-    HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) {
-      this.removeAttribute('open');
-    } as HTMLDialogElement['close'];
-  }
-});
-
 const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
 
 @Component({
@@ -83,12 +69,12 @@ describe('PtahEditableSectionComponent', () => {
   let host: HostComponent;
   let el: HTMLElement;
 
-  const q = <T extends HTMLElement = HTMLElement>(sel: string): T | null => el.querySelector<T>(sel);
+  const q = <T extends HTMLElement = HTMLElement>(sel: string): T | null => el.querySelector<T>(sel) ?? dialog()?.querySelector<T>(sel) ?? null;
   const editButton = (): HTMLButtonElement | null => q<HTMLButtonElement>('[data-ptah-editable-edit]');
   const cancelButton = (): HTMLButtonElement => q<HTMLButtonElement>('[data-ptah-editable-cancel]') as HTMLButtonElement;
   const saveButton = (): HTMLButtonElement => q<HTMLButtonElement>('[data-ptah-editable-save]') as HTMLButtonElement;
   const form = (): HTMLFormElement | null => q<HTMLFormElement>('[data-ptah-editable-form]');
-  const dialog = (): HTMLDialogElement => q<HTMLDialogElement>('dialog') as HTMLDialogElement;
+  const dialog = (): HTMLElement | null => document.querySelector('.cdk-dialog-container');
   const heading = (): HTMLElement => q('.ptah-section-title') as HTMLElement;
 
   async function settle(): Promise<void> {
@@ -257,11 +243,11 @@ describe('PtahEditableSectionComponent', () => {
       cancelButton().click();
       await settle();
       expect(host.edits).toEqual([]);
-      expect(dialog().hasAttribute('open')).toBe(true);
-      const titleId = dialog().getAttribute('aria-labelledby') as string;
-      expect(el.querySelector(`[id="${titleId}"]`)?.textContent).toBe('Discard changes?');
+      expect(dialog()).not.toBeNull();
+      const titleId = dialog()?.getAttribute('aria-labelledby') as string;
+      expect(dialog()?.querySelector(`[id="${titleId}"]`)?.textContent).toBe('Discard changes?');
       expect(q('[data-ptah-editable-confirm-body]')?.textContent?.trim()).toBe('Your edits to Profile will be lost.');
-      expect(dialog().querySelector('.modal-box button')).toBe(q('[data-ptah-editable-keep]'));
+      expect(dialog()?.querySelector('.modal-box button')).toBe(q('[data-ptah-editable-keep]'));
       q('[data-ptah-editable-discard]')?.click();
       await settle();
       expect(host.edits).toEqual(['cancel']);
@@ -273,7 +259,7 @@ describe('PtahEditableSectionComponent', () => {
       await openEdit();
       pressEscape(q('[data-testid="name-input"]') as HTMLElement);
       await settle();
-      expect(dialog().hasAttribute('open')).toBe(true);
+      expect(dialog()).not.toBeNull();
       q('[data-ptah-editable-keep]')?.click();
       await settle();
       expect(dialog()).toBeNull();

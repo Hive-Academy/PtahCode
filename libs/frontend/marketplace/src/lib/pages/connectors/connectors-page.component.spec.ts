@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * ConnectorsPageComponent specs (plan C9, Task 15.1). Routed the way Batch 17
  * will (`''` + `:connectorId` children) under a host providing the REAL links
@@ -38,6 +39,10 @@ import {
 import { ConnectorActionsTracker } from './connector-actions';
 import { ConnectorDetailComponent } from './connector-detail.component';
 import { ConnectorsPageComponent } from './connectors-page.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function ok<T>(data: T) {
   return {
@@ -172,7 +177,7 @@ describe('ConnectorsPageComponent', () => {
   const all = (selector: string): HTMLElement[] =>
     Array.from(root().querySelectorAll<HTMLElement>(selector));
   const one = (selector: string): HTMLElement | null =>
-    root().querySelector<HTMLElement>(selector);
+    root().querySelector<HTMLElement>(selector) ?? overlay().querySelector<HTMLElement>(selector);
   const url = (): string => TestBed.inject(Router).url;
   const gridIds = (): string[] =>
     all('[data-grid-connector]').map(

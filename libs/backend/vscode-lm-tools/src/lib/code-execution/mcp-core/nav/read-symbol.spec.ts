@@ -242,6 +242,9 @@ describe('handleReadSymbol', () => {
       /^… \d+ more lines; call again with startLine=\d+ endLine=300$/,
     );
     expect(lines[lines.length - 2]).toMatch(/\| x{100}$/);
+    const lastShownLine = Number(lines[lines.length - 2].match(/^\s*(\d+)\|/)?.[1]);
+    const continuationLine = Number(lines[lines.length - 1].match(/startLine=(\d+)/)?.[1]);
+    expect(continuationLine).toBe(lastShownLine + 1);
   });
 
   it.each([
@@ -249,13 +252,50 @@ describe('handleReadSymbol', () => {
     [{ file: 'notes.txt', startLine: 0 }, 'startLine'],
     [{ file: 'notes.txt', startLine: -3 }, 'startLine'],
     [{ file: 'notes.txt', startLine: 600 }, 'past the end'],
-    [{ file: 'notes.txt', startLine: 1, maxLines: 401 }, 'maxLines'],
     [{ file: 'notes.txt' }, 'pass "name"'],
     [{ file: 'notes.txt', startLine: 1, extra: true }, 'extra'],
   ])('rejects bad arguments %j', async (args, message) => {
     const reply = await handleReadSymbol(args, deps);
     expect(reply.isError).toBe(true);
     expect(reply.text).toContain(message);
+  });
+
+  it('clamps maxLines above 400 and reports the clamp', async () => {
+    const reply = await handleReadSymbol({ file: 'notes.txt', startLine: 1, maxLines: 401 }, deps);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('maxLines clamped to 400');
+    expect(reply.text.split('\n').filter((line) => /^\s*\d+\|/.test(line))).toHaveLength(400);
+  });
+
+  it.each([
+    [{ file: 'notes.txt', offset: 9, endLine: 11 }, 'offset->startLine'],
+    [{ file: 'notes.txt', startLine: 1, limit: 2 }, 'limit->maxLines'],
+    [{ file_path: 'notes.txt', startLine: 1, endLine: 1 }, 'file_path->file'],
+    [{ path: 'notes.txt', startLine: 1, endLine: 1 }, 'path->file'],
+  ])('accepts Read aliases %j', async (args, note) => {
+    const reply = await handleReadSymbol(args, deps);
+    expect(reply.isError).toBe(false);
+    expect(reply.text.split('\n')[0]).toContain(`note: accepted native keys ${note}`);
+  });
+
+  it('uses canonical file before file_path and path aliases', async () => {
+    const reply = await handleReadSymbol({ file: 'notes.txt', file_path: 'missing.txt', path: 'also-missing.txt', startLine: 1, endLine: 1 }, deps);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('notes.txt:1-1');
+  });
+
+  it('reports unknown keys with valid keys and aliases', async () => {
+    const reply = await handleReadSymbol({ file: 'notes.txt', startLine: 1, surprise: true }, deps);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('valid keys: file, name, kind, startLine, endLine, maxLines, workspaceRoot');
+    expect(reply.text).toContain('accepted aliases: offset, limit, file_path, path');
+  });
+
+  it('does not prefix an errored aliased read with the accepted-alias note', async () => {
+    const reply = await handleReadSymbol({ file_path: 'notes.txt', offset: 999 }, deps);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toMatch(/^Error:/);
+    expect(reply.text).not.toContain('note: accepted native keys');
   });
 
   it('refuses a path that escapes the workspace root', async () => {
@@ -267,7 +307,7 @@ describe('handleReadSymbol', () => {
     expect(reply.text).toContain('outside the workspace root');
   });
 
-  it('refuses a symlink that points outside the workspace root', async () => {
+  (process.platform === 'win32' ? it.skip : it)('refuses a symlink that points outside the workspace root', async () => {
     await symlink(path.join(outside, 'secret.ts'), path.join(root, 'link.ts'));
     const reply = await handleReadSymbol({ file: 'link.ts', name: 's' }, deps);
     expect(reply.isError).toBe(true);

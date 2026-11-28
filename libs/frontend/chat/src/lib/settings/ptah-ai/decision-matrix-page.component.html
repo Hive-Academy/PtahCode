@@ -1,0 +1,395 @@
+<header class="dashboard-toolbar">
+  <button ptahButton variant="ghost" type="button" (click)="back.emit()" aria-label="Context management">
+    <lucide-angular [img]="BackIcon" aria-hidden="true" />
+    Context management
+  </button>
+  <div class="header-actions">
+    @let configured = routingModelConfigured();
+    <span ptahBadge>
+      Routing model: {{ configured === null ? 'Unknown' : configured ? 'On' : 'Off' }}
+    </span>
+    @if (store.updatedAt(); as updatedAt) {
+      <span class="muted">Updated <ptah-relative-time [value]="updatedAt" /></span>
+    }
+    <button ptahIconButton type="button" label="Refresh decision matrix" [busy]="busy()" (click)="store.refresh()">
+      <lucide-angular [img]="RefreshIcon" aria-hidden="true" />
+    </button>
+  </div>
+</header>
+
+@let data = evidence();
+@let model = dashboard();
+
+<ng-template #funnel let-stages="stages" let-max="max">
+  @for (stage of stages; track stage.label) {
+    <div class="chart-row">
+      <span>{{ stage.label }}</span>
+      <ptah-meter [value]="stage.value" [max]="max" [label]="stage.label"
+        tone="gold" [hideLabel]="true" [showValue]="false" [animate]="false" />
+      <span class="chart-count">
+        {{ stage.value }}
+        @if (stage.drop !== null) {
+          <small class="muted" [attr.aria-label]="stage.drop + ' fewer runs'">−{{ stage.drop }}</small>
+        }
+      </span>
+    </div>
+  }
+</ng-template>
+
+@if (store.evidence() === 'loading') {
+  <section class="ptah-card" data-glass-surface="content" aria-busy="true">
+    <p role="status">Loading routing evidence…</p>
+    <ptah-skeleton shape="lines" />
+  </section>
+} @else if (store.evidence() === 'error') {
+  <ptah-alert tone="error" [compact]="true" live="polite">
+    Routing evidence could not be loaded.
+    <button alertAction ptahButton variant="ghost" type="button" (click)="store.loadEvidence()">Retry</button>
+  </ptah-alert>
+} @else if (data) {
+  <section class="kpi-grid" aria-label="Overview" data-testid="decision-matrix-kpis">
+    @for (kpi of model.kpis; track kpi.label) {
+      <div class="ptah-card kpi" data-glass-surface="tile" data-testid="decision-matrix-kpi">
+        <ptah-ring [value]="kpi.value" [max]="kpi.max" [label]="kpi.label"
+          [centerText]="kpi.max ? undefined : '—'" [centerOnly]="true" size="row" tone="gold"
+          [semanticRole]="kpi.max ? 'meter' : 'img'"
+          [ariaLabel]="kpi.max ? null : kpi.label + ': No data'" />
+        <div>
+          <strong>{{ kpi.label }}</strong>
+          <p class="muted">{{ kpi.value }} of {{ kpi.max }} {{ kpi.unit }}</p>
+        </div>
+      </div>
+    }
+  </section>
+
+  <div class="chart-grid">
+    <section class="ptah-card" data-glass-surface="content" aria-labelledby="pipeline-heading" data-testid="decision-matrix-chart">
+      <header class="section-heading">
+        <h2 id="pipeline-heading">Run pipeline</h2>
+        <span class="muted">Last {{ data.windowDays }} days</span>
+      </header>
+      @if (model.funnel.spawned) {
+        <ng-container [ngTemplateOutlet]="funnel" [ngTemplateOutletContext]="{ stages: model.pipeline, max: model.funnel.spawned }" />
+        <div class="chart-row">
+          <span>Lost</span>
+          <ptah-stacked-bar label="Lost runs" [segments]="model.losses" [style.inline-size.%]="model.lostShare" />
+          <span class="chart-count">{{ model.lostTotal }}</span>
+        </div>
+      } @else {
+        <p class="muted">No run totals available.</p>
+      }
+    </section>
+
+    <section class="ptah-card" data-glass-surface="content" aria-labelledby="outcome-mix-heading" data-testid="decision-matrix-chart">
+      <header class="section-heading">
+        <h2 id="outcome-mix-heading">Outcome mix by lane</h2>
+        <span class="muted">Share of runs</span>
+      </header>
+      @for (lane of model.mix; track lane.laneId) {
+        @let name = laneName(lane.laneId);
+        <div class="chart-row mix-row">
+          <span>{{ name }}</span>
+          <ptah-stacked-bar [label]="name + ' outcomes'" [segments]="lane.segments" />
+          <span class="chart-count" [attr.aria-label]="lane.approval + '% approved'">{{ lane.approval }}%</span>
+        </div>
+      } @empty {
+        <p class="muted">No lane outcomes available.</p>
+      }
+      @if (model.mix.length) {
+        <ul class="legend muted" aria-label="Outcome legend">
+          @for (segment of model.mixLegend; track segment.label) {
+            <li><i class="swatch" aria-hidden="true" [style.background]="segment.color"></i>{{ segment.label }}</li>
+          }
+        </ul>
+      }
+    </section>
+
+    <section class="ptah-card" data-glass-surface="content" aria-labelledby="workload-heading" data-testid="decision-matrix-chart">
+      <header class="section-heading">
+        <h2 id="workload-heading">Who does the work</h2>
+        <span class="muted">Runs per lane</span>
+      </header>
+      @if (workloads().length) {
+        <div class="workload">
+          <ptah-donut label="Run distribution" [segments]="workloads()" />
+          <ul class="legend workload-legend muted" aria-label="Run shares">
+            @for (segment of workloads(); track segment.laneId) {
+              <li><i class="swatch" aria-hidden="true" [style.background]="segment.color"></i>{{ segment.label }} <strong>{{ segment.share }}%</strong></li>
+            }
+          </ul>
+        </div>
+      } @else {
+        <p class="muted">No runs to show.</p>
+      }
+    </section>
+  </div>
+}
+
+<div class="routing-grid">
+  <section class="ptah-card routing-controls" data-glass-surface="content" aria-labelledby="routing-controls-heading">
+    <header class="section-heading"><h2 id="routing-controls-heading">Routing controls</h2></header>
+    <ptah-host-routing-setting (modelConfiguredChange)="routingModelConfigured.set($event)" />
+    <ptah-performance-routing-setting />
+    <ptah-lane-rotation-setting />
+  </section>
+
+  <section class="ptah-card current-picks" data-glass-surface="content" aria-labelledby="current-pick-heading">
+    <header class="section-heading">
+      <div>
+        <h2 id="current-pick-heading">Current pick per task kind</h2>
+        <p class="muted">Highest measured score by lane. The marker shows the runner-up.</p>
+      </div>
+    </header>
+    @if (data) {
+      @for (pick of model.picks; track pick.task) {
+        <div class="pick-row">
+          <strong class="kind">{{ pick.task }}</strong>
+          @if (pick.winner; as winner) {
+            <div>
+              <strong>{{ laneName(winner.laneId) }}</strong>
+              <span class="muted"> · {{ modelName(winner.model) }}</span>
+              @if (pick.close && pick.runnerUp; as runnerUp) {
+                <span ptahBadge size="xs">Rotates with {{ laneName(runnerUp.laneId) }}</span>
+              }
+            </div>
+            <div class="pick-meter">
+              <ptah-meter [value]="winner.score" [max]="100" [marker]="pick.runnerUp?.score"
+                [label]="pick.task + ' pick score'"
+                [valueText]="pick.runnerUp ? (winner.score | number:'1.0-1') + ' of 100. Runner-up ' + laneName(pick.runnerUp.laneId) + ' ' + (pick.runnerUp.score | number:'1.0-1') : undefined"
+                tone="gold" [hideLabel]="true" [showValue]="false" [animate]="false" />
+              <strong>{{ winner.score | number:'1.0-1' }}</strong>
+            </div>
+          } @else {
+            <span class="muted">No evidence yet — falls back to lane order</span>
+          }
+        </div>
+      }
+    } @else {
+      <p class="muted">{{ store.evidence() === 'loading' ? 'Loading measured scores…' : 'Measured scores unavailable.' }}</p>
+    }
+  </section>
+</div>
+
+<section class="ptah-card" data-glass-surface="content" aria-labelledby="matrix-heading">
+  <header class="section-heading">
+    <div>
+      <h2 id="matrix-heading">Outcome matrix</h2>
+      <p class="muted">Select a cell to see where its score comes from.</p>
+    </div>
+    <div class="segments" role="group" aria-label="Score source">
+      <button ptahButton variant="ghost" type="button" [attr.aria-pressed]="source() === 'measured'" (click)="source.set('measured')">Measured outcomes</button>
+      <button ptahButton variant="ghost" type="button" [attr.aria-pressed]="source() === 'ratings'" (click)="source.set('ratings')">Model ratings</button>
+    </div>
+  </header>
+
+  <p class="sr-only" aria-live="polite">
+    @if (detail(); as detail) {
+      {{ source() === 'measured' ? 'Measured outcomes' : 'Model ratings' }}:
+      {{ cell(detail.row, detail.task, laneName(detail.row.laneId, detail.row.family), modelName(detail.row.model))?.ariaLabel }}
+    }
+  </p>
+
+  @if (source() === 'ratings' && store.ratings() === 'loading') {
+    <ptah-skeleton shape="lines" />
+    <p role="status">Loading model ratings…</p>
+  } @else if (source() === 'ratings' && store.ratings() === 'error') {
+    <ptah-alert tone="error" [compact]="true" live="polite">
+      Ratings could not be loaded.
+      <button alertAction ptahButton variant="ghost" type="button" (click)="store.loadRatings()">Retry</button>
+    </ptah-alert>
+  } @else if (source() === 'measured' && !data) {
+    <p class="muted">{{ store.evidence() === 'loading' ? 'Waiting for routing evidence…' : 'Routing evidence unavailable.' }}</p>
+  } @else if (rows().length || search()) {
+    <div class="matrix-toolbar">
+      <input ptahInput type="search" aria-label="Search lanes or models" placeholder="Search lanes or models"
+        [value]="search()" (input)="setSearch($event)" />
+    </div>
+    @if (rows().length) {
+      <div class="matrix-layout">
+        <div class="table-rail">
+          <div class="table-scroll" role="region" aria-label="Outcome matrix table" tabindex="0">
+            <table aria-label="Score by lane model and task kind">
+              <thead>
+                <tr>
+                  <th scope="col">Lane · model</th>
+                  @for (task of tasks; track task) { <th scope="col" class="kind">{{ task }}</th> }
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of rows(); track row.id) {
+                  @let lane = laneName(row.laneId, row.family);
+                  @let name = modelName(row.model);
+                  <tr>
+                    <th scope="row" [title]="row.model"><strong>{{ lane }}</strong><small class="muted">{{ name }}</small></th>
+                    @for (task of tasks; track task) {
+                      @let item = cell(row, task, lane, name);
+                      <td>
+                        @if (item) {
+                          <button type="button" class="matrix-cell" [class.empty]="item.score === null"
+                            [style.--score]="item.score ?? 0"
+                            [attr.aria-label]="item.ariaLabel"
+                            [attr.aria-pressed]="selection()?.id === row.id && selection()?.task === task"
+                            (click)="select(row.id, task)">
+                            <strong>{{ (item.score | number:'1.0-1') ?? '—' }}</strong>
+                            <small>{{ item.countText }}</small>
+                            @if (item.stale) { <i class="dot stale" aria-hidden="true"></i> }
+                          </button>
+                        } @else {
+                          <span class="matrix-cell empty">
+                            <span aria-hidden="true">—</span><span class="sr-only">{{ source() === 'measured' ? 'No samples' : 'Unrated' }}</span>
+                          </span>
+                        }
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <div class="legend muted">
+            <span>Low</span><span class="ramp" aria-hidden="true"></span><span>High</span>
+            <span>{{ source() === 'measured' ? 'Dashed = no samples' : 'Dashed = unrated' }}</span>
+            <span><i class="dot stale" aria-hidden="true"></i> Stale</span>
+          </div>
+        </div>
+
+        <aside class="matrix-detail ptah-card" data-variant="inset" data-glass-surface="tile" aria-label="Selected cell detail">
+          @if (detail(); as detail) {
+            <h3>{{ laneName(detail.row.laneId, detail.row.family) }} · <span class="kind">{{ detail.task }}</span></h3>
+            <p class="muted">{{ modelName(detail.row.model) }}{{ detail.active.stale ? ' · Stale' : '' }}</p>
+            @if (detail.row.inCatalog === false && detail.row.model !== '*') {
+              <span ptahBadge size="xs" tone="warn">Outside current catalog</span>
+            }
+            <ptah-stat appearance="plain" size="sm" label="Score / 100"
+              [value]="(detail.active.score | number:'1.0-1') ?? 'Unscored'" />
+            @if (detail.measured; as measured) {
+              <p class="muted">{{ measured.funnel.spawned }} runs · {{ measured.sampleCount }} scored samples</p>
+              @if (measured.asOf) { <p class="muted">Measured <ptah-relative-time [value]="measured.asOf" /></p> }
+              @if (measured.funnel.spawned) {
+                <div class="detail-part">
+                  <h4>Run pipeline</h4>
+                  <ng-container [ngTemplateOutlet]="funnel" [ngTemplateOutletContext]="{ stages: measured.stages, max: measured.funnel.spawned }" />
+                </div>
+              }
+            }
+            @if (detail.row.effortSupport || detail.measured?.efforts?.length) {
+              <div class="detail-part">
+                <h4>Effort split</h4>
+                @if (detail.row.effortSupport; as support) {
+                  <dl class="detail-list">
+                    <div><dt>Effort source</dt><dd>{{ effortSourceLabels[support.provenance] }}</dd></div>
+                    @if (support.provenance !== 'unknown') {
+                      <div><dt>Supported</dt><dd>{{ support.supported.join(', ') || 'None' }}</dd></div>
+                      <div><dt>Default</dt><dd>{{ support.default ?? 'Not reported' }}</dd></div>
+                    }
+                  </dl>
+                }
+                @if (detail.measured?.efforts; as efforts) {
+                  @if (efforts.length) {
+                    <ptah-stacked-bar label="Runs by effort" [segments]="efforts" />
+                    <ul class="legend muted" aria-label="Effort legend">
+                      @for (effort of efforts; track effort.label) {
+                        <li>
+                          <i class="swatch" aria-hidden="true" [style.background]="effort.color"></i>
+                          {{ effort.label }} · {{ effort.value }} runs
+                          @if (effort.score !== null) { · {{ effort.score | number:'1.0-1' }} / 100 }
+                          @if (effort.stale) { · Stale }
+                        </li>
+                      }
+                    </ul>
+                  }
+                }
+              </div>
+            }
+            @let measuredScore = detail.measured?.score ?? null;
+            @if (measuredScore !== null || detail.rating) {
+              <div class="detail-part">
+                <h4>Measured vs model rating</h4>
+                @if (measuredScore !== null) {
+                  <div class="chart-row">
+                    <span>Measured</span>
+                    <ptah-meter [value]="measuredScore" [max]="100" label="Measured score" tone="gold" [hideLabel]="true" [showValue]="false" [animate]="false" />
+                    <span>{{ measuredScore | number:'1.0-1' }}</span>
+                  </div>
+                }
+                @if (detail.rating; as rating) {
+                  <div class="chart-row">
+                    <span>Rating</span>
+                    <ptah-meter [value]="rating.score" [max]="100" label="Model rating" tone="primary" [hideLabel]="true" [showValue]="false" [animate]="false" />
+                    <span>{{ rating.score | number:'1.0-1' }}</span>
+                  </div>
+                }
+              </div>
+            }
+            @if (detail.rating; as rating) {
+              <div class="detail-part">
+                <h4>Rating provenance</h4>
+                <dl class="detail-list">
+                  <div><dt>Source</dt><dd class="kind">{{ rating.source }}</dd></div>
+                  <div><dt>Source reference</dt><dd>{{ rating.sourceRef ?? 'None' }}</dd></div>
+                  <div><dt>As of</dt><dd>{{ rating.asOf }}</dd></div>
+                  <div><dt>Samples</dt><dd>{{ rating.sampleCount ?? 'Not counted' }}</dd></div>
+                  <div><dt>Stale</dt><dd>{{ rating.stale ? 'Yes' : 'No' }}</dd></div>
+                </dl>
+                @if (rating.note) { <p class="muted">{{ rating.note }}</p> }
+              </div>
+            }
+            @if (detail.measured; as measured) {
+              <dl class="detail-list detail-part">
+                @for (field of measured.other; track field.label) {
+                  <div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>
+                }
+              </dl>
+            }
+          } @else {
+            <p class="muted">Select a score to see its details.</p>
+          }
+        </aside>
+      </div>
+    } @else {
+      <p class="muted">No lanes or models match your search.</p>
+    }
+  } @else {
+    <p class="muted">{{ source() === 'measured' ? 'No lane evidence yet.' : 'No model ratings yet.' }}</p>
+  }
+</section>
+
+@if (data) {
+  <section class="ptah-card health" data-glass-surface="content" aria-label="Catalog health">
+    <h2>Model catalogs</h2>
+    <ul class="legend muted" aria-label="Lane catalog status">
+      @for (catalog of model.catalogs; track catalog.laneId) {
+        <li>
+          <i class="dot" [attr.data-status]="catalog.status" aria-hidden="true"></i>
+          <strong>{{ laneName(catalog.laneId) }}</strong> · {{ catalog.label }}
+          @if (catalog.fetchedAt !== null) { <ptah-relative-time [value]="catalog.fetchedAt" /> }
+        </li>
+      } @empty {
+        <li>No lane catalogs available.</li>
+      }
+    </ul>
+  </section>
+}
+
+@if (model.decisionModels.length) {
+  <details class="ptah-card decision-models" data-glass-surface="content">
+    <summary>Decision models</summary>
+    @for (decision of model.decisionModels; track decision.decisionModel) {
+      <article class="detail-part">
+        <h3>{{ modelName(decision.decisionModel) }}</h3>
+        <dl class="detail-list">
+          <div><dt>Proposals</dt><dd>{{ decision.proposals }}</dd></div>
+          <div><dt>Accepted</dt><dd>{{ decision.accepted }}</dd></div>
+          <div><dt>Mean confidence</dt><dd>{{ (decision.meanConfidence | percent) ?? 'Not reported' }}</dd></div>
+        </dl>
+        <ng-container [ngTemplateOutlet]="funnel"
+          [ngTemplateOutletContext]="{ stages: decision.pipeline, max: decision.funnel.spawned }" />
+        <dl class="detail-list">
+          @for (field of decision.other; track field.label) {
+            <div><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>
+          }
+        </dl>
+      </article>
+    }
+  </details>
+}

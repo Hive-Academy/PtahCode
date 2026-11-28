@@ -14,6 +14,7 @@ import {
   STREAM_EVENTS_CAP_SLACK,
   countNewlines,
 } from './agent-process-manager-helpers';
+import { pendingToolCallCount } from './tool-call-summary';
 import type { TrackedAgent } from './tracked-agent';
 
 const AGENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
@@ -146,8 +147,199 @@ describe('AgentOutputBuffer', () => {
       expect(tracked.accumulatedSegments).toHaveLength(
         MAX_ACCUMULATED_SEGMENTS,
       );
+      expect(tracked.segmentsTruncated).toBe(true);
       const delta = buffer.takeDelta(AGENT_ID, tracked);
       expect(delta?.segments).toHaveLength(MAX_ACCUMULATED_SEGMENTS + 3);
+    });
+
+    it('continues updating toolCallSummary past the 500-segment cap and keeps segmentsTruncated false at the cap', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      for (let i = 0; i < MAX_ACCUMULATED_SEGMENTS; i++) {
+        buffer.appendSegment(
+          AGENT_ID,
+          tracked,
+          { type: 'text', content: `line-${i}` },
+          onFlushDue,
+        );
+      }
+      expect(tracked.segmentsTruncated).toBeUndefined();
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'after-cap-1',
+          toolName: 'ptah_grep',
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-result',
+          content: 'ok',
+          toolCallId: 'after-cap-1',
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'after-cap-2',
+          toolName: 'Read',
+        },
+        onFlushDue,
+      );
+
+      expect(tracked.segmentsTruncated).toBe(true);
+      expect(tracked.accumulatedSegments).toHaveLength(
+        MAX_ACCUMULATED_SEGMENTS,
+      );
+      expect(tracked.toolCallSummary).toMatchObject({
+        totalCalls: 2,
+        ptahCalls: 1,
+        nativeCalls: 1,
+        unknownOutcomes: 1,
+        callsBeforeFirstPtahSuccess: 0,
+        substitutableNative: { fileRead: 1 },
+      });
+    });
+
+    it('logs once and keeps buffering if the classifier throws', () => {
+      const { buffer, logger } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+      const throwingInput: Record<string, unknown> = {};
+      Object.defineProperty(throwingInput, 'command', {
+        enumerable: true,
+        get() {
+          throw new Error('classifier boom');
+        },
+      });
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'err-1',
+          toolName: 'bash',
+          toolInput: throwingInput,
+        },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        {
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'err-2',
+          toolName: 'bash',
+          toolInput: throwingInput,
+        },
+        onFlushDue,
+      );
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(tracked.accumulatedSegments).toHaveLength(2);
+      expect(buffer.takeDelta(AGENT_ID, tracked)?.segments).toHaveLength(2);
+    });
+
+    it('counts OpenCode standalone command segments and settles Copilot command/file-change completions without counting unrelated file-change notifications', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      // Mixed Ptah + OpenCode Bash (1 Ptah + 1 Bash = 50% share)
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'ptah-1', toolName: 'ptah_grep' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-result', content: 'ok', toolCallId: 'ptah-1' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'command', content: 'out', toolCallId: 'opencode-bash-1', toolName: 'rg secret-pattern src', exitCode: 0 },
+        onFlushDue,
+      );
+      // Copilot shell start + command completion
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'copilot-sh-1', toolName: 'bash', toolInput: { command: 'git status' } },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'command', content: 'clean', toolCallId: 'copilot-sh-1', toolName: 'bash', exitCode: 0 },
+        onFlushDue,
+      );
+      // Copilot write start + file-change completion
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'copilot-wr-1', toolName: 'write_file' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'file-change', content: 'created file', changeKind: 'added', toolCallId: 'copilot-wr-1' },
+        onFlushDue,
+      );
+      // Unrelated pending call must stay unknown despite Codex file-change notifications
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'pending-read', toolName: 'Read' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'file-change', content: '/src/other.ts', changeKind: 'modified', toolCallId: 'codex-file-1' },
+        onFlushDue,
+      );
+
+      expect(tracked.toolCallSummary).toMatchObject({
+        totalCalls: 5,
+        ptahCalls: 1,
+        nativeCalls: 4,
+        nativeErrors: 0,
+        unknownOutcomes: 1,
+        callsBeforeFirstPtahSuccess: 0,
+        substitutableNative: { textSearch: 1, gitRead: 1, fileRead: 1, pathListing: 0 },
+        byTool: {
+          ptah_grep: { calls: 1, errors: 0 },
+          bash: { calls: 2, errors: 0 },
+          write_file: { calls: 1, errors: 0 },
+          Read: { calls: 1, errors: 0 },
+        },
+      });
+      expect(JSON.stringify(tracked.toolCallSummary)).not.toContain('secret-pattern');
+      expect(tracked.toolCallSummary).toBeDefined();
+      if (tracked.toolCallSummary) {
+        expect(pendingToolCallCount(tracked.toolCallSummary)).toBe(1);
+      }
     });
   });
 
@@ -411,6 +603,29 @@ describe('AgentOutputBuffer', () => {
       jest.advanceTimersByTime(OUTPUT_FLUSH_INTERVAL * 2);
       expect(onFlushDue).not.toHaveBeenCalled();
       expect(buffer.takeDelta(AGENT_ID, tracked)).toBeUndefined();
+    });
+
+    it('releases transient pending tool-call state while keeping tracked.toolCallSummary intact', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'p1', toolName: 'Read' },
+        onFlushDue,
+      );
+      const summary = tracked.toolCallSummary;
+      expect(summary).toBeDefined();
+      if (!summary) return;
+      expect(pendingToolCallCount(summary)).toBe(1);
+
+      buffer.discard(AGENT_ID);
+
+      expect(pendingToolCallCount(summary)).toBe(0);
+      expect(summary.totalCalls).toBe(1);
+      expect(summary.unknownOutcomes).toBe(1);
     });
   });
 });

@@ -1,7 +1,7 @@
 <ptah-native-modal
   [isOpen]="open()"
   ariaLabelledby="add-cli-instance-title"
-  size="md"
+  [size]="editing() ? 'xl' : 'md'"
   layout="shell"
   (closed)="requestClose()"
 >
@@ -30,31 +30,71 @@
   </div>
 
   <form
+    id="add-cli-instance-form"
     class="space-y-3 text-xs"
     (submit)="$event.preventDefault(); submit()"
     data-testid="add-cli-instance-form"
   >
-    <ptah-field
-      label="Instance name"
-      [error]="duplicateName() ? duplicateMessage : null"
-    >
-      <input
-        ptahInput
-        id="add-cli-instance-name"
-        type="text"
-        class="w-full text-xs text-base-content"
-        [value]="name()"
-        (input)="name.set(value($event))"
-        placeholder="e.g. Glm-Secondary, Llama-Local"
-        autocomplete="off"
-        maxlength="80"
-        data-testid="add-cli-instance-name"
-        [attr.aria-invalid]="duplicateName()"
-        [attr.aria-describedby]="
-          duplicateName() ? 'add-cli-instance-name-error' : null
-        "
-      />
-    </ptah-field>
+    @if (editing(); as target) {
+      <div
+        class="grid grid-cols-2 items-start gap-[var(--ptah-gap-heading)] lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,2.6fr)_minmax(0,0.7fr)_minmax(0,0.6fr)]"
+        data-testid="cli-instance-edit-header"
+      >
+        <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
+          <label for="add-cli-instance-name" class="block font-semibold">Instance name</label>
+          <input
+            ptahInput
+            id="add-cli-instance-name"
+            type="text"
+            class="block w-full text-xs text-base-content"
+            [value]="name()"
+            (input)="name.set(value($event))"
+            placeholder="e.g. Glm-Secondary, Llama-Local"
+            autocomplete="off"
+            maxlength="80"
+            data-testid="add-cli-instance-name"
+            [attr.aria-invalid]="duplicateName()"
+            [attr.aria-describedby]="
+              duplicateName() ? 'add-cli-instance-name-error' : null
+            "
+          />
+        </div>
+        <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
+          <span id="add-cli-instance-provider-label" class="block font-semibold">Provider connection</span>
+          <p
+            class="flex h-[var(--ptah-control-h-sm)] min-w-0 items-center gap-2"
+            aria-labelledby="add-cli-instance-provider-label"
+            data-testid="add-cli-instance-provider-fixed"
+          >
+            <ptah-provider-mark [providerId]="target.providerId" fallback="Bot" />
+            <span class="truncate" [title]="target.providerName">{{ target.providerName }}{{ editingProviderUnavailable() ? ' (unavailable)' : '' }}</span>
+          </p>
+        </div>
+        <ng-content select="[instanceEditFields]" />
+      </div>
+    } @else {
+      <ptah-field
+        label="Instance name"
+        [error]="duplicateName() ? duplicateMessage : null"
+      >
+        <input
+          ptahInput
+          id="add-cli-instance-name"
+          type="text"
+          class="w-full text-xs text-base-content"
+          [value]="name()"
+          (input)="name.set(value($event))"
+          placeholder="e.g. Glm-Secondary, Llama-Local"
+          autocomplete="off"
+          maxlength="80"
+          data-testid="add-cli-instance-name"
+          [attr.aria-invalid]="duplicateName()"
+          [attr.aria-describedby]="
+            duplicateName() ? 'add-cli-instance-name-error' : null
+          "
+        />
+      </ptah-field>
+    }
     @if (duplicateName()) {
       <p
         id="add-cli-instance-name-error"
@@ -66,22 +106,13 @@
       </p>
     }
 
-    <div class="space-y-1">
-      <span
-        class="block font-semibold text-base-content"
-        id="add-cli-instance-provider-label"
-        >Provider connection</span
-      >
-      @if (editing(); as target) {
-        <p
-          class="flex items-center gap-2 text-base-content"
-          aria-labelledby="add-cli-instance-provider-label"
-          data-testid="add-cli-instance-provider-fixed"
+    @if (!editing()) {
+      <div class="space-y-1">
+        <span
+          class="block font-semibold text-base-content"
+          id="add-cli-instance-provider-label"
+          >Provider connection</span
         >
-          <ptah-provider-mark [providerId]="target.providerId" fallback="Bot" />
-          <span>{{ target.providerName }}</span>
-        </p>
-      } @else {
         <span class="flex items-center gap-2">
           @if (providerId()) {
             <ptah-provider-mark [providerId]="providerId()" fallback="Bot" />
@@ -98,6 +129,12 @@
             data-testid="add-cli-instance-provider"
           />
         </span>
+        @if (state.connections().status === 'ready' && !providerOptions().length) {
+          <p role="status">No providers connected.</p>
+          <button type="button" ptahButton variant="link" size="sm" (click)="connectProvider()">
+            Connect a provider
+          </button>
+        }
         @if (state.connections().status === 'error') {
           <p
             role="alert"
@@ -108,8 +145,8 @@
             the Providers tab.
           </p>
         }
-      }
-    </div>
+      </div>
+    }
 
     @if (showSignIn()) {
       <div
@@ -236,13 +273,6 @@
         {{ hint }}
       </p>
     }
-    <!-- Submitting with Enter from a field. The visible submit is in the footer. -->
-    <button
-      type="submit"
-      class="hidden"
-      tabindex="-1"
-      aria-hidden="true"
-    ></button>
   </form>
 
   <div
@@ -253,11 +283,11 @@
       Cancel
     </button>
     <button
-      type="button"
+      type="submit"
+      form="add-cli-instance-form"
       ptahButton
       variant="primary"
       [disabled]="!canSubmit()"
-      (click)="submit()"
       data-testid="add-cli-instance-submit"
     >
       {{ busy() ? 'Saving…' : editing() ? 'Save changes' : 'Create Instance' }}

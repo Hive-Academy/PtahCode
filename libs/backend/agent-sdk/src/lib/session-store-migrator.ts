@@ -30,6 +30,7 @@ import {
   agentOutputBlobName,
   toSessionRecordInput,
   type PersistedAgentOutput,
+  type PersistedAgentOutputHeader,
   type SessionMetadata,
   type TaggedAgentOutputItem,
 } from './session-metadata-store';
@@ -234,10 +235,19 @@ export class LegacySessionStoreMigrator {
       };
     }
     if (output) {
+      const cli = output.cli ?? ref.cli;
+      const model = output.model ?? ref.model;
+      const startedAt = output.startedAt ?? ref.startedAt;
+      const normalized: PersistedAgentOutput = {
+        ...output,
+        ...(cli !== undefined ? { cli } : {}),
+        ...(model !== undefined ? { model } : {}),
+        ...(startedAt !== undefined ? { startedAt } : {}),
+      };
       await this.blobs.write(
         sessionId,
         agentOutputBlobName(ref.agentId),
-        output,
+        normalized,
       );
     }
   }
@@ -250,6 +260,7 @@ function isSafeBlobSegment(value: string): boolean {
 
 async function readSequenceOutput(
   storage: IStateStorage & {
+    getAsync: <T>(key: string) => Promise<T | undefined>;
     readJsonSequence: (
       key: string,
     ) => AsyncIterable<{ items: readonly unknown[]; done: boolean }>;
@@ -266,10 +277,24 @@ async function readSequenceOutput(
     }
     if (page.done) break;
   }
-  if (segments.length === 0 && streamEvents.length === 0) return undefined;
+  const header = await storage.getAsync<PersistedAgentOutputHeader>(
+    `${KEYS.agentOutputHeaderPrefix}${agentId}`,
+  );
+  if (segments.length === 0 && streamEvents.length === 0 && !header) {
+    return undefined;
+  }
   return {
     agentId,
-    savedAt: Date.now(),
+    savedAt: header?.savedAt ?? Date.now(),
+    ...(header?.cli !== undefined ? { cli: header.cli } : {}),
+    ...(header?.model !== undefined ? { model: header.model } : {}),
+    ...(header?.startedAt !== undefined ? { startedAt: header.startedAt } : {}),
+    ...(header?.segmentsTruncated !== undefined
+      ? { segmentsTruncated: header.segmentsTruncated }
+      : {}),
+    ...(header?.toolCallSummary !== undefined
+      ? { toolCallSummary: header.toolCallSummary }
+      : {}),
     ...(segments.length > 0 ? { segments } : {}),
     ...(streamEvents.length > 0 ? { streamEvents } : {}),
   };

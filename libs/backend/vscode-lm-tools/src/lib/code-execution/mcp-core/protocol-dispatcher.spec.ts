@@ -578,6 +578,43 @@ describe('artifact publish dispatch scope', () => {
     );
   });
 
+  it.each(['codex-app-server', 'provider-session', 'claude-sdk'] as const)(
+    'publishes a %s artifact with the host-resolved scope',
+    async (runtime) => {
+      const publish = jest.fn().mockResolvedValue({
+        id: 'abcdefghijklmnop',
+        revision: 1,
+        title: 'Report',
+        sessionId: 'native-tab',
+        viewerUrl: 'ptah-artifact://abcdefghijklmnop/index.html',
+        createdAt: '2026-10-20T12:00:00.000Z',
+        savedPath: '/trusted/workspace/artifacts/index.html',
+      });
+      const deps = buildDeps({
+        artifactStore: { publish, list: jest.fn(), readBytes: jest.fn() },
+        liveChatSessions: {
+          resolve: (id) => id === 'native-session' ? {
+            kind: 'resolved',
+            session: {
+              runtime, sessionId: id, tabId: 'native-tab',
+              workspaceRoot: '/trusted/workspace', cwd: '/trusted/workspace',
+            },
+          } : { kind: 'unresolved' },
+        },
+      });
+      await handleMCPRequest(makeRequest({
+        method: 'tools/call',
+        _callerSessionId: 'native-session',
+        _callerWorkspaceRoot: '/untrusted/workspace',
+        params: { name: 'ptah_artifact_publish', arguments: { title: 'Report', html: '<h1>ok</h1>' } },
+      }), deps);
+      expect(publish).toHaveBeenCalledWith(
+        { workspaceRoot: '/trusted/workspace', sessionId: 'native-tab' },
+        { title: 'Report', html: '<h1>ok</h1>' },
+      );
+    },
+  );
+
   it('takes identity from the transport and rejects agent-supplied scope', async () => {
     const publish = jest.fn().mockResolvedValue({
       id: 'abcdefghijklmnop',
@@ -1724,16 +1761,21 @@ describe('protocol-handlers › tools/list eager _meta marking', () => {
   it('keeps other agent and routing tools deferred', async () => {
     const tools = await listTools();
     for (const name of [
-      'ptah_agent_read',
-      'ptah_agent_status',
       'ptah_agent_stop',
       'ptah_agent_message',
       'ptah_agent_message_status',
-      'ptah_agent_wait',
       'ptah_route_decide',
       'ptah_outcome_report',
+      'ptah_agent_wait',
     ]) {
       expect(isEager(tools.find((tool) => tool.name === name))).toBe(false);
+    }
+    for (const name of [
+      'ptah_agent_read',
+      'ptah_agent_status',
+      'ptah_session_handoff_ack',
+    ]) {
+      expect(isEager(tools.find((tool) => tool.name === name))).toBe(true);
     }
   });
 
@@ -2009,6 +2051,13 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
         expect(findFiles).not.toHaveBeenCalled();
       },
     );
+
+    it('passes escaped glob patterns byte-for-byte to the provider', async () => {
+      const pattern = 'app/\\[id\\]/*.tsx';
+      const findFiles = jest.fn().mockResolvedValue([]);
+      await searchFiles({ pattern }, findFiles);
+      expect(findFiles).toHaveBeenCalledWith(pattern, 51);
+    });
 
     it.each([
       ['zero', 0],
@@ -9436,7 +9485,7 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // read tools (issue #1400); +2 in TASK_2026_2299 (ptah_read_symbol and
       // ptah_grep); the five write tools are hidden from a
       // caller whose credential has no `cronWriteApproval`.
-      expect(coding).toHaveLength(hasIDECapabilities ? 80 : 77);
+      expect(coding).toHaveLength(hasIDECapabilities ? 81 : 78);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -10948,7 +10997,7 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
   // `ptah_ast_analyze` take an absolute path verbatim (`resolveWorkspaceFilePath`
   // and `resolveFilePath` in the namespace builders) and apply no root check.
   // The navigation tools must never be wider than that, and they are narrower.
-  it('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
+  (process.platform === 'win32' ? it.skip : it)('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
     const outsideFile = path.join(outside, 'b.txt');
     fs.symlinkSync(outside, path.join(root, 'link'));
 

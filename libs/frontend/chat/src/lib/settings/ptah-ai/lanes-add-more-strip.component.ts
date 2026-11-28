@@ -172,6 +172,7 @@ import { LanesRedetectButtonComponent } from './lanes-redetect-button.component'
                 Not installed
               </span>
               <ptah-native-popover
+                [restoreFocus]="false"
                 [isOpen]="openId() === row.id"
                 [keepInViewport]="true"
                 placement="bottom-start"

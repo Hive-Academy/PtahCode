@@ -282,6 +282,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
     resume?: CodexThreadIdentity,
     secrets?: CodexMcpSecrets,
     selection?: CodexSelection,
+    options?: { readonly preserveTurnSettings: boolean },
   ): Promise<CodexContext> {
     if (this.closed) throw new Error('Codex runtime is closed');
     if (this.contexts.has(profile.contextId))
@@ -345,7 +346,7 @@ export class CodexRuntime implements RuntimePort, CodexHistoryReader {
     this.contexts.set(profile.contextId, context);
     if (observer) this.observers.set(profile.contextId, observer);
     try {
-      await context.open(resume);
+      await context.open(resume, options?.preserveTurnSettings);
       try {
         await context.listModels();
       } catch (error: unknown) {

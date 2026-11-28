@@ -108,6 +108,35 @@ describe('persisted runtime identity cache', () => {
     expect(lookup.lookup(id)).toBeUndefined();
   });
 
+  it('uses the metadata workspace as the raw path of a provider session', async () => {
+    const providerRow: SessionMetadata = {
+      sessionId: id,
+      name: 'session',
+      providerId: 'antigravity',
+      workspaceId: '/home/dev/proj',
+      createdAt: 1,
+      lastActiveAt: 1,
+      totalCost: 0,
+      totalTokens: { input: 0, output: 0 },
+      providerSessionExecution: {
+        version: 1,
+        sessionId: id,
+        runtime: 'provider-session',
+        providerId: 'antigravity',
+        workspaceId: '/home/dev/proj',
+        providerSession: { profile: 'antigravity' },
+      },
+    };
+    const f = fixture([providerRow]);
+    const lookup = await initializeSessionRuntimeIdentityLookup(
+      f.store,
+      mockLogger(),
+    );
+    expect(lookup.lookup(id)?.persisted?.runtime).toBe('provider-session');
+    expect(lookup.lookup(id)?.workspacePath).toBe('/home/dev/proj');
+    lookup.dispose();
+  });
+
   it('refreshes the raw path and removes it when thread metadata disappears', async () => {
     const f = fixture([rawRow()]);
     const lookup = await initializeSessionRuntimeIdentityLookup(
@@ -130,7 +159,9 @@ describe('persisted runtime identity cache', () => {
     async (action) => {
       const metadata = rawRow();
       const f = fixture([
-        action === 'release' ? { ...metadata, codexExecution: undefined } : metadata,
+        action === 'release'
+          ? { ...metadata, codexExecution: undefined }
+          : metadata,
       ]);
       const lookup = await initializeSessionRuntimeIdentityLookup(
         f.store,
@@ -204,8 +235,16 @@ describe('persisted runtime identity cache', () => {
 
   it('forwards the optional native title through the routing cache writer', async () => {
     const f = fixture([]);
-    const lookup = await initializeSessionRuntimeIdentityLookup(f.store, mockLogger());
-    await lookup.updateCodexExecution(id, () => identity, undefined, 'Native title');
+    const lookup = await initializeSessionRuntimeIdentityLookup(
+      f.store,
+      mockLogger(),
+    );
+    await lookup.updateCodexExecution(
+      id,
+      () => identity,
+      undefined,
+      'Native title',
+    );
     expect(f.store.updateCodexExecution.mock.calls[0][3]).toBe('Native title');
     expect(lookup.lookup(id)?.persisted).toEqual(identity);
     lookup.dispose();

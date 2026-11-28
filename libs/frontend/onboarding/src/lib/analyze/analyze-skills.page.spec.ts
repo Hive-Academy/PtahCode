@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ChangeDetectorRef, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -28,6 +29,10 @@ import { StackSkillReviewComponent } from '../proposal/stack-skill-review.compon
 import { OnboardingRunPillService } from '../shell/onboarding-run-pill.service';
 import { AnalysisStepStore } from './analysis-step.store';
 import { AnalyzeSkillsPage } from './analyze-skills.page';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 jest.mock('@ptah-extension/setup-wizard', () => ({
   normalizeSetupWorkspacePath: jest.requireActual<
@@ -1292,9 +1297,7 @@ describe('AnalyzeSkillsPage', () => {
         fixture.nativeElement as HTMLElement
       ).querySelector<HTMLElement>('[data-testid="skill-install-primary"]');
       if (!button) throw new Error('Missing primary');
-      const dialog = (fixture.nativeElement as HTMLElement).querySelector(
-        'dialog:not(.discard-draft-dialog)',
-      ) as HTMLDialogElement | null;
+      const dialog = overlay().querySelector<HTMLElement>('[role="dialog"][aria-labelledby="skill-consent-title"]');
       if (!dialog) throw new Error('Missing consent dialog');
       const nativeFocus = HTMLElement.prototype.focus;
       const focus = jest
@@ -1303,7 +1306,7 @@ describe('AnalyzeSkillsPage', () => {
           this: HTMLElement,
           options?: FocusOptions,
         ) {
-          if (dialog.open && !dialog.contains(this)) return;
+          if (dialog.isConnected && !dialog.contains(this)) return;
           nativeFocus.call(this, options);
         });
       dialog.querySelector<HTMLButtonElement>('button')?.focus();
@@ -1323,7 +1326,7 @@ describe('AnalyzeSkillsPage', () => {
       fixture.detectChanges();
       expect(page.state.stage()).toBe('review');
       expect(page.state.selectedIds().has('owner/repo/one')).toBe(true);
-      expect(dialog.open).toBe(false);
+      expect(dialog.isConnected).toBe(false);
       expect(document.activeElement).toBe(button);
       focus.mockRestore();
     },
@@ -1361,7 +1364,7 @@ describe('AnalyzeSkillsPage', () => {
       const element = fixture.nativeElement as HTMLElement;
       expect(page.state.installed()).toEqual(['owner/repo/one']);
       expect(page.state.stage()).toBe('review');
-      expect(element.querySelector('dialog')?.open).toBe(false);
+      expect(overlay().querySelector('[role="dialog"][aria-labelledby="skill-consent-title"]')).toBeNull();
       expect(element.textContent).toContain(
         'Skills are installed. Could not open the next step. Try again.',
       );

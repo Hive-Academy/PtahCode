@@ -150,6 +150,7 @@ class RuntimeContext implements CodexContext {
   private reportedModel: string | null = null;
   private reportedEffort: string | null = null;
   private turnHistory = false;
+  private preserveTurnSettings = false;
   private settings: CodexTurnSettings;
   private levelPolicy: Pick<
     CodexExecutionProfile,
@@ -329,8 +330,12 @@ class RuntimeContext implements CodexContext {
     return this.settings.permissionLevel ?? this.profile.permissionLevel;
   }
 
-  async open(resume?: CodexThreadIdentity): Promise<void> {
+  async open(
+    resume?: CodexThreadIdentity,
+    preserveTurnSettings = false,
+  ): Promise<void> {
     this.turnHistory = resume !== undefined;
+    this.preserveTurnSettings = this.turnHistory && preserveTurnSettings;
     await this.process.start();
     if (this.process.verifiedCodexHome !== this.profile.normalizedHome)
       throw new CodexHomeMismatchError();
@@ -993,6 +998,38 @@ class RuntimeContext implements CodexContext {
     return this.state === 'closed';
   }
 
+  async resolveSkillCommand(command: string): Promise<CodexTurnInput['skill']> {
+    const token = command.trimStart().split(/\s/, 1)[0];
+    if (!token?.startsWith('/') || token.length < 2) return undefined;
+    const name = token.slice(1).toLowerCase();
+    const entry = (await this.skillCommands()).find(({ names }) =>
+      names.some((alias) => alias.toLowerCase() === name),
+    );
+    return entry?.skill;
+  }
+
+  async listSkillCommands(cwd?: string, timeoutMs?: number): Promise<readonly string[]> {
+    return [...new Set((await this.skillCommands(cwd, timeoutMs)).flatMap(({ names }) => names))];
+  }
+
+  private async skillCommands(cwd = this.profile.cwd, timeoutMs?: number): Promise<{ names: string[]; skill: NonNullable<CodexTurnInput['skill']> }[]> {
+    this.assertOpen();
+    try {
+      const { data } = await this.process.request('skills/list', {
+        cwds: [cwd],
+      }, timeoutMs);
+      return data.flatMap(({ skills }) => skills).filter(({ enabled }) => enabled).map(({ name, path, pluginId }) => {
+        const names = [name];
+        if (pluginId) names.push(`${pluginId}:${name}`, `${pluginId.split('@')[0]}:${name}`);
+        return { names, skill: { type: 'skill', name, path } };
+      });
+    } catch (error) {
+      // Older app-server binaries may lack skill discovery.
+      if (error instanceof CodexUnsupportedMethodError) return [];
+      throw error;
+    }
+  }
+
   startTurn(input: CodexTurnInput): Promise<CodexTurnReceipt> {
     return this.serialize(() => this.start(input));
   }
@@ -1011,6 +1048,7 @@ class RuntimeContext implements CodexContext {
         : input.text;
     return [
       { type: 'text', text },
+      ...(input.skill ? [input.skill] : []),
       ...(input.attachments ?? (initial ? this.profile.attachments : [])).map(
         (attachment) =>
           attachment.type === 'image'
@@ -1035,7 +1073,10 @@ class RuntimeContext implements CodexContext {
       threadId: this.identity.threadId,
       input: this.wireInput(input, !this.sentInitialInput),
       ...(this.settings.model === undefined ? {} : { model: this.settings.model }),
-      effort: this.settings.effort ?? null,
+      // A lookup-only resume inherits thread effort until a turn selects one.
+      ...(this.preserveTurnSettings && this.settings.effort === undefined
+        ? {}
+        : { effort: this.settings.effort ?? null }),
       approvalPolicy: levelPolicy.approvalPolicy,
       approvalsReviewer: 'user',
       cwd: this.profile.cwd,

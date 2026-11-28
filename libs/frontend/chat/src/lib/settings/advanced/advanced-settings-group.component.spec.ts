@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { VSCodeService } from '@ptah-extension/core';
@@ -11,6 +12,10 @@ import {
   SettingsSaveFeedbackService,
   type SettingsGenericSaveRequest,
 } from '../feedback/settings-save-feedback.service';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 const mockRpcCall = jest.fn();
 jest.mock('@ptah-extension/core', () => {
@@ -400,8 +405,8 @@ describe('AdvancedSettingsGroupComponent', () => {
       trigger?.click();
       fixture.detectChanges();
       await settle();
-      expect(help?.querySelector('[content]')?.textContent).toContain(setting?.help);
-      expect(help?.querySelector('[content]')?.textContent).toContain('Applies on the next cleanup run.');
+      expect(overlay().querySelector('[content]')?.textContent).toContain(setting?.help);
+      expect(overlay().querySelector('[content]')?.textContent).toContain('Applies on the next cleanup run.');
       expect(field('memory.retention.processedDays').getAttribute('aria-describedby'))
         .toContain('advanced-setting-memory.retention.processedDays-help');
     });
@@ -413,7 +418,7 @@ describe('AdvancedSettingsGroupComponent', () => {
       restart?.querySelector<HTMLButtonElement>('button')?.click();
       fixture.detectChanges();
       await settle();
-      expect(restart?.querySelector('[content]')?.textContent).toContain('Restart Ptah to apply.');
+      expect(overlay().querySelector('[content]')?.textContent).toContain('Restart Ptah to apply.');
       expect(restart?.querySelector('[data-restart-badge]')?.textContent?.trim()).toBe(
         'Restart',
       );
@@ -433,7 +438,7 @@ describe('AdvancedSettingsGroupComponent', () => {
       background?.querySelector<HTMLButtonElement>('button')?.click();
       fixture.detectChanges();
       await settle();
-      expect(background?.querySelector('[content]')?.textContent).toContain('Applies right away.');
+      expect(overlay().querySelector('[content]')?.textContent).toContain('Applies right away.');
     });
   });
 

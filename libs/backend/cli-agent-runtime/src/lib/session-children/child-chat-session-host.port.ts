@@ -14,6 +14,7 @@
  */
 import type {
   AgentSessionOpenedPayload,
+  AgentSessionStartConfig,
   EffortLevel,
   PhaseDispatchV1,
   PermissionLevel,
@@ -54,6 +55,7 @@ export interface HandoffChatSessionStartInput {
   readonly descriptor: SessionHandoffOpenedPayload;
   /** The handing-off session's model; absent → the host default. */
   readonly model?: string;
+  readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   /** The handing-off session's permission level. */
   readonly permissionLevel?: PermissionLevel;
 }

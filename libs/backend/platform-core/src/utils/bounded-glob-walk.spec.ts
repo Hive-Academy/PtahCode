@@ -186,6 +186,33 @@ describe('walkGlobMatches', () => {
     ]);
   });
 
+  it('lets an opted-in caller prune directory symlinks without changing the default', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-bounded-walk-outside-'));
+    fs.writeFileSync(path.join(outside, 'outside.ts'), '');
+    const link = path.join(root, 'external');
+    try {
+      fs.symlinkSync(outside, link, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch {
+      fs.rmSync(outside, { recursive: true, force: true });
+      return;
+    }
+    const onFailure = jest.fn();
+    const shouldFollowDirectorySymlink = jest.fn(async () => false);
+    const files: string[] = [];
+    for await (const file of walkGlobMatches('**/*.ts', {
+      cwd: root,
+      dot: true,
+      onFailure,
+      shouldFollowDirectorySymlink,
+    })) {
+      files.push(file);
+    }
+    expect(shouldFollowDirectorySymlink).toHaveBeenCalledWith(link.replace(/\\/g, '/'));
+    expect(files).toEqual([]);
+    expect(onFailure).not.toHaveBeenCalled();
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
   // r3 B1 (FB): an unreadable directory was a silent empty branch.
   describe('I/O failures', () => {
     function failOpendir(match: (dir: string) => boolean, code: string): void {

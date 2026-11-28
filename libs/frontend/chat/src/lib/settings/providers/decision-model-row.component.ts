@@ -24,12 +24,17 @@ import {
   PtahIconButtonDirective,
   type ProviderIdentityOption,
 } from '@ptah-extension/ui';
-import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  LoggingService,
+} from '@ptah-extension/core';
 import {
   type AgentSetConfigParams,
   type DecisionModelStatusDto,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { formatProviderDisplayName } from './provider-consumer-rows';
 import {
   DECISION_KIND_OPTIONS,
   buildDecisionRow,
@@ -150,19 +155,33 @@ export class DecisionModelRowComponent implements OnInit {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly loader = inject(PROVIDER_MODELS_LOADER);
   private readonly injector = inject(Injector);
+  private readonly appState = inject(AppStateManager);
 
   protected readonly ChevronIcon = ChevronDown;
   protected readonly CloseIcon = X;
   protected readonly action = DECISION_ACTION;
   protected readonly cellClass = CELL;
   protected readonly kindOptions = DECISION_KIND_OPTIONS;
-  protected readonly providerSelectOptions = computed(() => [
-    { value: '', label: 'Choose a provider' },
-    ...this.providers().map((provider) => ({
-      value: provider.id,
-      label: provider.name,
-    })),
-  ]);
+  protected readonly providerSelectOptions = computed(() => {
+    const options = [
+      { value: '', label: 'Choose a provider' },
+      ...this.providers().map((provider) => ({
+        value: provider.id,
+        label: provider.name,
+      })),
+    ];
+    const saved = this.status()?.selection;
+    if (
+      saved?.kind === 'structured' &&
+      !options.some(({ value }) => value === saved.providerId)
+    ) {
+      options.push({
+        value: saved.providerId,
+        label: `${formatProviderDisplayName(saved.providerId)} (unavailable)`,
+      });
+    }
+    return options;
+  });
   protected readonly inputClass = DECISION_INPUT;
   protected readonly invalidInputClass = DECISION_INPUT_INVALID;
   protected readonly label = DECISION_LABEL;
@@ -368,6 +387,7 @@ export class DecisionModelRowComponent implements OnInit {
   }
 
   protected onProvider(providerId: string): void {
+    if (this.draft().providerId === providerId) return;
     this.draft.update((draft) => ({ ...draft, providerId, model: '' }));
     void this.refreshSuggestions();
   }
@@ -387,6 +407,14 @@ export class DecisionModelRowComponent implements OnInit {
   protected setUpOllamaCloud(): void {
     this.close();
     this.setupProviderRequested.emit('ollama-cloud');
+  }
+
+  protected connectProvider(): void {
+    this.close();
+    this.appState.requestSettingsTab({
+      tab: 'providers',
+      section: 'more-providers',
+    });
   }
 
   /**

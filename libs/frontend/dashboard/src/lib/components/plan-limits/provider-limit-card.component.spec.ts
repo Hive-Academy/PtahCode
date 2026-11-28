@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { buildProviderLimitCard } from './provider-limit-card.view-model';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ProviderLimitCardComponent } from './provider-limit-card.component';
@@ -137,7 +138,9 @@ describe('ProviderLimitCardComponent', () => {
     const fixture = render(vm);
     q(fixture, 'provider-limit-details')?.click();
     fixture.detectChanges();
-    const popover = (fixture.nativeElement as HTMLElement).querySelector('ptah-description-list');
+    const popover = TestBed.inject(OverlayContainer)
+      .getContainerElement()
+      .querySelector('ptah-description-list');
     expect(popover).not.toBeNull();
     const text = popover?.textContent ?? '';
     for (const expected of ['Window 0', 'Window 1', 'Window 2', 'Window 3', '1,234 tokens', '$5.00 USD', 'model-a', 'model-b', 'scope-0', 'scope-1', 'scope-2', 'scope-3']) expect(text).toContain(expected);

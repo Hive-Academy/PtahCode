@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { PROVIDER_ACCOUNT_LABEL_MAX_LENGTH, type ProviderAccountSummary } from '@ptah-extension/shared';
@@ -255,15 +256,15 @@ describe('AddAccountFormComponent', () => {
     cancelButton().click();
     fixture.detectChanges();
     expect(host.cancelled).toBe(0);
-    (el().querySelector('[data-ptah-editable-keep]') as HTMLButtonElement | null)?.click();
+    (TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-ptah-editable-keep]') as HTMLButtonElement | null)?.click();
     fixture.detectChanges();
     expect(host.cancelled).toBe(0);
-    expect(el().querySelector('[data-ptah-editable-discard]')).toBeNull();
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-ptah-editable-discard]')).toBeNull();
     expect(input().value).toBe('Personal');
 
     cancelButton().click();
     fixture.detectChanges();
-    (el().querySelector('[data-ptah-editable-discard]') as HTMLButtonElement | null)?.click();
+    (TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-ptah-editable-discard]') as HTMLButtonElement | null)?.click();
     fixture.detectChanges();
     expect(host.cancelled).toBe(1);
   });
@@ -275,6 +276,6 @@ describe('AddAccountFormComponent', () => {
     cancelButton().click();
     fixture.detectChanges();
     expect(host.cancelled).toBe(0);
-    expect(el().querySelector('[data-ptah-editable-discard]')).toBeNull();
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[data-ptah-editable-discard]')).toBeNull();
   });
 });

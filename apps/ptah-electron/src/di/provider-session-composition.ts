@@ -106,10 +106,12 @@ const PROFILE_TABLE: Readonly<
   },
 };
 
-function isAdmittedProfile(profile: ProviderSessionProfileId): profile is AdmittedProfile {
-  return (ELECTRON_PROVIDER_SESSION_PROFILES as readonly ProviderSessionProfileId[]).includes(
-    profile,
-  );
+function isAdmittedProfile(
+  profile: ProviderSessionProfileId,
+): profile is AdmittedProfile {
+  return (
+    ELECTRON_PROVIDER_SESSION_PROFILES as readonly ProviderSessionProfileId[]
+  ).includes(profile);
 }
 
 export interface ElectronProviderSessionBindingInput {
@@ -244,7 +246,8 @@ export function createProviderSessionContextDeps(
         SDK_TOKENS.SDK_MEMORY_PROMPT_INJECTOR,
       );
     deps.memory = {
-      buildSessionStartBlock: (...args) => memory().buildSessionStartBlock(...args),
+      buildSessionStartBlock: (...args) =>
+        memory().buildSessionStartBlock(...args),
       buildBlock: (...args) => memory().buildBlock(...args),
     };
   }
@@ -301,7 +304,8 @@ export function bindElectronProviderSessionChat(
   input: ElectronProviderSessionBindingInput,
 ): ElectronProviderSessionPendingBinding {
   const logger = container.resolve<Logger>(TOKENS.LOGGER);
-  const profiles: readonly AdmittedProfile[] = ELECTRON_PROVIDER_SESSION_PROFILES;
+  const profiles: readonly AdmittedProfile[] =
+    ELECTRON_PROVIDER_SESSION_PROFILES;
   const spawner = container.resolve<IProcessSpawner>(
     SDK_TOKENS.SDK_PROCESS_SPAWNER,
   );
@@ -319,7 +323,10 @@ export function bindElectronProviderSessionChat(
     // resolved to its target, then the command-line length is checked.
     prepareCommand: input.prepareCommand ?? laneAcpCommandPreparer,
   });
-  const runtimes = new Map<ProviderSessionProfileId, ProviderSessionPoolRuntime>(
+  const runtimes = new Map<
+    ProviderSessionProfileId,
+    ProviderSessionPoolRuntime
+  >(
     profiles.map((profile) => [
       profile,
       { runtime, load: PROFILE_TABLE[profile].load },
@@ -339,24 +346,32 @@ export function bindElectronProviderSessionChat(
     pidLedger: input.pidLedger,
     logger,
   });
+  const readSavedPermissionLevel = (workspacePath: string) =>
+    resolveSavedCodexPermissionLevel(
+      (name) => input.scopeResolver.readForPath(name, workspacePath, true),
+      () => {
+        throw new ProviderSessionChatAdapterError(
+          'runtime-failed',
+          'permission',
+        );
+      },
+    );
   const openRequests = createProviderSessionOpenRequests({
     cliDetection,
-    readSavedPermissionLevel: (workspacePath) =>
-      resolveSavedCodexPermissionLevel(
-        (name) => input.scopeResolver.readForPath(name, workspacePath, true),
-        () => {
-          throw new ProviderSessionChatAdapterError('runtime-failed', 'permission');
-        },
-      ),
+    readSavedPermissionLevel,
     mcpServerRunning: () =>
       container
         .resolve<{ isMcpServerRunning(): boolean }>(CHAT_TOKENS.SDK_CONTEXT)
         .isMcpServerRunning(),
     baseEnv: input.baseEnv ?? laneAcpBaseEnv,
     ptahMcpToolPrefix: (profile) =>
-      isAdmittedProfile(profile) ? PROFILE_TABLE[profile].ptahMcpToolPrefix : undefined,
+      isAdmittedProfile(profile)
+        ? PROFILE_TABLE[profile].ptahMcpToolPrefix
+        : undefined,
     ptahMcpServerName: (profile) =>
-      isAdmittedProfile(profile) ? PROFILE_TABLE[profile].ptahMcpServerName : undefined,
+      isAdmittedProfile(profile)
+        ? PROFILE_TABLE[profile].ptahMcpServerName
+        : undefined,
     logger,
   });
   // The resolver admits a provider session only on a host that lists its
@@ -374,37 +389,39 @@ export function bindElectronProviderSessionChat(
         )
         .streamEventsToWebview(...args),
   };
-  const ports: ProviderSessionChatHostPorts = createProviderSessionChatHostPorts({
-    resolver: container.resolve<ProviderSessionChatHostPortsDeps['resolver']>(
-      AUTH_PROVIDERS_TOKENS.SDK_WORKSPACE_PROVIDER_PROFILE_RESOLVER,
-    ),
-    workspaceProvider: container.resolve<
-      ProviderSessionChatHostPortsDeps['workspaceProvider']
-    >(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
-    platformInfo: container.resolve<ProviderSessionChatHostPortsDeps['platformInfo']>(
-      PLATFORM_TOKENS.PLATFORM_INFO,
-    ),
-    hostCapabilities,
-    webviewManager: container.resolve<
-      ProviderSessionChatHostPortsDeps['webviewManager']
-    >(TOKENS.WEBVIEW_MANAGER),
-    logger,
-    info: PROVIDER_SESSION_INFO,
-    pool,
-    openRequests,
-    metadata: metadataStore,
-    approvals: {
-      respond: (...args) =>
-        container
-          .resolve<SessionApprovalRouter>(SDK_TOKENS.SESSION_APPROVAL_ROUTER)
-          .respond(...args),
-    },
-    broadcaster,
-    hostAttention: container.resolve<
-      NonNullable<ProviderSessionChatHostPortsDeps['hostAttention']>
-    >(SDK_TOKENS.HOST_ATTENTION_COORDINATOR),
-    ...createProviderSessionContextDeps(container),
-  });
+  const ports: ProviderSessionChatHostPorts =
+    createProviderSessionChatHostPorts({
+      resolver: container.resolve<ProviderSessionChatHostPortsDeps['resolver']>(
+        AUTH_PROVIDERS_TOKENS.SDK_WORKSPACE_PROVIDER_PROFILE_RESOLVER,
+      ),
+      workspaceProvider: container.resolve<
+        ProviderSessionChatHostPortsDeps['workspaceProvider']
+      >(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+      platformInfo: container.resolve<
+        ProviderSessionChatHostPortsDeps['platformInfo']
+      >(PLATFORM_TOKENS.PLATFORM_INFO),
+      hostCapabilities,
+      webviewManager: container.resolve<
+        ProviderSessionChatHostPortsDeps['webviewManager']
+      >(TOKENS.WEBVIEW_MANAGER),
+      logger,
+      info: PROVIDER_SESSION_INFO,
+      pool,
+      openRequests,
+      readSavedPermissionLevel,
+      metadata: metadataStore,
+      approvals: {
+        respond: (...args) =>
+          container
+            .resolve<SessionApprovalRouter>(SDK_TOKENS.SESSION_APPROVAL_ROUTER)
+            .respond(...args),
+      },
+      broadcaster,
+      hostAttention: container.resolve<
+        NonNullable<ProviderSessionChatHostPortsDeps['hostAttention']>
+      >(SDK_TOKENS.HOST_ATTENTION_COORDINATOR),
+      ...createProviderSessionContextDeps(container),
+    });
   const historyPort: ProviderSessionHistoryPort =
     createProviderSessionHistoryPort({
       metadata: metadataStore,
@@ -453,13 +470,11 @@ export function bindElectronProviderSessionChat(
     },
   };
   const authStatus = createProviderSessionAuthStatusProbe({
-    profiles: profiles.map(
-      (profile): ProviderSessionAuthProfile => ({
-        profile,
-        lane: authLane(cliDetection, profile),
-        signInHint: PROFILE_TABLE[profile].acp.signInHint,
-      }),
-    ),
+    profiles: profiles.map((profile): ProviderSessionAuthProfile => ({
+      profile,
+      lane: authLane(cliDetection, profile),
+      signInHint: PROFILE_TABLE[profile].acp.signInHint,
+    })),
     logger,
   });
 

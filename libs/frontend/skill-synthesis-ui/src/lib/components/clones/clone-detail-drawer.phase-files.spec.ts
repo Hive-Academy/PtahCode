@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import {
   ROLE_PHASE_ALIASES,
@@ -57,7 +58,7 @@ async function setup(
 }
 
 const all = (fixture: Fixture, testid: string): HTMLElement[] =>
-  Array.from(fixture.nativeElement.querySelectorAll(`[data-testid="${testid}"]`));
+  Array.from(TestBed.inject(OverlayContainer).getContainerElement().querySelectorAll(`[data-testid="${testid}"]`));
 
 async function click(fixture: Fixture, el: HTMLElement): Promise<void> {
   el.click();

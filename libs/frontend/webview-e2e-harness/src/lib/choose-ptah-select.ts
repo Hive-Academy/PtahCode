@@ -22,3 +22,17 @@ export async function choosePtahSelect(
   await option.click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
 }
+
+/** The open listbox of a ptah-select. Options are portaled, not inside the host. */
+export async function ptahSelectListbox(control: Locator): Promise<Locator> {
+  const trigger = control
+    .locator('button[role="combobox"]')
+    .or(control.and(control.page().locator('button[role="combobox"]')));
+  if ((await trigger.getAttribute('aria-expanded')) !== 'true') {
+    await trigger.click();
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  }
+  const listboxId = await trigger.getAttribute('aria-controls');
+  if (!listboxId) throw new Error('ptah-select did not open a listbox');
+  return control.page().locator(`[id="${listboxId}"]`);
+}

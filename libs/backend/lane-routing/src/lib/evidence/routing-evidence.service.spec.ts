@@ -195,6 +195,33 @@ describe('RoutingEvidenceService', () => {
     }]);
   });
 
+  it('rolls up default and named runs once per lane and family before indexing models and efforts', async () => {
+    const resolved = outcome('default', {
+      model: LANE_DEFAULT_MODEL,
+      resolvedModel: 'glm-5',
+      resolvedModelProvenance: 'native',
+      effort: 'high',
+      finalReview: 'approved',
+    });
+    const { service } = setup([
+      resolved,
+      resolved,
+      outcome('explicit', { effort: 'medium', finalReview: 'rejected' }),
+      outcome('other-lane', { laneId: 'other-glm', model: LANE_DEFAULT_MODEL }),
+    ]);
+
+    const result = await service.read([ROW, { ...ROW, ptahCliId: 'other-glm' }]);
+    const implementRollup = (model: string) => result.lanes[0].models
+      .find((entry) => entry.model === model)?.keys
+      .find((key) => key.taskKind === 'implement' && key.effort === '*')?.funnel.spawned;
+    expect(implementRollup('glm-5')).toBe(2);
+    expect(implementRollup('*')).toBe(2);
+    expect(result.laneFunnels).toMatchObject([
+      { laneId: 'glm', family: 'z-ai', funnel: { spawned: 2, delivered: 2, reviewed: 2, approved: 1, rejected: 1 } },
+      { laneId: 'other-glm', family: 'z-ai', funnel: { spawned: 1, delivered: 1, reviewed: 0 } },
+    ]);
+  });
+
   it('reports lanes that have no snapshot and refreshes each available lane once', async () => {
     const { service, catalog } = setup();
     const disabled: CliDetectionResult = { cli: 'codex', installed: true, disabled: true, messagingMode: 'none' };

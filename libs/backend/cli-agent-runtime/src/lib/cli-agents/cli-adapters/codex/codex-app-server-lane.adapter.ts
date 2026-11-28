@@ -12,6 +12,7 @@ import {
   type CodexRuntimeEvent,
   type CodexSelection,
   type CodexThreadIdentity,
+  type CodexTurnInput,
   type CodexTurnReceipt,
 } from '@ptah-extension/codex-runtime';
 import {
@@ -26,6 +27,7 @@ import {
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
+  LaneTurnInputRefusal,
   LaneTurnSettingRefusal,
   type CliAdapter,
   type CliCommandOptions,
@@ -46,6 +48,7 @@ import {
   renderRoleBlock,
   stripAnsiCodes,
 } from '../cli-adapter.utils';
+import { leadingLaneCommand } from '../lane-command-filter';
 import {
   buildCodexLaneProfileSettings,
   CODEX_LANE_PTAH_AUTH_REFERENCE,
@@ -55,7 +58,7 @@ import { CODEX_RESUME_RESENDS_ROLE } from './codex-lane-config.builder';
 import { CodexLaneEvents } from './codex-lane-events';
 import { readCodexUserMcpServerNames } from './codex-user-mcp-servers';
 import { withCodexLaneStartupTimeout } from './codex-app-server-lane-startup';
-import { readCodexLaneCatalog } from './codex-app-server-lane-catalog';
+import { listCodexLaneSkills, readCodexLaneCatalog } from './codex-app-server-lane-catalog';
 import {
   handledRequirements,
   identitySchema,
@@ -163,12 +166,23 @@ export class CodexLaneWriterCloseError extends Error {
   }
 }
 
+const CODEX_SKILLS_UNAVAILABLE = 'Codex skills are unavailable.';
+
+const CODEX_LANE_COMMANDS: LaneTurnOptionsCatalog['commands'] = [
+  { name: 'compact', group: 'command', description: 'Compact the conversation' },
+];
+
+function codexLaneCommands(skills: readonly string[]): LaneTurnOptionsCatalog['commands'] {
+  return [...CODEX_LANE_COMMANDS, ...skills.map((name) => ({ name, group: 'skill' as const }))];
+}
+
 /** Native lane consumer. The legacy SDK adapter remains a separate selectable adapter. */
 export class CodexAppServerLaneAdapter implements CliAdapter {
   readonly name = 'codex' as const;
   readonly displayName = 'Codex CLI';
   readonly roleChannel = 'developer-instructions' as const;
   readonly supportsMcp = true;
+  readonly builtinLaneCommands = CODEX_LANE_COMMANDS;
 
   static createWriterRegistry(): Map<string, LiveLaneWriter> {
     return new Map();
@@ -220,8 +234,8 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         // `turn/steer` carries the same input items as `turn/start` (A6).
         images: { state: 'supported', onSteer: true },
         files: { state: 'supported', delivery: 'reference' },
-        commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
-        skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
+        commands: { state: 'supported' },
+        skills: { state: 'supported' },
       },
       usage: { timing: 'live' },
       // D12: approvals stay with the manifest's `ask` reason; Codex lanes run approvalPolicy never.
@@ -287,20 +301,23 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
    * rethrown, so the coordinator reports an error instead of a false
    * empty list.
    */
-  async stoppedLaneCatalog(): Promise<StoppedLaneCatalog> {
+  async stoppedLaneCatalog(workingDirectory?: string): Promise<StoppedLaneCatalog> {
     try {
       const binary = await this.binary.resolve();
       if (!binary) throw new Error('Codex executable is unavailable');
       const home = await this.home();
-      const catalog = await readCodexLaneCatalog(
+      const { models, skills } = await readCodexLaneCatalog(
         () => this.runtime.openCatalog(binary.path, home, binary.selection),
         this.logger,
+        workingDirectory,
       );
-      const efforts = codexAdvertisedEfforts(catalog);
+      const efforts = codexAdvertisedEfforts(models);
       const unsendableEfforts = codexUnsendableEfforts(efforts);
       return {
-        models: codexLaneModels(catalog),
+        models: codexLaneModels(models),
         efforts,
+        commands: codexLaneCommands(skills ?? []),
+        ...(skills === undefined ? { commandsUnavailable: true, unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
         ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
       };
     } catch (error: unknown) {
@@ -421,8 +438,9 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     let context: CodexContext | undefined;
     const closePromises = new WeakMap<CodexContext, Promise<void>>();
     let active: ActiveTurn | undefined;
-    // True from runTurn until startTurn settles, so a second turn cannot race the first.
+    // A raw skill lookup or turn start reserves the idle lane.
     let starting = false;
+    let compacting = false;
     let initialTurnPending = false;
     let closed = false;
     let closePromise: Promise<boolean> | undefined;
@@ -515,7 +533,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       return closePromise;
     };
     const writer: LiveLaneWriter = {
-      isBusy: () => initialTurnPending || starting || active !== undefined,
+      isBusy: () => initialTurnPending || starting || compacting || active !== undefined,
       close,
     };
     abort.signal.addEventListener(
@@ -724,7 +742,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       )
         return;
       if (!active) {
-        pending.push(event);
+        if (!compacting) pending.push(event);
         return;
       }
       const modelMessage =
@@ -804,6 +822,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       text: string,
       onStarted?: () => void,
       attachments?: readonly CodexAttachment[],
+      skill?: CodexTurnInput['skill'],
     ): Promise<number> => {
       if (closed) return Promise.reject(new Error('Codex lane is closed'));
       if (active || starting)
@@ -818,10 +837,17 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       return new Promise<number>((resolve, reject) => {
         const start = async (): Promise<void> => {
           try {
+            const startTurn = () =>
+              opened.startTurn({
+                text,
+                signal: abort.signal,
+                ...(attachments && { attachments }),
+                ...(skill && { skill }),
+              });
             let receipt: CodexTurnReceipt;
             try {
               receipt = await withCodexLaneStartupTimeout(
-                opened.startTurn({ text, signal: abort.signal, ...(attachments && { attachments }) }),
+                startTurn(),
                 abort,
               );
             } catch (error: unknown) {
@@ -846,7 +872,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
               );
               void pump(opened, eventAbort.signal);
               receipt = await withCodexLaneStartupTimeout(
-                opened.startTurn({ text, signal: abort.signal, ...(attachments && { attachments }) }),
+                startTurn(),
                 abort,
               );
             }
@@ -887,6 +913,27 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         void start();
       });
     };
+    const isCompactCommand = (message: string): boolean =>
+      leadingLaneCommand(message)?.toLowerCase() === 'compact';
+    const resolveRawSkill = async (message: string): Promise<NonNullable<CodexTurnInput['skill']>> => {
+      let skill: CodexTurnInput['skill'];
+      try {
+        skill = await opened.resolveSkillCommand?.(message);
+      } catch (error) {
+        throw new LaneTurnInputRefusal(CODEX_SKILLS_UNAVAILABLE, { cause: error });
+      }
+      if (!skill) throw new LaneTurnInputRefusal('This Codex skill is no longer available or enabled.');
+      return skill;
+    };
+    const runCompact = async (): Promise<number> => {
+      compacting = true;
+      try {
+        await opened.compact();
+        return 0;
+      } finally {
+        compacting = false;
+      }
+    };
     const prompt = buildTaskPrompt(
       {
         ...options,
@@ -896,8 +943,32 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       },
       this.name,
     );
+    const promptPreambles = fullPromptPreambles({
+      ...options,
+      lanePolicyDelivery: 'developer-instructions',
+    });
+    let delivered: typeof promptPreambles | undefined;
+    const markPromptDelivered = () => {
+      delivered = promptPreambles;
+    };
+    const resumeCompact = resume && isCompactCommand(options.task);
+    let initialSkill: CodexTurnInput['skill'];
+    try {
+      // Path-prefixed task text can start immediately without skill discovery.
+      if (!resumeCompact && leadingLaneCommand(options.task)) {
+        initialSkill = resume
+          ? await resolveRawSkill(options.task)
+          : await opened.resolveSkillCommand?.(options.task);
+      }
+    } catch (error) {
+      await close();
+      throw error;
+    }
     initialTurnPending = false;
-    const done = runTurn(prompt).then(async (code) => {
+    const initial = resumeCompact
+      ? runCompact()
+      : runTurn(prompt, markPromptDelivered, undefined, initialSkill);
+    const done = initial.then(async (code) => {
       // Model listing shares the live context's command queue. Read after the
       // first turn so catalog discovery cannot delay an in-flight steer or interrupt.
       const source = context;
@@ -915,10 +986,6 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         }
       }
       return code;
-    });
-    const delivered = fullPromptPreambles({
-      ...options,
-      lanePolicyDelivery: 'developer-instructions',
     });
     let currentModel = selectedModel;
     let currentEffort = reasoningEffort;
@@ -955,7 +1022,12 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     };
     const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
       if (closed || !context) throw new Error('Codex lane is closed');
-      const { catalog, models } = await readModelCatalog(context);
+      const [modelResult, skills] = await Promise.allSettled([
+        readModelCatalog(context),
+        listCodexLaneSkills(context),
+      ]);
+      if (modelResult.status === 'rejected') throw modelResult.reason;
+      const { catalog, models } = modelResult.value;
       const advertised = codexAdvertisedEfforts(catalog);
       const unsendableEfforts = codexUnsendableEfforts(advertised);
       return {
@@ -966,7 +1038,54 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         ...(unsendableEfforts.length > 0 ? { unsendableEfforts } : {}),
         ...(currentModel ? { currentModel } : {}),
         ...(currentEffort ? { currentEffort } : {}),
-        commands: [],
+        commands: codexLaneCommands(skills.status === 'fulfilled' ? skills.value : []),
+        ...(skills.status === 'rejected' ? { commandsUnavailable: true, unavailableReason: CODEX_SKILLS_UNAVAILABLE } : {}),
+      };
+    };
+    const assertIdle = (): void => {
+      if (closed) throw new Error('Codex lane is closed');
+      if (active || starting || compacting)
+        throw new Error('Codex lane turn is already active');
+    };
+    const prepareContinuation = async (message: string, content?: LaneTurnContent): Promise<() => ContinuationOutcome> => {
+      assertIdle();
+      if (isCompactCommand(message)) return () => {
+        assertIdle();
+        return { done: runCompact() };
+      };
+      let skill: CodexTurnInput['skill'];
+      if (leadingLaneCommand(message)) {
+        starting = true;
+        try {
+          skill = await resolveRawSkill(message);
+        } finally {
+          starting = false;
+        }
+        if (closed) throw new Error('Codex lane is closed');
+      }
+      const role =
+        CODEX_RESUME_RESENDS_ROLE && options.role
+          ? `${renderRoleBlock(options.role, this.name)}\n\n`
+          : '';
+      const nextPrompt = buildTaskPrompt(
+        {
+          ...options,
+          task: message,
+          files: undefined,
+          role: undefined,
+          resumeSessionId: sessionId,
+          lanePolicyDelivery: 'developer-instructions',
+          resumeRestoresContext: true,
+          resumeDeliveredPreambles: delivered,
+        },
+        this.name,
+      );
+      return () => {
+        assertIdle();
+        return { done: runTurn(role + nextPrompt, () => {
+          markPromptDelivered();
+          if (role) roleDelivery = 'task-prompt';
+        }, codexAttachments(content), skill) };
       };
     };
     return {
@@ -1018,8 +1137,9 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         if (closed || !expectedTurnId || !context || starting)
           throw new Error('Codex active turn unavailable');
         const attachments = codexAttachments(content);
+        const skill = leadingLaneCommand(message) ? await resolveRawSkill(message) : undefined;
         const receipt = await context.steer(
-          { text: message, ...(attachments && { attachments }) },
+          { text: message, ...(attachments && { attachments }), ...(skill && { skill }) },
           expectedTurnId,
         );
         if (
@@ -1032,33 +1152,8 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         if (closed) throw new Error('Codex lane is closed');
         if (nextTurnWarnings.length < 1) nextTurnWarnings.push(message);
       },
-      continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> => {
-        if (closed) return Promise.reject(new Error('Codex lane is closed'));
-        if (active || starting)
-          return Promise.reject(new Error('Codex lane turn is already active'));
-        const role =
-          CODEX_RESUME_RESENDS_ROLE && options.role
-            ? `${renderRoleBlock(options.role, this.name)}\n\n`
-            : '';
-        const nextPrompt = buildTaskPrompt(
-          {
-            ...options,
-            task: message,
-            files: undefined,
-            role: undefined,
-            resumeSessionId: sessionId,
-            lanePolicyDelivery: 'developer-instructions',
-            resumeRestoresContext: true,
-            resumeDeliveredPreambles: delivered,
-          },
-          this.name,
-        );
-        return Promise.resolve({
-          done: runTurn(role + nextPrompt, () => {
-            if (role) roleDelivery = 'task-prompt';
-          }, codexAttachments(content)),
-        });
-      },
+      prepareContinuation,
+      continue: async (message, content) => (await prepareContinuation(message, content))(),
     };
   }
 

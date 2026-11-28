@@ -27,6 +27,7 @@ export {
 export {
   CODEX_PROVIDER_ENTRY,
   CODEX_DEFAULT_TIERS,
+  resolveCodexModel,
 } from './entries/codex-provider-entry';
 export {
   OLLAMA_PROVIDER_ENTRY,
@@ -55,3 +56,5 @@ export {
   type OpenCodeProtocol,
 } from './entries/opencode-provider-entry';
 export { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';
+
+export { isChatBuiltinCommand } from './chat-builtin-commands';

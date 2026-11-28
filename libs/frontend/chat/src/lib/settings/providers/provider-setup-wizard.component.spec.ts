@@ -21,7 +21,7 @@
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import { NativeDrawerComponent, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import { VSCodeService } from '@ptah-extension/core';
 import * as shared from '@ptah-extension/shared';
 import type {
@@ -131,11 +131,30 @@ function createComponent(
   return fixture;
 }
 
+function root(
+  fixture: ComponentFixture<ProviderSetupWizardComponent>,
+): HTMLElement {
+  const drawer = fixture.debugElement.query(By.directive(NativeDrawerComponent))
+    ?.componentInstance as NativeDrawerComponent | undefined;
+  return drawer?.panel()?.nativeElement ?? (fixture.nativeElement as HTMLElement);
+}
+
 function query(
   fixture: ComponentFixture<ProviderSetupWizardComponent>,
   testId: string,
 ): HTMLElement | null {
-  return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+  return (
+    root(fixture).querySelector(`[data-testid="${testId}"]`) ??
+    document.querySelector(`[data-testid="${testId}"]`)
+  );
+}
+
+function discardDialog(): HTMLElement | null {
+  return (
+    (document
+      .querySelector('[data-testid="wizard-discard-heading"]')
+      ?.closest('.cdk-dialog-container') as HTMLElement | null) ?? null
+  );
 }
 
 function button(
@@ -169,7 +188,7 @@ function selectProvider(
   fixture: ComponentFixture<ProviderSetupWizardComponent>,
   id: string,
 ): void {
-  const radio = fixture.nativeElement.querySelector(
+  const radio = root(fixture).querySelector(
     `input[type="radio"][name="wizard-provider"][value="${id}"]`,
   ) as HTMLInputElement | null;
   if (!radio) throw new Error(`missing provider radio ${id}`);
@@ -195,12 +214,12 @@ function expectFloatingControl(
 }
 
 function expectResolvedLabels(fixture: ComponentFixture<ProviderSetupWizardComponent>): void {
-  const root = fixture.nativeElement as HTMLElement;
-  for (const label of root.querySelectorAll<HTMLLabelElement>('label[for]')) {
+  const container = root(fixture);
+  for (const label of container.querySelectorAll<HTMLLabelElement>('label[for]')) {
     expect(label.htmlFor).toBeTruthy();
-    expect(root.querySelectorAll(`[id="${label.htmlFor}"]`)).toHaveLength(1);
+    expect(container.querySelectorAll(`[id="${label.htmlFor}"]`)).toHaveLength(1);
   }
-  for (const control of root.querySelectorAll<HTMLInputElement>('input:not([type="radio"]):not([type="checkbox"]), select, textarea')) {
+  for (const control of container.querySelectorAll<HTMLInputElement>('input:not([type="radio"]):not([type="checkbox"]), select, textarea')) {
     expect(control.closest('ptah-field')).not.toBeNull();
   }
 }
@@ -250,7 +269,7 @@ describe('ProviderSetupWizardComponent', () => {
   describe('opening and step machine', () => {
     it('keeps step direction and panel wrappers for Continue, Back, and a direct jump', () => {
       const fixture = createComponent();
-      const element = fixture.nativeElement as HTMLElement;
+      const element = root(fixture);
       const stage = element.querySelector<HTMLElement>('.ptah-motion-stage');
       expect(query(fixture, 'wizard-step-provider')?.classList.contains('ptah-motion-panel')).toBe(true);
 
@@ -272,7 +291,7 @@ describe('ProviderSetupWizardComponent', () => {
 
     it('settles a rapid Provider to Credential to Provider switch on one backward panel', () => {
       const fixture = createComponent();
-      const stage = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.ptah-motion-stage');
+      const stage = root(fixture).querySelector<HTMLElement>('.ptah-motion-stage');
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-continue');
       expect(stage?.getAttribute('data-motion-dir')).toBe('forward');
@@ -315,7 +334,7 @@ describe('ProviderSetupWizardComponent', () => {
 
     it('removes the old Credential step through Continue, Back, Continue with no animations', () => {
       const fixture = createComponent();
-      const stage = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+      const stage = root(fixture).querySelector<HTMLElement>(
         '.ptah-motion-stage',
       );
       selectProvider(fixture, 'requesty');
@@ -371,7 +390,7 @@ describe('ProviderSetupWizardComponent', () => {
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-continue');
       expect(query(fixture, 'wizard-step-credential')).not.toBeNull();
-      expect((fixture.nativeElement as HTMLElement).querySelectorAll('[data-testid="wizard-step-credential"]')).toHaveLength(1);
+      expect(root(fixture).querySelectorAll('[data-testid="wizard-step-credential"]')).toHaveLength(1);
       expect(fixture.componentInstance['credentialModeSwitch']()).toBe(false);
     });
 
@@ -393,15 +412,15 @@ describe('ProviderSetupWizardComponent', () => {
     it('opens on the Provider step with five steps and a disabled Continue', () => {
       const fixture = createComponent();
       expect(query(fixture, 'wizard-title')?.textContent?.trim()).toBe('Connect provider');
-      expect(fixture.nativeElement.querySelectorAll('[data-testid="wizard-step-link"]').length).toBe(0);
-      const current = fixture.nativeElement.querySelector('li[aria-current="step"]');
+      expect(root(fixture).querySelectorAll('[data-testid="wizard-step-link"]').length).toBe(0);
+      const current = root(fixture).querySelector('li[aria-current="step"]');
       expect(current?.textContent).toContain('Provider');
       expect(button(fixture, 'wizard-continue')?.disabled).toBe(true);
     });
 
     it('preselects the deep-linked provider and stays on the Provider step', () => {
       const fixture = createComponent({ deepLinkProviderId: 'ollama' });
-      const radio = fixture.nativeElement.querySelector(
+      const radio = root(fixture).querySelector(
         'input[type="radio"][name="wizard-provider"][value="ollama"]',
       ) as HTMLInputElement | null;
       expect(radio?.checked).toBe(true);
@@ -434,14 +453,14 @@ describe('ProviderSetupWizardComponent', () => {
       const stepAction = jest.fn();
       fixture.componentInstance.signInShortcut.subscribe(shortcut);
       fixture.componentInstance.externalActionRequested.subscribe(stepAction);
-      const signIn = fixture.nativeElement.querySelector('[data-provider="github-copilot"] button') as HTMLButtonElement;
+      const signIn = root(fixture).querySelector('[data-provider="github-copilot"] button') as HTMLButtonElement;
       expect(signIn.closest('label')).toBeNull();
       signIn.click();
       expect(shortcut).toHaveBeenCalledWith('github-copilot');
       expect(stepAction).not.toHaveBeenCalled();
-      expect(fixture.nativeElement.querySelector('input[type="radio"]:checked')).toBeNull();
+      expect(root(fixture).querySelector('input[type="radio"]:checked')).toBeNull();
       fixture.detectChanges();
-      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+      expect(discardDialog()).toBeNull();
 
       fixture.componentRef.setInput('saving', true);
       fixture.detectChanges();
@@ -459,23 +478,22 @@ describe('ProviderSetupWizardComponent', () => {
         fixture.componentInstance.signInShortcut.subscribe(shortcut);
         fixture.componentInstance.closed.subscribe(closed);
         if (draft === 'search') typeInto(fixture, 'wizard-provider-search', 'copilot');
-        const signIn = fixture.nativeElement.querySelector(
+        const signIn = root(fixture).querySelector(
           '[data-provider="github-copilot"] button',
         ) as HTMLButtonElement;
-        const dialog = query(fixture, 'wizard-discard-review')?.querySelector('dialog');
 
         signIn.focus();
         signIn.click();
         fixture.detectChanges();
-        expect(dialog?.open).toBe(true);
+        expect(discardDialog()).not.toBeNull();
         expect(shortcut).not.toHaveBeenCalled();
         expect(closed).not.toHaveBeenCalled();
 
         click(fixture, 'wizard-discard-keep');
-        expect(dialog?.open).toBe(false);
+        expect(discardDialog()).toBeNull();
         expect(shortcut).not.toHaveBeenCalled();
         if (draft === 'selection') {
-          expect(fixture.nativeElement.querySelector('input[type="radio"]:checked')?.value)
+          expect(root(fixture).querySelector('input[type="radio"]:checked')?.value)
             .toBe('requesty');
         } else {
           expect((query(fixture, 'wizard-provider-search') as HTMLInputElement).value)
@@ -520,27 +538,27 @@ describe('ProviderSetupWizardComponent', () => {
 
     it('offers a provider-session provider only when the host reports it', () => {
       const antigravity = '[name="wizard-provider"][value="antigravity-cli"]';
-      expect(createComponent().nativeElement.querySelector(antigravity)).toBeNull();
+      expect(root(createComponent()).querySelector(antigravity)).toBeNull();
       expect(
-        createComponent({ offeredProviderSessionIds: ['antigravity-cli'] }).nativeElement.querySelector(antigravity),
+        root(createComponent({ offeredProviderSessionIds: ['antigravity-cli'] })).querySelector(antigravity),
       ).not.toBeNull();
     });
 
     it('filters provider options and offers Clear search when nothing matches', () => {
       const fixture = createComponent();
       typeInto(fixture, 'wizard-provider-search', 'requesty');
-      expect(fixture.nativeElement.querySelectorAll('[data-testid="wizard-provider-radio"]').length).toBe(1);
+      expect(root(fixture).querySelectorAll('[data-testid="wizard-provider-radio"]').length).toBe(1);
       typeInto(fixture, 'wizard-provider-search', 'no-such-provider');
       expect(query(fixture, 'wizard-provider-no-match')?.textContent).toContain('No providers match');
       click(fixture, 'wizard-clear-search');
       expect(
-        fixture.nativeElement.querySelectorAll('[data-testid="wizard-provider-radio"]').length,
+        root(fixture).querySelectorAll('[data-testid="wizard-provider-radio"]').length,
       ).toBeGreaterThan(1);
     });
 
     it('gates the custom endpoint on a name and a compatibility protocol', () => {
       const fixture = createComponent();
-      const customRadio = fixture.nativeElement.querySelector(
+      const customRadio = root(fixture).querySelector(
         '[data-testid="wizard-provider-custom-radio"]',
       ) as HTMLInputElement | null;
       customRadio?.click();
@@ -573,9 +591,9 @@ describe('ProviderSetupWizardComponent', () => {
       const fixture = createComponent();
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-continue');
-      const current = fixture.nativeElement.querySelector('li[aria-current="step"]');
+      const current = root(fixture).querySelector('li[aria-current="step"]');
       expect(current?.textContent).toContain('Credential');
-      const links = fixture.nativeElement.querySelectorAll(
+      const links = root(fixture).querySelectorAll(
         '[data-testid="wizard-step-link"]',
       ) as HTMLButtonElement[];
       // Both the horizontal strip and the mobile strip offer the link.
@@ -808,7 +826,7 @@ describe('ProviderSetupWizardComponent', () => {
       click(fixture, 'wizard-provider-change-keep');
       expect(query(fixture, 'wizard-provider-change-review')).toBeNull();
       expect(
-        (fixture.nativeElement.querySelector('input[value="requesty"]') as HTMLInputElement | null)
+        (root(fixture).querySelector('input[value="requesty"]') as HTMLInputElement | null)
           ?.checked,
       ).toBe(true);
     });
@@ -822,7 +840,7 @@ describe('ProviderSetupWizardComponent', () => {
       selectProvider(fixture, 'ollama');
       click(fixture, 'wizard-provider-change-discard');
       expect(
-        (fixture.nativeElement.querySelector('input[value="ollama"]') as HTMLInputElement | null)
+        (root(fixture).querySelector('input[value="ollama"]') as HTMLInputElement | null)
           ?.checked,
       ).toBe(true);
       click(fixture, 'wizard-continue');
@@ -1109,7 +1127,7 @@ describe('ProviderSetupWizardComponent', () => {
       expect(query(fixture, 'wizard-failure-copy')?.textContent?.trim()).toBe(
         'The connection check failed. Retry or review the connection details.',
       );
-      expect(fixture.nativeElement.textContent).not.toContain('ECONNRESET');
+      expect(root(fixture).textContent).not.toContain('ECONNRESET');
     });
 
     it('discards a late result from a superseded probe', async () => {
@@ -1165,7 +1183,7 @@ describe('ProviderSetupWizardComponent', () => {
       expect(verify).toHaveBeenCalledTimes(1);
       // The user backs out instead of committing.
       click(fixture, 'wizard-cancel');
-      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(true);
+      expect(discardDialog()).not.toBeNull();
       click(fixture, 'wizard-discard-confirm');
       fixture.detectChanges();
       expect(closings).toHaveLength(1);
@@ -1203,7 +1221,7 @@ describe('ProviderSetupWizardComponent', () => {
         model: 'kimi-k2-model',
       });
       fixture.detectChanges();
-      const sources = fixture.nativeElement.querySelectorAll(
+      const sources = root(fixture).querySelectorAll(
         '[data-testid="wizard-tier-source"]',
       );
       expect(sources[0].textContent?.trim()).toBe('Set in this wizard · kimi-k2-model');
@@ -1231,7 +1249,7 @@ describe('ProviderSetupWizardComponent', () => {
       });
       fixture.detectChanges();
       click(fixture, 'wizard-use-defaults');
-      const sources = fixture.nativeElement.querySelectorAll('[data-testid="wizard-tier-source"]');
+      const sources = root(fixture).querySelectorAll('[data-testid="wizard-tier-source"]');
       expect(sources[1].textContent).toContain('Provider default');
     });
 
@@ -1349,11 +1367,11 @@ describe('ProviderSetupWizardComponent', () => {
       await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
       click(fixture, 'wizard-continue');
       expect(query(fixture, 'wizard-models-native')?.textContent).toContain('default models');
-      expect(fixture.nativeElement.querySelector('ptah-provider-model-picker')).toBeNull();
+      expect(root(fixture).querySelector('ptah-provider-model-picker')).toBeNull();
       // Not blocked by the explicit-model rule even though no provider defaults resolve.
       expect(button(fixture, 'wizard-continue')?.disabled).toBe(false);
       click(fixture, 'wizard-continue');
-      expect(fixture.nativeElement.querySelectorAll('[data-testid="wizard-review-tier"]').length).toBe(0);
+      expect(root(fixture).querySelectorAll('[data-testid="wizard-review-tier"]').length).toBe(0);
       const commits: ProviderWizardCommit[] = [];
       fixture.componentInstance.commitRequested.subscribe((commit) => commits.push(commit));
       click(fixture, 'wizard-commit');
@@ -1365,7 +1383,7 @@ describe('ProviderSetupWizardComponent', () => {
       const fixture = createComponent({ mainRouteExists: true }, verify);
       await reachScope(fixture);
       expect(button(fixture, 'wizard-commit')?.textContent?.trim()).toBe('Connect provider');
-      const checked = fixture.nativeElement.querySelector(
+      const checked = root(fixture).querySelector(
         'input[name="wizard-activation"]:checked',
       );
       expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
@@ -1381,9 +1399,9 @@ describe('ProviderSetupWizardComponent', () => {
       await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
       click(fixture, 'wizard-continue');
       click(fixture, 'wizard-continue');
-      const checked = fixture.nativeElement.querySelector<HTMLInputElement>('input[name="wizard-activation"]:checked');
+      const checked = root(fixture).querySelector<HTMLInputElement>('input[name="wizard-activation"]:checked');
       expect(checked?.getAttribute('data-testid')).toBe('wizard-activation-connect-only');
-      expect(fixture.nativeElement.textContent).toContain('The main agent remains unconfigured until you choose a provider.');
+      expect(root(fixture).textContent).toContain('The main agent remains unconfigured until you choose a provider.');
     });
 
     it('allows Claude API connect only, preserves an explicit choice, and emits that choice', async () => {
@@ -1396,13 +1414,13 @@ describe('ProviderSetupWizardComponent', () => {
       await Promise.resolve(); await Promise.resolve(); fixture.detectChanges();
       click(fixture, 'wizard-continue');
       click(fixture, 'wizard-continue');
-      const root = fixture.nativeElement as HTMLElement;
-      const connectOnly = root.querySelector<HTMLInputElement>('[data-testid="wizard-activation-connect-only"]');
+      const container = root(fixture);
+      const connectOnly = container.querySelector<HTMLInputElement>('[data-testid="wizard-activation-connect-only"]');
       if (!connectOnly) throw new Error('missing connect-only option');
       expect(connectOnly.disabled).toBe(false);
       expect(connectOnly.checked).toBe(true);
-      expect(fixture.nativeElement.textContent).not.toContain('Connect only is unavailable on this host');
-      const main = root.querySelector<HTMLInputElement>('[data-testid="wizard-activation-use-main-agent"]');
+      expect(container.textContent).not.toContain('Connect only is unavailable on this host');
+      const main = container.querySelector<HTMLInputElement>('[data-testid="wizard-activation-use-main-agent"]');
       if (!main) throw new Error('missing main-agent option');
       main.click(); fixture.detectChanges();
       expect(main.checked).toBe(true);
@@ -1421,12 +1439,12 @@ describe('ProviderSetupWizardComponent', () => {
         verify,
       );
       await reachScope(fixture);
-      const options = fixture.nativeElement.querySelectorAll(
+      const options = root(fixture).querySelectorAll(
         '[data-testid="wizard-save-to-option"]',
       );
       const workspace = options[2] as HTMLInputElement;
       expect(workspace.disabled).toBe(true);
-      expect(fixture.nativeElement.textContent).toContain(
+      expect(root(fixture).textContent).toContain(
         'Open a workspace to save an override.',
       );
     });
@@ -1439,7 +1457,7 @@ describe('ProviderSetupWizardComponent', () => {
       TestBed.overrideProvider(VSCodeService, { useValue: { isElectron } });
       const fixture = createComponent({ supportedSaveTargets: ['global', 'app', 'workspace'] }, verifyEcho());
       await reachScope(fixture);
-      const labels = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="wizard-save-to"] label') as NodeListOf<HTMLElement>)
+      const labels = Array.from(root(fixture).querySelectorAll('[data-testid="wizard-save-to"] label') as NodeListOf<HTMLElement>)
         .map((label) => label.querySelector('span span')?.textContent?.trim());
       expect(labels).toEqual(['Global · all apps', app, 'This workspace']);
     });
@@ -1466,6 +1484,15 @@ describe('ProviderSetupWizardComponent', () => {
       expect(query(fixture, 'wizard-saved')?.textContent).toContain(
         'Requesty is now used for new main-agent requests.',
       );
+      const done = button(fixture, 'wizard-done');
+      expect(done?.closest('[drawer-footer]')).not.toBeNull();
+      expect(query(fixture, 'wizard-body')?.contains(done)).toBe(false);
+      expect(button(fixture, 'wizard-commit')).toBeNull();
+      expect(button(fixture, 'wizard-back')).toBeNull();
+      expect(button(fixture, 'wizard-cancel')).toBeNull();
+      expect(
+        done?.closest('[drawer-footer]')?.querySelectorAll('button.btn-primary'),
+      ).toHaveLength(1);
       const closings: number[] = [];
       fixture.componentInstance.closed.subscribe(() => {
         closings.push(1);
@@ -1511,7 +1538,7 @@ describe('ProviderSetupWizardComponent', () => {
       });
       click(fixture, 'wizard-cancel');
       expect(closings).toHaveLength(1);
-      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+      expect(discardDialog()).toBeNull();
     });
 
     it('asks before discarding, and Keep editing keeps the setup', () => {
@@ -1522,8 +1549,8 @@ describe('ProviderSetupWizardComponent', () => {
       });
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-cancel');
-      const dialog = query(fixture, 'wizard-discard-review')?.querySelector('dialog');
-      expect(dialog?.open).toBe(true);
+      const dialog = discardDialog();
+      expect(dialog).not.toBeNull();
       expect(dialog?.getAttribute('aria-labelledby')).toBe('wizard-discard-heading');
       expect(dialog?.querySelector('.modal-box button')).toBe(button(fixture, 'wizard-discard-keep'));
       expect(button(fixture, 'wizard-discard-confirm')?.classList.contains('btn-error')).toBe(true);
@@ -1532,7 +1559,7 @@ describe('ProviderSetupWizardComponent', () => {
       );
       expect(closings).toHaveLength(0);
       click(fixture, 'wizard-discard-keep');
-      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+      expect(discardDialog()).toBeNull();
       expect(closings).toHaveLength(0);
     });
 
@@ -1547,10 +1574,9 @@ describe('ProviderSetupWizardComponent', () => {
 
       const keydown = escape();
       button(fixture, 'wizard-discard-keep')?.dispatchEvent(keydown);
-      expect(keydown.defaultPrevented).toBe(false);
-      query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.dispatchEvent(new Event('cancel'));
       fixture.detectChanges();
-      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+      expect(keydown.defaultPrevented).toBe(true);
+      expect(discardDialog()).toBeNull();
       expect(query(fixture, 'native-drawer-panel')).toBe(panel);
       expect(closed).not.toHaveBeenCalled();
     });
@@ -1632,7 +1658,7 @@ describe('ProviderSetupWizardComponent', () => {
       click(fixture, 'wizard-continue');
       typeInto(fixture, 'wizard-api-key', 'sk-test-123');
       const buttons = Array.from(
-        fixture.nativeElement.querySelectorAll('button'),
+        root(fixture).querySelectorAll('button'),
       ) as HTMLButtonElement[];
       // The drawer close and modal backdrop are owned by the shared overlay primitives.
       const wizardButtons = buttons.filter(
@@ -1658,7 +1684,7 @@ describe('ProviderSetupWizardComponent', () => {
     it('renders the provider mark with a structural fallback', () => {
       const fixture = createComponent();
       selectProvider(fixture, 'requesty');
-      const marks = fixture.nativeElement.querySelectorAll('ptah-provider-mark');
+      const marks = root(fixture).querySelectorAll('ptah-provider-mark');
       expect(marks.length).toBeGreaterThan(0);
     });
   });

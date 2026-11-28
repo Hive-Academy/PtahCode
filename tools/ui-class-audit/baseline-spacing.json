@@ -13,10 +13,9 @@
     "gap-2": 2,
     "gap-3": 1,
     "ml-6": 1,
-    "mt-0.5": 2,
+    "mt-0.5": 1,
     "mt-1": 1,
     "p-2.5": 1,
-    "pb-2": 1,
     "px-1.5": 2,
     "px-2": 1,
     "py-1": 2,
@@ -49,17 +48,10 @@
     "pt-3": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/add-cli-instance-modal.component.html": {
-    "-mb-6": 1,
-    "-mt-6": 1,
-    "-mx-6": 2,
     "gap-2": 7,
-    "mb-4": 1,
-    "mt-5": 1,
     "p-3": 1,
     "pr-9": 1,
-    "px-5": 2,
     "py-0.5": 1,
-    "py-3": 2,
     "space-y-1": 1,
     "space-y-2": 2,
     "space-y-3": 1
@@ -69,15 +61,8 @@
     "pt-6": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/cli-tier-mapping-modal.component.html": {
-    "-mb-6": 1,
-    "-mt-6": 1,
-    "-mx-6": 2,
     "gap-1.5": 3,
     "gap-2": 3,
-    "mb-4": 1,
-    "mt-5": 1,
-    "px-5": 2,
-    "py-3": 2,
     "space-y-1": 1,
     "space-y-3": 2
   },
@@ -178,22 +163,6 @@
     "py-2": 2,
     "space-y-1.5": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
-    "-mt-6": 1,
-    "-mx-3": 1,
-    "-mx-6": 1,
-    "gap-1.5": 1,
-    "gap-2": 3,
-    "p-2.5": 1,
-    "pt-2": 1,
-    "pt-3": 1,
-    "px-0": 1,
-    "px-2": 2,
-    "px-3": 1,
-    "py-2.5": 1,
-    "space-y-2": 1,
-    "space-y-3": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/provider-consumer-assignments.component.ts": {
     "gap-1.5": 4,
     "gap-2": 1,
@@ -201,7 +170,7 @@
     "gap-y-1": 1,
     "mt-auto": 1,
     "p-1.5": 1,
-    "p-2": 2,
+    "p-2": 1,
     "p-3": 1,
     "px-1": 1,
     "space-y-0.5": 1,
@@ -211,15 +180,15 @@
   },
   "libs/frontend/chat/src/lib/settings/providers/provider-setup-wizard.component.ts": {
     "gap-1": 9,
-    "gap-2": 19,
+    "gap-2": 17,
     "gap-3": 1,
     "mt-0.5": 7,
-    "mt-1": 14,
-    "mt-2": 13,
+    "mt-1": 10,
+    "mt-2": 12,
     "mt-3": 31,
     "mt-4": 4,
-    "p-2": 6,
-    "p-3": 6,
+    "p-2": 5,
+    "p-3": 3,
     "px-4": 1,
     "py-3": 1,
     "space-y-1": 2,
@@ -247,12 +216,6 @@
     "py-1": 2,
     "space-y-1": 2,
     "space-y-3": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.html": {
-    "gap-1": 2,
-    "gap-1.5": 2,
-    "gap-2.5": 1,
-    "mb-2": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "gap-1": 1,
@@ -324,44 +287,17 @@
     "space-y-1.5": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-stt-panel.component.ts": {
-    "gap-1": 5,
+    "gap-1": 4,
     "gap-2": 2,
     "mt-1": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/local-tts-panel.component.ts": {
-    "gap-1": 6,
+    "gap-1": 5,
     "gap-1.5": 1,
     "gap-2": 2,
     "mb-3": 1,
     "mt-1": 1,
     "p-2": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
-    "gap-1": 5,
-    "gap-1.5": 2,
-    "gap-3": 2,
-    "gap-5": 1,
-    "gap-x-2": 2,
-    "gap-x-3": 1,
-    "gap-y-0.5": 1,
-    "gap-y-1": 1,
-    "gap-y-2": 1,
-    "ml-auto": 1,
-    "mt-0.5": 2,
-    "mt-1": 2,
-    "mt-2": 2,
-    "mt-3": 1,
-    "p-1": 1,
-    "p-3": 1,
-    "p-4": 2,
-    "pt-3": 1,
-    "pt-4": 1,
-    "px-1.5": 4,
-    "px-2": 1,
-    "py-1": 1,
-    "space-y-1.5": 2,
-    "space-y-2": 1,
-    "space-y-3": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/session-budget-settings.component.ts": {
     "px-2": 1,

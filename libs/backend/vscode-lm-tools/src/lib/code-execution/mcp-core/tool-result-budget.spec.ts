@@ -134,6 +134,7 @@ describe('budget tables', () => {
     expect(Object.keys(TOOL_RESULT_BUDGET_OVERRIDES).sort()).toEqual([
       'ptah_browser_content',
       'ptah_grep',
+      'ptah_inspect',
       'ptah_read_symbol',
       'ptah_route_decide',
       'ptah_session_read',
@@ -143,6 +144,7 @@ describe('budget tables', () => {
       chars: 33 * 1024,
       tokens: (33 * 1024) / 4,
     });
+  expect(getToolResultBudget('ptah_inspect')).toEqual({ chars: 24_000, tokens: 9_000 });
     // TASK_2026_584 F2: the default 32 KiB transcript tail plus the default
     // budget for the header and the held-completion block.
     expect(getToolResultBudget('ptah_session_read')).toEqual({
@@ -187,6 +189,7 @@ describe('budget tables', () => {
       ptah_get_symbol_index: 'preformatted',
       ptah_read_symbol: 'preformatted',
       ptah_grep: 'preformatted',
+      ptah_inspect: 'preformatted',
       ptah_agent_spawn: 'preformatted',
       ptah_agent_status: 'preformatted',
       ptah_agent_read: 'preformatted',

@@ -21,6 +21,7 @@ import type {
   AgentSessionStartConfig,
   FlatStreamEventUnion,
   McpToolProfile,
+  PermissionLevel,
   PermissionPromptCancelledPayload,
   ProviderInfo,
   ProviderSessionSeed,
@@ -72,6 +73,11 @@ export interface ProviderSessionChatPrepared {
   readonly resume?: { readonly nativeSessionId: string };
   /** Absent: the host opens with its defaults (Ptah MCP only, no instructions). */
   readonly open?: ProviderSessionOpenOptions;
+  /**
+   * The saved permission level when the caller sent none. A reused process
+   * may have opened at an older level, so the session applies this one.
+   */
+  readonly permission?: PermissionLevel;
 }
 
 export interface ProviderSessionAcquireRequest {
@@ -91,6 +97,8 @@ export interface ProviderSessionAcquireRequest {
   };
   /** Where the runtime sends permission requests for this session. */
   readonly approvals: ProviderApprovalSink;
+  /** Effective permission to open a replacement process on continue. */
+  readonly permission?: PermissionLevel;
   /** `ProviderSessionChatPrepared.open` of this session. */
   readonly open?: ProviderSessionOpenOptions;
 }
@@ -159,6 +167,8 @@ export interface ProviderSessionChatPorts {
     config: AgentSessionStartConfig | AgentSessionResumeConfig,
     sessionId?: SessionId,
   ): Promise<ProviderSessionChatPrepared>;
+  /** Read the workspace default when continuing a retained chat session. */
+  readSavedPermissionLevel?(workspacePath: string): PermissionLevel;
   /**
    * A live session from the host pool: a reused entry or a newly opened one.
    * Rejects with a `ProviderSessionChatAdapterError` or with the runtime's
@@ -176,6 +186,7 @@ export interface ProviderSessionChatPorts {
    * next turn's `acquire` attaches the replacement.
    */
   holds(sessionId: SessionId, session: ProviderSession): boolean;
+  initialPermission?(sessionId: SessionId, session: ProviderSession): AgentSessionStartConfig['permissionLevel'];
   /** Give one session back to the pool (which closes or keeps the process). */
   release(
     sessionId: SessionId,

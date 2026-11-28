@@ -69,6 +69,7 @@ function setup(options?: {
   view?: unknown;
   lastPicks?: readonly { key: string; candidateId: string }[];
   rotationReason?: string | null;
+  rotationError?: Error;
 }) {
   const logger = {
     debug: jest.fn(),
@@ -90,8 +91,22 @@ function setup(options?: {
     options?.reader === undefined
       ? { readMergedView }
       : options.reader;
-  const isRegistered = jest.fn((token: symbol) => token === LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE ? options?.lastPicks !== undefined || options?.rotationReason !== undefined : (options?.registered ?? true));
-  const resolve = jest.fn((token: symbol) => token === LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE ? { getLastPicks: () => ({ entries: options?.lastPicks ?? [], reason: options?.rotationReason ?? null }) } : store);
+  const isRegistered = jest.fn((token: symbol) => {
+    if (token === LANE_ROUTING_TOKENS.CAPABILITY_MATRIX_STORE) return options?.registered ?? true;
+    return token === LANE_ROUTING_TOKENS.ROTATION_STORE && options !== undefined &&
+      ('lastPicks' in options || 'rotationReason' in options || 'rotationError' in options);
+  });
+  const resolve = jest.fn((token: symbol) => {
+    if (token === LANE_ROUTING_TOKENS.CAPABILITY_MATRIX_STORE) return store;
+    if (token !== LANE_ROUTING_TOKENS.ROTATION_STORE) throw new Error('Unexpected dependency');
+    if (options?.rotationError) throw options.rotationError;
+    return {
+      load: () => ({
+        state: { version: 1, entries: options?.lastPicks ?? [] },
+        reason: options?.rotationReason ?? null,
+      }),
+    };
+  });
   const runtimeContainer = { isRegistered, resolve };
 
   new CapabilityMatrixRpcHandlers(
@@ -110,6 +125,24 @@ function setup(options?: {
 }
 
 describe('CapabilityMatrixRpcHandlers', () => {
+  it('reads a fresh rotation store without resolving the route decision service', async () => {
+    const { call, resolve } = setup({ lastPicks: [] });
+    await expect(call({})).resolves.toMatchObject({ lastPicks: [], lastPicksUnavailable: false });
+    expect(resolve).toHaveBeenCalledWith(LANE_ROUTING_TOKENS.ROTATION_STORE);
+    expect(resolve).not.toHaveBeenCalledWith(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE);
+  });
+
+  it('keeps ratings available when the rotation store fails to resolve', async () => {
+    const rotationError = new Error('rotation store failed to resolve');
+    const { call, logger } = setup({ rotationError });
+    await expect(call({})).resolves.toMatchObject({
+      profiles: [expect.objectContaining({ family: 'z-ai' })],
+      lastPicks: [],
+      lastPicksUnavailable: true,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.any(String), rotationError);
+  });
+
   it('returns the last rotation pick when the read port is registered', async () => {
     const { call } = setup({ lastPicks: [{ key: 'implement|implement', candidateId: 'codex' }] });
     await expect(call({})).resolves.toMatchObject({ lastPicks: [{ key: 'implement|implement', candidateId: 'codex' }] });
@@ -122,6 +155,8 @@ describe('CapabilityMatrixRpcHandlers', () => {
     const { call, readMergedView, isRegistered } = setup();
 
     await expect(call(undefined)).resolves.toEqual({
+      lastPicks: [],
+      lastPicksUnavailable: false,
       profiles: [
         {
           family: 'z-ai',

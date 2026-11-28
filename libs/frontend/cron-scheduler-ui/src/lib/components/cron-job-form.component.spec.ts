@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import type { ScheduledJobDto } from '@ptah-extension/shared';
@@ -59,7 +60,7 @@ describe('CronJobFormComponent', () => {
   }
 
   function query<T extends HTMLElement>(testId: string): T | null {
-    return (fixture.nativeElement as HTMLElement).querySelector<T>(
+    return TestBed.inject(OverlayContainer).getContainerElement().querySelector<T>(
       `[data-testid="${testId}"]`,
     );
   }
@@ -221,7 +222,7 @@ describe('CronJobFormComponent', () => {
     await submit();
 
     expect(stateMock.create).not.toHaveBeenCalled();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+    expect(TestBed.inject(OverlayContainer).getContainerElement().textContent).toContain(
       'reserved for internal jobs',
     );
   });

@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * Test doubles shared by the ProviderListView specs
  * (`provider-list-view.component.spec.ts`, `provider-list-view.removal.spec.ts`).
@@ -224,7 +225,8 @@ export class ListViewPage {
   }
 
   public q<T extends HTMLElement = HTMLElement>(selector: string): T | null {
-    return this.root().querySelector<T>(selector);
+    return this.root().querySelector<T>(selector)
+      ?? TestBed.inject(OverlayContainer).getContainerElement().querySelector<T>(selector);
   }
 
   public qa<T extends HTMLElement = HTMLElement>(selector: string): T[] {

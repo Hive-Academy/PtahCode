@@ -93,9 +93,10 @@ export interface BackgroundConsumerRow {
   readonly requiresToolUse: boolean;
   readonly provider: string;
   readonly model: string;
+  readonly fallbackProvider: ReturnType<typeof inheritedConsumerProvider>;
   /** The full route in words, e.g. "Follows main agent → Claude · cli → Default (haiku tier)". */
   readonly resolvedSummary: string;
-  /** The reassignment cell's text: "Follows main agent → {driver}" (no own provider) or "{provider} · {model}". */
+  /** The reassignment cell shows the effective provider and role model. */
   readonly cellLabel: string;
   /** True when the role has no provider of its own and runs on the main agent's route. */
   readonly followsMain: boolean;
@@ -134,6 +135,25 @@ export const ENHANCEMENT_HELPER_COPY =
 export interface ConsumerRouteInfo {
   readonly driverProviderId?: string | null;
   readonly resolvedAuthModality?: string | null;
+  readonly providers?: readonly ProviderRouteStatus[];
+}
+
+const AUTH_MODALITY_LABELS: Readonly<Record<string, string>> = {
+  'api-key': 'API key',
+  oauth: 'OAuth',
+  cli: 'CLI',
+  local: 'Local',
+};
+
+export function inheritedConsumerProvider(route: ConsumerRouteInfo | null) {
+  const id = route?.driverProviderId;
+  if (!id) return null;
+  const provider = formatProviderDisplayName(id);
+  const modality = AUTH_MODALITY_LABELS[route.resolvedAuthModality ?? ''];
+  return {
+    id,
+    name: modality && id !== 'claude-cli' ? `${provider} · ${modality}` : provider,
+  };
 }
 
 /** A setting key's source as `ProvidersSettingsStateService.scopeEntry` reports it. */
@@ -161,19 +181,6 @@ export interface ConsumerRowSpec {
   readonly unsupportedProviders: readonly string[];
 }
 
-/** The main agent's driver in words ("Claude · cli"), or "Active provider" before the route has loaded. */
-function routeLabel(
-  route: ConsumerRouteInfo | null,
-  withModality: boolean,
-): string {
-  if (!route?.driverProviderId) return 'Active provider';
-  const modality =
-    withModality && route.resolvedAuthModality
-      ? ` · ${route.resolvedAuthModality}`
-      : '';
-  return `${formatProviderDisplayName(route.driverProviderId)}${modality}`;
-}
-
 export function formatResolvedSummary(
   route: ConsumerRouteInfo | null,
   provider: string,
@@ -182,7 +189,7 @@ export function formatResolvedSummary(
 ): string {
   const modelStr = model || `Default (${defaultTier} tier)`;
   if (!provider)
-    return `Follows main agent → ${routeLabel(route, true)} → ${modelStr}`;
+    return `Follows main agent → ${inheritedConsumerProvider(route)?.name ?? 'Active provider'} → ${modelStr}`;
   return `${formatProviderDisplayName(provider)} · ${modelStr}`;
 }
 
@@ -199,6 +206,22 @@ export function makeRow(
     modelScope = modelSource?.scope ?? 'mixed';
   const providerOverride = providerSource?.hasOverride === true,
     modelOverride = modelSource?.hasOverride === true;
+  const activeProvider = inheritedConsumerProvider(route);
+  const status = route?.providers?.find((entry) => entry.id === provider)?.status;
+  // The curator rides the active route on auth failure.
+  const fallbackProvider =
+    id === 'memory-curator' &&
+    provider &&
+    activeProvider &&
+    provider !== activeProvider.id &&
+    !spec.unsupportedProviders.includes(provider) &&
+    !spec.unsupportedProviders.includes(activeProvider.id) &&
+    (status === 'needs-key' || status === 'unauthenticated')
+      ? activeProvider
+      : null;
+  const resolvedSummary = fallbackProvider
+    ? `${formatResolvedSummary(route, '', model, tier)} (saved ${formatProviderDisplayName(provider)} unavailable)`
+    : formatResolvedSummary(route, provider, model, tier);
   return {
     id,
     name,
@@ -207,10 +230,9 @@ export function makeRow(
     requiresToolUse: spec.toolUse,
     provider,
     model,
-    resolvedSummary: formatResolvedSummary(route, provider, model, tier),
-    cellLabel: provider
-      ? `${formatProviderDisplayName(provider)} · ${model || `Default (${tier} tier)`}`
-      : `Follows main agent → ${routeLabel(route, false)}`,
+    fallbackProvider,
+    resolvedSummary,
+    cellLabel: resolvedSummary,
     followsMain: !provider,
     tierLabel: model ? 'direct model' : `${tier} tier`,
     providerFieldName: `${name} provider`,

@@ -694,6 +694,10 @@ export class SessionLifecycleManager {
    * Find a session record by either tabId or realSessionId.
    * Delegates to SessionRegistry.find().
    */
+  findMatches(idOrTabId: string): SessionRecord[] {
+    return this._registry.findMatches(idOrTabId);
+  }
+
   find(idOrTabId: string): SessionRecord | undefined {
     return this._registry.find(idOrTabId);
   }

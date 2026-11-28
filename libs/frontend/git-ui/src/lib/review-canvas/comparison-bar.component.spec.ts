@@ -1,4 +1,5 @@
 import axe from 'axe-core';
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import type { ComponentFixture } from '@angular/core/testing';
@@ -63,7 +64,15 @@ describe('ComparisonBarComponent', () => {
   const host = (): HTMLElement => fixture.nativeElement as HTMLElement;
   const byTestId = <T extends HTMLElement = HTMLElement>(
     id: string,
-  ): T | null => host().querySelector<T>(`[data-testid="${id}"]`);
+  ): T | null => {
+    const selector = `[data-testid="${id}"]`;
+    return (
+      host().querySelector<T>(selector) ??
+      TestBed.inject(OverlayContainer)
+        .getContainerElement()
+        .querySelector<T>(selector)
+    );
+  };
   const settle = async (): Promise<void> => {
     await fixture.whenStable();
     fixture.detectChanges();

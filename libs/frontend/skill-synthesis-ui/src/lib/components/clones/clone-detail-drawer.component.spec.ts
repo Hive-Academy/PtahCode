@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ROLE_PHASE_ALIASES, type AgentOutcomeSignals, type CloneSummary } from '@ptah-extension/shared';
 import { makeLibraryAgreementFixtures } from '@ptah-extension/shared/testing';
@@ -51,7 +52,7 @@ async function setup(options: Options = {}): Promise<Fixture> {
 }
 
 const find = (fixture: Fixture, testid: string): HTMLElement | null =>
-  fixture.nativeElement.querySelector(`[data-testid="${testid}"]`);
+  TestBed.inject(OverlayContainer).getContainerElement().querySelector(`[data-testid="${testid}"]`);
 
 const require_ = (fixture: Fixture, testid: string): HTMLElement => {
   const el = find(fixture, testid);
@@ -115,7 +116,7 @@ describe('CloneDetailDrawerComponent — body edit mode', () => {
     // One body on screen, never two: the read-only block is gone, not hidden.
     expect(find(fixture, 'drawer-body')).toBeNull();
     expect(
-      fixture.nativeElement.querySelector('ptah-markdown-block'),
+      TestBed.inject(OverlayContainer).getContainerElement().querySelector('ptah-markdown-block'),
     ).toBeNull();
     expect(find(fixture, 'clone-body-editor')).not.toBeNull();
   });

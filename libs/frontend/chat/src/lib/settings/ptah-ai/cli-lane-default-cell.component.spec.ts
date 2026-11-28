@@ -1,6 +1,7 @@
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { TestBed } from '@angular/core/testing';
+import type { ComponentFixture } from '@angular/core/testing';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
 import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
 
@@ -46,14 +47,22 @@ const cursorManifest: CliAdapterManifest = {
 };
 
 describe('CliLaneDefaultCellComponent', () => {
-  beforeEach(() => {
-    HTMLDialogElement.prototype.showModal = function () {
-      this.setAttribute('open', '');
-    };
-    HTMLDialogElement.prototype.close = function () {
-      this.removeAttribute('open');
-    };
+  afterEach(() => {
+    document
+      .querySelectorAll('.cdk-overlay-container')
+      .forEach((node) => node.replaceChildren());
   });
+
+  async function confirmation(
+    fixture: ComponentFixture<CliLaneDefaultCellComponent>,
+  ): Promise<HTMLElement> {
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const dialog = document.querySelector<HTMLElement>('.cdk-dialog-container');
+    if (!dialog) throw new Error('Expected the full-access confirmation');
+    return dialog;
+  }
   function setup(
     cli: 'codex' | 'ptah-cli' | 'cursor' = 'codex',
     value?: { permission?: 'plan' | 'yolo'; network?: 'allow' | 'deny' },
@@ -166,7 +175,7 @@ describe('CliLaneDefaultCellComponent', () => {
     ).toEqual(['sm', 'sm']);
   });
 
-  it('keeps unavailable Network in its compact field with the reason as its description', () => {
+  it('keeps unavailable Network in its compact field with the reason as its description', async () => {
     const fixture = setup('codex');
     fixture.componentRef.setInput('layout', 'card');
     fixture.componentRef.setInput('manifest', {
@@ -202,6 +211,8 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(trigger).not.toBeNull();
     trigger?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(trigger?.getAttribute('aria-expanded')).toBe('true');
     const descriptionId = fields[1]
       .querySelector('button[ptahFieldTrigger]')
@@ -212,7 +223,7 @@ describe('CliLaneDefaultCellComponent', () => {
     ).toBe('Grok exposes no native read-only plan flag.');
     expect(fields[1].querySelector('.ptah-field__message')).toBeNull();
     expect(
-      fields[1].querySelector('[role="dialog"]')?.textContent?.trim(),
+      document.querySelector('[role="dialog"]')?.textContent?.trim(),
     ).toBe('Grok exposes no native read-only plan flag.');
     for (const label of host.querySelectorAll<HTMLLabelElement>('label[for]')) {
       const control = host.querySelector<HTMLElement>(
@@ -224,7 +235,7 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(host.querySelector('.defaults-warning')).toBeNull();
   });
 
-  it('keeps a long manifest reason intact in the Network info popover', () => {
+  it('keeps a long manifest reason intact in the Network info popover', async () => {
     const fixture = setup('codex');
     const reason =
       'Native enforcement is unverified. This adapter cannot enforce a network boundary for this permission mode, so choose another verified mode before starting a lane.';
@@ -245,9 +256,11 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(trigger).not.toBeNull();
     trigger?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(trigger?.getAttribute('aria-expanded')).toBe('true');
     expect(
-      host
+      document
         .querySelector('[role="dialog"][aria-label="More about Network"]')
         ?.textContent?.trim(),
     ).toBe(reason);
@@ -353,7 +366,7 @@ describe('CliLaneDefaultCellComponent', () => {
     );
   });
 
-  it('saves Cursor yolo without a full-access dialog when yolo is already the built-in default', () => {
+  it('saves Cursor yolo without a full-access dialog when yolo is already the built-in default', async () => {
     const fixture = setup('cursor');
     fixture.componentRef.setInput('layout', 'wide');
     fixture.componentRef.setInput('manifest', cursorManifest);
@@ -369,7 +382,8 @@ describe('CliLaneDefaultCellComponent', () => {
       }
     ).choosePermission('yolo');
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
+    await fixture.whenStable();
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
     expect(selected).toHaveBeenCalledWith({
       permission: 'yolo',
       network: 'allow',
@@ -382,10 +396,10 @@ describe('CliLaneDefaultCellComponent', () => {
       'yolo',
     );
     expect(combobox(fixture, 'codex network default').value()).toBe('allow');
-    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
   });
 
-  it('requires confirmation for full auto and cancel preserves the saved choice', () => {
+  it('requires confirmation for full auto and cancel preserves the saved choice', async () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
@@ -394,13 +408,13 @@ describe('CliLaneDefaultCellComponent', () => {
     fixture.detectChanges();
     expect(selected).not.toHaveBeenCalled();
     expect(select.value()).toBe('plan');
-    expect(
-      (fixture.nativeElement.querySelector('dialog') as HTMLDialogElement).open,
-    ).toBe(true);
-    (
-      fixture.nativeElement.querySelector('dialog button') as HTMLButtonElement
-    ).click();
+    const dialog = await confirmation(fixture);
+    expect(dialog.textContent).toContain('Confirm full access');
+    dialog.querySelector<HTMLButtonElement>('button')?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
     expect(selected).not.toHaveBeenCalled();
   });
 
@@ -409,23 +423,21 @@ describe('CliLaneDefaultCellComponent', () => {
       'button[aria-label^="Reset to default"]',
     );
 
-  it('confirms a reset that raises a saved plan to the built-in full-access default', () => {
+  it('confirms a reset that raises a saved plan to the built-in full-access default', async () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
     resetControl(fixture)?.click();
-    fixture.detectChanges();
+    const dialog = await confirmation(fixture);
     expect(reset).not.toHaveBeenCalled();
-    expect(fixture.nativeElement.querySelector('dialog[open]')).not.toBeNull();
-    Array.from(
-      fixture.nativeElement.querySelectorAll(
-        'button',
-      ) as NodeListOf<HTMLButtonElement>,
-    ).find((button) => button.textContent?.trim() === 'Confirm')?.click();
+    Array.from(dialog.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Confirm',
+    )?.click();
+    fixture.detectChanges();
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
-  it('resets a saved yolo default to the built-in yolo default without confirmation', () => {
+  it('resets a saved yolo default to the built-in yolo default without confirmation', async () => {
     const fixture = setup('codex', { permission: 'yolo', network: 'allow' });
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
@@ -442,8 +454,9 @@ describe('CliLaneDefaultCellComponent', () => {
     );
     resetButton?.click();
     fixture.detectChanges();
+    await fixture.whenStable();
     expect(reset).toHaveBeenCalledTimes(1);
-    expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
+    expect(document.querySelector('.cdk-dialog-container')).toBeNull();
   });
 
   it('shows no reset without a saved default', () => {
@@ -517,19 +530,18 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('More default actions');
   });
 
-  it('emits the confirmed full-auto choice', () => {
+  it('emits the confirmed full-auto choice', async () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const selected = jest.fn();
     fixture.componentInstance.selected.subscribe(selected);
     const select = combobox(fixture, 'codex permission default');
     select.value.set('yolo');
-    fixture.detectChanges();
-    const confirm = Array.from(
-      fixture.nativeElement.querySelectorAll(
-        'button',
-      ) as NodeListOf<HTMLButtonElement>,
-    ).find((button) => button.textContent?.trim() === 'Confirm');
+    const dialog = await confirmation(fixture);
+    const confirm = Array.from(dialog.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Confirm',
+    );
     confirm?.click();
+    fixture.detectChanges();
     expect(selected).toHaveBeenCalledWith({
       permission: 'yolo',
       network: 'allow',
@@ -555,5 +567,31 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(warning?.textContent).toContain(
       'Saved CLI lane default has no supported permission/network pair.',
     );
+  });
+
+  it('opens Permission, Network and Reset from one Defaults action', async () => {
+    const fixture = setup('ptah-cli', { permission: 'yolo', network: 'allow' });
+    fixture.componentRef.setInput('layout', 'defaults');
+    fixture.componentRef.setInput('showCaption', false);
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const action = host.querySelector<HTMLButtonElement>(
+      '[data-testid="lanes-defaults-action"]',
+    );
+    expect(action?.textContent?.trim()).toBe('Defaults');
+    expect(host.querySelector('[role="combobox"]')).toBeNull();
+    expect(host.querySelector('button[aria-label^="Reset"]')).toBeNull();
+    action?.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const panel = document.querySelector('.cdk-overlay-pane');
+    expect(panel?.textContent).toContain('Permission');
+    expect(panel?.textContent).toContain('Network');
+    const reset = panel?.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Reset"]',
+    );
+    expect(reset?.textContent?.trim()).toBe('Reset');
+    expect(host.querySelector('[role="combobox"]')).toBeNull();
   });
 });

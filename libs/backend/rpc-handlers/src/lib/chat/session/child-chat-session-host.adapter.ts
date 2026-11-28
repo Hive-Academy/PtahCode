@@ -201,6 +201,7 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
         tabId: input.tabId,
         workspaceRoot: input.workspaceRoot,
         cwd: input.cwd,
+        ...(input.expectedRuntime ? { expectedRuntime: input.expectedRuntime } : {}),
         prompt: input.prompt,
         sessionName: input.sessionName,
         ...(input.model ? { model: input.model } : {}),

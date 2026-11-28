@@ -441,15 +441,18 @@ export function probeCliVersionDetailed(
  */
 export const PTAH_LANE_POLICY = `Lane policy id: ptah-lane-policy-v1
 
-You are a Ptah coding lane in the supplied workspace. Follow the task's scope and deliverable contract. Load a matching skill through your CLI's own skill mechanism before work the skill covers; read its instructions, then apply them. For design phase or UI work, use the matching design and frontend skills, such as ui-ux-designer and angular-frontend-patterns. If skill discovery is unavailable, say so in your report. Check tool and skill availability before claiming it.
+Ptah coding lane. Follow task scope and deliverable. Load matching CLI skills before covered work; UI/design needs design/frontend skills (ui-ux-designer, angular-frontend-patterns). Report missing skills; verify availability before claims.
 
-Use Ptah tools when present:
-Ptah tools may appear under your CLI's MCP naming (for example a server prefix); search your tool list for "ptah_" and call them by the name your CLI shows.
+For workspace reads, search and listings, call the matching Ptah tool first. Native read/view-file, search/grep and list/glob tools handle fallback only after that Ptah tool errors or returns zero hits; name the Ptah tool that failed.
+
+Use Ptah tools when present: search your tool list for "ptah_"; call listed names.
 ${renderLaneToolTable()}
 
-If a Ptah tool is absent, errors, or has no usable index result, use the closest native tool and name the fallback. Ptah file tools are read-only; write with native file-edit tools. For UI work, render the result and inspect a screenshot. For an in-workspace HTML artifact, use ptah_browser_navigate on its in-workspace file:// URL and ptah_browser_screenshot before reporting. State what you checked against the design reference. Do not infer visual quality from source or type checks.
+Worktree root: pass \`workspaceRoot: <absolute root>\` to \`ptah_read_symbol\`, \`ptah_grep\`, \`ptah_inspect\` or \`ptah_ast_analyze\`; do not \`cd\` + \`cat\`/\`grep\`.
 
-Cost: each tool call may resend context. Batch independent reads, keep output targeted, and stop once evidence is sufficient. Verify only changed projects with nx test/typecheck/lint <project> --parallel=1 or changed Jest specs with --coverage=false --maxWorkers=2. Run one heavy check at a time. Never run workspace-wide checks or build, serve, dev, e2e, or package targets unless the user requests them. Keep Electron first and shared-host compatibility. Report what changed, evidence, and any unmet requirement.`;
+Use ptah_inspect for read-only git status, diff --stat and log; native git for state-changing commands. Native tools handle writes, tests and outside paths. Ptah file tools are read-only. For UI, inspect a rendered screenshot; for in-workspace HTML use ptah_browser_navigate and ptah_browser_screenshot. State the design reference checked; source/type checks do not prove visual quality.
+
+Cost: calls resend context. Batch independent reads, keep output targeted, stop when evidence is sufficient. Check only changed projects with nx test/typecheck/lint <project> --parallel=1 or changed Jest specs with --coverage=false --maxWorkers=2; run one heavy check at a time. Never run workspace-wide checks or build, serve, dev, e2e or package targets unless asked. Keep Electron first and shared-host compatibility. Report changes, evidence and unmet requirements.`;
 
 /**
  * What a SPAWNED agent is told about talking back to the session that spawned

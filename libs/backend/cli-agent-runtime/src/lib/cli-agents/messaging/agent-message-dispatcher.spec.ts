@@ -147,12 +147,17 @@ describe('AgentMessageDispatcher', () => {
       expect((await s.h.store.get(id))?.rawDelivery).toBeUndefined();
     });
 
-    it('keeps the header when the command list lookup throws', async () => {
+    it.each(['rejected', 'undefined'])('holds a first skill send when catalog lookup is %s', async (failure) => {
       const s = setup();
-      s.advertisedCommands.mockRejectedValueOnce(new Error('catalog down'));
-      const { attempt } = await s.attempt('/compact');
-      await s.dispatcher.attempt(attempt);
-      expect(String(sentArg(s, 1))).toMatch(/^\[Ptah message /);
+      if (failure === 'rejected') s.advertisedCommands.mockRejectedValueOnce(new Error('catalog down'));
+      const { attempt, id } = await s.attempt('/session-handoff');
+      await expect(s.dispatcher.attempt(attempt)).resolves.toMatchObject({
+        mode: 'unsupported', detail: 'The lane command catalog is unavailable.',
+        receipt: { state: 'blocked-retryable' },
+      });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect(s.h.resume.resume).not.toHaveBeenCalled();
+      expect(await s.h.store.getBody(id)).toBe('/session-handoff');
     });
 
     it('refuses /always-approve on before any adapter call, keeping the body', async () => {
@@ -169,10 +174,28 @@ describe('AgentMessageDispatcher', () => {
       expect(await s.h.store.getBody(id)).toBe('\n/Always-Approve on');
     });
 
-    it('delivers a retry of a raw envelope raw again, even without a list', async () => {
-      const s = setup({ advertised: [] });
+    it.each(['rejected', 'undefined'])('holds a raw retry when catalog lookup is %s', async (failure) => {
+      const s = setup();
+      if (failure === 'rejected') s.advertisedCommands.mockRejectedValueOnce(new Error('catalog down'));
+      const { attempt, id } = await s.attempt('/session-handoff', { rawDelivery: { raw: true } });
+      await expect(s.dispatcher.attempt(attempt)).resolves.toMatchObject({
+        mode: 'unsupported', detail: 'The lane command catalog is unavailable.',
+      });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect(s.h.resume.resume).not.toHaveBeenCalled();
+      expect(await s.h.store.get(id)).toMatchObject({
+        state: 'blocked-retryable', rawDelivery: { raw: true },
+      });
+      expect(await s.h.store.getBody(id)).toBe('/session-handoff');
+    });
+
+    it('retries a native command raw when the refreshed catalog admits it', async () => {
+      const s = setup({ advertised: ['compact'] });
       const { attempt } = await s.attempt('/compact', { rawDelivery: { raw: true } });
       await s.dispatcher.attempt(attempt);
+      expect(s.advertisedCommands).toHaveBeenCalledWith(
+        attempt.laneId, attempt.envelope.laneLineageId, true, '/compact',
+      );
       expect(sentArg(s, 1)).toBe('/compact');
     });
   });

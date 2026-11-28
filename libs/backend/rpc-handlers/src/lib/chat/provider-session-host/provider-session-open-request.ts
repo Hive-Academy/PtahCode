@@ -88,6 +88,7 @@ export interface ProviderSessionOpenInput {
   /** Stored native id; the pool attaches with `resume` or `load`. */
   readonly nativeSessionId?: string;
   readonly model?: string;
+  readonly permission?: PermissionLevel;
   /**
    * The chat session's open options. Absent (a history read): the options
    * the chat last acquired this session with while it still owns it, so the
@@ -115,7 +116,10 @@ export function createProviderSessionOpenRequests(
 ): ProviderSessionOpenRequests {
   const sinks = new Map<SessionId, ProviderApprovalSink>();
   /** The open options of each session a chat owns, for its history reads. */
-  const chatOpen = new Map<SessionId, NonNullable<ProviderSessionOpenInput['open']>>();
+  const chatOpen = new Map<
+    SessionId,
+    NonNullable<ProviderSessionOpenInput['open']>
+  >();
 
   const relay = (sessionId: SessionId): ProviderApprovalSink => ({
     request(request, signal) {
@@ -173,8 +177,13 @@ export function createProviderSessionOpenRequests(
    * moderate 7), which the narrower-mode grants trust.
    */
   const userMcp = (input: ProviderSessionOpenInput) => {
-    const reserved = new Set(['ptah', deps.ptahMcpServerName?.(input.profile) ?? 'ptah']);
-    return (input.open?.userMcp ?? []).filter((server) => !reserved.has(server.name));
+    const reserved = new Set([
+      'ptah',
+      deps.ptahMcpServerName?.(input.profile) ?? 'ptah',
+    ]);
+    return (input.open?.userMcp ?? []).filter(
+      (server) => !reserved.has(server.name),
+    );
   };
 
   /** Ptah's entry first and authoritative: a user server never takes its name. */
@@ -211,7 +220,9 @@ export function createProviderSessionOpenRequests(
     input: ProviderSessionOpenInput,
     attachments: readonly ProviderMcpAttachment[],
   ): string | undefined => {
-    const ptahAttached = attachments.some((attachment) => attachment.name === 'ptah');
+    const ptahAttached = attachments.some(
+      (attachment) => attachment.name === 'ptah',
+    );
     const parts = [
       input.open?.instructions ?? '',
       ptahAttached
@@ -225,7 +236,9 @@ export function createProviderSessionOpenRequests(
   };
 
   /** A chat request is remembered; a history read borrows the chat's options. */
-  const withChatOpen = (input: ProviderSessionOpenInput): ProviderSessionOpenInput => {
+  const withChatOpen = (
+    input: ProviderSessionOpenInput,
+  ): ProviderSessionOpenInput => {
     if (input.open) {
       chatOpen.set(input.sessionId, input.open);
       return input;
@@ -259,7 +272,9 @@ export function createProviderSessionOpenRequests(
             profile: input.profile,
             binaryPath: detection.path,
             policy: {
-              permission: deps.readSavedPermissionLevel(input.workspacePath),
+              permission:
+                input.permission ??
+                deps.readSavedPermissionLevel(input.workspacePath),
               cwd: input.workspacePath,
             },
             ...(input.model ? { model: input.model } : {}),

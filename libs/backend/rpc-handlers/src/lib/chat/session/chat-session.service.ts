@@ -221,6 +221,7 @@ export interface HandoffSessionStartParams extends MainSessionAccountSelection {
   readonly prompt: string;
   readonly sessionName: string;
   readonly model?: string;
+  readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   /** The handing-off session's level; absent → the global default. */
   readonly permissionLevel?: PermissionLevel;
 }
@@ -235,6 +236,7 @@ interface AgentSessionPathLabels {
 
 /** What {@link ChatSessionService.launchSdkSession} needs from its callers. */
 interface SdkSessionLaunch {
+  readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   readonly admissionTiming?: ChatAdmissionTiming;
   readonly phase?: PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
@@ -1002,6 +1004,11 @@ export class ChatSessionService {
         `Codex chat does not support the "${optionError.key}" option.`,
         'CODEX_UNSUPPORTED_OPTION',
       );
+    } else if (adapterError?.code === 'unsupported-command') {
+      failure = new RpcUserError(
+        `Codex app-server does not support /${adapterError.command} in Ptah chat.`,
+        'CODEX_UNSUPPORTED_OPTION',
+      );
     } else if (adapterError?.code === 'busy') {
       failure = new RpcUserError(
         'Codex chat is busy. Try again when the current operation finishes.',
@@ -1639,6 +1646,7 @@ export class ChatSessionService {
 
       await this.launchSdkSession({
         logLabel: 'handoff session',
+        expectedRuntime: params.expectedRuntime,
         tabId,
         workspaceId: workspaceRoot,
         projectPath: cwd,
@@ -1810,6 +1818,9 @@ export class ChatSessionService {
               currentModel,
               modelIsStored,
             );
+        if (input.expectedRuntime && input.expectedRuntime !== execution.runtime) {
+          throw new Error('The workspace runtime changed since the predecessor started');
+        }
         return { config, execution };
       },
     );
@@ -3706,6 +3717,10 @@ export class ChatSessionService {
     tabId: string,
   ): Promise<void> {
     if (!this.sdkAdapter.isSessionActive(sessionId)) return;
+    if (this.hasLiveSessionStream(sessionId, tabId)) return;
+    const metadata = await this.sessionMetadataStore.get(sessionId);
+    // Codex opens a stream per turn. Between turns the thread stays live.
+    if (metadata?.codexExecution?.runtime === 'codex-app-server') return;
     if (this.hasLiveSessionStream(sessionId, tabId)) return;
 
     this.logger.warn(

@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { Boxes, Eye, EyeOff, LucideAngularModule, X } from 'lucide-angular';
 import {
+  AppStateManager,
   ProvidersSettingsStateService,
   type ProvidersConnection,
   type ProvidersEditContext,
@@ -31,6 +32,7 @@ import {
   PROVIDER_SESSION_PROVIDER_IDS,
   getAnthropicProvider,
 } from '@ptah-extension/shared';
+import { settingsProviderConnections } from './provider-connection-options';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from '../feedback/settings-toast.component';
 
@@ -116,6 +118,7 @@ export class AddCliInstanceModalComponent {
   protected readonly focusRing = FOCUS;
   protected readonly duplicateMessage = DUPLICATE_NAME;
   protected readonly state = inject(ProvidersSettingsStateService);
+  private readonly appState = inject(AppStateManager);
   private readonly feedback = inject(SettingsSaveFeedbackService);
 
   readonly open = input(false);
@@ -145,7 +148,7 @@ export class AddCliInstanceModalComponent {
     })),
   ]);
   protected readonly providerOptions = computed(() =>
-    (this.state.connections().data ?? [])
+    settingsProviderConnections(this.state.connections().data ?? [])
       .filter((connection) => !EXCLUDED_PROVIDERS.has(connection.id))
       .map((connection) => ({
         id: connection.id,
@@ -155,6 +158,12 @@ export class AddCliInstanceModalComponent {
             : `${connection.name} · ${MODALITY[connection.authMode] ?? connection.authMode}`,
       })),
   );
+  protected readonly editingProviderUnavailable = computed(() => {
+    const target = this.editing();
+    if (!target || this.state.connections().status !== 'ready') return false;
+    const id = target.providerId === ANTHROPIC_API_LANE_ENTRY.id ? 'anthropic' : target.providerId;
+    return !this.providerOptions().some((option) => option.id === id);
+  });
   protected readonly provider = computed<ProvidersConnection | null>(() => {
     const id = this.editing()?.providerId ?? this.providerId();
     return (
@@ -304,7 +313,8 @@ export class AddCliInstanceModalComponent {
     if (target)
       return this.name().trim() !== target.name || !!this.key().trim();
     const provider = this.provider();
-    if (!provider || EXCLUDED_PROVIDERS.has(provider.id)) return false;
+    if (!provider || !this.providerOptions().some((option) => option.id === provider.id))
+      return false;
     if (
       provider.id === 'anthropic' &&
       this.claudeSource() === 'shared-connection'
@@ -350,6 +360,11 @@ export class AddCliInstanceModalComponent {
       this.signInAction.set('check');
       void this.state.performExternalAuth(COPILOT, 'cli-check');
     }
+  }
+
+  protected connectProvider(): void {
+    this.requestClose();
+    this.appState.requestSettingsTab({ tab: 'providers', section: 'more-providers' });
   }
 
   protected signIn(): Promise<void> {

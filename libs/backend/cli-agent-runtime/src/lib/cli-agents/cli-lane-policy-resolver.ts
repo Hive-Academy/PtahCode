@@ -1,4 +1,4 @@
-import { CLI_LANE_DEFAULTS_SCHEMA, codexSandboxModeSchema, DEFAULT_CODEX_SANDBOX_MODE, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
+import { CLI_LANE_BUILT_IN_PERMISSION_ORDER, CLI_LANE_DEFAULTS_SCHEMA, codexSandboxModeSchema, DEFAULT_CODEX_SANDBOX_MODE, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type {
   CliAdapterManifest, CliLaneDefaults, CliType, EffectiveLanePolicy,
@@ -59,6 +59,38 @@ function validateResolvedPolicy(
   }
 }
 
+function resolveParentCeiling(
+  input: { cli: CliType; manifest: CliAdapterManifest; parentLevel?: string },
+  policy: EffectiveLanePolicy,
+  selectedNetwork: EffectiveLanePolicy['network'],
+): EffectiveLanePolicy | undefined {
+  const { permission, networkSource } = policy;
+  if (input.parentLevel !== undefined) {
+    const order = CLI_LANE_BUILT_IN_PERMISSION_ORDER;
+    const ceiling = order.findIndex((mode) => mode === input.parentLevel);
+    const parentRank = ceiling < 0 ? order.length - 1 : ceiling;
+    if (order[parentRank] === 'plan' || (permission ? order.indexOf(permission) < parentRank : parentRank > 0)) {
+      for (const mode of order.slice(parentRank)) {
+        const codexReadOnly = mode === 'plan' && input.cli === 'codex';
+        const capped = resolveCliLaneDefaultPair(input.manifest, {
+          permission: mode, network: codexReadOnly ? 'deny' : selectedNetwork,
+        });
+        if ('unsupported' in capped) continue;
+        return validateResolvedPolicy(input.cli, input.manifest, {
+          permission: mode, network: capped.network, permissionSource: 'parent-plan',
+          networkSource: codexReadOnly ? 'parent-plan' : networkSource ?? capped.networkSource,
+        });
+      }
+      const codexReadOnly = order[parentRank] === 'plan' && input.cli === 'codex';
+      return validateResolvedPolicy(input.cli, input.manifest, {
+        permission: order[parentRank], network: codexReadOnly ? 'deny' : selectedNetwork,
+        permissionSource: 'parent-plan', networkSource: codexReadOnly ? 'parent-plan' : networkSource,
+      });
+    }
+  }
+  return undefined;
+}
+
 export function resolveCliLanePolicy(input: {
   cli: CliType;
   manifest: CliAdapterManifest;
@@ -79,18 +111,20 @@ export function resolveCliLanePolicy(input: {
         reason: `Resumed policy is empty: both permission and network are undefined.`,
       });
     }
-    return validateResolvedPolicy(input.cli, input.manifest, input.parentLevel === 'plan'
-      ? { ...snapshot, permission: 'plan', permissionSource: 'parent-plan',
-          ...(input.cli === 'codex' ? { network: 'deny' as const, networkSource: 'parent-plan' as const } : {}) }
-      : snapshot);
+    if (input.parentLevel === 'plan') {
+      return validateResolvedPolicy(input.cli, input.manifest, {
+        ...snapshot, permission: 'plan', permissionSource: 'parent-plan',
+        ...(input.cli === 'codex' ? { network: 'deny' as const, networkSource: 'parent-plan' as const } : {}),
+      });
+    }
+    return resolveParentCeiling(input, snapshot, snapshot.network)
+      ?? validateResolvedPolicy(input.cli, input.manifest, snapshot);
   }
   const saved = CLI_LANE_DEFAULTS_SCHEMA.parse(input.saved ?? {});
   const configured = saved[input.cli] ?? (input.cli === 'codex' && input.legacyCodexMode
     ? codexLegacyPolicy(input.legacyCodexMode) : undefined);
-  const parentPlan = input.parentLevel === 'plan';
-  const selectedPermission = parentPlan ? 'plan' : input.request.permission ?? configured?.permission;
-  const selectedNetwork = parentPlan && input.cli === 'codex'
-    ? 'deny' : input.request.network ?? configured?.network;
+  const selectedPermission = input.request.permission ?? configured?.permission;
+  const selectedNetwork = input.request.network ?? configured?.network;
   const pair = resolveCliLaneDefaultPair(input.manifest, {
     permission: selectedPermission, network: selectedNetwork,
   });
@@ -100,10 +134,9 @@ export function resolveCliLanePolicy(input: {
     : configured?.permission !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.permissionSource;
   const networkSource = input.request.network !== undefined ? 'spawn'
     : configured?.network !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.networkSource;
-  const requested: EffectiveLanePolicy = input.parentLevel === 'plan'
-    ? { permission: 'plan', network: input.cli === 'codex' ? 'deny' : network,
-        permissionSource: 'parent-plan', networkSource: input.cli === 'codex' ? 'parent-plan' : networkSource }
-    : { permission, network, permissionSource, networkSource };
+  const requested: EffectiveLanePolicy = { permission, network, permissionSource, networkSource };
+  const capped = resolveParentCeiling(input, requested, selectedNetwork);
+  if (capped) return capped;
   if ('unsupported' in pair && selectedPermission === undefined) {
     throw new LaneSpawnPolicyError({
       code: 'UNSUPPORTED_LANE_POLICY',

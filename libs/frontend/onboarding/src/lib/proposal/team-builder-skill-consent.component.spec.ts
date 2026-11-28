@@ -1,5 +1,10 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { StackSkillConsentComponent } from './stack-skill-consent.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 describe('StackSkillConsentComponent', () => {
   it('explains hooks when a flagged skill has no listed scripts', () => {
@@ -16,11 +21,11 @@ describe('StackSkillConsentComponent', () => {
     ]);
     fixture.componentRef.setInput('approvedIds', new Set());
     fixture.detectChanges();
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+    expect(overlay().textContent).toContain(
       'Also contains hooks or executable files. Review all files.',
     );
   });
-  it('reopens a native dialog closed during installation', async () => {
+  it('keeps the consent dialog open on Escape during installation', async () => {
     const fixture = TestBed.createComponent(StackSkillConsentComponent);
     fixture.componentRef.setInput('open', true);
     fixture.componentRef.setInput('previews', []);
@@ -29,13 +34,11 @@ describe('StackSkillConsentComponent', () => {
     fixture.detectChanges();
     const cancelled = jest.fn();
     fixture.componentInstance.cancelRequested.subscribe(cancelled);
-    const dialog = (fixture.nativeElement as HTMLElement).querySelector(
-      'dialog',
-    ) as HTMLDialogElement;
-    dialog.close();
-    fixture.componentInstance.onClosed();
-    await Promise.resolve();
-    expect(dialog.open).toBe(true);
+    const dialog = overlay().querySelector<HTMLElement>('[role="dialog"][aria-labelledby="skill-consent-title"]');
+    expect(dialog).not.toBeNull();
+    dialog?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await fixture.whenStable();
+    expect(dialog?.isConnected).toBe(true);
     expect(cancelled).not.toHaveBeenCalled();
   });
   it('requires explicit approval for scripts and shows previewed files as text', () => {
@@ -56,7 +59,7 @@ describe('StackSkillConsentComponent', () => {
     fixture.componentRef.setInput('approvedIds', new Set(['owner/repo/skill']));
     fixture.detectChanges();
     expect(fixture.componentInstance.allApproved()).toBe(true);
-    const root = fixture.nativeElement as HTMLElement;
+    const root = overlay();
     expect(root.querySelector('img')).toBeNull();
     expect(root.textContent).toContain('<img src=x>');
   });
@@ -77,7 +80,7 @@ describe('StackSkillConsentComponent', () => {
       );
       fixture.componentRef.setInput('approvedIds', new Set());
       fixture.detectChanges();
-      const root = fixture.nativeElement as HTMLElement;
+      const root = overlay();
       const install = [...root.querySelectorAll('button')].find((button) =>
         button.textContent?.includes('and continue'),
       );
@@ -120,7 +123,7 @@ describe('StackSkillConsentComponent', () => {
     fixture.componentRef.setInput('approvedIds', new Set());
     fixture.detectChanges();
 
-    const root = fixture.nativeElement as HTMLElement;
+    const root = overlay();
     const sectionFor = (skillName: string): HTMLElement => {
       const section = root.querySelector<HTMLElement>(
         `section[aria-label="${skillName}"]`,

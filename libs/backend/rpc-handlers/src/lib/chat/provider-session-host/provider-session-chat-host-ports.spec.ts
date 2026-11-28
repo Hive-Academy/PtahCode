@@ -40,8 +40,9 @@ jest.mock('@ptah-extension/agent-sdk', () => {
     UNROUTABLE_PERMISSION_TIMEOUT_MS: abort.UNROUTABLE_PERMISSION_TIMEOUT_MS,
     ProviderSessionChatAdapterError: jest.requireActual<
       typeof import('../../../../../agent-sdk/src/lib/provider-session/provider-session-chat-adapter-error')
-    >('../../../../../agent-sdk/src/lib/provider-session/provider-session-chat-adapter-error')
-      .ProviderSessionChatAdapterError,
+    >(
+      '../../../../../agent-sdk/src/lib/provider-session/provider-session-chat-adapter-error',
+    ).ProviderSessionChatAdapterError,
     PTAH_UI_HINT_CODEX: 'PTAH-UI-HINT',
     // The resolver contract of `resolveSessionCapabilityPolicy`: no resolver
     // fails closed to an unverified policy that keeps ptah.
@@ -138,7 +139,12 @@ describe('provider-session chat host ports', () => {
       },
       hostCapabilities: { nativeCodex: false, providerSessions: ['grok'] },
       webviewManager: { broadcastMessage },
-      logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+      logger: {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+      },
       info: {
         id: 'provider-session',
         name: 'Grok',
@@ -158,7 +164,8 @@ describe('provider-session chat host ports', () => {
       },
       pool,
       openRequests,
-      metadata: metadata as unknown as ProviderSessionChatHostPortsDeps['metadata'],
+      metadata:
+        metadata as unknown as ProviderSessionChatHostPortsDeps['metadata'],
       approvals: { respond },
       broadcaster: { streamEventsToWebview },
       ...extra,
@@ -193,7 +200,10 @@ describe('provider-session chat host ports', () => {
       workspaceId: workspace,
       providerSession: { profile: 'grok' },
     },
-    providerSessionThread: { nativeSessionId: 'native-1', processGeneration: 1 },
+    providerSessionThread: {
+      nativeSessionId: 'native-1',
+      processGeneration: 1,
+    },
     ...overrides,
   });
 
@@ -203,27 +213,61 @@ describe('provider-session chat host ports', () => {
       h.ports.prepare({ projectPath: workspace, model: 'grok-4' }),
     ).resolves.toEqual({
       seed: seed(),
-      open: { ptahMcp: false, userMcp: [], instructions: PROVIDER_SESSION_PTAH_IDENTITY },
+      open: {
+        ptahMcp: false,
+        userMcp: [],
+        instructions: PROVIDER_SESSION_PTAH_IDENTITY,
+      },
     });
     expect(h.metadata.get).not.toHaveBeenCalled();
     expect(h.resolveExecutionProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ workspacePath: workspace, existingIdentity: undefined }),
+      expect.objectContaining({
+        workspacePath: workspace,
+        existingIdentity: undefined,
+      }),
     );
   });
 
   it('prepares a resume with the stored native id and binding', async () => {
     const stored = storedSession();
     const h = harness(stored);
-    await expect(h.ports.prepare({ projectPath: workspace }, id)).resolves.toEqual({
+    await expect(
+      h.ports.prepare({ projectPath: workspace }, id),
+    ).resolves.toEqual({
       seed: seed(),
       resume: { nativeSessionId: 'native-1' },
       // Built for a restored session too; the runtime decides per profile
       // whether the agent is sent them again.
-      open: { ptahMcp: false, userMcp: [], instructions: PROVIDER_SESSION_PTAH_IDENTITY },
+      open: {
+        ptahMcp: false,
+        userMcp: [],
+        instructions: PROVIDER_SESSION_PTAH_IDENTITY,
+      },
     });
     expect(h.resolveExecutionProfile).toHaveBeenCalledWith(
-      expect.objectContaining({ existingIdentity: stored.providerSessionExecution }),
+      expect.objectContaining({
+        existingIdentity: stored.providerSessionExecution,
+      }),
     );
+  });
+
+  it('adds the saved permission level only when the caller sent none', async () => {
+    const readSavedPermissionLevel = jest.fn(() => 'ask' as const);
+    const h = harness(storedSession(), { readSavedPermissionLevel });
+    await expect(
+      h.ports.prepare({ projectPath: workspace }, id),
+    ).resolves.toMatchObject({
+      permission: 'ask',
+    });
+    expect(readSavedPermissionLevel).toHaveBeenCalledWith(seed().workspacePath);
+
+    readSavedPermissionLevel.mockClear();
+    const explicit = await h.ports.prepare(
+      { projectPath: workspace, permissionLevel: 'yolo' },
+      id,
+    );
+    expect(explicit).not.toHaveProperty('permission');
+    expect(readSavedPermissionLevel).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -232,7 +276,9 @@ describe('provider-session chat host ports', () => {
     ['a Codex binding', storedSession({ providerSessionExecution: undefined })],
   ])('refuses a resume with %s as resume-failed', async (_label, stored) => {
     const h = harness(stored);
-    await expect(h.ports.prepare({ projectPath: workspace }, id)).rejects.toMatchObject({
+    await expect(
+      h.ports.prepare({ projectPath: workspace }, id),
+    ).rejects.toMatchObject({
       name: 'ProviderSessionChatAdapterError',
       code: 'resume-failed',
     });
@@ -245,7 +291,9 @@ describe('provider-session chat host ports', () => {
       runtime: 'claude-sdk',
       model: 'sonnet',
     });
-    await expect(h.ports.prepare({ projectPath: workspace })).rejects.toMatchObject({
+    await expect(
+      h.ports.prepare({ projectPath: workspace }),
+    ).rejects.toMatchObject({
       code: 'unavailable',
     });
   });
@@ -272,10 +320,13 @@ describe('provider-session chat host ports', () => {
       nativeSessionId: 'native-1',
       model: 'grok-4',
     });
-    expect(h.openRequests.attachApprovals).toHaveBeenCalledWith(id, h.approvals);
-    expect(h.openRequests.attachApprovals.mock.invocationCallOrder[0]).toBeLessThan(
-      h.pool.acquire.mock.invocationCallOrder[0],
+    expect(h.openRequests.attachApprovals).toHaveBeenCalledWith(
+      id,
+      h.approvals,
     );
+    expect(
+      h.openRequests.attachApprovals.mock.invocationCallOrder[0],
+    ).toBeLessThan(h.pool.acquire.mock.invocationCallOrder[0]);
     expect(h.pool.acquire).toHaveBeenCalledWith(id, h.poolRequest, signal);
     expect(h.ports.tabId(id)).toBe('tab-1');
   });
@@ -295,10 +346,17 @@ describe('provider-session chat host ports', () => {
 
   it('keeps the routing of a session whose re-acquire fails', async () => {
     const h = harness();
-    const request = { sessionId: id, tabId: 'tab-1', seed: seed(), approvals: h.approvals };
+    const request = {
+      sessionId: id,
+      tabId: 'tab-1',
+      seed: seed(),
+      approvals: h.approvals,
+    };
     await h.ports.acquire(request, new AbortController().signal);
     h.pool.acquire.mockRejectedValueOnce(new Error('respawn failed'));
-    await expect(h.ports.acquire(request, new AbortController().signal)).rejects.toThrow();
+    await expect(
+      h.ports.acquire(request, new AbortController().signal),
+    ).rejects.toThrow();
     expect(h.openRequests.detachApprovals).not.toHaveBeenCalled();
     expect(h.ports.tabId(id)).toBe('tab-1');
   });
@@ -328,7 +386,9 @@ describe('provider-session chat host ports', () => {
   it('forgets the sink even when the pool release fails', async () => {
     const h = harness();
     h.pool.release.mockRejectedValueOnce(new Error('close failed'));
-    await expect(h.ports.release(id, 'session-ended')).rejects.toThrow('close failed');
+    await expect(h.ports.release(id, 'session-ended')).rejects.toThrow(
+      'close failed',
+    );
     expect(h.openRequests.detachApprovals).toHaveBeenCalledWith(id);
   });
 
@@ -352,13 +412,13 @@ describe('provider-session chat host ports', () => {
       thread: { nativeSessionId: 'native-1', processGeneration: 2 },
     };
     await h.ports.identity.save(id, binding, 'Title');
-    const [sessionId, updater, thread, title] =
-      h.metadata.updateProviderSessionExecution.mock.calls[0] as unknown as [
-        SessionId,
-        () => unknown,
-        () => unknown,
-        string,
-      ];
+    const [sessionId, updater, thread, title] = h.metadata
+      .updateProviderSessionExecution.mock.calls[0] as unknown as [
+      SessionId,
+      () => unknown,
+      () => unknown,
+      string,
+    ];
     expect(sessionId).toBe(id);
     expect(updater()).toBe(binding.execution);
     expect(thread()).toEqual(binding.thread);
@@ -371,12 +431,19 @@ describe('provider-session chat host ports', () => {
       { sessionId: id, tabId: 'tab-1', seed: seed(), approvals: h.approvals },
       new AbortController().signal,
     );
-    const event = { id: 'e1', eventType: 'message_start' } as FlatStreamEventUnion;
+    const event = {
+      id: 'e1',
+      eventType: 'message_start',
+    } as FlatStreamEventUnion;
     async function* stream() {
       yield event;
     }
     await h.ports.publish(id, stream());
-    expect(h.streamEventsToWebview).toHaveBeenCalledWith(id, expect.anything(), 'tab-1');
+    expect(h.streamEventsToWebview).toHaveBeenCalledWith(
+      id,
+      expect.anything(),
+      'tab-1',
+    );
     expect(h.drained).toEqual([event]);
     await h.ports.publishNotice(id, [event]);
     expect(h.broadcastMessage).toHaveBeenCalledWith(MESSAGE_TYPES.CHAT_CHUNK, {
@@ -395,7 +462,9 @@ describe('provider-session chat host ports', () => {
       request: { requestId: 'r1', title: 'Edit file' },
     });
     const payload = h.broadcastMessage.mock.calls[0][1] as { id: string };
-    expect(h.ports.handlePermissionResponse({ id: payload.id, decision: 'allow' })).toBe(true);
+    expect(
+      h.ports.handlePermissionResponse({ id: payload.id, decision: 'allow' }),
+    ).toBe(true);
     expect(h.respond).toHaveBeenCalledWith(
       { sessionId: id, threadId: 'native-1', requestId: 'r1' },
       {
@@ -439,13 +508,22 @@ describe('provider-session chat host ports', () => {
         projectPath: workspace,
         mcpServerRunning: true,
         systemPrompt: 'Be brief.',
-        mcpServersOverride: { docs: { type: 'http', url: 'https://docs.example/mcp' } },
+        mcpServersOverride: {
+          docs: { type: 'http', url: 'https://docs.example/mcp' },
+        },
       });
       expect(apply).toHaveBeenCalledWith('/real', 'fp');
       expect(buildSessionStartBlock).toHaveBeenCalledWith(workspace);
       expect(prepared.open).toEqual({
         ptahMcp: true,
-        userMcp: [{ type: 'http', name: 'docs', url: 'https://docs.example/mcp', headers: [] }],
+        userMcp: [
+          {
+            type: 'http',
+            name: 'docs',
+            url: 'https://docs.example/mcp',
+            headers: [],
+          },
+        ],
         instructions: [
           '## Roster',
           PROVIDER_SESSION_PTAH_IDENTITY,
@@ -454,17 +532,31 @@ describe('provider-session chat host ports', () => {
       });
       const open = prepared.open;
       await h.ports.acquire(
-        { sessionId: id, seed: seed(), approvals: h.approvals, ...(open ? { open } : {}) },
+        {
+          sessionId: id,
+          seed: seed(),
+          approvals: h.approvals,
+          ...(open ? { open } : {}),
+        },
         new AbortController().signal,
       );
-      expect(h.openRequests.request).toHaveBeenCalledWith(expect.objectContaining({ open }));
+      expect(h.openRequests.request).toHaveBeenCalledWith(
+        expect.objectContaining({ open }),
+      );
     });
 
     it('refuses an unsupported option before anything resolves', async () => {
       const h = harness();
       await expect(
-        h.ports.prepare({ tabId: 'tab-1', projectPath: workspace, corpusName: 'docs' }),
-      ).rejects.toMatchObject({ code: 'unsupported-option', option: 'corpusName' });
+        h.ports.prepare({
+          tabId: 'tab-1',
+          projectPath: workspace,
+          corpusName: 'docs',
+        }),
+      ).rejects.toMatchObject({
+        code: 'unsupported-option',
+        option: 'corpusName',
+      });
       expect(h.resolveExecutionProfile).not.toHaveBeenCalled();
     });
 
@@ -488,7 +580,12 @@ describe('provider-session chat host ports', () => {
       // The next open of the id starts clean: nothing marked it released.
       await expect(
         h.ports.acquire(
-          { sessionId: id, tabId: 'tab-2', seed: seed(), approvals: h.approvals },
+          {
+            sessionId: id,
+            tabId: 'tab-2',
+            seed: seed(),
+            approvals: h.approvals,
+          },
           new AbortController().signal,
         ),
       ).resolves.toBe(h.live);

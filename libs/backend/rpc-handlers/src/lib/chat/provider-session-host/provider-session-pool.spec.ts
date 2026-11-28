@@ -113,7 +113,17 @@ function harness(options: { load?: boolean } = {}) {
     ...(nativeSessionId ? { nativeSessionId } : {}),
     build: (context) => {
       contexts.push(context);
-      return { attach: context.attach } as ProviderSessionOpenRequest;
+      return {
+        profile: PROFILE,
+        binaryPath: 'fake-provider',
+        policy: { permission: 'ask', cwd: 'D:/work' },
+        mcp: [],
+        ...(context.attach ? { attach: context.attach } : {}),
+        approvals: { request: async () => 'decline' },
+        baseEnv: {},
+        consumer: 'chat',
+        runId: 'test-chat',
+      };
     },
   });
   return { pool, open, opened, sessions, pending, credentials, pidLedger, logger, request, contexts };
@@ -630,10 +640,9 @@ describe('ProviderSessionPool pid ledger with spawn reports (S1, S3)', () => {
 describe('ProviderSessionPool open request build (N-3, MCP profile)', () => {
   it('builds only when it opens: a live entry is reused without a build', async () => {
     const h = harness();
-    const build = jest.fn(async (context: ProviderSessionPoolOpenContext) => ({
-      attach: context.attach,
-    }) as ProviderSessionOpenRequest);
-    const request: ProviderSessionPoolRequest = { profile: PROFILE, workspaceRoot: 'D:/work', build };
+    const fixture = h.request();
+    const build = jest.fn(fixture.build);
+    const request: ProviderSessionPoolRequest = { ...fixture, build };
     await h.pool.acquire('s1', request);
     await h.pool.acquire('s1', request);
     expect(build).toHaveBeenCalledTimes(1);

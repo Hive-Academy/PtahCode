@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { Component, signal } from '@angular/core';
 import { provideRouter, Router } from '@angular/router';
@@ -9,6 +10,10 @@ import {
 } from '@ptah-extension/core';
 import { CronStateService } from '../services/cron-state.service';
 import { CronSchedulerTabComponent } from './cron-scheduler-tab.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 @Component({ standalone: true, template: '' })
 class ReviewDestinationStub {}
@@ -116,14 +121,14 @@ describe('CronSchedulerTabComponent', () => {
   it('opens the create form from the New job action', () => {
     const fixture = configure(true);
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.querySelector('[data-testid="cron-form"]')).toBeNull();
+    expect(overlay().querySelector('[data-testid="cron-form"]')).toBeNull();
 
     (
       el.querySelector('[data-testid="cron-new-job-btn"]') as HTMLButtonElement
     ).click();
     fixture.detectChanges();
 
-    expect(el.querySelector('[data-testid="cron-form"]')).not.toBeNull();
+    expect(overlay().querySelector('[data-testid="cron-form"]')).not.toBeNull();
     expect(fixture.componentInstance.editingJob()).toBeNull();
   });
 

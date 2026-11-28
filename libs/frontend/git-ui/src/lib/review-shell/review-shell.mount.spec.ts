@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * ReviewShellComponent with its real header and review canvas (TASK_2026_576
  * Batch 43). Ports the `git-dock.mount.spec.ts` cases that still apply: the
@@ -28,6 +29,10 @@ import type { GitReviewService as ReviewType } from '../services/git-review.serv
 import type { GitStatusService as StatusType } from '../services/git-status.service';
 import type { FileViewOpenRequest } from '../types/file-view.types';
 import type { ReviewShellComponent as ShellType } from './review-shell.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 @Component({
   selector: 'ptah-pierre-diff-host',
@@ -212,7 +217,7 @@ describe('ReviewShellComponent mounted with its real header and canvas', () => {
   function query<T extends HTMLElement = HTMLElement>(
     selector: string,
   ): T | null {
-    return (fixture.nativeElement as HTMLElement).querySelector<T>(selector);
+    return (fixture.nativeElement as HTMLElement).querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
   }
 
   it('renders the real header, the tablist and the canvas from a real status read', () => {

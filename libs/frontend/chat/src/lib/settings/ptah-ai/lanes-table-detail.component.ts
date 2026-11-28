@@ -164,7 +164,8 @@ export class LanesTableDetailComponent {
     return this.openKind() === kind;
   }
   protected focusCredentialKey(): void {
-    this.element.nativeElement
+    // The credential form is projected into the CDK overlay, outside this host.
+    this.element.nativeElement.ownerDocument
       .querySelector<HTMLElement>('[data-testid="cursor-credential-key"]')
       ?.focus();
   }
