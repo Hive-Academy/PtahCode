@@ -48,7 +48,10 @@ export interface ProviderHttpMcpAttachment {
   /** `'ptah'` for Ptah's own server; a user server keeps its configured name. */
   readonly name: string;
   readonly url: string;
-  readonly headers: readonly { readonly name: string; readonly value: string }[];
+  readonly headers: readonly {
+    readonly name: string;
+    readonly value: string;
+  }[];
 }
 
 /** A user-configured local MCP server, as ACP `McpServer::Stdio`. */
@@ -61,8 +64,7 @@ export interface ProviderStdioMcpAttachment {
 }
 
 export type ProviderMcpAttachment =
-  | ProviderHttpMcpAttachment
-  | ProviderStdioMcpAttachment;
+  ProviderHttpMcpAttachment | ProviderStdioMcpAttachment;
 
 export interface ProviderSessionAttach {
   readonly nativeSessionId: string;
@@ -190,6 +192,7 @@ export interface ProviderSession {
   setPermission(
     permission: ProviderSessionPolicy['permission'],
   ): Promise<AppliedSettings>;
+  getPermission?(): ProviderSessionPolicy['permission'] | undefined;
   isTurnRunning(): boolean;
   getPid(): number | undefined;
   close(): Promise<void>;

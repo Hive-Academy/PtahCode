@@ -2,6 +2,7 @@ import {
   getProviderSessionProfile,
   type AgentModelInfo,
   type IAgentAdapter,
+  type PermissionLevel,
   type RuntimeHostCapabilities,
   type SessionId,
 } from '@ptah-extension/shared';
@@ -39,6 +40,8 @@ export interface NativeChatAdapter extends IAgentAdapter {
   owns(sessionId: SessionId): boolean;
   /** Resolves a live native thread; returns undefined for an opening tab. */
   resolveLiveSessionId?(callerId: string): SessionId | undefined;
+  /** Reads the effective level for a resolved session ID. */
+  getPermissionLevel?(sessionId: string): PermissionLevel | undefined;
   listSessionModels(sessionId: SessionId): Promise<readonly AgentModelInfo[]>;
 }
 
@@ -234,6 +237,21 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     for (const native of [this.native, this.providerSessions]) {
       const resolved = native?.resolveLiveSessionId?.(callerId);
       if (resolved === callerId) return resolved;
+    }
+    return undefined;
+  }
+  /**
+   * Reads the effective level for a session ID, or for the chat tab ID that a
+   * Ptah MCP caller carries before (or instead of) its published session ID.
+   */
+  getPermissionLevel(sessionId: string): PermissionLevel | undefined {
+    for (const native of [this.native, this.providerSessions]) {
+      if (!native?.getPermissionLevel) continue;
+      const direct = native.getPermissionLevel(sessionId);
+      if (direct) return direct;
+      const live = native.resolveLiveSessionId?.(sessionId);
+      const level = live ? native.getPermissionLevel(live) : undefined;
+      if (level) return level;
     }
     return undefined;
   }

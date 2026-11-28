@@ -16,6 +16,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   MESSAGE_TYPES,
+  type PermissionLevel,
   type PermissionResponse,
   type ProviderInfo,
   type SessionId,
@@ -36,7 +37,8 @@ import {
 } from './provider-session-start-options';
 
 export interface ProviderSessionChatHostPortsDeps
-  extends ChatRuntimeAdmissionDeps,
+  extends
+    ChatRuntimeAdmissionDeps,
     Pick<
       ProviderSessionStartOptionsDeps,
       'memory' | 'capabilityResolver' | 'harnessPolicySync'
@@ -54,6 +56,10 @@ export interface ProviderSessionChatHostPortsDeps
     'get' | 'updateProviderSessionExecution'
   >;
   readonly approvals: Pick<SessionApprovalRouter, 'respond'>;
+  /** The saved permission level of a workspace, for a start or resume without one. */
+  readonly readSavedPermissionLevel?: (
+    workspacePath: string,
+  ) => PermissionLevel;
   readonly broadcaster: Pick<ChatStreamBroadcaster, 'streamEventsToWebview'>;
   readonly hostAttention?: Pick<HostAttentionCoordinator, 'resolve'>;
 }
@@ -81,7 +87,8 @@ export function createProviderSessionChatHostPorts(
   const inFlight = new Map<SessionId, Set<{ released: boolean }>>();
   const markReleased = (sessionId?: SessionId) => {
     const sets = sessionId ? [inFlight.get(sessionId)] : [...inFlight.values()];
-    for (const set of sets) for (const token of set ?? []) token.released = true;
+    for (const set of sets)
+      for (const token of set ?? []) token.released = true;
   };
   const tabId = (sessionId: SessionId) => tabs.get(sessionId) ?? sessionId;
   const approval = createProviderSessionApprovalPresentation({
@@ -111,6 +118,7 @@ export function createProviderSessionChatHostPorts(
 
   return {
     info: deps.info,
+    readSavedPermissionLevel: deps.readSavedPermissionLevel,
     async prepare(config, sessionId) {
       // Refused before anything resolves or spawns.
       startOptions.check(config);
@@ -121,10 +129,19 @@ export function createProviderSessionChatHostPorts(
       const open = await startOptions.resolve(config, {
         workspacePath: execution.seed.workspacePath,
       });
+      // A process opened earlier (e.g. for a history read) keeps the level it
+      // opened at, so a session without a level re-applies the saved one.
+      const permission =
+        config.permissionLevel === undefined
+          ? deps.readSavedPermissionLevel?.(execution.seed.workspacePath)
+          : undefined;
       return {
         seed: execution.seed,
-        ...(stored ? { resume: { nativeSessionId: stored.nativeSessionId } } : {}),
+        ...(stored
+          ? { resume: { nativeSessionId: stored.nativeSessionId } }
+          : {}),
         open,
+        ...(permission ? { permission } : {}),
       };
     },
     async acquire(request, signal) {
@@ -146,6 +163,7 @@ export function createProviderSessionChatHostPorts(
             ? { nativeSessionId: request.resume.nativeSessionId }
             : {}),
           ...(seed.model ? { model: seed.model } : {}),
+          ...(request.permission ? { permission: request.permission } : {}),
           ...(request.open ? { open: request.open } : {}),
         });
         // Before the open: the agent may ask for approval while it starts.
