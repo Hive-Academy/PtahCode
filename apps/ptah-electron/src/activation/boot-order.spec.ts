@@ -57,10 +57,7 @@ import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
 
 import { BootCoordinator } from './boot-coordinator';
 import { createHeavyServicesBooter } from './boot-heavy-services';
-import {
-  startAgentAdapterInitialization,
-  startMembershipVerification,
-} from './bootstrap';
+import { startAgentAdapterInitialization } from './bootstrap';
 
 const WORKSPACE = '/ws';
 
@@ -495,18 +492,13 @@ describe('activation order — the persistence gate (TASK_2026_347)', () => {
 });
 
 describe('activation order — the network never gates the window', () => {
-  it('leaves verifyLicense and agentAdapter.initialize pending across window creation', async () => {
-    // Both are started with `void` in `bootstrapElectron`. Modelling that here
-    // with hanging stubs shows the window marker is reached while neither has
-    // resolved — which is precisely what awaiting them used to prevent.
-    let settledLicense = false;
+  it('leaves agentAdapter.initialize pending across window creation', async () => {
+    // It is started with `void` in `bootstrapElectron`. Modelling that here
+    // with a hanging stub shows the window marker is reached while it has not
+    // resolved — which is precisely what awaiting it used to prevent.
     let settledAdapter = false;
 
     const container = makeContainer([
-      [
-        TOKENS.LICENSE_SERVICE,
-        { verifyLicense: jest.fn(() => new Promise(() => undefined)) },
-      ],
       [
         TOKENS.AGENT_ADAPTER,
         {
@@ -516,9 +508,6 @@ describe('activation order — the network never gates the window', () => {
       ],
     ]);
 
-    void startMembershipVerification(container).then(() => {
-      settledLicense = true;
-    });
     void startAgentAdapterInitialization(container).then(() => {
       settledAdapter = true;
     });
@@ -528,7 +517,6 @@ describe('activation order — the network never gates the window', () => {
     record('createMainWindow');
 
     expect(mockCallOrder).toContain('createMainWindow');
-    expect(settledLicense).toBe(false);
     expect(settledAdapter).toBe(false);
   });
 });

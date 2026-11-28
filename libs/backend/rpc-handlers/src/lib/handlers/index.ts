@@ -35,7 +35,6 @@ export { PtahCliRpcHandlers } from './ptah-cli-rpc.handlers';
 export { SetupRpcHandlers } from './setup-rpc.handlers';
 export { WizardGenerationRpcHandlers } from './wizard-generation-rpc.handlers';
 export { ConfigRpcHandlers } from './config-rpc.handlers';
-export { LicenseRpcHandlers } from './license-rpc.handlers';
 export { ChatRpcHandlers } from './chat-rpc.handlers';
 export { AuthRpcHandlers } from './auth-rpc.handlers';
 export { asAuthCommandRunner } from './auth-command-runner';

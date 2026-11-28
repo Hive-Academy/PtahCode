@@ -52,7 +52,7 @@ describe('isSdkAuthSecretKey', () => {
 
   it('ignores keys outside the ptah.auth namespace', () => {
     expect(isSdkAuthSecretKey('ptah.webSearch.apiKey.tavily')).toBe(false);
-    expect(isSdkAuthSecretKey('ptah.licenseKey')).toBe(false);
+    expect(isSdkAuthSecretKey('ptah.model.selected')).toBe(false);
   });
 
   it('ignores every declared connector slot family and id', () => {

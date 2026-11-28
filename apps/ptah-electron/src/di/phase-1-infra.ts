@@ -3,8 +3,8 @@
  *
  * Registers (in order):
  *   - Platform-agnostic vscode-core services via registerVsCodeCorePlatformAgnostic
- *     (Phase 1.0b: SENTRY_SERVICE, Phase 1.1: LICENSE_SERVICE, Phase 1.1b:
- *     AUTH_SECRETS_SERVICE, Phase 1.2: RPC_HANDLER, MESSAGE_VALIDATOR,
+ *     (Phase 1.0b: SENTRY_SERVICE, Phase 1.1b: AUTH_SECRETS_SERVICE,
+ *     Phase 1.2: RPC_HANDLER, MESSAGE_VALIDATOR,
  *     AGENT_SESSION_WATCHER_SERVICE, SUBAGENT_REGISTRY_SERVICE)
  *   - Phase 1.3: TOKENS.FILE_SYSTEM_MANAGER shim (delegates to IFileSystemProvider)
  *   - Phase 1.4: TOKENS.CONFIG_MANAGER shim (file-based settings routing)
@@ -130,7 +130,7 @@ export function registerPhase1Infra(
     });
   }
   // The shim itself — and its own try/catch — belongs to `vscode-core`, which
-  // owns the token and the shape `LicenseService` reads off it. Only the two
+  // owns the token and the shape `AuthSecretsService` reads off it. Only the two
   // paths are this host's.
   registerExtensionContextShim(container, logger, {
     appPath: options.appPath,

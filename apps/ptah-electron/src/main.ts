@@ -140,7 +140,6 @@ if (!gotLock) {
   // Held for the process lifetime so the Electron Tray is never garbage
   // collected (an unreferenced Tray disappears from the system tray).
   const trayRef: { current: PtahTrayService | null } = { current: null };
-  let revalidationInterval: ReturnType<typeof setInterval> | null = null;
   let updateCheckInterval: ReturnType<typeof setInterval> | null = null;
   let flushWorkspacePersistence: (() => void) | null = null;
   let sentryFlushed = false;
@@ -444,7 +443,6 @@ if (!gotLock) {
       coordinator,
     });
     bootStep('registerPostWindow done');
-    revalidationInterval = post.revalidationInterval;
     updateCheckInterval = post.updateCheckInterval;
 
     // POST-WINDOW: SQLite, memory, skills, harness reconcile, session import.
@@ -544,10 +542,6 @@ if (!gotLock) {
       flushWorkspacePersistence: () => flushWorkspacePersistence?.(),
       flushSessionMetadataStores: () => flushSessionMetadataStores(),
       clearTimers: () => {
-        if (revalidationInterval !== null) {
-          clearInterval(revalidationInterval);
-          revalidationInterval = null;
-        }
         if (updateCheckInterval !== null) {
           clearInterval(updateCheckInterval);
           updateCheckInterval = null;

@@ -1,4 +1,4 @@
-<div class="dashboard-page min-h-full bg-surface-0" data-testid="dashboard-grid">
+<div class="min-h-full bg-surface-0" data-testid="dashboard-grid">
   <ptah-page-header
     title="Dashboard"
     description="Usage, plan limits and spend across your providers"
@@ -13,9 +13,6 @@
       <ptah-plan-limits-panel dashboardLimits />
     </ptah-usage-dashboard>
 
-    <div class="dashboard-secondary grid grid-cols-1 gap-ptah-section" data-testid="dashboard-secondary">
-      <ptah-skill-selection-card />
-      <ptah-builders-card />
-    </div>
+    <ptah-skill-selection-card />
   </div>
 </div>

@@ -65,8 +65,8 @@ import { TabState, SendMessageOptions } from '@ptah-extension/chat-types';
  * - CompactionLifecycleService — SDK session-compaction state machine
  * - MessageDispatchService — Send/queue routing + slash-command guard
  * - SessionStatsAggregatorService — SESSION_STATS aggregation
- * - ChatLifecycleService — Bootstrap, license, agent-summary, ID resolution,
- *   error handling
+ * - ChatLifecycleService — Bootstrap, agent-summary, ID resolution, error
+ *   handling
  */
 @Injectable({ providedIn: 'root' })
 export class ChatStore {
@@ -125,7 +125,6 @@ export class ChatStore {
   readonly unmatchedPermissions = this.permissionHandler.unmatchedPermissions;
   readonly questionRequests = this.permissionHandler.questionRequests;
   readonly resumableSubagents = this.sessionLoader.resumableSubagents;
-  readonly licenseStatus = this.lifecycle.licenseStatus;
 
   /**
    * Registry-derived compaction state for one tab. Every compaction surface
@@ -298,11 +297,6 @@ export class ChatStore {
   /** Dismiss interrupted subagents for good. Delegates to SessionLoaderService. */
   dismissResumableSubagents(agents: SubagentRecord[]): Promise<void> {
     return this.sessionLoader.dismissResumableSubagents(agents);
-  }
-
-  /** License status fetch with retry. Delegates to ChatLifecycleService. */
-  async fetchLicenseStatus(retries = 3): Promise<void> {
-    return this.lifecycle.fetchLicenseStatus(retries);
   }
 
   /** Handle compaction start. Delegates to CompactionLifecycleService. */

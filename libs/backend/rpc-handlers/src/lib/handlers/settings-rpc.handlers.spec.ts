@@ -13,7 +13,6 @@
  *     no real FS I/O occurs.
  *   - `userInteraction.showOpenDialog` is stubbed to control the "open dialog"
  *     branch without touching the file system.
- *   - Fake timers are used where `setTimeout` appears (license-import path).
  *
  * Behavioral contracts locked in:
  *   - register() wires all four methods.
@@ -38,10 +37,6 @@
  *     settings export version" message, no mutations.
  *   - settings:import: version === current → passes.
  *   - settings:import: version < current → passes (backward compat).
- *   - settings:import: license key imported, verify succeeds → reloadWindow
- *     scheduled.
- *   - settings:import: license key imported, verify fails → reloadWindow NOT
- *     called; result still reports import success.
  *   - settings:import: config values applied via workspaceProvider.setConfiguration.
  *
  * Source-under-test:
@@ -58,11 +53,7 @@ jest.mock('node:fs/promises', () => ({
   readFile: jest.fn(),
 }));
 
-import type {
-  Logger,
-  LicenseService,
-  LicenseStatus,
-} from '@ptah-extension/vscode-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import {
   createMockRpcHandler,
   type MockRpcHandler,
@@ -71,7 +62,6 @@ import type {
   ISaveDialogProvider,
   IUserInteraction,
   IWorkspaceProvider,
-  IPlatformCommands,
 } from '@ptah-extension/platform-core';
 import { FILE_BASED_SETTINGS_DEFAULTS } from '@ptah-extension/platform-core';
 import type {
@@ -116,21 +106,9 @@ type MockWorkspaceProvider = jest.Mocked<
   Pick<IWorkspaceProvider, 'setConfiguration' | 'getConfiguration'>
 >;
 
-type MockPlatformCommands = jest.Mocked<
-  Pick<IPlatformCommands, 'reloadWindow'>
->;
-
-type MockLicenseService = jest.Mocked<Pick<LicenseService, 'verifyLicense'>>;
-
 // ---------------------------------------------------------------------------
 // Factory helpers
 // ---------------------------------------------------------------------------
-
-function makeLicenseStatus(
-  overrides: Partial<LicenseStatus> = {},
-): LicenseStatus {
-  return { valid: true, tier: 'community', ...overrides } as LicenseStatus;
-}
 
 /** Minimal valid export payload for the current schema version. */
 function makeValidExport(
@@ -165,8 +143,6 @@ interface Harness {
   saveDialogProvider: MockSaveDialogProvider;
   userInteraction: MockUserInteraction;
   workspaceProvider: MockWorkspaceProvider;
-  platformCommands: MockPlatformCommands;
-  licenseService: MockLicenseService;
 }
 
 function makeHarness(): Harness {
@@ -194,14 +170,6 @@ function makeHarness(): Harness {
     getConfiguration: jest.fn().mockReturnValue(undefined),
   };
 
-  const platformCommands: MockPlatformCommands = {
-    reloadWindow: jest.fn().mockResolvedValue(undefined),
-  };
-
-  const licenseService: MockLicenseService = {
-    verifyLicense: jest.fn(),
-  };
-
   const handlers = new SettingsRpcHandlers(
     logger as unknown as Logger,
     rpcHandler as unknown as import('@ptah-extension/vscode-core').RpcHandler,
@@ -210,8 +178,6 @@ function makeHarness(): Harness {
     saveDialogProvider as unknown as ISaveDialogProvider,
     userInteraction as unknown as IUserInteraction,
     workspaceProvider as unknown as IWorkspaceProvider,
-    platformCommands as unknown as IPlatformCommands,
-    licenseService as unknown as LicenseService,
   );
 
   return {
@@ -223,8 +189,6 @@ function makeHarness(): Harness {
     saveDialogProvider,
     userInteraction,
     workspaceProvider,
-    platformCommands,
-    licenseService,
   };
 }
 
@@ -898,101 +862,6 @@ describe('SettingsRpcHandlers', () => {
       );
       expect(result.result.imported).toContain('config:model.selected');
       expect(result.result.skipped).not.toContain('config:model.selected');
-    });
-
-    // -----------------------------------------------------------------------
-    // License key import path
-    // -----------------------------------------------------------------------
-
-    it('schedules reloadWindow after successful license key import + verify', async () => {
-      jest.useFakeTimers();
-      try {
-        const h = makeHarness();
-        (h.userInteraction.showOpenDialog as jest.Mock).mockResolvedValue([
-          '/tmp/with-license.json',
-        ]);
-        const exportPayload = makeValidExport({ licenseKey: 'ptah_lic_abc' });
-        seedFile(JSON.stringify(exportPayload));
-        h.importService.importSettings.mockResolvedValue(
-          makeImportResult({ imported: ['ptah.licenseKey'] }),
-        );
-        h.licenseService.verifyLicense.mockResolvedValue(
-          makeLicenseStatus({ valid: true, tier: 'builders' }),
-        );
-        h.handlers.register();
-
-        await call(h, 'settings:import');
-
-        // reloadWindow must be deferred — not called immediately
-        expect(h.platformCommands.reloadWindow).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1500);
-        expect(h.platformCommands.reloadWindow).toHaveBeenCalledTimes(1);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('does NOT schedule reloadWindow when license verify returns valid=false', async () => {
-      jest.useFakeTimers();
-      try {
-        const h = makeHarness();
-        (h.userInteraction.showOpenDialog as jest.Mock).mockResolvedValue([
-          '/tmp/invalid-license.json',
-        ]);
-        const exportPayload = makeValidExport({ licenseKey: 'ptah_lic_bad' });
-        seedFile(JSON.stringify(exportPayload));
-        h.importService.importSettings.mockResolvedValue(
-          makeImportResult({ imported: ['ptah.licenseKey'] }),
-        );
-        h.licenseService.verifyLicense.mockResolvedValue(
-          makeLicenseStatus({ valid: false, tier: 'expired' }),
-        );
-        h.handlers.register();
-
-        const result = await call<{
-          cancelled: boolean;
-          result: SettingsImportResult;
-        }>(h, 'settings:import');
-
-        jest.advanceTimersByTime(1500);
-        // The import itself still reports success for the key that was written
-        expect(result.cancelled).toBe(false);
-        // reloadWindow must NOT fire — stale cache would lock user out
-        expect(h.platformCommands.reloadWindow).not.toHaveBeenCalled();
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    it('does NOT schedule reloadWindow when license verify throws', async () => {
-      jest.useFakeTimers();
-      try {
-        const h = makeHarness();
-        (h.userInteraction.showOpenDialog as jest.Mock).mockResolvedValue([
-          '/tmp/verify-throws.json',
-        ]);
-        seedFile(
-          JSON.stringify(makeValidExport({ licenseKey: 'ptah_lic_xyz' })),
-        );
-        h.importService.importSettings.mockResolvedValue(
-          makeImportResult({ imported: ['ptah.licenseKey'] }),
-        );
-        h.licenseService.verifyLicense.mockRejectedValue(
-          new Error('network error'),
-        );
-        h.handlers.register();
-
-        const result = await call<{
-          cancelled: boolean;
-          result: SettingsImportResult;
-        }>(h, 'settings:import');
-
-        jest.advanceTimersByTime(1500);
-        expect(result.cancelled).toBe(false);
-        expect(h.platformCommands.reloadWindow).not.toHaveBeenCalled();
-      } finally {
-        jest.useRealTimers();
-      }
     });
 
     // -----------------------------------------------------------------------

@@ -63,7 +63,6 @@ export const ALLOWED_METHOD_PREFIXES = [
   'auth:',
   'setup-status:',
   'llm:', // LLM provider management (API keys, provider status)
-  'license:', // Ptah Builders membership status and key entry
   'wizard:', // Setup wizard analysis and skill selection
   'command:', // Webview command execution (ptah.* commands only)
   'enhancedPrompts:', // Enhanced Prompts system (status, wizard, regenerate)

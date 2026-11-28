@@ -138,12 +138,10 @@ describe('ElectronShellComponent Machines tab', () => {
 
   afterEach(() => fixture.destroy());
 
-  it('places Machines after Tasks and before Analytics', () => {
+  it('places Machines after Apps and right before Analytics', () => {
     const titles = tabs().map((tab) => tab.title);
-    expect(titles.indexOf('Machines')).toBe(titles.indexOf('Tasks') + 1);
-    expect(titles.indexOf('Machines')).toBeLessThan(
-      titles.indexOf('Analytics'),
-    );
+    expect(titles.indexOf('Machines')).toBe(titles.indexOf('Apps') + 1);
+    expect(titles.indexOf('Analytics')).toBe(titles.indexOf('Machines') + 1);
   });
 
   it('follows the sibling tab pattern with the Server icon', () => {
@@ -265,7 +263,7 @@ describe('ElectronShellComponent Machines tab', () => {
       withoutFolders();
       layoutStub.hasWorkspaceFolders.set(true);
       fixture.detectChanges();
-      expect(tabs()).toHaveLength(8);
+      expect(tabs()).toHaveLength(7);
     });
   });
 });

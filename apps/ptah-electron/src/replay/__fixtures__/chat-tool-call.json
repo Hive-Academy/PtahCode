@@ -90,18 +90,6 @@
       "availableProviders": [],
       "claudeCliInstalled": true
     },
-    "license:getStatus": {
-      "valid": true,
-      "tier": "community",
-      "isPremium": false,
-      "isCommunity": true,
-      "daysRemaining": null,
-      "plan": {
-        "name": "Community",
-        "description": "Free tier",
-        "features": []
-      }
-    },
     "workspace:switch": {
       "success": true
     },

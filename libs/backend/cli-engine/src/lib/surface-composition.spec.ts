@@ -204,7 +204,7 @@ function composeFullMode(): {
   const c: DependencyContainer = rootContainer.createChildContainer();
   c.register(TOKENS.LOGGER, { useValue: logger });
   registerVsCodeCorePlatformAgnostic(c, logger, {
-    includeLicensingAndAuth: false,
+    includeAuthAndTelemetry: false,
   });
   c.register(TOKENS.CONTEXT_ORCHESTRATION_SERVICE, { useValue: {} });
   c.register(TOKENS.WEBVIEW_MANAGER, {
@@ -390,7 +390,7 @@ describe('CLI surface composition — defensive missing collaborators (Req 7.4, 
     const c: DependencyContainer = rootContainer.createChildContainer();
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
     // VSCODE_LM_TOOLS_TOKENS.SURFACE_STATE_SERVICE is never registered —
     // registerVsCodeLmToolsServices is not called on this container at all.

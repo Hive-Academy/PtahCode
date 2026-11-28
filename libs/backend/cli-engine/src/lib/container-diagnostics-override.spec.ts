@@ -11,8 +11,8 @@
  * off until the user grants it.
  *
  * Why `CliDIContainer.setup()` is not called: it is the whole CLI bootstrap
- * (persistence-sqlite, memory-curator, messaging-gateway, voice-providers,
- * licensing), and `with-engine.spec.ts` mocks it for the same reason. So the
+ * (persistence-sqlite, memory-curator, messaging-gateway, voice-providers),
+ * and `with-engine.spec.ts` mocks it for the same reason. So the
  * call site is pinned by reading its source, and the rest runs for real over
  * the REAL `registerPlatformCliServices` and vscode-core registration, plus the
  * workspace storage `container.ts` puts over them (`WorkspaceAwareStateStorage`
@@ -163,7 +163,7 @@ function buildHostContainer(userDataPath: string, root: string): HostHarness {
   const logger = buildLogger();
   c.register(TOKENS.LOGGER, { useValue: logger });
   registerVsCodeCorePlatformAgnostic(c, logger, {
-    includeLicensingAndAuth: false,
+    includeAuthAndTelemetry: false,
   });
   // As `container.ts` Phase 1: the workspace-aware store over CliStateStorage,
   // and the FILE_SYSTEM_MANAGER shim workspace-intelligence needs.

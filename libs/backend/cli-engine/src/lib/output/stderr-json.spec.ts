@@ -71,7 +71,6 @@ describe('emitFatalError', () => {
     expect(FatalErrorCode.DbLock).toBe('db_lock');
     expect(FatalErrorCode.WorkspaceMissing).toBe('workspace_missing');
     expect(FatalErrorCode.AuthRequired).toBe('auth_required');
-    expect(FatalErrorCode.LicenseRequired).toBe('license_required');
   });
 
   it('swallows write failures silently', () => {

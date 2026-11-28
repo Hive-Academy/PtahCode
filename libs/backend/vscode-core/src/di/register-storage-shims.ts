@@ -5,8 +5,8 @@
  * library owns, and both shipped as byte-identical copies in the Electron
  * composition root and the CLI one. They live here rather than in each host
  * because what they encode is a `vscode-core` fact — which token each port hangs
- * off, and what shape `TOKENS.EXTENSION_CONTEXT` has to be for `LicenseService`
- * and `AuthSecretsService` to read it — not a host policy. The VS Code host has
+ * off, and what shape `TOKENS.EXTENSION_CONTEXT` has to be for `AuthSecretsService`
+ * to read it — not a host policy. The VS Code host has
  * neither: there the real `vscode.ExtensionContext` and its storage are already
  * the thing being shimmed.
  *
@@ -39,7 +39,7 @@ export interface ExtensionContextShimPaths {
  * eagerly, so this must run after the host's platform phase.
  *
  * A failure is logged and swallowed rather than thrown: the shim's consumers
- * (`LicenseService`, `AuthSecretsService`, the SDK/LLM services) resolve it
+ * (`AuthSecretsService`, the SDK/LLM services) resolve it
  * lazily, so a host that could not build it degrades instead of failing to boot.
  */
 export function registerExtensionContextShim(

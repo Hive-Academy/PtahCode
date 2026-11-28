@@ -66,7 +66,6 @@ import {
   HarnessRpcHandlers,
   ImagePickerRpcHandlers,
   IndexingRpcHandlers,
-  LicenseRpcHandlers,
   LlmRpcHandlers,
   McpDirectoryRpcHandlers,
   MemoryRpcHandlers,
@@ -334,12 +333,6 @@ export const RPC_HANDLER_MANIFEST = [
     methods: CapabilityRpcHandlers.METHODS,
     requires: [],
     handler: CapabilityRpcHandlers,
-  },
-  {
-    key: 'license',
-    methods: LicenseRpcHandlers.METHODS,
-    requires: [],
-    handler: LicenseRpcHandlers,
   },
   {
     key: 'llm',

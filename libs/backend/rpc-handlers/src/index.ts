@@ -46,7 +46,6 @@ export {
   SetupRpcHandlers,
   WizardGenerationRpcHandlers,
   ConfigRpcHandlers,
-  LicenseRpcHandlers,
   ChatRpcHandlers,
   ConfigScopeRpcHandlers,
   AuthRpcHandlers,

@@ -43,10 +43,9 @@ export interface PostWindowOptions {
 }
 
 export interface PostWindowResult {
-  revalidationInterval: ReturnType<typeof setInterval> | null;
   /**
    * Periodic 4-hour update check interval handle. Cleared in main.ts will-quit
-   * LIFO handler (position 2.5, after revalidationInterval, before git watcher).
+   * LIFO handler (position 2.5, before git watcher).
    * Null when UpdateManager.start() bails early (dev mode or already started).
    */
   updateCheckInterval: ReturnType<typeof setInterval> | null;
@@ -64,7 +63,6 @@ export async function registerPostWindow(
   // the same container, so there is nothing to share.
   const broadcastReadiness = createBootReadinessBroadcaster(container);
 
-  let revalidationInterval: PostWindowResult['revalidationInterval'] = null;
   let updateCheckInterval: PostWindowResult['updateCheckInterval'] = null;
   let updateManager: UpdateManager | null = null;
   let messagingGateway: GatewayService | null = null;
@@ -191,33 +189,7 @@ export async function registerPostWindow(
       error instanceof Error ? error.message : String(error),
     );
   }
-  try {
-    const licenseService = container.resolve(TOKENS.LICENSE_SERVICE) as {
-      revalidate: () => Promise<void>;
-    };
-
-    revalidationInterval = setInterval(
-      () => {
-        licenseService.revalidate().catch((err) => {
-          console.warn(
-            '[Ptah Electron] Background license revalidation failed:',
-            err instanceof Error ? err.message : String(err),
-          );
-        });
-      },
-      24 * 60 * 60 * 1000,
-    );
-
-    console.log('[Ptah Electron] Membership revalidation scheduled');
-  } catch (error) {
-    console.warn(
-      '[Ptah Electron] Membership revalidation setup failed (non-fatal):',
-      error instanceof Error ? error.message : String(error),
-    );
-  }
-
   return {
-    revalidationInterval,
     updateCheckInterval,
   };
 }

@@ -11,7 +11,7 @@
  *     absolute paths pass through unchanged. Missing workspacePath returns a
  *     structured error (never throws).
  *   - Open access: `runWizard` and `regenerate` dispatch straight into
- *     EnhancedPromptsService for every workspace (no license gating).
+ *     EnhancedPromptsService for every workspace (no gating).
  *   - Download: missing content returns a "generate first" error; a real
  *     content buffer is handed to `ISaveDialogProvider.showSaveAndWrite`
  *     with the expected filename/filters/title; user-cancelled save

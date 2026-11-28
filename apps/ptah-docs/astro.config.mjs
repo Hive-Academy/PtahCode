@@ -23,7 +23,7 @@ export default defineConfig({
     '/providers/switching': '/chat/switching-models/',
     '/settings/api-keys': '/settings/',
     '/settings/why-not-package-json': '/settings/',
-    '/troubleshooting/license-issues': '/getting-started/signing-in/',
+    '/troubleshooting/license-issues': '/troubleshooting/',
     '/reference/tier-comparison': '/reference/',
     '/reference/changelog': '/reference/',
     '/sessions/metadata': '/sessions/',

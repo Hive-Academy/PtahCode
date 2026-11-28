@@ -6,7 +6,6 @@ import type {
 
 /** The sections of the Advanced page that the instrument band summarizes, in band order. */
 export type AdvancedOverviewId =
-  | 'membership'
   | 'agent-behaviour'
   | 'output-style'
   | 'mcp-server'
@@ -26,7 +25,6 @@ const SEGMENTS: readonly {
   readonly label: string;
   readonly targetId: string;
 }[] = [
-  { id: 'membership', label: 'Membership', targetId: 'advanced-membership' },
   {
     id: 'agent-behaviour',
     label: 'Agent behaviour',

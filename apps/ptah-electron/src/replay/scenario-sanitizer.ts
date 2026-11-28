@@ -160,7 +160,6 @@ export const DEFAULT_ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set<string>(
     'wizard:analysis-status',
     'wizard:list-analyses',
     'wizard:load-analysis',
-    'license:getStatus',
     'llm:getProviderStatus',
     'llm:getDefaultProvider',
     'llm:listVsCodeModels',

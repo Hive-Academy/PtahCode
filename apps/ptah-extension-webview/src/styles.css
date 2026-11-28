@@ -3288,12 +3288,12 @@ END OF ANUBIS DESIGN SYSTEM
 /* Every surface role isolates, which traps the z-40/z-50 of a native
    popover (panel + fixed backdrop stay in the component DOM) inside the
    surface that hosts it — later siblings then paint above the panel and
-   intercept its clicks (marketplace provider cards, the settings license
-   card, the canvas rail menu over the board panes). `.popover-panel`
+   intercept its clicks (marketplace provider cards, the canvas rail menu
+   over the board panes). `.popover-panel`
    exists in the DOM only while a popover is open, so lift exactly the
    hosting surface for exactly that time. Same lift level as the bar.
    The surface's own z-index does not escape an inline custom-element host
-   (the license card host has no display), so the following block sibling
+   (a host with no display), so the following block sibling
    paints over the panel. Lift the host that directly wraps that surface. */
 :root[data-glass='on'] [data-glass-surface]:has(.popover-panel, .suggestions-panel) { z-index: 30; }
 :root[data-glass='on'] :has(> [data-glass-surface='content']:has(.popover-panel, .suggestions-panel)) {

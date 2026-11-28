@@ -170,7 +170,7 @@ export async function pickRichOption(page: Page, select: Locator, name: string):
 
 /**
  * Boots a SECOND page in the same browser context, with the two tabs' fixture state changed by `configure`
- * (for reads the app fetches once and caches: `license:getStatus` at start, `llm:getProviderStatus` in
+ * (for reads the app fetches once and caches, such as `llm:getProviderStatus` in
  * `LlmProviderStateService`), opens `tab` and runs `assertion` with the variant's recorded calls. The shared
  * session page is untouched.
  */

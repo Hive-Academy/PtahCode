@@ -211,7 +211,7 @@ export interface QuitSequenceDeps {
    * the final one.
    */
   flushSessionMetadataStores: () => Promise<void>;
-  /** Clears the licence-revalidation and update-check intervals. */
+  /** Clears the update-check interval. */
   clearTimers: () => void;
   /** Terminates the voice `utilityProcess` worker, if one was registered. */
   disposeVoiceWorker: () => void;

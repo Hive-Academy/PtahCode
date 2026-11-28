@@ -274,9 +274,6 @@ function buildMinimalContainer(): DependencyContainer {
   c.register(TOKENS.SENTRY_SERVICE, {
     useValue: { captureException: jest.fn(), captureMessage: jest.fn() },
   });
-  c.register(TOKENS.LICENSE_SERVICE, {
-    useValue: { getStatus: jest.fn() },
-  });
   c.register(TOKENS.SAVE_DIALOG_PROVIDER, {
     useValue: { showSaveDialog: jest.fn() },
   });
@@ -1288,7 +1285,7 @@ describe('Electron DI — main-loop watchdog (TASK_2026_437)', () => {
     } as unknown as Logger;
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
 
     const watchdog = c.resolve<{
@@ -1319,7 +1316,7 @@ describe('Electron DI — background-work governor (TASK_2026_437)', () => {
     } as unknown as Logger;
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
 
     const governor = c.resolve<{

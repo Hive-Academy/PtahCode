@@ -29,7 +29,7 @@ function buildGovernorContainer() {
   } as unknown as Logger;
   c.register(TOKENS.LOGGER, { useValue: logger });
   registerVsCodeCorePlatformAgnostic(c, logger, {
-    includeLicensingAndAuth: false,
+    includeAuthAndTelemetry: false,
   });
   return c;
 }

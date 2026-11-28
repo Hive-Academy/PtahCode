@@ -1913,8 +1913,8 @@ describe('GatewayChatBridge — turn watchdog (Task 2.3/3.3)', () => {
 // F4 — SDK context wiring: MCP + prompts/plugins (TASK_2026_155, Task 2.4/3.3)
 // ---------------------------------------------------------------------------
 //
-// Ptah is now fully open source: there is no premium/free tier and no
-// `isPremium` on the SDK config. The formerly premium-gated capabilities
+// Ptah is fully open source: there is no premium/free tier on the SDK
+// config. The formerly gated capabilities
 // (code-exec MCP, enhanced prompts) are unconditional — the ONLY governor is
 // the live MCP port + the resolved prompt wiring. These specs prove that
 // wiring drives the SDK config correctly.

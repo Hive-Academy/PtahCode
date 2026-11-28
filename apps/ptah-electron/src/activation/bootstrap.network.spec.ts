@@ -1,5 +1,5 @@
 /**
- * `bootstrapElectron` — the two NETWORK calls must not gate the window
+ * `bootstrapElectron` — the agent adapter NETWORK call must not gate the window
  * (TASK_2026_331 B1.T2).
  *
  * ## Why the call site is asserted from source
@@ -11,9 +11,9 @@
  * whole function up here would test the mock graph, not the ordering — the same
  * reasoning `wire-runtime.boot-order.spec.ts` records.
  *
- * So the split is: the two helpers are driven for real (they are pure
- * container-in, promise-out functions), and the ONE thing that cannot be
- * observed from them — whether the boot awaits them — is pinned textually.
+ * So the split is: the helper is driven for real (it is a pure
+ * container-in, promise-out function), and the ONE thing that cannot be
+ * observed from it — whether the boot awaits it — is pinned textually.
  * The negative assertions run against the source with comments stripped, so
  * prose explaining the old shape cannot satisfy them.
  */
@@ -24,10 +24,7 @@ import { join } from 'path';
 import type { DependencyContainer } from 'tsyringe';
 import { TOKENS } from '@ptah-extension/vscode-core';
 
-import {
-  startAgentAdapterInitialization,
-  startMembershipVerification,
-} from './bootstrap';
+import { startAgentAdapterInitialization } from './bootstrap';
 
 const RAW_SOURCE = readFileSync(join(__dirname, 'bootstrap.ts'), 'utf8');
 const SOURCE = RAW_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(
@@ -62,15 +59,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-describe('bootstrapElectron — network calls are started, not awaited', () => {
-  it('starts membership verification with `void`, never `await`', () => {
-    expect(BOOTSTRAP_BODY).toContain('void startMembershipVerification(');
-    expect(BOOTSTRAP_BODY).not.toContain('await startMembershipVerification(');
-    expect(BOOTSTRAP_BODY).not.toContain(
-      'await licenseService.verifyLicense()',
-    );
-  });
-
+describe('bootstrapElectron — the network call is started, not awaited', () => {
   it('starts agent adapter initialization with `void`, never `await`', () => {
     expect(BOOTSTRAP_BODY).toContain('void startAgentAdapterInitialization(');
     expect(BOOTSTRAP_BODY).not.toContain(
@@ -89,93 +78,6 @@ describe('bootstrapElectron — network calls are started, not awaited', () => {
 
   it('still returns startupWorkspaceRoot', () => {
     expect(BOOTSTRAP_BODY).toContain('startupWorkspaceRoot,');
-  });
-});
-
-describe('startMembershipVerification', () => {
-  it('resolves normally when the licence service answers', async () => {
-    const verifyLicense = jest
-      .fn()
-      .mockResolvedValue({ valid: true, tier: 'builders' });
-    const container = makeContainer([
-      [TOKENS.LICENSE_SERVICE, { verifyLicense }],
-    ]);
-
-    await expect(
-      startMembershipVerification(container),
-    ).resolves.toBeUndefined();
-    expect(verifyLicense).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not reject when the network call fails', async () => {
-    const container = makeContainer([
-      [
-        TOKENS.LICENSE_SERVICE,
-        { verifyLicense: jest.fn().mockRejectedValue(new Error('ETIMEDOUT')) },
-      ],
-    ]);
-
-    await expect(
-      startMembershipVerification(container),
-    ).resolves.toBeUndefined();
-  });
-
-  it('never touches the licence service when skip is set (PTAH_E2E gate, TASK_2026_389)', async () => {
-    const verifyLicense = jest.fn().mockResolvedValue({ valid: true });
-    const resolve = jest.fn(() => ({ verifyLicense }));
-    const container = { resolve } as unknown as DependencyContainer;
-
-    await expect(
-      startMembershipVerification(container, { skip: true }),
-    ).resolves.toBeUndefined();
-    expect(resolve).not.toHaveBeenCalled();
-    expect(verifyLicense).not.toHaveBeenCalled();
-  });
-
-  it('is wired from PTAH_E2E at the call site in bootstrapElectron', () => {
-    expect(BOOTSTRAP_BODY).toMatch(
-      /void startMembershipVerification\(container, \{\s*skip: process\.env\['PTAH_E2E'\] === '1',\s*\}\)/,
-    );
-  });
-
-  it('does not reject when the licence service is not registered', async () => {
-    await expect(
-      startMembershipVerification(makeContainer([])),
-    ).resolves.toBeUndefined();
-  });
-
-  it('stays pending while the network hangs, without blocking its caller', async () => {
-    // The shape the boot relies on: the helper is `void`-ed, so a hung request
-    // costs the boot nothing. Asserting the caller is unblocked means asserting
-    // that work AFTER the call runs while this promise is still pending.
-    let resolveVerify!: (v: { valid: boolean }) => void;
-    const container = makeContainer([
-      [
-        TOKENS.LICENSE_SERVICE,
-        {
-          verifyLicense: jest.fn(
-            () =>
-              new Promise((resolve) => {
-                resolveVerify = resolve;
-              }),
-          ),
-        },
-      ],
-    ]);
-
-    let settled = false;
-    const pending = startMembershipVerification(container).then(() => {
-      settled = true;
-    });
-
-    // Stand in for the rest of the boot: several microtask turns.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(settled).toBe(false);
-
-    resolveVerify({ valid: false });
-    await pending;
-    expect(settled).toBe(true);
   });
 });
 

@@ -28,9 +28,8 @@ import {
  * The write half of the pipeline is fed by the SDK `PostToolUse` hook, which
  * only fires during a real model turn. The DI container that owns the callback
  * registry is module-scoped inside the packed `main.mjs` and is NOT reachable
- * from Playwright's `electronApp.evaluate()` (the same limitation documented in
- * `license-watcher.spec.ts`). There is no production RPC that records a skill
- * event directly. So the only honest, non-instrumented trigger is a real
+ * from Playwright's `electronApp.evaluate()`. There is no production RPC that
+ * records a skill event directly. So the only honest, non-instrumented trigger is a real
  * `/caveman` turn — which needs provider auth and a network round-trip, and is
  * therefore flaky/unsuitable for headless CI.
  *

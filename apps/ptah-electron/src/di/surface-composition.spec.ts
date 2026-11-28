@@ -275,7 +275,7 @@ describe('Electron surface composition — lazy push host and destroyed-window d
     const c: DependencyContainer = rootContainer.createChildContainer();
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
     c.register(TOKENS.CONTEXT_ORCHESTRATION_SERVICE, { useValue: {} });
     registerWorkspaceStateStorageStub(c);
@@ -330,7 +330,7 @@ describe('Electron surface composition — lazy push host and destroyed-window d
     const c: DependencyContainer = rootContainer.createChildContainer();
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
     c.register(TOKENS.CONTEXT_ORCHESTRATION_SERVICE, { useValue: {} });
     registerWorkspaceStateStorageStub(c);
@@ -400,7 +400,7 @@ describe('Electron surface composition — real two-consumer round trip (Req 7.4
     const c: DependencyContainer = rootContainer.createChildContainer();
     c.register(TOKENS.LOGGER, { useValue: logger });
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
     c.register(TOKENS.CONTEXT_ORCHESTRATION_SERVICE, { useValue: {} });
     registerWorkspaceStateStorageStub(c);

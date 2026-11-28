@@ -39,7 +39,6 @@ import {
   ConfigScopeRpcHandlers,
   AuthRpcHandlers,
   ContextRpcHandlers,
-  LicenseRpcHandlers,
   AutocompleteRpcHandlers,
   SubagentRpcHandlers,
   PluginRpcHandlers,
@@ -123,7 +122,6 @@ export function registerPhase4Handlers(
   container.registerSingleton(AuthRpcHandlers);
   container.registerSingleton(ConfigScopeRpcHandlers);
   container.registerSingleton(ContextRpcHandlers);
-  container.registerSingleton(LicenseRpcHandlers);
   container.registerSingleton(AutocompleteRpcHandlers);
   container.registerSingleton(SubagentRpcHandlers);
   container.registerSingleton(PluginRpcHandlers);
@@ -177,7 +175,6 @@ export function registerPhase4Handlers(
       'ConfigRpcHandlers',
       'AuthRpcHandlers',
       'ContextRpcHandlers',
-      'LicenseRpcHandlers',
       'AutocompleteRpcHandlers',
       'SubagentRpcHandlers',
       'PluginRpcHandlers',

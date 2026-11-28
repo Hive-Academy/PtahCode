@@ -48,7 +48,6 @@ import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings
 import { DecisionMatrixPageComponent } from './ptah-ai/decision-matrix-page.component';
 import { AdvancedSettingsComponent } from './advanced-settings.component';
 import { SearchVoiceSettingsComponent } from './search-voice-settings.component';
-import { ChatStore } from '../services/chat.store';
 import {
   AppStateManager,
   AuthStateService,
@@ -110,7 +109,7 @@ const isAgentsRoutingSection = (
  *   CLI matrix and the background model roles)
  * - OrchestrationSettingsComponent: Context Management tab (tab id `orchestration`: subagent cache TTL, session
  *   budget, lane guards, context budgets, Codex agents, background queries)
- * - AdvancedSettingsComponent: Advanced tab (membership, data portability, agent behaviour, MCP, VS Code LM)
+ * - AdvancedSettingsComponent: Advanced tab (data portability, agent behaviour, MCP, VS Code LM)
  * - SearchVoiceSettingsComponent: Search & Voice tab (web search, voice, go vet consent)
  *
  * Deep links (`AppStateManager.requestSettingsTab`) are routed by section to the tab that owns
@@ -167,13 +166,10 @@ export class SettingsComponent implements OnInit {
   readonly SetupIcon = SlidersHorizontal;
   readonly PlayIcon = Play;
   readonly RefreshIcon = RefreshCw;
-  private readonly chatStore = inject(ChatStore);
   /**
    * Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it).
-   * Advanced shows a state mark while the membership needs attention (same source as the Membership card).
    */
   readonly settingsTabs = computed(() => {
-    const membershipNeedsAttention = !!this.chatStore.licenseStatus()?.reason;
     return [
       { id: 'claude-auth', label: 'Providers', icon: Plug },
       { id: 'orchestration', label: 'Context Management', icon: Layers },
@@ -191,14 +187,6 @@ export class SettingsComponent implements OnInit {
         id: 'pro-features',
         label: 'Advanced',
         icon: SlidersHorizontal,
-        ...(membershipNeedsAttention
-          ? ({
-              stateMark: {
-                tone: 'warn',
-                label: 'Membership needs attention',
-              },
-            } as const)
-          : {}),
       },
       { id: 'tools', label: 'Search & Voice', icon: AudioLines },
     ] as const;
@@ -238,7 +226,7 @@ export class SettingsComponent implements OnInit {
           'Limits that keep chats and lanes inside your budget and plan limits.',
         matrix: 'Routing suggestions, executor rotation and the ratings behind them.',
         'pro-features':
-          'Membership, agent behaviour, the MCP server, tools and setup.',
+          'Import and export, agent behaviour, the MCP server, tools and setup.',
         tools: 'Web search providers, voice engines and workspace checks.',
       })[this.selectedSettingsTab()],
   );

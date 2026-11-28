@@ -5,7 +5,7 @@ import { test, expect } from '../support/fixtures';
  * IPC contract specs for `get-startup-config`.
  *
  * The preload script issues `ipcRenderer.sendSync('get-startup-config')` once
- * during page load to obtain license + workspace bootstrap state. The main
+ * during page load to obtain the initial view and workspace bootstrap state. The main
  * handler is registered in apps/ptah-electron/src/activation/post-window.ts
  * and synchronously returns:
  *
@@ -14,9 +14,6 @@ import { test, expect } from '../support/fixtures';
  *     workspaceRoot:  string,    // '' when no workspace is set
  *     workspaceName:  string,    // basename(workspaceRoot) or ''
  *   }
- *
- * The handler dynamically queries the LicenseService on each call so that
- * webContents.reload() picks up post-launch license changes.
  */
 
 interface StartupConfig {

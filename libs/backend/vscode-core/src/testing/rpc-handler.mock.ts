@@ -2,9 +2,9 @@
  * Mock factory for {@link RpcHandler} (vscode-core).
  *
  * `registerMethod` records handlers in a Map so specs can drive `handleMessage`
- * end-to-end without standing up the real license middleware. All error
- * plumbing (license gating, Sentry reporting) is bypassed — tests that need
- * those paths should use the real `RpcHandler` with a mock `LicenseService`.
+ * end-to-end without standing up the real handler. All error plumbing
+ * (Sentry reporting) is bypassed — tests that need those paths should use
+ * the real `RpcHandler`.
  *
  * Production source: `libs/backend/vscode-core/src/messaging/rpc-handler.ts`
  */

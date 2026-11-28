@@ -7,8 +7,8 @@
  *   - db:health  → inspect connection state, pragma stats, WAL size
  *   - db:reset   → backup → close → rename old file → reopen (5-step workflow)
  *
- * Both methods are license-exempt (maintenance / recovery surfaces) and
- * Electron-only (better-sqlite3 does not run in the VS Code extension host).
+ * Both methods are maintenance / recovery surfaces and Electron-only
+ * (better-sqlite3 does not run in the VS Code extension host).
  *
  * Per architecture §7 the `db:health` handler MUST NOT throw — it always
  * returns a structured result even when the connection is unavailable.

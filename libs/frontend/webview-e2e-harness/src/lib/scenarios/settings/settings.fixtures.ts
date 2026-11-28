@@ -472,20 +472,6 @@ export function verifyDraftConnectionResolver(): RpcFixtureResolver {
 }
 
 /**
- * `license:getStatus` — the Advanced tab's `LicenseStatusCardComponent`
- * (`license-status-card.component.ts:264-266`) never leaves its loading
- * branch without this: `isLoadingLicenseStatus()` is `chatStore.licenseStatus()
- * === null` and nothing else in the app's boot path calls this method.
- */
-export const LICENSE_STATUS_FIXTURE = {
-  valid: true,
-  tier: 'community' as const,
-  isPremium: false,
-  isCommunity: true,
-  daysRemaining: null,
-};
-
-/**
  * `llm:getProviderStatus` — the Advanced tab's `VscodeLmConfigComponent`
  * (`vscode-lm-config.component.ts:149-151`) renders nothing until its
  * `vscodeLmProvider` computed finds a `provider: 'vscode-lm'` row here.
@@ -1006,7 +992,6 @@ function statefulSettingsFixtures(
       record(state, 'settings:import', params);
       return { success: true };
     },
-    'license:getStatus': LICENSE_STATUS_FIXTURE,
     'llm:getProviderStatus': LLM_PROVIDER_STATUS_FIXTURE,
     'llm:listProviderModels': VSCODE_LM_MODELS_FIXTURE,
   };

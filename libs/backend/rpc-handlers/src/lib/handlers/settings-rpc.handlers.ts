@@ -25,17 +25,8 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import {
-  Logger,
-  RpcHandler,
-  TOKENS,
-  LicenseService,
-} from '@ptah-extension/vscode-core';
-import {
-  SDK_TOKENS,
-  SECRET_KEYS,
-  countPopulatedSecrets,
-} from '@ptah-extension/agent-sdk';
+import { Logger, RpcHandler, TOKENS } from '@ptah-extension/vscode-core';
+import { SDK_TOKENS, countPopulatedSecrets } from '@ptah-extension/agent-sdk';
 import type {
   SettingsExportService,
   SettingsImportService,
@@ -54,7 +45,6 @@ import {
   isFileBasedSettingKey,
 } from '@ptah-extension/platform-core';
 import type {
-  IPlatformCommands,
   ISaveDialogProvider,
   IUserInteraction,
   IWorkspaceProvider,
@@ -108,10 +98,6 @@ export class SettingsRpcHandlers {
     private readonly userInteraction: IUserInteraction,
     @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
     private readonly workspaceProvider: IWorkspaceProvider,
-    @inject(TOKENS.PLATFORM_COMMANDS)
-    private readonly platformCommands: IPlatformCommands,
-    @inject(TOKENS.LICENSE_SERVICE)
-    private readonly licenseService: LicenseService,
   ) {}
 
   register(): void {
@@ -299,8 +285,7 @@ export class SettingsRpcHandlers {
 
   /**
    * settings:import — show open dialog, read file, delegate to service,
-   * apply config values via IWorkspaceProvider, optionally reload after a
-   * license key import.
+   * apply config values via IWorkspaceProvider.
    */
   private registerImport(): void {
     this.rpcHandler.registerMethod('settings:import', async () => {
@@ -453,32 +438,6 @@ export class SettingsRpcHandlers {
           skipped: importResult.skipped.length,
           errors: importResult.errors.length,
         });
-        if (importResult.imported.includes(SECRET_KEYS.LICENSE_KEY)) {
-          this.logger.info(
-            '[RPC] License key imported, verifying and scheduling reload',
-          );
-          try {
-            const status = await this.licenseService.verifyLicense();
-            if (status.valid) {
-              setTimeout(() => {
-                void this.platformCommands.reloadWindow();
-              }, 1500);
-            } else {
-              this.logger.warn(
-                '[RPC] License key imported but verification returned invalid',
-                { reason: status.reason } as unknown as Error,
-              );
-            }
-          } catch (verifyError) {
-            this.logger.warn(
-              '[RPC] License verification after import failed — user should restart manually',
-              verifyError instanceof Error
-                ? verifyError
-                : new Error(String(verifyError)),
-            );
-          }
-        }
-
         return {
           cancelled: false,
           result: importResult,

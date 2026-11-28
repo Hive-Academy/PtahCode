@@ -27,7 +27,7 @@ describe('CLI engine session driver lock composition', () => {
       trace: jest.fn(),
     } as unknown as Logger;
     registerVsCodeCorePlatformAgnostic(c, logger, {
-      includeLicensingAndAuth: false,
+      includeAuthAndTelemetry: false,
     });
     expect(c.isRegistered(PLATFORM_TOKENS.SESSION_DRIVER_LOCK, true)).toBe(
       false,

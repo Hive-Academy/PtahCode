@@ -9,8 +9,8 @@
  * - OutputManager uses vscode.window.createOutputChannel -> replace with IOutputChannel wrapper
  * - Logger depends on OutputManager -> create adapter that works with our wrapper
  *
- * Note: LicenseService and AuthSecretsService now use `import type` for vscode,
- * so they have no runtime vscode dependency and can be used directly in Electron.
+ * Note: AuthSecretsService uses `import type` for vscode,
+ * so it has no runtime vscode dependency and can be used directly in Electron.
  */
 
 import type { IOutputChannel } from '@ptah-extension/platform-core';

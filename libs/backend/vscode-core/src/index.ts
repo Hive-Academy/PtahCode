@@ -86,13 +86,6 @@ export type {
   IAuthSecretsService,
   AuthCredentialType,
 } from './services/auth-secrets.service';
-export { LicenseService } from './services/license.service';
-export type {
-  LicenseStatus,
-  LicenseEvents,
-  LicenseTierValue,
-} from './services/license.service';
-export { PREVIOUS_USER_CONTEXT_KEY } from './services/license/license-cache';
 export { SentryService } from './services/sentry.service';
 export type {
   SentryInitOptions,

@@ -95,7 +95,7 @@ export function isCompactCommand(content: string): boolean {
  * `success: false` covers BOTH a thrown/transport failure AND a *structural*
  * backend rejection — a `chat:start`/`chat:continue` round trip that succeeds at
  * the transport layer but returns `data.success === false` (AUTH_REQUIRED,
- * model-unavailable, license gate). Callers that only care about fire-and-forget
+ * model-unavailable). Callers that only care about fire-and-forget
  * ignore this; the Tasks Start-flow bridge branches on it so a structural
  * failure no longer resolves as success (TASK_2026_157 F-D2 — a phantom
  * `in_progress` transition on a session that never actually started).

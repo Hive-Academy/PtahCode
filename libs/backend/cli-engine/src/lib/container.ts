@@ -8,7 +8,7 @@
  * - DOES NOT call registerVsCodeCoreServices() (it imports the vscode module)
  * - Manually registers platform-agnostic vscode-core services
  * - Uses platform-cli providers instead of Electron or VS Code API wrappers
- * - Uses real LicenseService & AuthSecretsService (no runtime vscode dependency via `import type`)
+ * - Uses real AuthSecretsService (no runtime vscode dependency via `import type`)
  * - Provides a TUI-compatible OutputManager that delegates to IOutputChannel
  *
  * Phase-based registration order mirrors Electron container:
@@ -75,7 +75,7 @@ import {
   registerExtensionContextShim,
   registerStateStorageAdapters,
 } from '@ptah-extension/vscode-core';
-import { LicenseService, GitInfoService } from '@ptah-extension/vscode-core';
+import { GitInfoService } from '@ptah-extension/vscode-core';
 import {
   WorkspaceAwareStateStorage,
   WorkspaceContextManager,
@@ -149,7 +149,6 @@ import {
   ConfigRpcHandlers,
   AuthRpcHandlers,
   ContextRpcHandlers,
-  LicenseRpcHandlers,
   AutocompleteRpcHandlers,
   SubagentRpcHandlers,
   PluginRpcHandlers,
@@ -525,7 +524,7 @@ export class CliDIContainer {
 
     logger.info('[CLI DI] Starting service registration...');
     registerVsCodeCorePlatformAgnostic(container, logger, {
-      includeLicensingAndAuth: true,
+      includeAuthAndTelemetry: true,
     });
 
     // One session store for every project, shared with the desktop app and
@@ -711,20 +710,9 @@ export class CliDIContainer {
       );
     }
     // The shim itself — and its own try/catch — belongs to `vscode-core`, which
-    // owns the token and the shape `LicenseService` reads off it. Only the two
+    // owns the token and the shape `AuthSecretsService` reads off it. Only the two
     // paths are this host's.
     registerExtensionContextShim(container, logger, { appPath, userDataPath });
-    try {
-      const licenseService = container.resolve<LicenseService>(
-        TOKENS.LICENSE_SERVICE,
-      );
-      licenseService.seedCommunityStatus();
-    } catch (error) {
-      logger.warn(
-        '[CLI DI] Failed to seed community license (non-fatal)',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
 
     phaseEnd('1', phase1Start);
     const phase2Start = phaseStart('2');
@@ -1026,7 +1014,6 @@ export class CliDIContainer {
       container.registerSingleton(ConfigRpcHandlers);
       container.registerSingleton(AuthRpcHandlers);
       container.registerSingleton(ContextRpcHandlers);
-      container.registerSingleton(LicenseRpcHandlers);
       container.registerSingleton(AutocompleteRpcHandlers);
       container.registerSingleton(SubagentRpcHandlers);
       container.registerSingleton(PluginRpcHandlers);

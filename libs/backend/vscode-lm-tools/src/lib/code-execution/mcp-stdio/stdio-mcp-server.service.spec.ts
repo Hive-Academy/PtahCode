@@ -1050,8 +1050,8 @@ describe('StdioMcpServerService', () => {
       );
       expect(resp.error).toBeUndefined();
       const result = resp.result as { isError?: boolean };
-      // No license gate: the previously Pro-only provider path is now allowed
-      // straight through to the underlying PtahAPI.
+      // No gate: the provider path goes straight through to the underlying
+      // PtahAPI.
       expect(result.isError).toBeUndefined();
       expect(api.spawn).toHaveBeenCalledTimes(1);
       const arg = (api.spawn as jest.Mock).mock.calls[0][0];

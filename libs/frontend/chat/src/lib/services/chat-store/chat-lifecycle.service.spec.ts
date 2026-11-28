@@ -1,15 +1,11 @@
 /**
- * ChatLifecycleService specs — bootstrap, license retry, session-ID
- * resolution, chat-error handling.
+ * ChatLifecycleService specs — bootstrap, session-ID resolution,
+ * chat-error handling.
  *
  * Coverage:
  *   - bootstrap: flips servicesReady BEFORE kicking off async loads
  *   - bootstrap: kicks off loadSessions, restoreCliSessionsForActiveTab,
- *     loadAuthStatus, fetchLicenseStatus
- *   - fetchLicenseStatus: success path stores result
- *   - fetchLicenseStatus: failure result on final attempt sets null + logs
- *   - fetchLicenseStatus: thrown error on final attempt sets null + logs
- *   - fetchLicenseStatus: linear backoff between failed attempts
+ *     loadAuthStatus
  *   - handleSessionIdResolved: direct tabId routing
  *   - handleSessionIdResolved: falls back to streaming/draft active tab
  *   - handleSessionIdResolved: warns when no tab found
@@ -22,11 +18,7 @@
  */
 
 import { TestBed } from '@angular/core/testing';
-import {
-  ClaudeRpcService,
-  AuthStateService,
-  VSCodeService,
-} from '@ptah-extension/core';
+import { AuthStateService, VSCodeService } from '@ptah-extension/core';
 import { provideSurfaceActiveTesting } from '@ptah-extension/core/testing';
 import { ChatLifecycleService } from './chat-lifecycle.service';
 import { TabManagerService } from '@ptah-extension/chat-state';
@@ -98,7 +90,6 @@ describe('ChatLifecycleService', () => {
   let loadSessionsMock: jest.Mock;
   let restoreCliSessionsMock: jest.Mock;
   let loadAuthStatusMock: jest.Mock;
-  let rpcCallMock: jest.Mock;
   let finalizeCurrentMessageMock: jest.Mock;
   let clearCompactionStateMock: jest.Mock;
   let claimMock: jest.Mock;
@@ -188,7 +179,6 @@ describe('ChatLifecycleService', () => {
     loadSessionsMock = jest.fn().mockResolvedValue(undefined);
     restoreCliSessionsMock = jest.fn().mockResolvedValue(undefined);
     loadAuthStatusMock = jest.fn().mockResolvedValue(undefined);
-    rpcCallMock = jest.fn();
     finalizeCurrentMessageMock = jest.fn();
     clearCompactionStateMock = jest.fn();
     claimMock = jest.fn((): CarryOverClaim => 'none');
@@ -232,10 +222,6 @@ describe('ChatLifecycleService', () => {
       clearCompactionState: clearCompactionStateMock,
     } as unknown as CompactionLifecycleService;
 
-    const claudeRpcMock = {
-      call: rpcCallMock,
-    } as unknown as ClaudeRpcService;
-
     const authStateMock = {
       loadAuthStatus: loadAuthStatusMock,
     } as unknown as AuthStateService;
@@ -258,7 +244,6 @@ describe('ChatLifecycleService', () => {
           provide: FollowUpQueueService,
           useValue: { draftHeld: dropHeldCommandsMock },
         },
-        { provide: ClaudeRpcService, useValue: claudeRpcMock },
         { provide: AuthStateService, useValue: authStateMock },
         { provide: VSCodeService, useValue: vscodeServiceMock },
         {
@@ -287,89 +272,23 @@ describe('ChatLifecycleService', () => {
   describe('bootstrap', () => {
     it('flips servicesReady via callback BEFORE kicking off async loads', async () => {
       const setReady = jest.fn();
-      // Make all kickoffs reject so we can observe order via call timing
-      rpcCallMock.mockResolvedValue({
-        isSuccess: () => true,
-        data: null,
-      });
       await service.bootstrap(setReady);
       expect(setReady).toHaveBeenCalledTimes(1);
-      // All four kickoffs should have been initiated
+      // All kickoffs should have been initiated
       expect(loadSessionsMock).toHaveBeenCalled();
       expect(restoreCliSessionsMock).toHaveBeenCalled();
       expect(loadAuthStatusMock).toHaveBeenCalled();
-      expect(rpcCallMock).toHaveBeenCalledWith('license:getStatus', {});
     });
 
     it('logs each failed kickoff but does not throw', async () => {
       loadSessionsMock.mockRejectedValueOnce(new Error('s'));
       restoreCliSessionsMock.mockRejectedValueOnce(new Error('r'));
       loadAuthStatusMock.mockRejectedValueOnce(new Error('a'));
-      rpcCallMock.mockRejectedValue(new Error('l'));
       const setReady = jest.fn();
       await service.bootstrap(setReady);
       // Allow microtasks (rejected promises) to settle
       await new Promise((r) => setTimeout(r, 0));
       expect(setReady).toHaveBeenCalled();
-    });
-  });
-
-  describe('fetchLicenseStatus', () => {
-    it('stores license result on success', async () => {
-      rpcCallMock.mockResolvedValueOnce({
-        isSuccess: () => true,
-        data: { tier: 'builders', isActive: true },
-      });
-      await service.fetchLicenseStatus();
-      expect(service.licenseStatus()).toEqual({
-        tier: 'builders',
-        isActive: true,
-      });
-    });
-
-    it('logs and sets null after final failure result', async () => {
-      rpcCallMock.mockResolvedValue({
-        isSuccess: () => false,
-        error: 'forbidden',
-      });
-      await service.fetchLicenseStatus(2);
-      expect(service.licenseStatus()).toBeNull();
-      expect(error).toHaveBeenCalledWith(
-        '[ChatStore] Failed to fetch license status after retries:',
-        'forbidden',
-      );
-    });
-
-    it('logs and sets null after final thrown error', async () => {
-      jest.useFakeTimers();
-      rpcCallMock.mockRejectedValue(new Error('network'));
-      const promise = service.fetchLicenseStatus(2);
-      // Advance backoff timers between attempts
-      await jest.runAllTimersAsync();
-      await promise;
-      expect(service.licenseStatus()).toBeNull();
-      expect(error).toHaveBeenCalledWith(
-        '[ChatStore] Error fetching license status after retries:',
-        expect.any(Error),
-      );
-      jest.useRealTimers();
-    });
-
-    it('uses linear backoff between failed attempts', async () => {
-      jest.useFakeTimers();
-      const setTimeoutSpy = jest.spyOn(global, 'setTimeout');
-      rpcCallMock
-        .mockRejectedValueOnce(new Error('a'))
-        .mockRejectedValueOnce(new Error('b'))
-        .mockResolvedValueOnce({ isSuccess: () => true, data: { ok: true } });
-      const promise = service.fetchLicenseStatus(3);
-      await jest.runAllTimersAsync();
-      await promise;
-      // 1000 * 1, 1000 * 2 — only between failures (not after final success)
-      const delays = setTimeoutSpy.mock.calls.map((c) => c[1]);
-      expect(delays).toContain(1000);
-      expect(delays).toContain(2000);
-      jest.useRealTimers();
     });
   });
 

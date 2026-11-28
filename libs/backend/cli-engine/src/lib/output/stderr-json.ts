@@ -20,7 +20,6 @@ export const FatalErrorCode = {
   DbLock: 'db_lock',
   WorkspaceMissing: 'workspace_missing',
   AuthRequired: 'auth_required',
-  LicenseRequired: 'license_required',
   ProxyBindFailed: 'proxy_bind_failed',
   ProxyInvalidRequest: 'proxy_invalid_request',
   PermissionGateUnavailable: 'permission_gate_unavailable',
