@@ -458,3 +458,31 @@ describe('convertPtahUi', () => {
     ]);
   });
 });
+
+describe('catalog/4 leaderboard and meter conversion', () => {
+  it('emits one component each with positional IDs and no bindings', () => {
+    const result = convertPtahUi(parse(
+      'row\n  leaderboard\n    group agent Agents\n    - Developer | 60 | 12 requests | Today\n'
+      + '  meter Capacity\n    Free | 5 | | muted\n  table\n    Label\n    A\n  list\n    - A\n',
+    ), 'ranked');
+    expect(result.bindings).toEqual([]);
+    expect(result.envelope.catalogVersion).toBe('dashboard-catalog/4');
+    expect(result.envelope.components).toEqual([{
+      kind: 'stack',
+      id: 'c0',
+      direction: 'horizontal',
+      children: [
+        { id: 'c0.0', kind: 'leaderboard', groups: [{
+          title: 'Agents', icon: 'agent', entries: [
+            { label: 'Developer', share: 60, value: '12 requests', detail: 'Today' },
+          ],
+        }] },
+        { id: 'c0.1', kind: 'meter', title: 'Capacity', segments: [
+          { label: 'Free', amount: 5, muted: true },
+        ] },
+        { id: 'c0.2', kind: 'table', columns: [{ key: 'c0', label: { text: 'Label' } }], rows: [['A']] },
+        { id: 'c0.3', kind: 'list', items: [{ text: { text: 'A' } }] },
+      ],
+    }]);
+  });
+});

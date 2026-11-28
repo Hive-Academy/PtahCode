@@ -64,7 +64,7 @@ describe('DashboardTableComponent', () => {
     expect(element.querySelectorAll('tbody tr')).toHaveLength(25);
     expect(element.textContent).toContain('5000 results');
     expect(element.textContent).toContain('Page 1 of 200');
-    const viewport = element.querySelector('table')!.parentElement!;
+    const viewport = element.querySelector('[data-testid="table-viewport"]')!;
     expect(viewport.classList.contains('overflow-auto')).toBe(true);
     expect(viewport.classList.contains('max-h-96')).toBe(true);
     button('next').click(); fixture.detectChanges();
@@ -114,7 +114,7 @@ describe('DashboardTableComponent', () => {
       expand.click(); fixture.detectChanges();
       expect(expand.getAttribute('aria-label')).toBe('Collapse Recent deploys');
       expect(expand.getAttribute('aria-expanded')).toBe('true');
-      expect(element.querySelector('table')!.parentElement!.classList.contains('max-h-96')).toBe(false);
+      expect(element.querySelector('[data-testid="table-viewport"]')!.classList.contains('max-h-96')).toBe(false);
       const filter = element.querySelector<HTMLInputElement>('input')!;
       filter.focus();
       filter.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); fixture.detectChanges();
@@ -133,14 +133,87 @@ describe('DashboardTableComponent', () => {
   });
 
   it('uses unique content and filter ids across two instances', () => {
-    const first = setup(); const second = setup();
+    const first = setup({ ...node, rows: manyRows(30) }); const second = setup({ ...node, rows: manyRows(30) });
     const ids = [first, second].map(({ element, button }) => {
       const input = element.querySelector('input')!;
-      expect(element.querySelector('label')?.htmlFor).toBe(input.id);
+      expect(input.getAttribute('aria-label')).toBe('Filter Recent deploys');
+      expect(input.placeholder).toBe('Filter rows');
+      expect(element.querySelector('label')).toBeNull();
       return [button('expand').getAttribute('aria-controls'), input.id];
     });
     expect(ids[0][0]).not.toBe(ids[1][0]);
     expect(ids[0][1]).not.toBe(ids[1][1]);
+  });
+
+  it('keeps an active filter available when the table shrinks', () => {
+    const value = { ...node, rows: manyRows(12), title: { text: '   ' } };
+    const { fixture, element } = setup(value);
+    const filter = element.querySelector<HTMLInputElement>('input[type="search"]');
+    if (!filter) throw new Error('Expected a filter input');
+    expect(filter.getAttribute('aria-label')).toBe('Filter Table');
+    expect(element.querySelector('h3')).toBeNull();
+    filter.value = 'service-1';
+    filter.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('node', { ...value, rows: manyRows(10) });
+    fixture.detectChanges();
+    expect(element.querySelector('input[type="search"]')).toBe(filter);
+    expect(filter.value).toBe('service-1');
+    expect(element.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(element.querySelector('button[aria-expanded]')).toBeNull();
+
+    filter.value = '';
+    filter.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(element.querySelector('input[type="search"]')).toBeNull();
+    expect(element.querySelectorAll('tbody tr')).toHaveLength(10);
+  });
+
+  it('keeps a small untitled table free of heading, filter, expand, result count and pager', () => {
+    const { element } = setup({ ...node, title: undefined, rows: manyRows(10) });
+    expect(element.querySelectorAll('tbody tr')).toHaveLength(10);
+    expect(element.querySelector('h3')).toBeNull();
+    expect(element.textContent).not.toContain('Table');
+    expect(element.querySelector('section')?.getAttribute('aria-label')).toBe('Table');
+    expect(element.querySelector('table')?.getAttribute('aria-label')).toBe('Table');
+    expect(element.querySelector('input, ptah-dashboard-pager, p[role="status"]')).toBeNull();
+    expect(element.querySelector('[data-apps-focus-key="surface:deploys:expand"]')).toBeNull();
+  });
+
+  it.each([
+    ['1,234,567.89', true],
+    ['-$1,234.50', true],
+    ['$-5', true],
+    ['0.5%', true],
+    ['1,2,3', false],
+    ['101,102', true],
+    ['100,', false],
+    ['01,234', false],
+    ['+-5', false],
+    ['--5', false],
+    ['-$-5', false],
+    ['0042', false],
+  ])('classifies %s as numeric: %s', (value, expected) => {
+    const { element } = setup({
+      ...node, columns: [{ key: 'value', label: { text: 'Value' } }],
+      rows: [[value], ['   '], ['']],
+    });
+    expect(element.querySelector('tbody td')?.classList.contains('tabular-nums')).toBe(expected);
+  });
+
+  it('right-aligns and bolds numeric-looking columns unless an explicit align is set', () => {
+    const { element } = setup({ ...node, columns: [
+      { key: 'name', label: { text: 'Name' } }, { key: 'tokens', label: { text: 'Tokens' } },
+      { key: 'share', label: { text: 'Share' } }, { key: 'cost', label: { text: 'Cost' } },
+      { key: 'mixed', label: { text: 'Mixed' } }, { key: 'pinned', label: { text: 'Pinned' }, align: 'left' }],
+      rows: [['alpha', '5.2k', '45%', '$1.20', '12', 3], ['beta', '332', '', '$0.08', 'n/a', 4], ['gamma', 1200, '7.5%', null, '3', 5]] });
+    const cells = Array.from(element.querySelector('tbody tr')!.querySelectorAll('td'));
+    const headers = Array.from(element.querySelectorAll('thead th'));
+    const numeric = (cell: Element) => cell.classList.contains('text-right') && cell.classList.contains('font-semibold');
+    expect(cells.map(numeric)).toEqual([false, true, true, true, false, false]);
+    expect(headers.map(header => header.classList.contains('text-right'))).toEqual([false, true, true, true, false, false]);
+    expect(cells[1].classList.contains('tabular-nums')).toBe(true);
   });
 
   it('tolerates malformed rows, cells and columns without throwing or losing alignment', () => {

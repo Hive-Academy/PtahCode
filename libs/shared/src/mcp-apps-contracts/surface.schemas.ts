@@ -18,7 +18,11 @@ import {
   SURFACE_CATALOG_VERSION_4,
   SURFACE_GAPS,
   SURFACE_ID_PATTERN,
+  SURFACE_ICON_TOKENS,
+  SURFACE_LEADERBOARD_MAX_ENTRIES,
+  SURFACE_LEADERBOARD_MAX_GROUPS,
   SURFACE_LIMITS,
+  SURFACE_METER_MAX_SEGMENTS,
   SURFACE_OPERATION_ID_PATTERN,
   SURFACE_PATH_DENYLIST,
   SURFACE_PATH_SEGMENT_PATTERN,
@@ -48,8 +52,10 @@ import type {
   SurfaceGetStateInput,
   SurfaceGridComponent,
   SurfaceInputOption,
+  SurfaceLeaderboardComponent,
   SurfaceLineChartComponent,
   SurfaceListComponent,
+  SurfaceMeterComponent,
   SurfacePatchOp,
   SurfaceProgressComponent,
   SurfaceRadioGroupInput,
@@ -499,6 +505,45 @@ export const SurfaceTextBlockComponentSchema = z
   })
   .strict() satisfies z.ZodType<SurfaceTextBlockComponent>;
 
+const leaderboardEntry = z.object({
+  label: boundedString().min(1),
+  share: z.number().min(0).max(100),
+  value: boundedString().optional(),
+  detail: boundedString().optional(),
+}).strict();
+
+const leaderboardGroup = z.object({
+  title: boundedString().optional(),
+  icon: z.enum(SURFACE_ICON_TOKENS).optional(),
+  entries: z.array(leaderboardEntry).min(1).max(SURFACE_LEADERBOARD_MAX_ENTRIES),
+}).strict();
+
+export const SurfaceLeaderboardComponentSchema = z.object({
+  id: componentId(),
+  kind: z.literal('leaderboard'),
+  title: boundedString().optional(),
+  groups: z.array(leaderboardGroup).min(1).max(SURFACE_LEADERBOARD_MAX_GROUPS)
+    .refine(
+      (groups) => groups.reduce((total, group) => total + group.entries.length, 0)
+        <= SURFACE_LEADERBOARD_MAX_ENTRIES,
+      { message: `Expected at most ${SURFACE_LEADERBOARD_MAX_ENTRIES} entries across groups` },
+    ),
+}).strict() satisfies z.ZodType<SurfaceLeaderboardComponent>;
+
+const meterSegment = z.object({
+  label: boundedString().min(1),
+  amount: z.number().nonnegative(),
+  value: boundedString().optional(),
+  muted: z.boolean().optional(),
+}).strict();
+
+export const SurfaceMeterComponentSchema = z.object({
+  id: componentId(),
+  kind: z.literal('meter'),
+  title: boundedString().optional(),
+  segments: z.array(meterSegment).min(1).max(SURFACE_METER_MAX_SEGMENTS),
+}).strict() satisfies z.ZodType<SurfaceMeterComponent>;
+
 /** Explicit annotation breaks the recursive children/type inference cycle. */
 export const SurfaceComponentSchema: z.ZodType<SurfaceComponent> = z
   .discriminatedUnion('kind', [
@@ -599,6 +644,8 @@ export const SurfaceCatalog4ComponentSchema: z.ZodType<SurfaceComponent> =
     SurfaceDividerComponentSchema,
     SurfaceTextBlockComponentSchema,
     SurfaceAvatarComponentSchema,
+    SurfaceLeaderboardComponentSchema,
+    SurfaceMeterComponentSchema,
   ]) satisfies z.ZodType<SurfaceComponent>;
 
 /**

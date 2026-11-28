@@ -4,8 +4,9 @@ import type { SurfaceSelection } from '@ptah-extension/shared/mcp-apps-contracts
 import { SURFACE_PAGE_SIZE, type SurfaceComponentViewState } from '../surface-view-state';
 import { pageSlice } from '../table/table-rows';
 import type { DisplayNode } from '../view-model/view-model.types';
+import { DashboardCollectionFilterComponent } from './dashboard-collection-filter.component';
 import { DashboardPagerComponent } from './dashboard-pager.component';
-import { PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahSectionHeaderComponent, PtahSurfaceDirective } from '@ptah-extension/ui';
 
 export type ListNode = Extract<DisplayNode, { kind: 'list' }>;
 interface ListItem {
@@ -15,6 +16,8 @@ interface ListItem {
   readonly url?: string;
 }
 let nextListInstance = 0;
+/** Above this many items the list shows its filter and expand controls. */
+const COLLAPSIBLE_ITEMS = 10;
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,34 +29,41 @@ function plainText(value: unknown): string | undefined {
 @Component({
   selector: 'ptah-dashboard-list',
   standalone: true,
-  imports: [NgTemplateOutlet, DashboardPagerComponent, PtahButtonDirective, PtahInputDirective, PtahSurfaceDirective],
+  imports: [NgTemplateOutlet, DashboardCollectionFilterComponent, DashboardPagerComponent, PtahButtonDirective,
+    PtahSectionHeaderComponent, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section ptahSurface variant="inset" padding="sm" class="flex flex-col text-base-content" (keydown.escape)="collapse($event)">
-      <div class="flex items-center justify-between gap-2">
-        <h3 class="text-sm font-semibold">{{ title() }}</h3>
-        <button #expandButton type="button" ptahButton variant="ghost" size="xs"
-          [attr.aria-label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + title()"
-          [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="contentId"
-          [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
-          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
-            <path [attr.d]="viewState().expanded ? 'M7 14l5-5 5 5' : 'M7 10l5 5 5-5'" />
-          </svg>
-        </button>
-      </div>
+    <section ptahSurface variant="inset" padding="sm" class="flex flex-col gap-2 text-base-content"
+      [attr.aria-label]="accessibleName()" (keydown.escape)="collapse($event)">
+      @if (title(); as title) { <ptah-section-header [heading]="title" /> }
       @if (description(); as description) { <p class="text-sm text-base-content-muted">{{ description }}</p> }
-      <div [id]="contentId" class="overflow-auto" [class.max-h-64]="!viewState().expanded">
+      @if (showFilter() && !node().data) {
+        <div class="flex items-center gap-2">
+          <ptah-dashboard-collection-filter class="min-w-0 flex-1" [inputId]="filterId" [accessibleName]="accessibleName()"
+            placeholder="Filter items" [value]="viewState().filter ?? ''" [focusKey]="focusKey('filter')"
+            (valueChange)="setFilter($event)" />
+          @if (collapsible()) {
+            <button #expandButton type="button" ptahButton variant="ghost" size="xs"
+              [attr.aria-label]="(viewState().expanded ? 'Collapse ' : 'Expand ') + accessibleName()"
+              [attr.aria-expanded]="!!viewState().expanded" [attr.aria-controls]="contentId"
+              [attr.data-apps-focus-key]="focusKey('expand')" (click)="toggleExpanded()">
+              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+                <path [attr.d]="viewState().expanded ? 'M7 14l5-5 5 5' : 'M7 10l5 5 5-5'" />
+              </svg>
+            </button>
+          }
+        </div>
+      }
+      <div [id]="contentId" class="flex flex-col gap-2 overflow-auto" [class.max-h-64]="collapsible() && !viewState().expanded">
         @if (node().data; as data) {
           <p role="status">Data is not available in this view.@if (data.rowCount !== undefined) { {{ data.rowCount }} rows. }</p>
         } @else {
-          <label [for]="filterId" class="text-sm text-base-content-muted">Filter {{ title() }}</label>
-          <input #filterInput [id]="filterId" type="search" ptahInput size="sm" class="w-full"
-            [value]="viewState().filter ?? ''" [attr.data-apps-focus-key]="focusKey('filter')"
-            (input)="setFilter(filterInput.value)" />
-          <p role="status" class="text-sm text-base-content-muted">{{ page().total }} results</p>
+          @if (showCount()) {
+            <p role="status" class="text-xs text-base-content-muted">{{ page().total }} results</p>
+          }
           <ng-template #rows>
             @for (item of page().items; track item.originalIndex) {
-              <li class="rounded-md px-2 py-1.5">
+              <li class="rounded-md px-1 py-1">
                 @if (item.text !== undefined) { <p class="text-sm font-medium">{{ item.text }}</p> }
                 @if (item.detail !== undefined) { <p class="text-xs text-base-content-muted">{{ item.detail }}</p> }
                 @if (item.url !== undefined) { <p class="break-all text-xs text-base-content-muted">{{ item.url }}</p> }
@@ -71,8 +81,10 @@ function plainText(value: unknown): string | undefined {
           } @else {
             <ul class="list-disc space-y-1 pl-6"><ng-container [ngTemplateOutlet]="rows" /></ul>
           }
-          <ptah-dashboard-pager [pagination]="page()" [surfaceId]="surfaceId()" [componentId]="node().id"
-            (pageChange)="setPage($event)" />
+          @if (page().pageCount > 1) {
+            <ptah-dashboard-pager [pagination]="page()" [surfaceId]="surfaceId()" [componentId]="node().id"
+              (pageChange)="setPage($event)" />
+          }
         }
         <ng-content />
       </div>
@@ -88,7 +100,9 @@ export class DashboardListComponent {
   public readonly selectionChange = output<SurfaceSelection>();
   public readonly contentId = `ptah-list-content-${nextListInstance++}`;
   public readonly filterId = `${this.contentId}-filter`;
-  public readonly title = computed(() => plainText(this.node().title) ?? 'List');
+  public readonly title = computed(() => plainText(this.node().title)?.trim() || undefined);
+  /** Names the section and the controls; the visible heading appears only for a real title. */
+  public readonly accessibleName = computed(() => this.title() ?? 'List');
   public readonly description = computed(() => plainText(this.node().description));
   public readonly items = computed((): readonly ListItem[] => {
     const items: unknown = this.node().items;
@@ -107,7 +121,11 @@ export class DashboardListComponent {
       .join(' ').toLowerCase().includes(query)), this.viewState().page);
   });
   public readonly pageSize = SURFACE_PAGE_SIZE;
-  private readonly expandButton = viewChild.required<ElementRef<HTMLButtonElement>>('expandButton');
+  public readonly collapsible = computed(() => this.items().length > COLLAPSIBLE_ITEMS);
+  public readonly showFilter = computed(() => this.collapsible() || (this.viewState().filter ?? '') !== '');
+  /** The count is noise for a short static list: show it while filtering or when there is more than one page. */
+  public readonly showCount = computed(() => (this.viewState().filter ?? '') !== '' || this.page().pageCount > 1);
+  private readonly expandButton = viewChild<ElementRef<HTMLButtonElement>>('expandButton');
 
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
   public setFilter(filter: string): void { this.viewStateChange.emit({ ...this.viewState(), filter, page: 0 }); }
@@ -117,7 +135,7 @@ export class DashboardListComponent {
     if (!this.viewState().expanded) return;
     event.stopPropagation();
     this.viewStateChange.emit({ ...this.viewState(), expanded: false });
-    this.expandButton().nativeElement.focus();
+    this.expandButton()?.nativeElement.focus();
   }
   public isSelected(itemIndex: number): boolean {
     const selection = this.selection();

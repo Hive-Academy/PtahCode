@@ -72,8 +72,10 @@ function render(renderable: SurfaceRenderable, interaction = interactionOf(), vi
 }
 
 /** The fixture made no element and no handler attribute anywhere in the rendered tree. */
-function expectInert(element: HTMLElement): void {
-  expect(element.querySelectorAll('img, script, iframe, object, embed, style, [style], a[href]')).toHaveLength(0);
+function expectInert(element: HTMLElement, expectedWidths: readonly string[] = []): void {
+  expect(element.querySelectorAll('img, script, iframe, object, embed, style, a[href]')).toHaveLength(0);
+  const styled = Array.from(element.querySelectorAll('[style]'));
+  expect(styled.map(node => node.getAttribute('style'))).toEqual(expectedWidths.map(width => 'width: ' + width + ';'));
   const handlers = Array.from(element.querySelectorAll('*'))
     .flatMap(node => Array.from(node.attributes).filter(attribute => /^on/i.test(attribute.name)));
   expect(handlers).toHaveLength(0);
@@ -155,7 +157,7 @@ describe('trust boundary: producer text renders literally', () => {
     expect(texts(element, 'ptah-dashboard-stat [id^="ptah-stat-details"] p')).toEqual([markup]);
     expect(texts(element, 'ptah-dashboard-table h3')).toEqual([markup]);
     expect(texts(element, 'ptah-dashboard-table section > p')).toEqual([markup]);
-    expect(texts(element, 'ptah-dashboard-table caption')).toEqual([markup]);
+    expect(element.querySelector('ptah-dashboard-table table')?.getAttribute('aria-label')).toBe(markup);
     expect(texts(element, 'ptah-dashboard-table th button')).toEqual([markup]);
     expect(texts(element, 'ptah-dashboard-table td')).toEqual([markup]);
     expect(texts(element, 'ptah-dashboard-list h3')).toEqual([markup]);
@@ -222,6 +224,32 @@ describe('trust boundary: /4 accordion, avatar, trend and spark', () => {
       && (attribute.value.includes(scriptUrl) || attribute.value.includes('<img')))).toEqual([]);
     expect(element.querySelectorAll('a, image, use, .agent-injected')).toHaveLength(0);
   }
+
+  it('renders untrusted leaderboard fields as literal text', () => {
+    const element = render(v4([{
+      id: 'leaders', kind: 'leaderboard', title: markup,
+      groups: [{ title: markup, entries: [{ label: markup, value: scriptUrl, share: 25, detail: markup }] }],
+    }]));
+    expect(texts(element, 'ptah-dashboard-leaderboard h3')).toEqual([markup]);
+    expect(element.querySelector('ol')?.getAttribute('aria-label')).toBe(markup);
+    expect(texts(element, 'ol li span[title]')).toEqual([markup]);
+    expect(texts(element, 'ol li .font-semibold')).toEqual([scriptUrl]);
+    expect(texts(element, 'ol li .break-words')).toEqual([markup]);
+    expectInert(element, ['25%']);
+    expect(element.querySelector('a, [href], [src], [srcset], [xlink\\:href]')).toBeNull();
+  });
+
+  it('renders untrusted meter fields as literal text', () => {
+    const element = render(v4([{
+      id: 'usage', kind: 'meter', title: markup,
+      segments: [{ label: scriptUrl, value: markup, amount: 1 }],
+    }]));
+    expect(texts(element, 'ptah-dashboard-meter h3')).toEqual([markup]);
+    expect(texts(element, 'ul li .break-words')).toEqual([scriptUrl]);
+    expect(texts(element, 'ul li .font-semibold')).toEqual([markup]);
+    expectInert(element, ['100%', '100%']);
+    expect(element.querySelector('a, [href], [src], [srcset], [xlink\\:href]')).toBeNull();
+  });
 
   it('renders accordion title, avatar name and subtitle, and stat title with trend and spark literally', () => {
     const element = render(v4([
@@ -444,6 +472,14 @@ describe('trust boundary: no HTML sink in either lib (comment-stripped source sc
     const binding = /\[(?:attr\.)?style(?:\.[\w-]+)*\]|\[ngStyle\]|\[(?:attr\.)?(?:href|src|srcset|xlink:href|innerHTML)\]/;
     const findings = atoms.filter(file => binding.test(stripComments(readFileSync(file, 'utf8'), file)));
     expect(findings).toEqual([]);
+  });
+
+  it.each(['dashboard-leaderboard', 'dashboard-meter'])('%s binds only percent width for styles', name => {
+    const file = join(renderer, 'lib', 'components', `${name}.component.ts`);
+    const source = stripComments(readFileSync(file, 'utf8'), file);
+    const bindings = source.match(/\[(?:attr\.)?style(?:\.[^\]]+)?\]|\[ngStyle\]/g);
+    expect(bindings).toEqual(['[style.width.%]']);
+    expect(source).not.toMatch(/\[(?:attr\.)?(?:href|src|srcset|xlink:href|innerHTML|outerHTML)\]/i);
   });
 
   it('the renderer lib does not import the markdown lib', () => {

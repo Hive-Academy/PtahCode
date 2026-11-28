@@ -42,6 +42,8 @@ export * from './lib/types/provider-account.types';
 // `"strict": false` from `tsconfig.base.json`.
 export * from './mcp-apps-contracts/dashboard-spec.types';
 export type * from './mcp-apps-contracts/surface.types';
+export { SURFACE_ICON_TOKENS } from './mcp-apps-contracts/surface-catalog';
+export type { SurfaceIconToken } from './mcp-apps-contracts/surface-catalog';
 export type * from './mcp-apps-contracts/artifact.types';
 export * from './lib/types/ptah-cli.types';
 export * from './lib/types/agent-permission.types';

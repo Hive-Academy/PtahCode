@@ -49,6 +49,23 @@ function renderDisplay(component: SurfaceComponent): string {
       return component.subtitle
         ? `Avatar: ${component.name} — ${component.subtitle}`
         : `Avatar: ${component.name}`;
+    case 'leaderboard':
+      return [
+        component.title,
+        ...component.groups.flatMap((group) => [
+          group.title,
+          ...group.entries.map((entry, index) =>
+            `${index + 1}. ${entry.label}: ${entry.value ?? `${entry.share}%`}${entry.detail ? ` (${entry.detail})` : ''}`,
+          ),
+        ]),
+      ].filter(Boolean).join('\n');
+    case 'meter':
+      return [
+        component.title,
+        ...component.segments.map((segment) =>
+          `${segment.label}: ${segment.value ?? segment.amount}`,
+        ),
+      ].filter(Boolean).join('\n');
     case 'table':
       return renderTable(component);
     case 'list':

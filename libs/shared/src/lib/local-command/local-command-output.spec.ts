@@ -166,6 +166,25 @@ describe('formatLocalCommandOutput', () => {
     },
   );
 
+  it('renders usage contributors and fixed-icon top groups as leaderboards', () => {
+    const body = bodyOf(formatLocalCommandOutput(USAGE));
+    expect(body).toContain('leaderboard Contributors (% of usage)');
+    expect(body).toContain('group skill skills');
+    expect(body).toContain('group agent subagents');
+    expect(body).toContain('group server MCP servers');
+  });
+
+  it('renders category proportions, muted capacity and detailed token leaderboards', () => {
+    const body = bodyOf(formatLocalCommandOutput(CONTEXT));
+    expect(body).toContain('meter Estimated usage by category');
+    expect(body).toContain('Free space | 921500 | 921.5k | muted');
+    expect(body).toContain('Autocompact buffer | 33000 | 33k | muted');
+    for (const section of ['MCP tools', 'Custom agents', 'Skills']) {
+      expect(body).toMatch(new RegExp(`accordion ${section} \\(\\d+\\)\\n  leaderboard\\n`));
+    }
+    expect(body).toMatch(/accordion Memory files \(\d+\)\n {2}table\n/);
+  });
+
   it('puts excess weekly limits into a table and compiles all 51 limits', () => {
     const text = 'Current week: 4% used\n'.repeat(51);
     const body = bodyOf(formatLocalCommandOutput(text));
@@ -174,7 +193,7 @@ describe('formatLocalCommandOutput', () => {
     expect(compilePtahUiBlock(body, 'many-limits').ok).toBe(true);
   });
 
-  it('returns raw usage when a chart percentage would use exponent notation', () => {
+  it('returns raw usage when a contributor share cannot be represented', () => {
     const text =
       'Last 24h · 3 requests · 1 session\n  1000000000000000000000% Oversized';
     expect(formatLocalCommandOutput(text)).toBe(text);
@@ -186,7 +205,7 @@ describe('formatLocalCommandOutput', () => {
     expect(formatted).not.toContain('Users');
   });
 
-  it('caps long tables with a "+N more" note', () => {
+  it('caps long leaderboards with a "+N more" note', () => {
     const rows = Array.from(
       { length: 12 },
       (_v, i) => `| mcp__srv__tool_${i} | srv | ${i + 1}k |`,
@@ -195,7 +214,7 @@ describe('formatLocalCommandOutput', () => {
     const body = bodyOf(formatLocalCommandOutput(text));
     expect(body).toContain('accordion MCP tools (12)');
     expect(body).toContain('note info +4 more');
-    expect(body).toContain('tool_11 | srv | 12k');
+    expect(body).toContain('- tool_11 | 15.4 | 12k | srv');
     expect(compilePtahUiBlock(body, 'cap').ok).toBe(true);
   });
 

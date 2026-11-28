@@ -26,6 +26,8 @@ import type {
 } from '../view-model/view-model.types';
 import { DashboardAlertComponent, type AlertNode } from './dashboard-alert.component';
 import { DashboardAvatarComponent } from './dashboard-avatar.component';
+import { DashboardLeaderboardComponent } from './dashboard-leaderboard.component';
+import { DashboardMeterComponent } from './dashboard-meter.component';
 import { DashboardBadgeComponent, type BadgeNode } from './dashboard-badge.component';
 import { DashboardDividerComponent, type DividerNode } from './dashboard-divider.component';
 import { DashboardProgressComponent, type ProgressNode } from './dashboard-progress.component';
@@ -67,7 +69,7 @@ const NO_INTERACTION: SurfaceInteractionState = {
 
 /**
  * The kinds this node renders: the 19 `/3` kinds plus the `/4` `accordion`
- * and `avatar`; anything else is `@default` and reports `renderFailed`.
+ * and avatar, leaderboard and meter. Other kinds report `renderFailed`.
  */
 export const SURFACE_NODE_KINDS: ReadonlySet<string> = new Set([
   'section', 'stack', 'grid', 'card', 'accordion',
@@ -75,6 +77,8 @@ export const SURFACE_NODE_KINDS: ReadonlySet<string> = new Set([
   'stat', 'table', 'list', 'line-chart', 'bar-chart',
   'alert', 'badge', 'progress', 'radial-progress', 'divider', 'text-block',
   'avatar',
+  'leaderboard',
+  'meter',
 ]);
 
 function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
@@ -108,6 +112,8 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
     DashboardDividerComponent,
     DashboardTextBlockComponent,
     DashboardAvatarComponent,
+    DashboardLeaderboardComponent,
+    DashboardMeterComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // A column flex host with flex-1 lets cards, charts, stats and vertical dividers stretch
@@ -242,6 +248,16 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
           <ptah-dashboard-avatar [node]="avatar" />
         }
       }
+      @case ('leaderboard') {
+        @if (leaderboardNode(); as leaderboard) {
+          <ptah-dashboard-leaderboard [node]="leaderboard" />
+        }
+      }
+      @case ('meter') {
+        @if (meterNode(); as meter) {
+          <ptah-dashboard-meter [node]="meter" />
+        }
+      }
       @default {}
     }
   `,
@@ -320,6 +336,16 @@ export class SurfaceNodeComponent {
     const node = this.node();
     return node.kind === 'text-block' ? node : null;
   });
+  protected readonly leaderboardNode = computed(() => {
+    const node = this.node();
+    return node.kind === 'leaderboard' ? node : null;
+  });
+
+  protected readonly meterNode = computed(() => {
+    const node = this.node();
+    return node.kind === 'meter' ? node : null;
+  });
+
   public readonly avatarNode: Signal<AvatarNode | null> = computed((): AvatarNode | null => {
     const node = this.node();
     return node.kind === 'avatar' ? node : null;

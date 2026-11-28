@@ -11,6 +11,8 @@ import {
   SURFACE_TREND_POLARITIES,
   type SurfaceAction,
   type SurfaceAvatarComponent,
+  type SurfaceLeaderboardComponent,
+  type SurfaceMeterComponent,
   type SurfaceComponent,
   type SurfaceDataModel,
   type SurfaceDataValue,
@@ -20,11 +22,14 @@ import {
 } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import type { SurfaceRenderable } from '../surface-view-state';
 import { buildDashboardViewModel, mapDisplayNode } from './dashboard-view-model';
+import { isSurfaceCardTitle, isSurfaceLeaderboardGroups, isSurfaceMeterSegments } from './surface-card-fields';
 import type {
   AvatarNode,
   DisplayNode,
   InputNode,
   LayoutNode,
+  LeaderboardNode,
+  MeterNode,
   StatusNode,
   SurfaceNode,
   SurfaceViewModel,
@@ -36,7 +41,8 @@ export type SurfaceViewModelBuild =
   | { readonly renderFailed: true; readonly reason: string; readonly viewModel: null };
 
 type LayoutComponent = Extract<SurfaceComponent, { kind: LayoutNode['kind'] }>;
-type DisplayComponent = Exclude<SurfaceComponent, LayoutComponent | SurfaceInput | SurfaceAvatarComponent>;
+type DisplayComponent = Exclude<SurfaceComponent,
+  LayoutComponent | SurfaceInput | SurfaceAvatarComponent | SurfaceLeaderboardComponent | SurfaceMeterComponent>;
 type StatusComponent = Extract<
   SurfaceComponent,
   { kind: 'alert' | 'badge' | 'progress' | 'radial-progress' | 'divider' | 'text-block' }
@@ -49,7 +55,7 @@ const TEXT_BLOCK_ROLES = ['heading', 'body'] as const;
 
 const BUILD_FAILED = 'Surface content could not be mapped.';
 /** Kinds and stat fields that only `dashboard-catalog/4` may carry. */
-const CATALOG_4_ONLY_KINDS: ReadonlySet<string> = new Set(['accordion', 'avatar']);
+const CATALOG_4_ONLY_KINDS: ReadonlySet<string> = new Set(['accordion', 'avatar', 'leaderboard', 'meter']);
 
 /** Deliberately not a type guard: a guard would narrow interface unions away. */
 function isObject(value: unknown): boolean {
@@ -244,6 +250,31 @@ function mapAvatar(component: SurfaceAvatarComponent): AvatarNode {
     ...(component.subtitle === undefined ? {} : { subtitle: component.subtitle }), selectable: false };
 }
 
+function mapLeaderboard(component: SurfaceLeaderboardComponent): LeaderboardNode {
+  const { id, kind, title, groups } = component;
+  if (!isSurfaceCardTitle(title) || !isSurfaceLeaderboardGroups(groups)) {
+    throw new TypeError('Invalid surface leaderboard.');
+  }
+  return {
+    id, kind, title, selectable: false,
+    groups: groups.map(group => ({
+      title: group.title, icon: group.icon,
+      entries: group.entries.map(({ label, share, value, detail }) => ({ label, share, value, detail })),
+    })),
+  };
+}
+
+function mapMeter(component: SurfaceMeterComponent): MeterNode {
+  const { id, kind, title, segments } = component;
+  if (!isSurfaceCardTitle(title) || !isSurfaceMeterSegments(segments)) {
+    throw new TypeError('Invalid surface meter.');
+  }
+  return {
+    id, kind, title, selectable: false,
+    segments: segments.map(({ label, amount, value, muted }) => ({ label, amount, value, muted })),
+  };
+}
+
 function buildSurface(content: Extract<SurfaceRenderable, { contract: 'dashboard-spec/2' }>): SurfaceViewModel {
   const { surface, dataModel } = content;
   if (
@@ -290,6 +321,10 @@ function buildSurface(content: Extract<SurfaceRenderable, { contract: 'dashboard
           return mapStatus(component);
         case 'avatar':
           return mapAvatar(component);
+        case 'leaderboard':
+          return mapLeaderboard(component);
+        case 'meter':
+          return mapMeter(component);
         case 'stat':
           return withStatExtras(mapDisplayNode(component), component, catalog4);
         default:

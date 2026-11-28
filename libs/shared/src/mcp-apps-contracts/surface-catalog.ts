@@ -14,7 +14,7 @@ export const SURFACE_SCHEMA_VERSION = 'dashboard-spec/2';
 export const SURFACE_CATALOG_VERSION = 'dashboard-catalog/3';
 /**
  * The ptah-ui display catalog: `/3` plus the `accordion` layout kind, the
- * `avatar` display kind and the stat `trend` and `spark` fields. It never
+ * `avatar`, `leaderboard` and `meter` display kinds and the stat `trend` and `spark` fields. It never
  * widens `/3`: a `/3` envelope that uses any of them is rejected.
  */
 export const SURFACE_CATALOG_VERSION_4 = 'dashboard-catalog/4';
@@ -67,7 +67,11 @@ export const SURFACE_COMPONENT_KINDS = [
 ] as const;
 /** dashboard-catalog/4 additions, kept apart so the `/3` lists above never grow. */
 export const SURFACE_CATALOG_4_ONLY_LAYOUT_KINDS = ['accordion'] as const;
-export const SURFACE_CATALOG_4_ONLY_DISPLAY_KINDS = ['avatar'] as const;
+export const SURFACE_CATALOG_4_ONLY_DISPLAY_KINDS = [
+  'avatar',
+  'leaderboard',
+  'meter',
+] as const;
 export const SURFACE_CATALOG_4_ONLY_STAT_FIELDS = ['trend', 'spark'] as const;
 /** dashboard-catalog/4 vocabularies: the `/3` lists plus the additions above. */
 export const SURFACE_CATALOG_4_LAYOUT_KINDS = [
@@ -88,6 +92,16 @@ export const SURFACE_TREND_DIRECTIONS = ['up', 'down'] as const;
 export const SURFACE_TREND_POLARITIES = ['good', 'bad'] as const;
 /** A sparkline needs two points to draw a line; the ceiling is `maxSeriesPoints`. */
 export const SURFACE_SPARK_MIN_POINTS = 2;
+export const SURFACE_ICON_TOKENS = [
+  'skill', 'agent', 'server', 'tool', 'file', 'memory', 'chart', 'clock',
+  'bolt', 'info', 'terminal', 'folder', 'cpu', 'gauge', 'user', 'sparkles',
+] as const;
+export type SurfaceIconToken = (typeof SURFACE_ICON_TOKENS)[number];
+
+export const SURFACE_LEADERBOARD_MAX_ENTRIES = 50;
+export const SURFACE_LEADERBOARD_MAX_GROUPS = 8;
+export const SURFACE_METER_MAX_SEGMENTS = 12;
+
 export const SURFACE_ACTIONS = [
   ...DASHBOARD_ACTIONS,
   'surface.submit',

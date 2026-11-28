@@ -1,4 +1,15 @@
-import { SURFACE_LIMITS } from './surface-catalog';
+import {
+  SURFACE_ICON_TOKENS,
+  SURFACE_LEADERBOARD_MAX_ENTRIES,
+  SURFACE_LEADERBOARD_MAX_GROUPS,
+  SURFACE_LIMITS,
+  SURFACE_METER_MAX_SEGMENTS,
+} from './surface-catalog';
+import type {
+  SurfaceLeaderboardEntry,
+  SurfaceLeaderboardGroup,
+  SurfaceMeterSegment,
+} from './surface.types';
 import {
   decodeText,
   depthFailure,
@@ -163,6 +174,10 @@ function parseItem(
       return parseSourceList(state, content);
     case 'chart':
       return parseChart(state, depth, content);
+    case 'leaderboard':
+      return parseLeaderboard(state, depth, content);
+    case 'meter':
+      return parseMeter(state, depth, content);
     case 'note':
       return parseNote(state, content);
     case 'badge':
@@ -501,6 +516,84 @@ function parseChart(state: State, depth: number, content: string): ItemResult {
     points,
   };
   return { ok: true, value: chart };
+}
+
+function parseLeaderboard(state: State, depth: number, content: string): ItemResult {
+  const title = headerText(content, 'leaderboard');
+  if (content !== 'leaderboard' && !title)
+    return failureAt('syntax', 'invalid leaderboard title', state.index + 1);
+
+  const groups: SurfaceLeaderboardGroup[] = [];
+  let entries: SurfaceLeaderboardEntry[] = [];
+  let entryCount = 0;
+  state.index += 1;
+  while (isBodyLine(state, depth)) {
+    const body = bodyContent(state, depth);
+    if (!body.ok) return body;
+    const line = state.index + 1;
+    if (body.value.startsWith('group ')) {
+      const header = keywordWordAndText(body.value, 'group');
+      const groupTitle = decodeText(header?.text ?? '');
+      if (!header || !includes(SURFACE_ICON_TOKENS, header.word) || !groupTitle)
+        return failureAt('syntax', 'group needs an allowed icon and title', line);
+      if (groups.length > 0 && entries.length === 0)
+        return failureAt('syntax', 'leaderboard group needs an entry', line);
+      if (groups.length >= SURFACE_LEADERBOARD_MAX_GROUPS)
+        return limitFailureAt('maxLeaderboardGroups', SURFACE_LEADERBOARD_MAX_GROUPS, line);
+      entries = [];
+      groups.push({ title: groupTitle, icon: header.word, entries });
+    } else {
+      if (!body.value.startsWith('- '))
+        return failureAt('syntax', 'leaderboard entry must start with "- "', line);
+      const cells = parseCells(body.value.slice(2));
+      if (!cells.ok) return failureAt('syntax', cells.message, line);
+      const [label, rawShare, value, detail] = cells.value;
+      const share = Number(rawShare);
+      if (!label || !isUnsignedDecimal(rawShare ?? '') || share > 100 || cells.value.length > 4)
+        return failureAt('syntax', 'entry needs a label and a share from 0 to 100', line);
+      if (entryCount >= SURFACE_LEADERBOARD_MAX_ENTRIES)
+        return limitFailureAt('maxLeaderboardEntries', SURFACE_LEADERBOARD_MAX_ENTRIES, line);
+      if (groups.length === 0) groups.push({ entries });
+      entries.push({ label, share, ...(value ? { value } : {}), ...(detail ? { detail } : {}) });
+      entryCount += 1;
+    }
+    state.index += 1;
+  }
+  if (entries.length === 0)
+    return failureAt('syntax', 'leaderboard needs an entry in each group', state.index + 1);
+  const counted = countComponents(state, 1);
+  if (!counted.ok) return counted;
+  return { ok: true, value: { kind: 'leaderboard', ...(title ? { title } : {}), groups } };
+}
+
+function parseMeter(state: State, depth: number, content: string): ItemResult {
+  const title = headerText(content, 'meter');
+  if (content !== 'meter' && !title)
+    return failureAt('syntax', 'invalid meter title', state.index + 1);
+
+  const segments: SurfaceMeterSegment[] = [];
+  state.index += 1;
+  while (isBodyLine(state, depth)) {
+    const body = bodyContent(state, depth);
+    if (!body.ok) return body;
+    const line = state.index + 1;
+    const cells = parseCells(body.value);
+    if (!cells.ok) return failureAt('syntax', cells.message, line);
+    const [label, rawAmount, value, flag] = cells.value;
+    const amount = Number(rawAmount);
+    if (!label || !isUnsignedDecimal(rawAmount ?? '') || !Number.isFinite(amount)
+        || cells.value.length > 4 || (flag !== undefined && flag !== 'muted'))
+      return failureAt('syntax', 'segment needs a label, a nonnegative amount and optional value and muted flag', line);
+    if (segments.length >= SURFACE_METER_MAX_SEGMENTS)
+      return limitFailureAt('maxMeterSegments', SURFACE_METER_MAX_SEGMENTS, line);
+    segments.push({ label, amount, ...(value ? { value } : {}), ...(flag ? { muted: true } : {}) });
+    state.index += 1;
+  }
+  if (segments.length === 0)
+    return failureAt('syntax', 'meter needs at least one segment', state.index + 1);
+  const counted = countComponents(state, 1);
+  if (!counted.ok) return counted;
+  return { ok: true, value: { kind: 'meter', ...(title ? { title } : {}), segments } };
 }
 
 /** `note = "note" SPS ntone SPS text`; an unescaped pipe in text is literal. */

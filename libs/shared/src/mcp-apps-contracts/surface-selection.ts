@@ -46,7 +46,8 @@ export function describeSurfaceSelection(
       stack.push(...candidate.children);
   }
   if (component === undefined) return null;
-  const title = 'title' in component ? component.title?.text : undefined;
+  const titleField = 'title' in component ? component.title : undefined;
+  const title = typeof titleField === 'string' ? titleField : titleField?.text;
   const lines = [
     `Component: ${quoted(component.id)}`,
     `Kind: ${quoted(component.kind)}`,

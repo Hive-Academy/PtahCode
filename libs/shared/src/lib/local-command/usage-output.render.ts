@@ -1,3 +1,4 @@
+import type { SurfaceIconToken } from '../../mcp-apps-contracts/surface-catalog';
 import type { UsageReport, UsageWindow } from './local-command.types';
 import {
   escapePtahUi,
@@ -8,9 +9,19 @@ import {
 } from './ptah-ui-writer';
 
 const MAX_CONTRIBUTORS = 10;
-const MAX_TOP_ROWS = 12;
+const MAX_TOP_ROWS_PER_GROUP = 8;
+const MAX_TOP_GROUPS = 6;
 const MAX_LIMIT_CARDS = 4;
-const CHART_LABEL_LENGTH = 48;
+const CONTRIBUTOR_LABEL_LENGTH = 48;
+
+function topIcon(kind: string): SurfaceIconToken {
+  switch (kind.toLowerCase()) {
+    case 'skills': return 'skill';
+    case 'subagents': return 'agent';
+    case 'mcp servers': return 'server';
+    default: return 'info';
+  }
+}
 
 function writeWindow(writer: PtahUiWriter, window: UsageWindow): void {
   const title = escapePtahUi(window.title);
@@ -21,45 +32,49 @@ function writeWindow(writer: PtahUiWriter, window: UsageWindow): void {
   if (window.sessions !== null)
     stats.push(`Sessions | ${formatPtahUiNumber(window.sessions)}`);
 
-  const points = window.contributors
+  const contributors = window.contributors
     .slice(0, MAX_CONTRIBUTORS)
     .map((c) => ({
-      label: escapePtahUi(c.label, CHART_LABEL_LENGTH),
+      label: escapePtahUi(c.label, CONTRIBUTOR_LABEL_LENGTH),
       value: formatPtahUiNumber(c.pct),
     }))
     .filter((p) => p.label);
 
-  const rows: string[] = [];
-  for (const top of window.tops) {
-    const kind = escapePtahUi(top.kind);
-    if (!kind) continue;
-    for (const item of top.items) {
-      const name = escapePtahUi(item.name);
-      if (name)
-        rows.push(`${kind} | ${name} | ${formatPtahUiNumber(item.pct)}%`);
-    }
-    if (top.more > 0)
-      rows.push(`${kind} | +${formatPtahUiNumber(top.more)} more | —`);
-  }
-  const shownRows = rows.slice(0, MAX_TOP_ROWS);
-  const hiddenRows = rows.length - shownRows.length;
+  const groups = window.tops
+    .map((top) => {
+      const rows = top.items.flatMap((item) => {
+        const label = escapePtahUi(item.name);
+        return label ? [{ label, pct: item.pct }] : [];
+      });
+      return { title: escapePtahUi(top.kind), top, rows };
+    })
+    .filter((group) => group.title && group.rows.length > 0);
+  const shownGroups = groups.slice(0, MAX_TOP_GROUPS);
+  const hiddenRows = groups.reduce(
+    (total, { top, rows }, index) => total + top.more
+      + (index < MAX_TOP_GROUPS ? Math.max(0, rows.length - MAX_TOP_ROWS_PER_GROUP) : rows.length),
+    0,
+  );
 
-  if (stats.length === 0 && points.length === 0 && shownRows.length === 0)
+  if (stats.length === 0 && contributors.length === 0 && shownGroups.length === 0)
     return;
   writer.line(0, `section ${title}`);
   if (stats.length > 0) {
     writer.line(1, 'stats');
     for (const stat of stats) writer.line(2, stat);
   }
-  if (points.length > 0) {
-    writer.line(1, 'chart bar Contributors (% of usage)');
-    for (const point of points)
-      writer.line(2, `${point.label} | ${point.value}`);
+  if (contributors.length > 0) {
+    writer.line(1, 'leaderboard Contributors (% of usage)');
+    for (const { label, value } of contributors)
+      writer.line(2, `- ${label} | ${value}`);
   }
-  if (shownRows.length > 0) {
-    writer.line(1, 'table');
-    writer.line(2, 'Top | Name | Share');
-    for (const row of shownRows) writer.line(2, row);
+  if (shownGroups.length > 0) {
+    writer.line(1, 'leaderboard Top contributors');
+    for (const { title, top, rows } of shownGroups) {
+      writer.line(2, `group ${topIcon(top.kind)} ${title}`);
+      for (const { label, pct } of rows.slice(0, MAX_TOP_ROWS_PER_GROUP))
+        writer.line(2, `- ${label} | ${formatPtahUiNumber(pct)}`);
+    }
     if (hiddenRows > 0) writer.line(1, `note info +${hiddenRows} more`);
   }
 }

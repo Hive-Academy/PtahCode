@@ -30,6 +30,7 @@ import {
   isSurfaceStatTrend,
   type SurfaceViewModelBuild,
 } from '../view-model/surface-view-model';
+import { isSurfaceCardTitle, isSurfaceLeaderboardGroups, isSurfaceMeterSegments } from '../view-model/surface-card-fields';
 import type { InputNode, SurfaceNode, SurfaceViewModel } from '../view-model/view-model.types';
 import { committedInputValue, plainText } from './surface-input-messages';
 import { SURFACE_CONTAINER_GRID_STYLES, type SurfaceLayoutWidth } from './surface-layout.component';
@@ -142,6 +143,8 @@ function isOption(value: unknown): boolean {
  */
 function hasRenderableAtomFields(kind: string, value: Record<string, unknown>): boolean {
   if (kind === 'avatar') return isSurfaceAvatarName(value['name']) && isSurfaceAvatarSubtitle(value['subtitle']);
+  if (kind === 'leaderboard') return isSurfaceCardTitle(value['title']) && isSurfaceLeaderboardGroups(value['groups']);
+  if (kind === 'meter') return isSurfaceCardTitle(value['title']) && isSurfaceMeterSegments(value['segments']);
   if (kind !== 'stat') return true;
   return (value['trend'] === undefined || isSurfaceStatTrend(value['trend']))
     && (value['spark'] === undefined || isSurfaceSpark(value['spark']));

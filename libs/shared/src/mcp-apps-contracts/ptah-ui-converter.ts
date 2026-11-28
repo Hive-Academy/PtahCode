@@ -172,6 +172,9 @@ function convertElement(
         id,
         items: element.items.map((text) => ({ text: { text } })),
       };
+    case 'leaderboard':
+    case 'meter':
+      return { ...element, id };
     case 'chart':
       return {
         kind: element.chart === 'line' ? 'line-chart' : 'bar-chart',

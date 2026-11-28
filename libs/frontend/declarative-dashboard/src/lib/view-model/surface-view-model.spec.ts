@@ -46,6 +46,15 @@ function action(id: string, name: SurfaceAction['action']): SurfaceAction {
 const options = [{ value: 'production', label: 'Production' }, { value: 'staging', label: 'Staging' }];
 
 describe('buildSurfaceViewModel', () => {
+  const cards: readonly SurfaceComponent[] = [
+    { id: 'leaderboard', kind: 'leaderboard', groups: [{ entries: [{ label: 'Leader', share: 25 }] }] },
+    { id: 'meter', kind: 'meter', segments: [{ label: 'Used', amount: 1 }] },
+  ];
+
+  it.each(cards)('rejects $kind on catalog/3', card => {
+    expect(buildSurfaceViewModel(v2([card])).renderFailed).toBe(true);
+  });
+
   it('reads each input host value through readSurfacePath', () => {
     const [text, select, radio, checkbox] = built(v2([
       { id: 'reason', kind: 'text', label: 'Reason', path: 'form.reason' },

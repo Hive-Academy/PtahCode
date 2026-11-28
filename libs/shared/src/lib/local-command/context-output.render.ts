@@ -1,3 +1,4 @@
+import { SURFACE_METER_MAX_SEGMENTS } from '../../mcp-apps-contracts/surface-catalog';
 import type {
   ContextItem,
   ContextMemoryFile,
@@ -13,6 +14,7 @@ import {
 
 const MAX_ROWS = 8;
 const FREE_SPACE = 'free space';
+const AUTOCOMPACT_BUFFER = 'autocompact buffer';
 
 function byTokens<T extends { readonly tokens: { readonly value: number } }>(
   rows: readonly T[],
@@ -44,19 +46,27 @@ function writeTable(
     writer.line(1, `note info +${rows.length - shown.length} more`);
 }
 
-function itemRows(
+function writeLeaderboard(
+  writer: PtahUiWriter,
+  heading: string,
   items: readonly ContextItem[],
   name: (item: ContextItem) => string,
-): string[] {
-  const rows: string[] = [];
-  for (const item of byTokens(items)) {
-    const label = escapePtahUi(name(item));
-    if (!label) continue;
-    rows.push(
-      `${label} | ${escapePtahUi(item.source ?? '')} | ${escapePtahUi(item.tokens.text)}`,
-    );
+): void {
+  const rows = byTokens(items)
+    .map((item) => ({ label: escapePtahUi(name(item)), item }))
+    .filter((row) => row.label);
+  if (rows.length === 0) return;
+  const total = rows.reduce((sum, { item }) => sum + item.tokens.value, 0);
+  writer.line(0, `accordion ${heading} (${rows.length})`);
+  writer.line(1, 'leaderboard');
+  for (const { label, item } of rows.slice(0, MAX_ROWS)) {
+    const share = formatPercentValue(total > 0 ? (item.tokens.value / total) * 100 : 0);
+    const value = escapePtahUi(item.tokens.text);
+    const detail = escapePtahUi(item.source ?? '');
+    writer.line(2, `- ${label} | ${share} | ${value}${detail ? ` | ${detail}` : ''}`);
   }
-  return rows;
+  if (rows.length > MAX_ROWS)
+    writer.line(1, `note info +${rows.length - MAX_ROWS} more`);
 }
 
 function memoryRows(files: readonly ContextMemoryFile[]): string[] {
@@ -101,45 +111,33 @@ export function renderContextPtahUi(report: ContextReport): string | null {
       `progress Context window | ${formatPercentValue(report.usedPct)} | ${percentTone(report.usedPct)}`,
     );
 
-  const points = byTokens(
-    report.categories.filter(
-      (category) => category.name.toLowerCase() !== FREE_SPACE,
-    ),
-  )
-    .map((category) => ({
-      label: escapePtahUi(category.name, 48),
-      value: formatPtahUiNumber(category.tokens.value),
-    }))
-    .filter((point) => point.label);
-  if (points.length > 0) {
-    writer.line(0, 'chart bar Tokens by category');
-    for (const point of points) writer.line(1, `${point.label} | ${point.value}`);
+  const segments = report.categories
+    .map((category) => ({ label: escapePtahUi(category.name, 48), category }))
+    .filter((segment) => segment.label);
+  if (segments.length > 0) {
+    writer.line(0, 'meter Estimated usage by category');
+    const shown = segments.slice(0, SURFACE_METER_MAX_SEGMENTS);
+    for (const { label, category } of shown) {
+      const normalized = category.name.toLowerCase();
+      const muted = normalized === FREE_SPACE || normalized === AUTOCOMPACT_BUFFER;
+      writer.line(
+        1,
+        `${label} | ${formatPtahUiNumber(category.tokens.value)} | ${escapePtahUi(category.tokens.text)}${muted ? ' | muted' : ''}`,
+      );
+    }
+    if (segments.length > shown.length)
+      writer.line(0, `note info +${segments.length - shown.length} more categories`);
   }
 
-  writeTable(
-    writer,
-    'MCP tools',
-    'Tool | Server | Tokens',
-    itemRows(report.mcpTools, shortToolName),
-  );
-  writeTable(
-    writer,
-    'Custom agents',
-    'Agent | Source | Tokens',
-    itemRows(report.customAgents, (item) => item.name),
-  );
+  writeLeaderboard(writer, 'MCP tools', report.mcpTools, shortToolName);
+  writeLeaderboard(writer, 'Custom agents', report.customAgents, (item) => item.name);
   writeTable(
     writer,
     'Memory files',
     'Type | Tokens',
     memoryRows(report.memoryFiles),
   );
-  writeTable(
-    writer,
-    'Skills',
-    'Skill | Source | Tokens',
-    itemRows(report.skills, (item) => item.name),
-  );
+  writeLeaderboard(writer, 'Skills', report.skills, (item) => item.name);
 
   return writer.itemCount > 0 ? writer.body() : null;
 }

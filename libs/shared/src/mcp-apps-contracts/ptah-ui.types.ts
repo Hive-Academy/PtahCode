@@ -1,3 +1,5 @@
+import type { SurfaceLeaderboardProps, SurfaceMeterProps } from './surface.types';
+
 /** Parsed, zod-free representation of a `ptah-ui` fence body. */
 export interface PtahUiDocument {
   readonly title?: string;
@@ -19,7 +21,16 @@ export type PtahUiElement =
   | PtahUiNoteElement
   | PtahUiProgressElement
   | PtahUiBadgeElement
-  | PtahUiAvatarElement;
+  | PtahUiAvatarElement
+  | PtahUiLeaderboardElement
+  | PtahUiMeterElement;
+
+export interface PtahUiLeaderboardElement extends SurfaceLeaderboardProps {
+  readonly kind: 'leaderboard';
+}
+export interface PtahUiMeterElement extends SurfaceMeterProps {
+  readonly kind: 'meter';
+}
 
 /** The `container(d)` productions. Every container has at least one child. */
 export type PtahUiContainerElement =
