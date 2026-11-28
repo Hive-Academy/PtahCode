@@ -39,14 +39,16 @@ describe('deriveChoiceEvidence', () => {
   it('counts unclassified runs in lane funnels only when they pass the window and identity filters', () => {
     const evidence = deriveChoiceEvidence([
       row('unclassified', { taskKind: null }),
+      row('window-start', { taskKind: null, endedAt: NOW - OUTCOME_WINDOW_MS }),
       row('old', { taskKind: null, endedAt: NOW - OUTCOME_WINDOW_MS - 1 }),
+      row('future', { taskKind: null, endedAt: NOW + 1, laneId: 'future-lane' }),
       row('invalid-date', { taskKind: null, endedAt: NaN }),
       row('blank-family', { taskKind: null, family: ' ' }),
       row('blank-model', { taskKind: null, model: ' ' }),
     ], NOW);
 
     expect(evidence.laneFunnels()).toMatchObject([
-      { laneId: 'glm', family: KEY.family, funnel: { spawned: 1, delivered: 1 } },
+      { laneId: 'glm', family: KEY.family, funnel: { spawned: 2, delivered: 2 } },
     ]);
     expect(evidence.cells()).toEqual([]);
     expect(evidence.routedRuns('glm', KEY.taskKind)).toBe(0);

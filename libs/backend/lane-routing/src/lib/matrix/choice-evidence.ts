@@ -239,7 +239,8 @@ export function deriveChoiceEvidence(
 
   for (const row of dedupeByRun(summaries)) {
     const { family, taskKind } = row;
-    if (!Number.isFinite(row.endedAt) || row.endedAt < sinceMs) continue;
+    if (!Number.isFinite(row.endedAt) || row.endedAt < sinceMs || row.endedAt > nowMs)
+      continue;
     if (!family.trim() || !row.model.trim()) continue;
 
     const capacity = isCapacityFailure(row.failureClass);

@@ -1740,13 +1740,15 @@ describe('ProvidersSettingsComponent', () => {
     expect(document.activeElement).toBe(button('Connect provider'));
   });
 
-  it('explains the Connect provider gate in precedence order and opens after recovery', async () => {
+  it('keeps the wizard request pending through the Connect provider gates and opens after recovery', async () => {
     const loadedScopes = state.scopes();
     const loadedConnections = state.connections();
     const failed = { status: 'error', data: null, error: 'Read failed' } as const;
     state.commit.set({ ...idle, status: 'saving' });
     state.scopes.set(failed);
     state.connections.set(failed);
+    const consumed = jest.fn();
+    fixture.componentInstance.focusTargetConsumed.subscribe(consumed);
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
     const connect = button('Connect provider');
@@ -1757,6 +1759,7 @@ describe('ProvidersSettingsComponent', () => {
       const text = document.querySelector('#' + reasonId)?.textContent?.replace(/\s+/g, ' ').trim();
       expect(text).toBe(reason);
       expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
+      expect(consumed).not.toHaveBeenCalled();
     };
     expect(document.activeElement).toBe(connect);
     expectBlocked('Providers could not be loaded. Your saved settings have not changed.');
@@ -1788,9 +1791,9 @@ describe('ProvidersSettingsComponent', () => {
     await render();
     expect(connect.hasAttribute('aria-disabled')).toBe(false);
     expect(connect.hasAttribute('aria-describedby')).toBe(false);
-    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
-    await openWizard(connect);
+    expect(wizard().open()).toBe(true);
     expect(wizard().deepLinkProviderId()).toBe('');
+    expect(consumed).toHaveBeenCalledTimes(1);
   });
 
   it('passes the actual cancellation result and rejects missing verification results', async () => {

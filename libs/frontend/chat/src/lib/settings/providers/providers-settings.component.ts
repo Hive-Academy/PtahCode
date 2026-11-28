@@ -1223,9 +1223,14 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         return;
       }
       if (target === 'more-providers') {
-        this.focusedTarget = target;
+        if (this.wizardOpen()) return;
+        if (!this.canStartSetup()) {
+          untracked(() => this.focusConnectProvider());
+          return;
+        }
         untracked(() => {
-          this.openWizard('');
+          if (!this.openWizard('')) return;
+          this.focusedTarget = target;
           this.focusTargetConsumed.emit();
         });
         return;
@@ -1449,9 +1454,9 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     if (this.drawerOpener?.isConnected) this.drawerOpener.focus();
     this.openWizard(providerId);
   }
-  protected openWizard(providerId: string): void {
+  protected openWizard(providerId: string): boolean {
     if (!providerId) this.focusConnectProvider();
-    if (!this.canStartSetup() || this.wizardOpen()) return;
+    if (!this.canStartSetup() || this.wizardOpen()) return false;
     this.wizardContext.set(this.state.reviewContext());
     this.returnFocus = this.element.nativeElement.ownerDocument
       .activeElement as HTMLElement | null;
@@ -1459,6 +1464,7 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.wizardSession.update((session) => session + 1);
     this.wizardCommitState.set('idle');
     this.wizardOpen.set(true);
+    return true;
   }
   readonly verifyDraftConnection = async (
     params: AuthVerifyDraftConnectionParams,
