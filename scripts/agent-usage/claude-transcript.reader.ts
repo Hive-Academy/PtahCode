@@ -222,15 +222,34 @@ export function readClaudeTranscript(file: string): ClaudeTranscriptSummary {
         const part = asObject(block);
         const id = asString(part['id']);
         if (part['type'] === 'tool_use' && id !== null) {
-          toolNames[id] = asString(part['name']) ?? '?';
-          toolIndexes.set(id, toolCalls.length);
-          toolCalls.push({
-            id,
-            name: toolNames[id] ?? '?',
-            ...(part['input'] !== undefined ? { input: part['input'] } : {}),
-            outcome: 'unknown',
-            atMs: Number.isFinite(stampMs) ? stampMs : null,
-          });
+          const name = asString(part['name']);
+          const existingPosition = toolIndexes.get(id);
+          if (existingPosition !== undefined) {
+            const existing = toolCalls[existingPosition];
+            if (existing) {
+              const mergedName = name ?? existing.name;
+              toolNames[id] = mergedName;
+              toolCalls[existingPosition] = {
+                ...existing,
+                name: mergedName,
+                ...(part['input'] !== undefined ? { input: part['input'] } : {}),
+                ...(existing.atMs === null && Number.isFinite(stampMs)
+                  ? { atMs: stampMs }
+                  : {}),
+              };
+            }
+          } else {
+            const resolvedName = name ?? '?';
+            toolNames[id] = resolvedName;
+            toolIndexes.set(id, toolCalls.length);
+            toolCalls.push({
+              id,
+              name: resolvedName,
+              ...(part['input'] !== undefined ? { input: part['input'] } : {}),
+              outcome: 'unknown',
+              atMs: Number.isFinite(stampMs) ? stampMs : null,
+            });
+          }
         }
       }
     }

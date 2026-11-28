@@ -235,10 +235,19 @@ export class LegacySessionStoreMigrator {
       };
     }
     if (output) {
+      const cli = output.cli ?? ref.cli;
+      const model = output.model ?? ref.model;
+      const startedAt = output.startedAt ?? ref.startedAt;
+      const normalized: PersistedAgentOutput = {
+        ...output,
+        ...(cli !== undefined ? { cli } : {}),
+        ...(model !== undefined ? { model } : {}),
+        ...(startedAt !== undefined ? { startedAt } : {}),
+      };
       await this.blobs.write(
         sessionId,
         agentOutputBlobName(ref.agentId),
-        output,
+        normalized,
       );
     }
   }

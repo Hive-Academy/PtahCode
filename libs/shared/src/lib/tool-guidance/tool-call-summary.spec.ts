@@ -7,6 +7,7 @@ import {
   pendingToolCallCount,
   recordToolCall,
   recordToolResult,
+  recordToolSegment,
   releaseToolCallSummary,
   summarizeToolCallSegments,
 } from './tool-call-summary';
@@ -237,5 +238,63 @@ describe('tool-call-summary (shared core)', () => {
     expect(summary.ptahCalls + summary.nativeCalls + summary.otherMcpCalls).toBe(
       summary.totalCalls,
     );
+  });
+
+  it('counts standalone OpenCode command segments once without leaking command text and settles Copilot command/file-change completions without settling unrelated file-change events', () => {
+    const secret = 'SYNTHETIC-CMD-SECRET';
+    const summary = summarizeToolCallSegments([
+      // OpenCode standalone Bash commands (no preceding tool-call)
+      { type: 'tool-call', toolCallId: 'p1', toolName: 'ptah_grep' },
+      { type: 'tool-result', toolCallId: 'p1' },
+      { type: 'command', toolCallId: 'oc-1', toolName: `rg ${secret} src`, exitCode: 0 },
+      { type: 'command', toolCallId: 'oc-2', toolName: `cat /tmp/${secret}/a.txt`, exitCode: 2 },
+      { type: 'command', toolCallId: 'oc-3', toolName: 'npm test' },
+      // Copilot keyed tool-call settled by command and file-change (must not double-count)
+      { type: 'tool-call', toolCallId: 'cp-1', toolName: 'bash', toolInput: { command: 'git status' } },
+      { type: 'command', toolCallId: 'cp-1', toolName: 'bash', exitCode: 0 },
+      { type: 'command', toolCallId: 'cp-1', toolName: 'bash', exitCode: 0 },
+      { type: 'tool-call', toolCallId: 'cp-2', toolName: 'edit' },
+      { type: 'file-change', toolCallId: 'cp-2', content: 'src/a.ts' },
+      // Unrelated Codex file-change notifications (keyed or unkeyed) must not count or settle pending calls
+      { type: 'tool-call', toolCallId: 'pending-1', toolName: 'Read' },
+      { type: 'file-change', toolCallId: 'codex-file-item', content: 'src/b.ts' },
+      { type: 'file-change', content: 'src/c.ts' },
+    ]);
+
+    expect(JSON.stringify(summary)).not.toContain(secret);
+    expect(summary).toEqual({
+      totalCalls: 7,
+      ptahCalls: 1,
+      nativeCalls: 6,
+      otherMcpCalls: 0,
+      discoveryCalls: 0,
+      ptahErrors: 0,
+      nativeErrors: 1,
+      unknownOutcomes: 2,
+      callsBeforeFirstPtahSuccess: 0,
+      substitutableNative: {
+        textSearch: 1,
+        fileRead: 2,
+        pathListing: 0,
+        gitRead: 1,
+      },
+      byTool: {
+        ptah_grep: { calls: 1, errors: 0 },
+        bash: { calls: 4, errors: 1 },
+        edit: { calls: 1, errors: 0 },
+        Read: { calls: 1, errors: 0 },
+      },
+      byToolOverflow: 0,
+    });
+
+    // Direct recordToolSegment matches summarizeToolCallSegments.
+    const live = createToolCallSummary();
+    recordToolSegment(live, { type: 'command', toolCallId: 'live-1', toolName: 'ls', exitCode: 0 });
+    releaseToolCallSummary(live);
+    expect(live.totalCalls).toBe(1);
+    expect(live.nativeCalls).toBe(1);
+    expect(live.unknownOutcomes).toBe(0);
+    expect(live.substitutableNative.pathListing).toBe(1);
+    expect(live.byTool).toEqual({ bash: { calls: 1, errors: 0 } });
   });
 });

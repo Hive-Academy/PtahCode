@@ -182,6 +182,120 @@ function parseMcpServer(name: string): string | undefined {
   return name.match(/^MCP\(([^_)]+)/i)?.[1];
 }
 
+const SAFE_PIPE_FILTER_COMMANDS = new Set([
+  'wc',
+  'uniq',
+  'nl',
+  'tr',
+  'cut',
+  'column',
+]);
+
+interface CommandStage {
+  readonly command: string;
+  readonly separator: '|' | 'chain' | null;
+}
+
+function splitCommandStages(command: string): CommandStage[] | null {
+  const stages: CommandStage[] = [];
+  let start = 0;
+  let quote: '"' | "'" | null = null;
+  let separator: '|' | 'chain' | null = null;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] ?? '';
+    if (quote !== null) {
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        i++;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '\n' || ch === '\r' || ch === '`') return null;
+    if ((ch === '$' || ch === '<' || ch === '>') && command[i + 1] === '(') {
+      return null;
+    }
+    if (ch === ';' || ch === '|' || ch === '&') {
+      if (ch === '&') {
+        const before = command.slice(start, i);
+        if (/(?:^|\s)\d*[<>]$/.test(before)) continue;
+      }
+      const next = command[i + 1];
+      const tokenLen =
+        (ch === '|' && next === '|') || (ch === '&' && next === '&') ? 2 : 1;
+      const stageSep: '|' | 'chain' =
+        ch === '|' && tokenLen === 1 ? '|' : 'chain';
+      stages.push({ command: command.slice(start, i), separator });
+      separator = stageSep;
+      i += tokenLen - 1;
+      start = i + 1;
+    }
+  }
+  stages.push({ command: command.slice(start), separator });
+  return stages;
+}
+
+function isMutatingSort(args: readonly string[]): boolean {
+  for (const arg of args) {
+    if (arg === '--') break;
+    if (arg === '-o' || arg.startsWith('-o') || arg === '--output' || arg.startsWith('--output=')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function classifySingleStage(stage: string): {
+  readonly category: NativeClass | null;
+  readonly isSafePipeFilter: boolean;
+} {
+  const words = tokenizeArgs(stage);
+  let offset = 0;
+  while (
+    offset < words.length &&
+    (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(words[offset] ?? '') ||
+      words[offset] === '&')
+  ) {
+    offset++;
+  }
+  const first = (words[offset] ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
+  if (!first) return { category: null, isSafePipeFilter: false };
+  const second = first === 'git' ? (words[offset + 1] ?? '').toLowerCase() : '';
+  const normalized = first === 'git' ? `git ${second}` : first;
+  const args =
+    first === 'git' ? words.slice(offset + 2) : words.slice(offset + 1);
+  if (first === 'sed' && isMutatingSed(args)) {
+    return { category: null, isSafePipeFilter: false };
+  }
+  if (first === 'find' && isMutatingFind(args)) {
+    return { category: null, isSafePipeFilter: false };
+  }
+  if (normalized === 'git branch' && isMutatingGitBranch(args)) {
+    return { category: null, isSafePipeFilter: false };
+  }
+  for (const [category, commands] of Object.entries(extras) as [
+    NativeClass,
+    readonly string[],
+  ][]) {
+    if (
+      commands.some(
+        (word) => word.toLowerCase() === normalized || word.toLowerCase() === first,
+      )
+    ) {
+      return { category, isSafePipeFilter: true };
+    }
+  }
+  const isSafeFilter =
+    SAFE_PIPE_FILTER_COMMANDS.has(first) ||
+    (first === 'sort' && !isMutatingSort(args));
+  return { category: null, isSafePipeFilter: isSafeFilter };
+}
+
 function nativeClass(call: ToolCallInput): NativeClass | null {
   const name = call.name.toLowerCase().replace(/_/g, '-');
   if (/^(grep|rg|search|select-string|findstr)\b/.test(name)) return 'text-search';
@@ -193,20 +307,16 @@ function nativeClass(call: ToolCallInput): NativeClass | null {
     .replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*cd\s+[^;&|]+&&\s*/i, '')
     .replace(/^\s*(?:["'])(.*?)(?:["'])/, '$1');
   if (hasOutputRedirection(stripQuotedStrings(command))) return null;
-  const words = tokenizeArgs(command);
-  let offset = 0;
-  while (offset < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=.*/.test(words[offset] ?? '') || words[offset] === '&')) offset++;
-  const first = (words[offset] ?? '').split(/[\\/]/).pop()?.toLowerCase() ?? '';
-  const second = first === 'git' ? (words[offset + 1] ?? '').toLowerCase() : '';
-  const normalized = first === 'git' ? `git ${second}` : first;
-  const args = first === 'git' ? words.slice(offset + 2) : words.slice(offset + 1);
-  if (first === 'sed' && isMutatingSed(args)) return null;
-  if (first === 'find' && isMutatingFind(args)) return null;
-  if (normalized === 'git branch' && isMutatingGitBranch(args)) return null;
-  for (const [category, commands] of Object.entries(extras) as [NativeClass, readonly string[]][]) {
-    if (commands.some((word) => word.toLowerCase() === normalized || word.toLowerCase() === first)) return category;
+  const stages = splitCommandStages(command);
+  if (!stages || stages.length === 0) return null;
+  const primary = classifySingleStage(stages[0]?.command ?? '');
+  if (primary.category === null) return null;
+  for (let i = 1; i < stages.length; i++) {
+    const stage = stages[i];
+    if (!stage || stage.separator !== '|') return null;
+    if (!classifySingleStage(stage.command).isSafePipeFilter) return null;
   }
-  return null;
+  return primary.category;
 }
 
 /**

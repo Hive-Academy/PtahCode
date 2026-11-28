@@ -12,6 +12,9 @@ const SAFE_TOOL_NAME_RE = /^[A-Za-z0-9_.:-]{1,80}$/;
 
 const FORBIDDEN_TOOL_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
+/** Maximum settled/evicted `toolCallId` entries remembered to ignore duplicate command completions. */
+const MAX_REMEMBERED_CALL_IDS = 2048;
+
 /** Minimal segment shape consumed by the pure tool-call summary accumulator. */
 export interface ToolCallSummarySegment {
   readonly type: string;
@@ -20,6 +23,7 @@ export interface ToolCallSummarySegment {
   readonly toolName?: string;
   readonly toolInput?: unknown;
   readonly toolArgs?: unknown;
+  readonly exitCode?: number;
 }
 
 interface PendingToolCall {
@@ -30,6 +34,7 @@ interface PendingToolCall {
 
 interface PendingSummaryState {
   readonly byId: Map<string, PendingToolCall>;
+  readonly rememberedIds: Set<string>;
   lastUnkeyed: PendingToolCall | null;
 }
 
@@ -44,10 +49,24 @@ const NATIVE_CLASS_TO_FIELD: Readonly<
   'git-read': 'gitRead',
 };
 
+function rememberCallId(state: PendingSummaryState, callId: string): void {
+  if (state.rememberedIds.has(callId)) return;
+  while (state.rememberedIds.size >= MAX_REMEMBERED_CALL_IDS) {
+    const oldest = state.rememberedIds.values().next().value;
+    if (oldest === undefined) break;
+    state.rememberedIds.delete(oldest);
+  }
+  state.rememberedIds.add(callId);
+}
+
 function stateFor(summary: ToolCallSummary): PendingSummaryState {
   let state = pendingStateBySummary.get(summary);
   if (!state) {
-    state = { byId: new Map<string, PendingToolCall>(), lastUnkeyed: null };
+    state = {
+      byId: new Map<string, PendingToolCall>(),
+      rememberedIds: new Set<string>(),
+      lastUnkeyed: null,
+    };
     pendingStateBySummary.set(summary, state);
   }
   return state;
@@ -130,6 +149,7 @@ export function createToolCallSummary(): ToolCallSummary {
   };
   pendingStateBySummary.set(summary, {
     byId: new Map<string, PendingToolCall>(),
+    rememberedIds: new Set<string>(),
     lastUnkeyed: null,
   });
   return summary;
@@ -205,6 +225,7 @@ export function recordToolCall(
       const oldestKey = state.byId.keys().next().value;
       if (oldestKey === undefined) break;
       state.byId.delete(oldestKey);
+      rememberCallId(state, oldestKey);
     }
     state.byId.set(callId, pendingEntry);
   } else {
@@ -242,6 +263,7 @@ export function recordToolResult(
     entry = state.byId.get(callId);
     if (!entry) return;
     state.byId.delete(callId);
+    rememberCallId(state, callId);
   } else {
     entry = state.lastUnkeyed ?? undefined;
     state.lastUnkeyed = null;
@@ -286,6 +308,75 @@ export function pendingToolCallCount(summary: ToolCallSummary): number {
 }
 
 /**
+ * Record any structured output segment into `summary`:
+ * - `tool-call` / `tool-result` / `tool-result-error` delegate directly.
+ * - `file-change` settles an existing pending keyed `toolCallId` (Copilot
+ *   file-write completion) and ignores standalone notifications without a
+ *   matching pending call (e.g. Codex `file` events).
+ * - `command` settles an existing pending keyed `toolCallId` (Copilot shell
+ *   completion, ignoring duplicates/evicted ids), or when standalone (OpenCode
+ *   Bash) normalizes into a `bash` shell call plus its `exitCode` outcome.
+ */
+export function recordToolSegment(
+  summary: ToolCallSummary,
+  segment: ToolCallSummarySegment,
+): void {
+  if (segment.type === 'tool-call') {
+    recordToolCall(summary, segment);
+    return;
+  }
+  if (segment.type === 'tool-result' || segment.type === 'tool-result-error') {
+    recordToolResult(summary, segment);
+    return;
+  }
+  const state = pendingStateBySummary.get(summary);
+  const callId = normalizedCallId(segment.toolCallId);
+  if (segment.type === 'file-change') {
+    if (callId !== undefined && state?.byId.has(callId)) {
+      recordToolResult(summary, { type: 'tool-result', toolCallId: callId });
+    }
+    return;
+  }
+  if (segment.type !== 'command') return;
+
+  if (callId !== undefined && state?.byId.has(callId)) {
+    const failed =
+      typeof segment.exitCode === 'number' &&
+      Number.isFinite(segment.exitCode) &&
+      segment.exitCode !== 0;
+    recordToolResult(summary, {
+      type: failed ? 'tool-result-error' : 'tool-result',
+      toolCallId: callId,
+    });
+    return;
+  }
+  if (callId !== undefined && state?.rememberedIds.has(callId)) {
+    return;
+  }
+
+  const rawCommand =
+    typeof segment.toolName === 'string' ? segment.toolName.trim() : '';
+  const toolInput =
+    segment.toolInput !== undefined
+      ? segment.toolInput
+      : rawCommand.length > 0
+        ? { command: rawCommand }
+        : undefined;
+  recordToolCall(summary, {
+    type: 'tool-call',
+    ...(callId !== undefined ? { toolCallId: callId } : {}),
+    toolName: 'bash',
+    ...(toolInput !== undefined ? { toolInput } : {}),
+  });
+  if (typeof segment.exitCode === 'number' && Number.isFinite(segment.exitCode)) {
+    recordToolResult(summary, {
+      type: segment.exitCode === 0 ? 'tool-result' : 'tool-result-error',
+      ...(callId !== undefined ? { toolCallId: callId } : {}),
+    });
+  }
+}
+
+/**
  * Summarize an ordered sequence of segments using the shared counting rules
  * and release transient pairing state before returning.
  */
@@ -294,14 +385,7 @@ export function summarizeToolCallSegments(
 ): ToolCallSummary {
   const summary = createToolCallSummary();
   for (const segment of segments) {
-    if (segment.type === 'tool-call') {
-      recordToolCall(summary, segment);
-    } else if (
-      segment.type === 'tool-result' ||
-      segment.type === 'tool-result-error'
-    ) {
-      recordToolResult(summary, segment);
-    }
+    recordToolSegment(summary, segment);
   }
   releaseToolCallSummary(summary);
   return summary;

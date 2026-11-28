@@ -46,6 +46,8 @@ describe('classifyToolCall', () => {
   it.each([
     ['rg needle file', 'text-search'],
     ['grep needle file | head', 'text-search'],
+    ['rg needle file | wc -l', 'text-search'],
+    ['rg needle file | sort | uniq', 'text-search'],
     ['rg "a > b" file', 'text-search'],
     ['rg needle file 2>&1', 'text-search'],
     ['cd x && rg needle', 'text-search'],
@@ -95,6 +97,12 @@ describe('classifyToolCall', () => {
     'Get-Content a.txt | Set-Content b.txt',
     'git stash',
     'git stash pop',
+    'ls && rm -rf tmp',
+    'ls; touch out.txt',
+    'find src -name "*.ts" | xargs rm',
+    'rg needle src | sort -o sorted.txt',
+    'rg needle src || echo missing',
+    'cd dir && ls && rm tmp.txt',
   ])('excludes mutating shell command from read categories: %s', (cmd) => {
     const classification = classifyToolCall({ name: 'Bash', input: { command: cmd } });
     expect(classification.operation).toBe('native-other');

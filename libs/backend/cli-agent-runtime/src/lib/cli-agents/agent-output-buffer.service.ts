@@ -1,6 +1,6 @@
 import { injectable, inject } from 'tsyringe';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
-import { AgentId } from '@ptah-extension/shared';
+import { AgentId, recordToolSegment } from '@ptah-extension/shared';
 import type {
   AgentOutputDelta,
   CliOutputSegment,
@@ -23,8 +23,6 @@ import {
 import type { TrackedAgent } from './tracked-agent';
 import {
   createToolCallSummary,
-  recordToolCall,
-  recordToolResult,
   releaseToolCallSummary,
 } from './tool-call-summary';
 
@@ -273,14 +271,7 @@ export class AgentOutputBuffer {
     try {
       const summary = (tracked.toolCallSummary ??= createToolCallSummary());
       this.activeSummaries.set(agentId, summary);
-      if (segment.type === 'tool-call') {
-        recordToolCall(summary, segment);
-      } else if (
-        segment.type === 'tool-result' ||
-        segment.type === 'tool-result-error'
-      ) {
-        recordToolResult(summary, segment);
-      }
+      recordToolSegment(summary, segment);
     } catch (error: unknown) {
       if (!this.summaryErrorLogged.has(agentId)) {
         this.summaryErrorLogged.add(agentId);

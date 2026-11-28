@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, join, resolve } from 'path';
 import {
   classifyToolCall,
   normalizeToolSummaryKey,
@@ -109,6 +109,9 @@ function toSummarySegment(value: unknown): ToolCallSummarySegment | null {
     ...(typeof segment['toolName'] === 'string' ? { toolName: segment['toolName'] } : {}),
     ...(segment['toolInput'] !== undefined ? { toolInput: segment['toolInput'] } : {}),
     ...(segment['toolArgs'] !== undefined ? { toolArgs: segment['toolArgs'] } : {}),
+    ...(typeof segment['exitCode'] === 'number' && Number.isFinite(segment['exitCode'])
+      ? { exitCode: segment['exitCode'] }
+      : {}),
   };
 }
 
@@ -139,7 +142,15 @@ export function readAgentOutputBlob(file: string): AgentOutputBlob {
   };
 }
 
-export function findAgentOutputBlobs(root = join(homedir(), '.ptah', 'state', 'sessions')): string[] {
+export function defaultAgentOutputBlobRoot(): string {
+  const override = process.env['PTAH_SESSIONS_DB_PATH'];
+  if (override !== undefined && override.trim() !== '') {
+    return join(dirname(resolve(override.trim())), 'sessions');
+  }
+  return join(homedir(), '.ptah', 'state', 'sessions');
+}
+
+export function findAgentOutputBlobs(root = defaultAgentOutputBlobRoot()): string[] {
   if (!existsSync(root)) return [];
   const files: string[] = [];
   for (const session of readdirSync(root, { withFileTypes: true })) {

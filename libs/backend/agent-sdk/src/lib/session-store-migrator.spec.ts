@@ -166,6 +166,66 @@ describe('LegacySessionStoreMigrator', () => {
     },
   );
 
+  it('fills missing cli, model, and startedAt from CliSessionReference for headerless async sequences without overwriting stored header values', async () => {
+    const { storage, inner } = asyncLegacy();
+    const legacy = new SessionMetadataStore(storage, logger);
+    await legacy.create(SESS_A, WS_A, 'Alpha');
+    const oldStart = '2025-01-15T12:00:00.000Z';
+    const legacyAgent = '55555555-5555-4555-8555-555555555555' as AgentId;
+    await legacy.saveAgentOutput(legacyAgent, {
+      segments: [{ type: 'tool-call', content: '', toolCallId: 'c1', toolName: 'ptah_grep' }],
+    });
+    // Simulate a pre-header async sequence where no header key existed at all.
+    await inner.update(`ptah.agentOutputHeader:${legacyAgent}`, undefined);
+    await legacy.addCliSession(SESS_A, {
+      cliSessionId: 'cli-legacy',
+      cli: 'opencode',
+      model: 'openai/gpt-5',
+      agentId: legacyAgent,
+      task: 'legacy task',
+      startedAt: oldStart,
+      status: 'completed',
+    } as CliSessionReference);
+
+    // Also test a sequence whose header explicitly sets cli/startedAt (must not be overwritten by ref).
+    const headerAgent = '66666666-6666-4666-8666-666666666666' as AgentId;
+    const headerStart = '2026-02-01T08:00:00.000Z';
+    await legacy.saveAgentOutput(headerAgent, {
+      cli: 'claude',
+      startedAt: headerStart,
+      segments: [{ type: 'text', content: 'hi' }],
+    });
+    await legacy.addCliSession(SESS_A, {
+      cliSessionId: 'cli-header',
+      cli: 'codex',
+      model: 'gpt-5-codex',
+      agentId: headerAgent,
+      task: 'header task',
+      startedAt: '2026-01-01T00:00:00.000Z',
+      status: 'completed',
+    } as CliSessionReference);
+    await legacy.flush();
+
+    const t = target();
+    const result = await t.migrator.migrate([
+      { sourcePath: '/legacy/alpha', storage },
+    ]);
+
+    expect(result).toMatchObject({ copied: 1, failed: 0 });
+    expect(t.blobs.__blobs.get(`${SESS_A}/agent-output.${legacyAgent}`)).toMatchObject({
+      agentId: legacyAgent,
+      cli: 'opencode',
+      model: 'openai/gpt-5',
+      startedAt: oldStart,
+    });
+    expect(t.blobs.__blobs.get(`${SESS_A}/agent-output.${headerAgent}`)).toMatchObject({
+      agentId: headerAgent,
+      cli: 'claude',
+      model: 'gpt-5-codex',
+      startedAt: headerStart,
+    });
+  });
+
   it('copies async agent output header metadata including summary-only outputs', async () => {
     const { storage } = asyncLegacy();
     const legacy = new SessionMetadataStore(storage, logger);

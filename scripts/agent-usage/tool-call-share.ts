@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { homedir, platform } from 'os';
-import { basename, dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
+import { DatabaseSync } from 'node:sqlite';
 import { claudeProjectsDir, readClaudeStore, type ClaudeToolCall, type ClaudeTranscriptSummary } from './claude-transcript.reader';
 import { findAgentOutputBlobs, readAgentOutputBlob } from './agent-output-blob.reader';
 import { classifyToolCall, normalizeToolSummaryKey, type CallServer, type NativeClass, type ToolCallInput, type ToolCallSummary } from '@ptah-extension/shared';
@@ -28,6 +29,7 @@ export interface ShareRow {
   readonly truncated: boolean;
   readonly hasSummary: boolean;
   readonly storedTotal: number | null;
+  readonly fallbackTotal?: number | null;
   readonly windowAt: number | null;
   readonly sessionId: string | null;
   readonly ptahShare: number;
@@ -62,17 +64,27 @@ function freshTotals(): ShareTotals {
   };
 }
 
+function incrementMcpCounter(counts: Record<string, number>, key: string, delta: number): void {
+  const current = Object.prototype.hasOwnProperty.call(counts, key) ? (counts[key] ?? 0) : 0;
+  Object.defineProperty(counts, key, {
+    value: current + delta,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
 function addTotals(target: ShareTotals, value: ShareTotals): void {
   for (const key of ['total', 'ptah', 'native', 'ptahErrors', 'unknown', 'discovery', 'beforeFirstPtahSuccess'] as const) target[key] += value[key];
   for (const key of Object.keys(target.nativeSubstitutable) as NativeClass[]) target.nativeSubstitutable[key] += value.nativeSubstitutable[key];
-  for (const [key, count] of Object.entries(value.otherMcp)) target.otherMcp[key] = (target.otherMcp[key] ?? 0) + count;
+  for (const [key, count] of Object.entries(value.otherMcp)) incrementMcpCounter(target.otherMcp, key, count);
 }
 
 function addOtherMcpCount(totals: ShareTotals, server: CallServer): void {
   const rawServer = server.slice('mcp:'.length);
   const normalized = normalizeToolSummaryKey(rawServer, server);
   const key = normalized === 'mcp:other' ? 'other' : normalized;
-  totals.otherMcp[key] = (totals.otherMcp[key] ?? 0) + 1;
+  incrementMcpCounter(totals.otherMcp, key, 1);
 }
 
 export function summarizeCalls(calls: readonly (ToolCallInput & { readonly error?: boolean })[]): ShareTotals {
@@ -128,16 +140,23 @@ function findLaneMetadata(value: unknown, agentId: string): Record<string, unkno
   return null;
 }
 
-let cachedWorkspaceMetadataFiles: readonly string[] | null = null;
+let cachedWorkspaceMetadataKey: string | null = null;
+let cachedWorkspaceMetadataFiles: readonly string[] = [];
 
 function workspaceMetadataFiles(): readonly string[] {
-  if (cachedWorkspaceMetadataFiles !== null) return cachedWorkspaceMetadataFiles;
   const configRoot = platform() === 'win32'
     ? process.env['APPDATA'] ?? join(homedir(), 'AppData', 'Roaming')
     : platform() === 'darwin'
       ? join(homedir(), 'Library', 'Application Support')
       : process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config');
-  const appRoots = ['Ptah', 'Ptah Dev'].map((appName) => join(configRoot, appName, 'workspace-storage'));
+  const ptahConfig = process.env['PTAH_CONFIG_PATH']?.trim();
+  const cliUserDataRoot = ptahConfig && ptahConfig.length > 0 ? resolve(ptahConfig) : join(homedir(), '.ptah');
+  const cacheKey = `${configRoot}\0${cliUserDataRoot}`;
+  if (cachedWorkspaceMetadataKey === cacheKey) return cachedWorkspaceMetadataFiles;
+  const appRoots = [
+    ...['Ptah', 'Ptah Dev'].map((appName) => join(configRoot, appName, 'workspace-storage')),
+    join(cliUserDataRoot, 'workspaces'),
+  ];
   const files: string[] = [];
   const visit = (directory: string): void => {
     try {
@@ -149,8 +168,42 @@ function workspaceMetadataFiles(): readonly string[] {
     } catch { /* An unavailable app profile contributes no metadata. */ }
   };
   for (const root of appRoots) visit(root);
+  cachedWorkspaceMetadataKey = cacheKey;
   cachedWorkspaceMetadataFiles = files;
   return cachedWorkspaceMetadataFiles;
+}
+
+function sessionStoreDbCandidates(file: string): string[] {
+  const candidates: string[] = [];
+  const override = process.env['PTAH_SESSIONS_DB_PATH']?.trim();
+  if (override) candidates.push(resolve(override));
+  const stateDirs = [dirname(dirname(dirname(file))), join(homedir(), '.ptah', 'state')];
+  for (const dir of stateDirs) {
+    for (const dbName of ['sessions.sqlite', 'sessions-dev.sqlite', 'sessions-test.sqlite']) {
+      const candidate = join(dir, dbName);
+      if (!candidates.includes(candidate)) candidates.push(candidate);
+    }
+  }
+  return candidates;
+}
+
+function readSessionStoreLaneMetadata(file: string, sessionId: string, agentId: string): Record<string, unknown> | null {
+  for (const dbPath of sessionStoreDbCandidates(file)) {
+    if (!existsSync(dbPath)) continue;
+    let db: DatabaseSync | null = null;
+    try {
+      db = new DatabaseSync(dbPath, { readOnly: true });
+      const row = db.prepare('SELECT detail_json FROM sessions WHERE session_id = ?').get(sessionId) as { detail_json?: unknown } | undefined;
+      if (typeof row?.detail_json !== 'string') continue;
+      const found = findLaneMetadata(JSON.parse(row.detail_json), agentId);
+      if (found) return found;
+    } catch {
+      /* Ignore unavailable/unmigrated databases; fall back to legacy JSON files. */
+    } finally {
+      try { db?.close(); } catch { /* Ignore close errors on failed read-only handle. */ }
+    }
+  }
+  return null;
 }
 
 function readLaneMetadata(file: string, agentId: string): Record<string, unknown> | null {
@@ -163,6 +216,9 @@ function readLaneMetadata(file: string, agentId: string): Record<string, unknown
       } catch { /* Ignore unrelated/torn blobs; paths and contents are never reported. */ }
     }
   } catch { /* Missing sibling metadata is represented as unknown. */ }
+  const sessionId = basename(dirname(file));
+  const stored = readSessionStoreLaneMetadata(file, sessionId, agentId);
+  if (stored) return stored;
   for (const metadataFile of workspaceMetadataFiles()) {
     try {
       const found = findLaneMetadata(JSON.parse(readFileSync(metadataFile, 'utf8')), agentId);
@@ -206,11 +262,12 @@ export function rowFromLane(file: string): ShareRow {
   const summary = blob.toolCallSummary;
   const hasSummary = summary !== null;
   const storedTotal = summary ? summary.totalCalls : null;
+  const fallbackTotal = hasSummary && !blob.truncated && !blob.empty ? blob.fallbackSummary.totalCalls : null;
   const windowAt = Number.isFinite(startedMs) ? startedMs : blob.savedAt;
   const sessionId = basename(dirname(file));
   const total = totalsFromSummary(summary ?? blob.fallbackSummary);
   const truncated = !hasSummary && (blob.truncated || blob.empty);
-  return { id: outputLabel(blob.agentId), kind: 'lane', vendor, model, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated, hasSummary, storedTotal, windowAt, sessionId: outputLabel(sessionId) };
+  return { id: outputLabel(blob.agentId), kind: 'lane', vendor, model, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated, hasSummary, storedTotal, fallbackTotal, windowAt, sessionId: outputLabel(sessionId) };
 }
 
 function claudeCalls(calls: readonly ClaudeToolCall[]): (ToolCallInput & { error?: boolean })[] {
@@ -222,7 +279,7 @@ export function buildShareReport(rows: readonly ShareRow[], lanesFound: number, 
   const vendorTotals: Record<string, ShareTotals> = {};
   const lanesWithSummary = laneCoverageRows.filter((row) => row.hasSummary).length;
   const sparse = laneCoverageRows.filter((row) => !row.hasSummary && row.truncated).length;
-  const mismatches = laneCoverageRows.filter((row) => row.storedTotal !== null && row.storedTotal !== row.total.total).length;
+  const mismatches = laneCoverageRows.filter((row) => row.storedTotal !== null && row.fallbackTotal !== undefined && row.fallbackTotal !== null && row.storedTotal !== row.fallbackTotal).length;
   for (const row of rows) {
     addTotals(totals, row.total);
     const vendor = vendorTotals[row.vendor] ?? (vendorTotals[row.vendor] = freshTotals());
@@ -274,19 +331,28 @@ export function selectClaudeSessionRows(transcripts: readonly ClaudeTranscriptSu
     .map((summary): ShareRow => {
       const total = summarizeCalls(claudeCalls(summary.toolCalls ?? []));
       const id = outputLabel(summary.id);
+      const sessionId = outputLabel(claudeTranscriptFullId(summary));
       const startedAt = summary.startedAt === null ? null : isoInstant(Date.parse(summary.startedAt));
-      return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, hasSummary: false, storedTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId: id };
+      return { id, kind: 'session', vendor: 'claude', model: summary.model ? outputLabel(summary.model) : null, startedAt, total, ptahShare: Math.round(100 * total.ptah / Math.max(1, total.total)), truncated: false, hasSummary: false, storedTotal: null, fallbackTotal: null, windowAt: startedAt === null ? null : Date.parse(startedAt), sessionId };
     });
 }
 
-function main(): void {
-  const args = process.argv.slice(2);
+export function runToolCallShare(
+  args: readonly string[],
+  io: {
+    readonly stdout?: (text: string) => void;
+    readonly stderr?: (text: string) => void;
+    readonly now?: number;
+  } = {},
+): 0 | 1 {
+  const stdout = io.stdout ?? ((text: string) => process.stdout.write(text));
+  const stderr = io.stderr ?? ((text: string) => process.stderr.write(text));
   const json = args.includes('--json');
   const get = (name: string): string | undefined => { const index = args.indexOf(name); return index >= 0 ? args[index + 1] : undefined; };
-  const now = Date.now();
+  const now = io.now ?? Date.now();
   const since = parseInstant(get('--since') ?? '24h', now);
   const until = get('--until') ? Date.parse(get('--until') ?? '') : now;
-  if (!Number.isFinite(since) || !Number.isFinite(until)) { process.stderr.write('Invalid time window.\n'); process.exitCode = 1; return; }
+  if (!Number.isFinite(since) || !Number.isFinite(until)) { stderr('Invalid time window.\n'); return 1; }
   const window = { since, until, agent: get('--agent'), session: get('--session') };
   const paths = findAgentOutputBlobs();
   const laneRows: ShareRow[] = [];
@@ -298,8 +364,14 @@ function main(): void {
   const lanes = laneRows.filter((row) => (!window.agent || row.id === window.agent) && (!window.session || row.sessionId === window.session) && row.windowAt !== null && row.windowAt >= window.since && row.windowAt <= window.until);
   const claude = selectClaudeSessionRows(readClaudeStore(claudeProjectsDir(), since).transcripts, window);
   const report = buildShareReport(filterRowsByWindow([...lanes, ...claude], window), paths.length, unreadable, laneRows);
-  if (emptyWindowExitCode(report.rows) === 1) { process.stderr.write(`${EMPTY_WINDOW_MESSAGE}\n`); process.exitCode = 1; return; }
-  process.stdout.write(formatShareReport(report, json));
+  if (emptyWindowExitCode(report.rows) === 1) { stderr(`${EMPTY_WINDOW_MESSAGE}\n`); return 1; }
+  stdout(formatShareReport(report, json));
+  return 0;
+}
+
+function main(): void {
+  const code = runToolCallShare(process.argv.slice(2));
+  if (code !== 0) process.exitCode = code;
 }
 
 if (require.main === module) main();

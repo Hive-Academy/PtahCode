@@ -1,6 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { DatabaseSync } from 'node:sqlite';
 import {
   createToolCallSummary,
   recordToolCall,
@@ -16,6 +17,7 @@ import {
   formatShareReport,
   parseInstant,
   rowFromLane,
+  runToolCallShare,
   selectClaudeSessionRows,
   summarizeCalls,
   type ShareRow,
@@ -97,17 +99,65 @@ describe('tool-call-share', () => {
     expect(filterRowsByWindow(rows, { since: 10, until: 10 }).map((item) => item.id)).toEqual(['a']);
   });
 
-  it('aggregates per row, vendor and overall, and counts undercounted lanes only without summary', () => {
-    const report = buildShareReport([
-      row('a', 'codex', 10, [{ name: 'ptah_grep', error: false }, { name: 'Read', error: true }]),
-      { ...row('b', 'codex', 20, [{ name: 'rg', error: false }]), truncated: true, hasSummary: false, storedTotal: 2 },
-      { ...row('c', 'claude', 30, [{ name: 'ToolSearch' }]), truncated: true, hasSummary: true },
-    ], 4);
-    expect(report.totals).toMatchObject({ total: 4, ptah: 1, native: 3, ptahErrors: 0, unknown: 1, discovery: 1 });
-    expect(report.vendorTotals['codex']?.total).toBe(3);
-    expect(report.coverage).toMatchObject({ lanesFound: 4, lanesWithSummary: 1, lanesTruncatedOrEmpty: 1, laneTotalMismatches: 1 });
-    expect(report.rows[0]?.ptahShare).toBe(50);
-    expect(report.coverage.vendorsWithNoData).toContain('grok');
+  it('aggregates per row, vendor and overall, and counts laneTotalMismatches from complete blobs only', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tool-share-mismatch-'));
+    try {
+      const completeMismatchFile = join(directory, 'agent-output.complete-mismatch.json');
+      writeFileSync(completeMismatchFile, JSON.stringify({
+        agentId: 'complete-mismatch',
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        segmentsTruncated: false,
+        savedAt: 1000,
+        toolCallSummary: {
+          totalCalls: 3, ptahCalls: 1, nativeCalls: 2, otherMcpCalls: 0, discoveryCalls: 0,
+          ptahErrors: 0, nativeErrors: 0, unknownOutcomes: 0, callsBeforeFirstPtahSuccess: 0,
+          substitutableNative: { textSearch: 0, fileRead: 1, pathListing: 1, gitRead: 0 },
+          byTool: { ptah_grep: { calls: 1, errors: 0 }, Read: { calls: 1, errors: 0 }, Glob: { calls: 1, errors: 0 } },
+          byToolOverflow: 0,
+        },
+        segments: [
+          { type: 'tool-call', toolCallId: 'c1', toolName: 'ptah_grep' },
+          { type: 'tool-result', toolCallId: 'c1' },
+        ],
+      }));
+      const truncatedSummaryFile = join(directory, 'agent-output.truncated-summary.json');
+      writeFileSync(truncatedSummaryFile, JSON.stringify({
+        agentId: 'truncated-summary',
+        cli: 'claude',
+        model: 'claude-sonnet',
+        startedAt: '2026-11-27T02:00:00.000Z',
+        segmentsTruncated: true,
+        savedAt: 2000,
+        toolCallSummary: {
+          totalCalls: 5, ptahCalls: 2, nativeCalls: 3, otherMcpCalls: 0, discoveryCalls: 1,
+          ptahErrors: 0, nativeErrors: 0, unknownOutcomes: 0, callsBeforeFirstPtahSuccess: 0,
+          substitutableNative: { textSearch: 0, fileRead: 0, pathListing: 0, gitRead: 0 },
+          byTool: { ptah_grep: { calls: 2, errors: 0 } },
+          byToolOverflow: 0,
+        },
+        segments: [{ type: 'tool-call', toolCallId: 's1', toolName: 'ToolSearch' }],
+      }));
+      const truncatedLegacyFile = join(directory, 'agent-output.truncated-legacy.json');
+      writeFileSync(truncatedLegacyFile, JSON.stringify({
+        agentId: 'truncated-legacy',
+        cli: 'codex',
+        savedAt: 3000,
+        segmentsTruncated: true,
+        segments: [{ type: 'tool-call', toolCallId: 'l1', toolName: 'rg' }],
+      }));
+
+      const report = buildShareReport([
+        rowFromLane(completeMismatchFile),
+        rowFromLane(truncatedSummaryFile),
+        rowFromLane(truncatedLegacyFile),
+      ], 3);
+      expect(report.totals).toMatchObject({ total: 9, ptah: 3, native: 6, ptahErrors: 0, unknown: 1, discovery: 1 });
+      expect(report.vendorTotals['codex']?.total).toBe(4);
+      expect(report.coverage).toMatchObject({ lanesFound: 3, lanesWithSummary: 2, lanesTruncatedOrEmpty: 1, laneTotalMismatches: 1 });
+      expect(report.coverage.vendorsWithNoData).toContain('grok');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
   it('counts only calls strictly before the first successful Ptah call', () => {
@@ -306,9 +356,114 @@ describe('tool-call-share', () => {
     const matched = selectClaudeSessionRows(transcripts, window);
     expect(matched).toHaveLength(1);
     expect(matched[0]?.id).toBe(fullUuid.slice(0, 24));
-    expect(matched[0]?.sessionId).toBe(fullUuid.slice(0, 24));
+    expect(matched[0]?.sessionId).toBe(fullUuid);
 
     const all = selectClaudeSessionRows(transcripts, { since: window.since, until: window.until });
     expect(all).toHaveLength(2);
+  });
+
+  it('uses own-key counters for MCP server names colliding with Object.prototype', () => {
+    const summarized = summarizeCalls([
+      { name: 'mcp__toString__ping', error: false },
+      { name: 'mcp__toString__pong', error: false },
+    ]);
+    expect(summarized.otherMcp).toEqual({ toString: 2 });
+    const report = buildShareReport([row('mcp-proto', 'claude', 10, [{ name: 'mcp__toString__ping', error: false }])], 1);
+    expect(report.totals.otherMcp).toEqual({ toString: 1 });
+    expect(report.vendorTotals['claude']?.otherMcp).toEqual({ toString: 1 });
+    expect(JSON.parse(formatShareReport(report, true)).totals.otherMcp).toEqual({ toString: 1 });
+  });
+
+  it('recovers cli, model, and startedAt for migrated headerless blobs from SQLite session store and CLI workspaces', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tool-share-migrated-'));
+    const prevSessionsDb = process.env['PTAH_SESSIONS_DB_PATH'];
+    const prevConfig = process.env['PTAH_CONFIG_PATH'];
+    try {
+      const dbPath = join(dir, 'sessions.sqlite');
+      const db = new DatabaseSync(dbPath);
+      db.exec('CREATE TABLE sessions (session_id TEXT PRIMARY KEY, detail_json TEXT)');
+      const sqliteSessionId = '11111111-1111-4111-8111-111111111111';
+      const sqliteAgentId = 'agent-sqlite-migrated';
+      db.prepare('INSERT INTO sessions (session_id, detail_json) VALUES (?, ?)').run(
+        sqliteSessionId,
+        JSON.stringify({
+          cliSessions: [{
+            agentId: sqliteAgentId,
+            cli: 'opencode',
+            model: 'openai/gpt-5',
+            startedAt: '2025-05-01T10:00:00.000Z',
+          }],
+        }),
+      );
+      db.close();
+
+      const sqliteBlobDir = join(dir, 'sessions', sqliteSessionId);
+      mkdirSync(sqliteBlobDir, { recursive: true });
+      const sqliteBlobFile = join(sqliteBlobDir, `agent-output.${sqliteAgentId}.json`);
+      writeFileSync(sqliteBlobFile, JSON.stringify({
+        agentId: sqliteAgentId,
+        savedAt: Date.parse('2026-11-28T00:00:00.000Z'),
+        segments: [{ type: 'tool-call', toolCallId: 't1', toolName: 'ptah_grep' }],
+      }));
+
+      const cliWorkspacesDir = join(dir, 'cli-config', 'workspaces', 'hash-1');
+      mkdirSync(cliWorkspacesDir, { recursive: true });
+      const cliAgentId = 'agent-cli-legacy';
+      writeFileSync(join(cliWorkspacesDir, 'workspace-state.json'), JSON.stringify({
+        'ptah.sessionMetadata': [{
+          sessionId: '22222222-2222-4222-8222-222222222222',
+          cliSessions: [{
+            agentId: cliAgentId,
+            cli: 'codex',
+            model: 'gpt-5-codex',
+            startedAt: '2026-11-27T12:00:00.000Z',
+          }],
+        }],
+      }));
+      const cliBlobDir = join(dir, 'sessions', '22222222-2222-4222-8222-222222222222');
+      mkdirSync(cliBlobDir, { recursive: true });
+      const cliBlobFile = join(cliBlobDir, `agent-output.${cliAgentId}.json`);
+      writeFileSync(cliBlobFile, JSON.stringify({
+        agentId: cliAgentId,
+        savedAt: Date.parse('2026-11-28T00:00:00.000Z'),
+        segments: [{ type: 'tool-call', toolCallId: 't2', toolName: 'ptah_read_symbol' }],
+      }));
+
+      process.env['PTAH_SESSIONS_DB_PATH'] = dbPath;
+      process.env['PTAH_CONFIG_PATH'] = join(dir, 'cli-config');
+
+      expect(rowFromLane(sqliteBlobFile)).toMatchObject({
+        vendor: 'opencode',
+        model: 'openai_gpt-5',
+        startedAt: '2025-05-01T10:00:00.000Z',
+        windowAt: Date.parse('2025-05-01T10:00:00.000Z'),
+      });
+      expect(rowFromLane(cliBlobFile)).toMatchObject({
+        vendor: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T12:00:00.000Z',
+        windowAt: Date.parse('2026-11-27T12:00:00.000Z'),
+      });
+
+      // Run the command against the non-default PTAH_SESSIONS_DB_PATH and verify window filtering excludes the 2025 lane.
+      let out = '';
+      let err = '';
+      const code = runToolCallShare(
+        ['--json', '--since', '2026-11-27T00:00:00.000Z', '--until', '2026-11-28T12:00:00.000Z', '--agent', cliAgentId],
+        { stdout: (s) => { out += s; }, stderr: (s) => { err += s; } },
+      );
+      expect(code).toBe(0);
+      expect(err).toBe('');
+      const parsed = JSON.parse(out) as { rows: ShareRow[] };
+      expect(parsed.rows).toHaveLength(1);
+      expect(parsed.rows[0]?.id).toBe(cliAgentId);
+      expect(parsed.rows[0]?.vendor).toBe('codex');
+    } finally {
+      if (prevSessionsDb === undefined) delete process.env['PTAH_SESSIONS_DB_PATH'];
+      else process.env['PTAH_SESSIONS_DB_PATH'] = prevSessionsDb;
+      if (prevConfig === undefined) delete process.env['PTAH_CONFIG_PATH'];
+      else process.env['PTAH_CONFIG_PATH'] = prevConfig;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

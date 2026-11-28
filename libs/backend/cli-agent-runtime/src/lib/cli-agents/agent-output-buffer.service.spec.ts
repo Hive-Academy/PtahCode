@@ -255,6 +255,92 @@ describe('AgentOutputBuffer', () => {
       expect(tracked.accumulatedSegments).toHaveLength(2);
       expect(buffer.takeDelta(AGENT_ID, tracked)?.segments).toHaveLength(2);
     });
+
+    it('counts OpenCode standalone command segments and settles Copilot command/file-change completions without counting unrelated file-change notifications', () => {
+      const { buffer } = makeBuffer();
+      const tracked = makeTracked();
+      const onFlushDue = jest.fn();
+
+      // Mixed Ptah + OpenCode Bash (1 Ptah + 1 Bash = 50% share)
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'ptah-1', toolName: 'ptah_grep' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-result', content: 'ok', toolCallId: 'ptah-1' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'command', content: 'out', toolCallId: 'opencode-bash-1', toolName: 'rg secret-pattern src', exitCode: 0 },
+        onFlushDue,
+      );
+      // Copilot shell start + command completion
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'copilot-sh-1', toolName: 'bash', toolInput: { command: 'git status' } },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'command', content: 'clean', toolCallId: 'copilot-sh-1', toolName: 'bash', exitCode: 0 },
+        onFlushDue,
+      );
+      // Copilot write start + file-change completion
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'copilot-wr-1', toolName: 'write_file' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'file-change', content: 'created file', changeKind: 'added', toolCallId: 'copilot-wr-1' },
+        onFlushDue,
+      );
+      // Unrelated pending call must stay unknown despite Codex file-change notifications
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'tool-call', content: '', toolCallId: 'pending-read', toolName: 'Read' },
+        onFlushDue,
+      );
+      buffer.appendSegment(
+        AGENT_ID,
+        tracked,
+        { type: 'file-change', content: '/src/other.ts', changeKind: 'modified', toolCallId: 'codex-file-1' },
+        onFlushDue,
+      );
+
+      expect(tracked.toolCallSummary).toMatchObject({
+        totalCalls: 5,
+        ptahCalls: 1,
+        nativeCalls: 4,
+        nativeErrors: 0,
+        unknownOutcomes: 1,
+        callsBeforeFirstPtahSuccess: 0,
+        substitutableNative: { textSearch: 1, gitRead: 1, fileRead: 1, pathListing: 0 },
+        byTool: {
+          ptah_grep: { calls: 1, errors: 0 },
+          bash: { calls: 2, errors: 0 },
+          write_file: { calls: 1, errors: 0 },
+          Read: { calls: 1, errors: 0 },
+        },
+      });
+      expect(JSON.stringify(tracked.toolCallSummary)).not.toContain('secret-pattern');
+      expect(tracked.toolCallSummary).toBeDefined();
+      if (tracked.toolCallSummary) {
+        expect(pendingToolCallCount(tracked.toolCallSummary)).toBe(1);
+      }
+    });
   });
 
   describe('appendSegment() echo images (D5)', () => {
