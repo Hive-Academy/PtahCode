@@ -117,11 +117,12 @@ test.describe('Ptah CLI instance header', () => {
       const dialog = page.getByRole('dialog', { name: 'Edit OpenRouter team' });
       const editHeader = dialog.getByTestId('cli-instance-edit-header');
       const modelEffort = editHeader.getByTestId('cli-instance-edit-model-effort');
+      const effortChip = modelEffort.getByRole('button', { name: 'Effort default for OpenRouter team' });
       const controls = [
         editHeader.getByRole('textbox', { name: 'Instance name' }),
         editHeader.getByTestId('add-cli-instance-provider-fixed'),
         modelEffort.getByRole('button', { name: 'Model default for OpenRouter team' }),
-        modelEffort.getByRole('button', { name: 'Effort default for OpenRouter team' }),
+        effortChip,
         editHeader.getByTestId('cli-instance-edit-permission'),
         editHeader.getByTestId('cli-instance-edit-network'),
       ];
@@ -141,6 +142,13 @@ test.describe('Ptah CLI instance header', () => {
       } else {
         const tops = [name, provider, model, effort, permission, network];
         expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(rowTolerance);
+        const modelText = modelEffort.getByTestId('cli-instance-edit-model-text');
+        await expect(modelText).toBeVisible();
+        const [modelRight, effortLeft] = await Promise.all([
+          modelText.evaluate((element) => element.getBoundingClientRect().right),
+          effortChip.evaluate((element) => element.getBoundingClientRect().left),
+        ]);
+        expect(modelRight).toBeLessThanOrEqual(effortLeft);
       }
     });
   }

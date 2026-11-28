@@ -83,6 +83,7 @@ export function splitModelId(id: string): readonly [string, string] | null {
         [keepInViewport]="true"
         [class.inline-flex]="place() === 'edit'"
         [class.min-w-0]="place() === 'edit'"
+        [class]="place() === 'edit' ? '[&>.popover-trigger]:min-w-0 [&>.popover-trigger]:max-w-full' : ''"
         placement="bottom-start"
         [hasBackdrop]="true"
         backdropClass="transparent"
@@ -115,7 +116,7 @@ export function splitModelId(id: string): readonly [string, string] | null {
               ><wbr /><span class="lane-model-part">{{ parts[1] }}</span></span
             >
           } @else if (place() === 'edit') {
-            <span class="truncate">{{ model.label }}</span>
+            <span class="min-w-0 truncate" [title]="model.title" data-testid="cli-instance-edit-model-text">{{ model.label }}</span>
           } @else {
             {{ model.label }}
           }
@@ -142,6 +143,7 @@ export function splitModelId(id: string): readonly [string, string] | null {
         [isOpen]="openField() === 'effort'"
         [keepInViewport]="true"
         [class.inline-flex]="place() === 'edit'"
+        [class.shrink-0]="place() === 'edit'"
         placement="bottom-start"
         [hasBackdrop]="true"
         backdropClass="transparent"

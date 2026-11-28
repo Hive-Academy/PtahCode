@@ -37,10 +37,10 @@
   >
     @if (editing(); as target) {
       <div
-        class="grid grid-cols-2 items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]"
+        class="grid grid-cols-2 items-start gap-[var(--ptah-gap-heading)] lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,2.6fr)_minmax(0,0.7fr)_minmax(0,0.6fr)]"
         data-testid="cli-instance-edit-header"
       >
-        <div class="flex min-w-0 flex-col gap-1">
+        <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
           <label for="add-cli-instance-name" class="block font-semibold">Instance name</label>
           <input
             ptahInput
@@ -59,7 +59,7 @@
             "
           />
         </div>
-        <div class="flex min-w-0 flex-col gap-1">
+        <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
           <span id="add-cli-instance-provider-label" class="block font-semibold">Provider connection</span>
           <p
             class="flex h-[var(--ptah-control-h-sm)] min-w-0 items-center gap-2"

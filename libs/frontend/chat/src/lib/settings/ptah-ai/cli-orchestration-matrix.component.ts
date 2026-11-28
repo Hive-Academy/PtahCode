@@ -226,7 +226,7 @@ const SAVE_SCOPE = 'global';
     >
       <ng-container instanceEditFields>
         @if (editRow(); as row) {
-          <div class="col-span-2 flex min-w-0 flex-col gap-1 lg:col-span-1">
+          <div class="col-span-2 flex min-w-0 flex-col gap-[var(--ptah-gap-label)] lg:col-span-1">
             <span class="block font-semibold">Model / Effort</span>
             <ptah-lane-model-effort-cell
               class="h-[var(--ptah-control-h-sm)] max-w-full"
@@ -241,7 +241,7 @@ const SAVE_SCOPE = 'global';
               (closed)="editModelField.set(null)"
             />
           </div>
-          <div class="flex min-w-0 flex-col gap-1">
+          <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
             <span id="cli-instance-edit-permission-label" class="block font-semibold">Permission</span>
             <output
               class="flex h-[var(--ptah-control-h-sm)] items-center"
@@ -250,7 +250,7 @@ const SAVE_SCOPE = 'global';
               data-testid="cli-instance-edit-permission"
             >{{ inheritedEditDefaults().permission }}</output>
           </div>
-          <div class="flex min-w-0 flex-col gap-1">
+          <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
             <span id="cli-instance-edit-network-label" class="block font-semibold">Network</span>
             <output
               class="flex h-[var(--ptah-control-h-sm)] items-center"
