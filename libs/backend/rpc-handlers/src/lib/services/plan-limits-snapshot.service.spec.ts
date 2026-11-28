@@ -395,6 +395,98 @@ describe('PlanLimitsSnapshotService', () => {
     expect(ownerResolver.ownerForCodexHome).toHaveBeenCalledWith('/home/codex');
   });
 
+  it('looks up native session owners in parallel, not one session at a time (TASK startup-rpc-timeouts)', async () => {
+    const releases: Record<string, () => void> = {};
+    const started: string[] = [];
+    const metadata = {
+      get: jest.fn((sessionId: string) => {
+        started.push(sessionId);
+        return new Promise<null>((resolve) => {
+          releases[sessionId] = () => resolve(null);
+        });
+      }),
+    };
+    const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+    const pending = s.service.snapshot({ sessionIds: ['s-a', 's-b', 's-c'] });
+
+    // All three lookups must be in flight before any of them settles — a
+    // sequential `for` loop would only have started the first.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started.sort()).toEqual(['s-a', 's-b', 's-c']);
+
+    Object.values(releases).forEach((release) => release());
+    await expect(pending).resolves.toMatchObject({ sessionOwners: {
+      's-a': { ownerKey: null },
+      's-b': { ownerKey: null },
+      's-c': { ownerKey: null },
+    } });
+  });
+
+  it('caps a hung native session lookup by the remaining snapshot budget instead of hanging forever', async () => {
+    jest.useFakeTimers();
+    try {
+      const metadata = {
+        get: jest.fn(
+          () =>
+            new Promise<{
+              codexExecution?: SessionRuntimeIdentity;
+              providerSessionExecution?: SessionRuntimeIdentity;
+            } | null>(() => undefined),
+        ),
+      };
+      const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+
+      const pending = s.service.snapshot({ sessionIds: ['stuck-session'] });
+      await jest.advanceTimersByTimeAsync(24_000);
+
+      await expect(pending).resolves.toMatchObject({ sessionOwners: {
+        'stuck-session': { ownerKey: null },
+      } });
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('looks up a duplicate session id only once', async () => {
+    const metadata = { get: jest.fn(async () => null) };
+    const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+
+    await s.service.snapshot({ sessionIds: ['dup-session', 'dup-session'] });
+
+    expect(metadata.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the snapshot non-cacheable when the session-owner budget is already spent (TASK startup-rpc-timeouts)', async () => {
+    jest.useFakeTimers();
+    try {
+      const metadata = { get: jest.fn(async () => null) };
+      const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+      // Discovery alone consumes the entire 24 s snapshot budget, so
+      // `sessionOwners()` starts with no time left for its own lookups.
+      s.discoverTargets.mockImplementationOnce(
+        () => new Promise((resolve) => setTimeout(() => resolve([]), 24_000)),
+      );
+
+      const pending = s.service.snapshot({ sessionIds: ['late-session'] });
+      await jest.advanceTimersByTimeAsync(24_000);
+      await expect(pending).resolves.toMatchObject({ sessionOwners: {
+        'late-session': { ownerKey: null },
+      } });
+      expect(metadata.get).not.toHaveBeenCalled();
+
+      // A second, non-refresh call for the same scope must NOT reuse that
+      // degraded snapshot — the first owed a session-owner lookup it never
+      // got to make.
+      s.discoverTargets.mockResolvedValue([]);
+      await s.service.snapshot({ sessionIds: ['late-session'] });
+      expect(s.discoverTargets).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('passes an incomplete discovery marker to the client snapshot', async () => {
     const s = build();
     s.discoverTargets.mockResolvedValue(

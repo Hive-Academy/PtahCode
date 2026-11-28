@@ -6,7 +6,11 @@ import {
   type IWorkspaceWatcher,
   type ISessionOrganizationRecorder,
 } from '@ptah-extension/platform-core';
-import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import {
+  TOKENS,
+  type BackgroundWorkAdmission,
+  type Logger,
+} from '@ptah-extension/vscode-core';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import {
   PERSISTENCE_TOKENS,
@@ -149,6 +153,28 @@ export function createHeavyServicesBooter(
   let gateOpened = false;
   let installScopeMigrationStarted = false;
 
+  /** `whenClear` lane name; it only labels the governor's ceiling log line. */
+  const INSTALL_SCOPE_MIGRATION_GOVERNOR_LANE = 'install-scope-migration';
+
+  /** The governor, or `null` when this container has none (a spec, a bare host). */
+  const resolveInstallScopeMigrationGovernor = (): BackgroundWorkAdmission | null => {
+    if (!container.isRegistered(TOKENS.BACKGROUND_WORK_GOVERNOR, true)) {
+      return null;
+    }
+    try {
+      return container.resolve<BackgroundWorkAdmission>(
+        TOKENS.BACKGROUND_WORK_GOVERNOR,
+      );
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unresolvable governor means the migration runs ungoverned, exactly as before this fix.
+      console.warn(
+        '[Ptah Electron] Background-work governor unavailable; the install-scope migration runs ungoverned:',
+        error instanceof Error ? error.message : String(error),
+      );
+      return null;
+    }
+  };
+
   /**
    * Start the one-time install-scope migration (TASK_2026_853 D-6) without
    * waiting for it. Electron is the only host that runs it (D-D5); VS Code
@@ -156,34 +182,76 @@ export function createHeavyServicesBooter(
    * a partial run itself, so a second workspace boot has nothing to add, and
    * a failed pass is retried on the next app start.
    *
-   * Never awaited: it walks every recent workspace, and neither the window
-   * (already on screen when this runs) nor the user-layer pass after it may
-   * wait for that. `run()` is documented never to reject; the guards below
-   * keep a broken resolution or a future rejection from becoming an
-   * unhandled rejection or stopping the boot.
+   * Never awaited BY THE CALLER: it walks every recent workspace, and
+   * neither the window (already on screen when this runs) nor the
+   * user-layer pass after it may wait for that. `run()` is documented never
+   * to reject; the guards below keep a broken resolution or a future
+   * rejection from becoming an unhandled rejection or stopping the boot.
+   *
+   * The migration itself is held behind {@link BackgroundWorkGovernor.whenClear}
+   * (the same gate `admitUserLayerPass` uses) so its synchronous fs work
+   * (`reconciler.reconcile`, `execFile`/`Atomics.wait` retries) does not run
+   * in the same event-loop turn as the rest of the startup boot path right
+   * after the window loads (TASK startup-rpc-timeouts). The outcome follows
+   * `admitUserLayerPass`'s own rule exactly: skip ONLY on `AbortError` (the
+   * governor is disposed, i.e. the host is shutting down — `run()` resumes
+   * from its ledger on the next start, same as before this fix); any other
+   * `whenClear` rejection, or no governor at all, fails open and runs the
+   * migration ungoverned.
    */
   const startInstallScopeMigration = (): void => {
     if (installScopeMigrationStarted) return;
     installScopeMigrationStarted = true;
-    try {
-      const logger = container.resolve<Logger>(TOKENS.LOGGER);
-      const migration = container.resolve(InstallScopeMigrationService);
-      // degradation-audit: reported - logged at error level; the boot goes on
-      // and the next app start retries the migration from its ledger.
-      migration.run().catch((error: unknown) => {
-        logger.error(
-          '[Ptah Electron] Install-scope migration failed (non-fatal)',
-          error instanceof Error ? error : new Error(String(error)),
+    void (async (): Promise<void> => {
+      try {
+        const governor = resolveInstallScopeMigrationGovernor();
+        if (governor !== null && !governor.isClear()) {
+          console.log(
+            '[Ptah Electron] Install-scope migration deferred until background work clears',
+          );
+          try {
+            await governor.whenClear({
+              signal,
+              lane: INSTALL_SCOPE_MIGRATION_GOVERNOR_LANE,
+            });
+          } catch (error: unknown) {
+            // degradation-audit: optional-capability - skipped only when the
+            // governor is disposed (host shutting down); any other wait
+            // failure is a governor defect and falls through to run anyway.
+            if (error instanceof Error && error.name === 'AbortError') {
+              console.log(
+                '[Ptah Electron] Install-scope migration skipped — background-work governor disposed:',
+                error.message,
+              );
+              return;
+            }
+            console.warn(
+              '[Ptah Electron] Install-scope migration — background-work wait failed; running anyway:',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
+        if (signal.aborted) return;
+        const logger = container.resolve<Logger>(TOKENS.LOGGER);
+        const migration = container.resolve(InstallScopeMigrationService);
+        // degradation-audit: reported - logged at error level; the boot goes on
+        // and the next app start retries the migration from its ledger.
+        await migration.run().catch((error: unknown) => {
+          logger.error(
+            '[Ptah Electron] Install-scope migration failed (non-fatal)',
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        });
+      } catch (error: unknown) {
+        // degradation-audit: reported - the boot must not stop for a migration
+        // that could not be constructed (or a governor that threw synchronously);
+        // the next app start tries again.
+        console.error(
+          '[Ptah Electron] Install-scope migration could not start (non-fatal):',
+          error instanceof Error ? error.message : String(error),
         );
-      });
-    } catch (error: unknown) {
-      // degradation-audit: reported - the boot must not stop for a migration
-      // that could not be constructed; the next app start tries again.
-      console.error(
-        '[Ptah Electron] Install-scope migration could not start (non-fatal):',
-        error instanceof Error ? error.message : String(error),
-      );
-    }
+      }
+    })();
   };
 
   // One task-end hook per process, not per booted root: its detector covers

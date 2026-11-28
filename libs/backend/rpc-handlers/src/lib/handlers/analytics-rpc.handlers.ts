@@ -30,8 +30,15 @@ import { InFlightCoalescer } from './in-flight-coalescer';
 
 const METHOD = 'analytics:spendSummary';
 
-/** Abort budget for one summary; the scan is bounded, the RPC must be too. */
-const USAGE_SUMMARY_BUDGET_MS = 30_000;
+/**
+ * Abort budget for one summary; the scan is bounded, the RPC must be too.
+ * Below the 30 s client RPC timeout (`DEFAULT_RPC_TIMEOUT_MS`), not equal to
+ * it: at 30_000 a scan that used the whole budget raced the client's own
+ * timeout instead of returning first, which read as a silent RPC timeout
+ * rather than this handler's own `PERSISTENCE_UNAVAILABLE` answer
+ * (TASK startup-rpc-timeouts).
+ */
+const USAGE_SUMMARY_BUDGET_MS = 24_000;
 
 @injectable()
 export class AnalyticsRpcHandlers {

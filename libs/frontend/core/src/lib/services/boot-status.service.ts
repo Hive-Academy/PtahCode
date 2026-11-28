@@ -72,8 +72,13 @@ import { ClaudeRpcService } from './claude-rpc.service';
 import type { MessageHandler } from './message-router.types';
 import { VSCodeService } from './vscode.service';
 
-/** Timeout for the one-shot readiness pull. Short: the answer is in-memory. */
-const READINESS_PULL_TIMEOUT_MS = 5000;
+/**
+ * Timeout for the one-shot readiness pull. The answer itself is an in-memory
+ * read, but the main process can be busy with other startup work when the
+ * pull lands, so this leaves headroom for a brief startup stall instead of
+ * logging a false timeout (TASK startup-rpc-timeouts).
+ */
+const READINESS_PULL_TIMEOUT_MS = 15_000;
 
 /**
  * How long the re-pull keeps running for unsettled host steps once readiness
@@ -188,6 +193,14 @@ export class BootStatusService implements MessageHandler {
 
   private watchdog: ReturnType<typeof setInterval> | null = null;
 
+  /**
+   * True while a pull is on the wire. Without it, a stalled main process
+   * leaves each tick's pull unsettled past the next tick, and the watchdog's
+   * `setInterval` fires a fresh 15 s RPC every 2 s on top of it — the timeout
+   * storm this guard exists to prevent (TASK startup-rpc-timeouts).
+   */
+  private pullInFlight = false;
+
   /** Epoch ms after which unsettled host steps stop being re-pulled. */
   private stepPullDeadline: number | null = null;
 
@@ -244,6 +257,11 @@ export class BootStatusService implements MessageHandler {
    * with no `boot:` namespace keeps the ready default forever.
    */
   private async pullReadiness(): Promise<void> {
+    // A pull already on the wire is left to settle on its own; the watchdog's
+    // next tick skips issuing a second one instead of piling RPCs up behind a
+    // stalled main process.
+    if (this.pullInFlight) return;
+    this.pullInFlight = true;
     try {
       const result = await this.rpc.call(
         'boot:getReadiness',
@@ -266,6 +284,8 @@ export class BootStatusService implements MessageHandler {
     } catch {
       // A host with no `boot:` namespace (VS Code) or a rejected call leaves
       // the ready default — deliberately indistinguishable from a settled boot.
+    } finally {
+      this.pullInFlight = false;
     }
   }
 

@@ -98,8 +98,8 @@ describe('HarnessGitignoreWriter (E23)', () => {
     );
 
   describe('adding the block', () => {
-    it('creates .gitignore with the block when none exists', () => {
-      const result = writer().apply(ws, DIRS);
+    it('creates .gitignore with the block when none exists', async () => {
+      const result = await writer().apply(ws, DIRS);
 
       expect(result.outcome).toBe('written');
       expect(result.patterns).toEqual([
@@ -113,35 +113,35 @@ describe('HarnessGitignoreWriter (E23)', () => {
       expect(text).toContain('.claude/skills/');
     });
 
-    it('is idempotent — a second pass rewrites nothing', () => {
-      writer().apply(ws, DIRS);
+    it('is idempotent — a second pass rewrites nothing', async () => {
+      await writer().apply(ws, DIRS);
       const afterFirst = gitignore();
 
-      const second = writer().apply(ws, DIRS);
+      const second = await writer().apply(ws, DIRS);
 
       expect(second.outcome).toBe('unchanged');
       expect(gitignore()).toBe(afterFirst);
     });
 
-    it('does not mistake its OWN entries for entries the user already ignored', () => {
+    it('does not mistake its OWN entries for entries the user already ignored', async () => {
       // The regression this guards: presence is tested against the file, so a
       // naive second pass finds every pattern present (it wrote them) and
       // empties the block it just created.
-      writer().apply(ws, DIRS);
-      writer().apply(ws, DIRS);
+      await writer().apply(ws, DIRS);
+      await writer().apply(ws, DIRS);
 
       expect(gitignore()).toContain('.claude/skills/');
     });
 
-    it('sorts patterns so target iteration order is not a diff', () => {
-      const forward = writer().apply(ws, ['.claude/skills', '.agents/skills']);
-      const reverse = writer().apply(ws, ['.agents/skills', '.claude/skills']);
+    it('sorts patterns so target iteration order is not a diff', async () => {
+      const forward = await writer().apply(ws, ['.claude/skills', '.agents/skills']);
+      const reverse = await writer().apply(ws, ['.agents/skills', '.claude/skills']);
 
       expect(forward.patterns).toEqual(reverse.patterns);
     });
 
-    it('writes nothing when there are no directories to ignore', () => {
-      const result = writer().apply(ws, []);
+    it('writes nothing when there are no directories to ignore', async () => {
+      const result = await writer().apply(ws, []);
 
       expect(result.outcome).toBe('nothing-to-ignore');
       expect(() => gitignore()).toThrow();
@@ -149,11 +149,11 @@ describe('HarnessGitignoreWriter (E23)', () => {
   });
 
   describe('preserving what the user wrote', () => {
-    it('keeps existing content byte-for-byte, including CRLF and no trailing newline', () => {
+    it('keeps existing content byte-for-byte, including CRLF and no trailing newline', async () => {
       const original = 'node_modules\r\ndist\r\n*.log';
       writeFileSync(join(ws, '.gitignore'), original, 'utf-8');
 
-      writer().apply(ws, DIRS);
+      await writer().apply(ws, DIRS);
 
       const text = gitignore();
       expect(text.startsWith(original)).toBe(true);
@@ -161,28 +161,28 @@ describe('HarnessGitignoreWriter (E23)', () => {
       expect(text).toContain(`${GITIGNORE_BEGIN}\r\n`);
     });
 
-    it('leaves an LF file on LF', () => {
+    it('leaves an LF file on LF', async () => {
       writeFileSync(join(ws, '.gitignore'), 'dist\nbuild\n', 'utf-8');
 
-      writer().apply(ws, DIRS);
+      await writer().apply(ws, DIRS);
 
       expect(gitignore()).not.toContain('\r\n');
     });
 
-    it('skips a pattern the user already ignores, with or without a trailing slash', () => {
+    it('skips a pattern the user already ignores, with or without a trailing slash', async () => {
       writeFileSync(
         join(ws, '.gitignore'),
         'dist\n.claude/skills\n.agents/skills/\n',
         'utf-8',
       );
 
-      const result = writer().apply(ws, DIRS);
+      const result = await writer().apply(ws, DIRS);
 
       expect(result.patterns).toEqual(['.claude/commands/']);
       expect(result.outcome).toBe('written');
     });
 
-    it('refuses to touch a file whose block was cut in half', () => {
+    it('refuses to touch a file whose block was cut in half', async () => {
       writeFileSync(
         join(ws, '.gitignore'),
         `dist\n${GITIGNORE_BEGIN}\n.claude/skills/\n`,
@@ -190,17 +190,17 @@ describe('HarnessGitignoreWriter (E23)', () => {
       );
       const before = gitignore();
 
-      const result = writer().apply(ws, DIRS);
+      const result = await writer().apply(ws, DIRS);
 
       expect(result.outcome).toBe('unchanged');
       expect(gitignore()).toBe(before);
     });
 
-    it('replaces only the block when the directory set changes', () => {
+    it('replaces only the block when the directory set changes', async () => {
       writeFileSync(join(ws, '.gitignore'), 'dist\n', 'utf-8');
-      writer().apply(ws, DIRS);
+      await writer().apply(ws, DIRS);
 
-      writer().apply(ws, ['.claude/skills']);
+      await writer().apply(ws, ['.claude/skills']);
 
       const text = gitignore();
       expect(text).toContain('dist');
@@ -229,10 +229,10 @@ describe('HarnessGitignoreWriter (E23)', () => {
    * candidate makes it dangerous. Both answers are "do not write it".
    */
   describe('rules that already talk about the path', () => {
-    it('adds only what this repo does not already cover', () => {
+    it('adds only what this repo does not already cover', async () => {
       writeFileSync(join(ws, '.gitignore'), NEGATION_LADDER, 'utf-8');
 
-      const result = writer().apply(ws, DIRS_WITH_AGENTS);
+      const result = await writer().apply(ws, DIRS_WITH_AGENTS);
 
       // `.claude/*` covers both Claude dirs; the other two are genuinely new.
       expect(result.patterns).toEqual(['.agents/skills/', '.codex/agents/']);
@@ -250,11 +250,11 @@ describe('HarnessGitignoreWriter (E23)', () => {
       '.claude/',
       '.claude/*',
       '.claude/**',
-    ])('treats %s as already covering .claude/skills', (rule) => {
+    ])('treats %s as already covering .claude/skills', async (rule) => {
       const original = `dist\n${rule}\n`;
       writeFileSync(join(ws, '.gitignore'), original, 'utf-8');
 
-      const result = writer().apply(ws, ['.claude/skills']);
+      const result = await writer().apply(ws, ['.claude/skills']);
 
       expect(result.patterns).toEqual([]);
       expect(result.outcome).toBe('nothing-to-ignore');
@@ -265,20 +265,20 @@ describe('HarnessGitignoreWriter (E23)', () => {
       '!.claude/skills/example-skill/**',
       '!.claude/skills/example-skill/',
       '.claude/skills/example-skill/build/',
-    ])('refuses to write a blanket rule over %s', (rule) => {
+    ])('refuses to write a blanket rule over %s', async (rule) => {
       // A rule mentioning something INSIDE the candidate means that subtree is
       // being managed deliberately. Appending `.claude/skills/` after it wins
       // by being later and defeats the intent, so the writer stays out.
       const original = `${rule}\n`;
       writeFileSync(join(ws, '.gitignore'), original, 'utf-8');
 
-      const result = writer().apply(ws, ['.claude/skills']);
+      const result = await writer().apply(ws, ['.claude/skills']);
 
       expect(result.patterns).toEqual([]);
       expect(gitignore()).toBe(original);
     });
 
-    it('is not fooled by a rule whose name merely starts the same way', () => {
+    it('is not fooled by a rule whose name merely starts the same way', async () => {
       // The boundary is a path separator, not a string prefix: `.claude-worktrees`
       // has nothing to do with `.claude/skills`, and treating it as coverage
       // would leave derived copies in `git status` forever.
@@ -288,20 +288,21 @@ describe('HarnessGitignoreWriter (E23)', () => {
         'utf-8',
       );
 
-      const result = writer().apply(ws, ['.claude/skills']);
+      const result = await writer().apply(ws, ['.claude/skills']);
 
       expect(result.patterns).toEqual(['.claude/skills/']);
     });
 
-    it('does not let a commented-out rule block a pattern', () => {
+    it('does not let a commented-out rule block a pattern', async () => {
       writeFileSync(join(ws, '.gitignore'), '# .claude/skills/\n', 'utf-8');
 
-      expect(writer().apply(ws, ['.claude/skills']).patterns).toEqual([
+      const result = await writer().apply(ws, ['.claude/skills']);
+      expect(result.patterns).toEqual([
         '.claude/skills/',
       ]);
     });
 
-    it('keeps the block stable on a second pass over the ladder', () => {
+    it('keeps the block stable on a second pass over the ladder', async () => {
       // The block subtraction has to survive the path comparison, and it is
       // MORE load-bearing now than it was under the literal match: the block's
       // own `.agents/skills/` line does not merely equal the candidate, it
@@ -309,11 +310,11 @@ describe('HarnessGitignoreWriter (E23)', () => {
       // every pattern covered, empty the block, and pass three would write it
       // again — a two-line diff oscillating forever.
       writeFileSync(join(ws, '.gitignore'), NEGATION_LADDER, 'utf-8');
-      const first = writer().apply(ws, DIRS_WITH_AGENTS);
+      const first = await writer().apply(ws, DIRS_WITH_AGENTS);
       expect(first.outcome).toBe('written');
       const afterFirst = gitignore();
 
-      const second = writer().apply(ws, DIRS_WITH_AGENTS);
+      const second = await writer().apply(ws, DIRS_WITH_AGENTS);
 
       expect(second.outcome).toBe('unchanged');
       expect(second.patterns).toEqual(first.patterns);
@@ -322,14 +323,14 @@ describe('HarnessGitignoreWriter (E23)', () => {
   });
 
   describe('respecting a user deletion', () => {
-    it('records the deletion and never re-adds the block', () => {
-      writer().apply(ws, DIRS);
+    it('records the deletion and never re-adds the block', async () => {
+      await writer().apply(ws, DIRS);
       writeFileSync(join(ws, '.gitignore'), 'dist\n', 'utf-8');
 
-      const noticed = writer().apply(ws, DIRS);
+      const noticed = await writer().apply(ws, DIRS);
       expect(noticed.outcome).toBe('removed-by-user');
 
-      const later = writer().apply(ws, DIRS);
+      const later = await writer().apply(ws, DIRS);
       expect(later.outcome).toBe('removed-by-user');
       expect(gitignore()).toBe('dist\n');
 
@@ -337,43 +338,48 @@ describe('HarnessGitignoreWriter (E23)', () => {
       expect(state.gitignoreBlockRemovedByUser).toBe(true);
     });
 
-    it('does not read a first run as a deletion', () => {
+    it('does not read a first run as a deletion', async () => {
       writeFileSync(join(ws, '.gitignore'), 'dist\n', 'utf-8');
 
-      expect(writer().apply(ws, DIRS).outcome).toBe('written');
+      const result = await writer().apply(ws, DIRS);
+      expect(result.outcome).toBe('written');
     });
 
-    it('forgets the deletion when the setting is toggled off and back on', () => {
+    it('forgets the deletion when the setting is toggled off and back on', async () => {
       let enabled = true;
       const read = (): boolean => enabled;
 
-      writer(read).apply(ws, DIRS);
+      await writer(read).apply(ws, DIRS);
       writeFileSync(join(ws, '.gitignore'), 'dist\n', 'utf-8');
-      expect(writer(read).apply(ws, DIRS).outcome).toBe('removed-by-user');
+      const noticed = await writer(read).apply(ws, DIRS);
+      expect(noticed.outcome).toBe('removed-by-user');
 
       enabled = false;
-      expect(writer(read).apply(ws, DIRS).outcome).toBe('disabled');
+      const disabled = await writer(read).apply(ws, DIRS);
+      expect(disabled.outcome).toBe('disabled');
 
       enabled = true;
-      expect(writer(read).apply(ws, DIRS).outcome).toBe('written');
+      const reenabled = await writer(read).apply(ws, DIRS);
+      expect(reenabled.outcome).toBe('written');
       expect(gitignore()).toContain('.claude/skills/');
     });
   });
 
   describe('the harness.manageGitignore setting', () => {
-    it('writes nothing when the setting is off', () => {
-      const result = writer(() => false).apply(ws, DIRS);
+    it('writes nothing when the setting is off', async () => {
+      const result = await writer(() => false).apply(ws, DIRS);
 
       expect(result.outcome).toBe('disabled');
       expect(() => gitignore()).toThrow();
     });
 
-    it('treats an unset setting as on', () => {
-      expect(writer(() => undefined).apply(ws, DIRS).outcome).toBe('written');
+    it('treats an unset setting as on', async () => {
+      const result = await writer(() => undefined).apply(ws, DIRS);
+      expect(result.outcome).toBe('written');
     });
 
-    it('treats a throwing reader as on rather than failing the pass', () => {
-      const result = writer(() => {
+    it('treats a throwing reader as on rather than failing the pass', async () => {
+      const result = await writer(() => {
         throw new Error('settings unavailable');
       }).apply(ws, DIRS);
 
@@ -382,20 +388,21 @@ describe('HarnessGitignoreWriter (E23)', () => {
   });
 
   describe('failure handling', () => {
-    it('reports rather than throws when .gitignore is a directory', () => {
+    it('reports rather than throws when .gitignore is a directory', async () => {
       mkdirSync(join(ws, '.gitignore'));
 
-      const result = writer().apply(ws, DIRS);
+      const result = await writer().apply(ws, DIRS);
 
       expect(result.outcome).toBe('failed');
       expect(result.reason).toBeDefined();
     });
 
-    it('reads a corrupt state file as the default state', () => {
+    it('reads a corrupt state file as the default state', async () => {
       mkdirSync(join(ws, '.ptah', 'harness'), { recursive: true });
       writeFileSync(harnessStatePath(ws), '{ not json', 'utf-8');
 
-      expect(writer().apply(ws, DIRS).outcome).toBe('written');
+      const result = await writer().apply(ws, DIRS);
+      expect(result.outcome).toBe('written');
     });
   });
   describe('synced skills inside a re-included skills directory', () => {
@@ -427,11 +434,11 @@ describe('HarnessGitignoreWriter (E23)', () => {
       return { writer: instance, calls };
     };
 
-    it('adds an exact rule per untracked synced skill, after the re-inclusion', () => {
+    it('adds an exact rule per untracked synced skill, after the re-inclusion', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter();
 
-      const result = w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, SYNCED);
 
       expect(result.outcome).toBe('written');
       expect(result.patterns).toEqual(
@@ -448,62 +455,62 @@ describe('HarnessGitignoreWriter (E23)', () => {
       );
     });
 
-    it('never adds a rule for a skill git tracks (project-owned)', () => {
+    it('never adds a rule for a skill git tracks (project-owned)', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter(new Set(['.claude/skills/vitest']));
 
-      const result = w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, SYNCED);
 
       expect(result.patterns).toContain('.claude/skills/angular-developer/');
       expect(result.patterns).not.toContain('.claude/skills/vitest/');
     });
 
-    it('adds no per-skill rule when git cannot answer', () => {
+    it('adds no per-skill rule when git cannot answer', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter(null);
 
-      const result = w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, SYNCED);
 
       expect(
         result.patterns.filter((p) => p.startsWith('.claude/skills/')),
       ).toEqual([]);
     });
 
-    it('removes the rule when the skill is no longer synced', () => {
+    it('removes the rule when the skill is no longer synced', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter();
 
-      w.apply(ws, DIRS, SYNCED);
-      const result = w.apply(ws, DIRS, ['.claude/skills/vitest']);
+      await w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, ['.claude/skills/vitest']);
 
       expect(result.patterns).toContain('.claude/skills/vitest/');
       expect(gitignore()).not.toContain('.claude/skills/angular-developer/');
     });
 
-    it('removes the last rule when no skill is synced, and keeps the markers', () => {
+    it('removes the last rule when no skill is synced, and keeps the markers', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter();
 
-      w.apply(ws, DIRS, ['.claude/skills/vitest']);
-      w.apply(ws, DIRS, []);
+      await w.apply(ws, DIRS, ['.claude/skills/vitest']);
+      await w.apply(ws, DIRS, []);
       expect(gitignore()).not.toContain('.claude/skills/vitest/');
       expect(gitignore()).toContain('# ptah:harness:begin');
-      const again = w.apply(ws, DIRS, ['.claude/skills/vitest']);
+      const again = await w.apply(ws, DIRS, ['.claude/skills/vitest']);
 
       expect(again.outcome).toBe('written');
       expect(gitignore()).toContain('.claude/skills/vitest/');
     });
 
-    it('moves the block after a negation the project added below it', () => {
+    it('moves the block after a negation the project added below it', async () => {
       writeFileSync(join(ws, '.gitignore'), 'skills/\n');
       const { writer: w } = skillWriter();
-      w.apply(ws, DIRS, SYNCED);
+      await w.apply(ws, DIRS, SYNCED);
       writeFileSync(
         join(ws, '.gitignore'),
         `${gitignore()}!.claude/skills/\n!.claude/skills/**\n`,
       );
 
-      w.apply(ws, DIRS, SYNCED);
+      await w.apply(ws, DIRS, SYNCED);
 
       const text = gitignore();
       expect(text.indexOf('.claude/skills/vitest/')).toBeGreaterThan(
@@ -511,13 +518,13 @@ describe('HarnessGitignoreWriter (E23)', () => {
       );
     });
 
-    it('skips a skill an outside rule already names or ignores', () => {
+    it('skips a skill an outside rule already names or ignores', async () => {
       // The negation ladder ignores every skill except `example-skill`, which
       // the project tracks by name: neither needs a rule.
       writeFileSync(join(ws, '.gitignore'), NEGATION_LADDER);
       const { writer: w, calls } = skillWriter();
 
-      const result = w.apply(ws, DIRS, [
+      const result = await w.apply(ws, DIRS, [
         '.claude/skills/vitest',
         '.claude/skills/example-skill',
       ]);
@@ -528,23 +535,23 @@ describe('HarnessGitignoreWriter (E23)', () => {
       expect(calls).toEqual([]);
     });
 
-    it('needs no rule where the skills directory is ignored as a whole', () => {
+    it('needs no rule where the skills directory is ignored as a whole', async () => {
       const { writer: w, calls } = skillWriter();
 
-      const result = w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, SYNCED);
 
       expect(result.patterns).toContain('.claude/skills/');
       expect(result.patterns).not.toContain('.claude/skills/vitest/');
       expect(calls).toEqual([]);
     });
 
-    it('respects a block the user removed', () => {
+    it('respects a block the user removed', async () => {
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
       const { writer: w } = skillWriter();
-      w.apply(ws, DIRS, SYNCED);
+      await w.apply(ws, DIRS, SYNCED);
       writeFileSync(join(ws, '.gitignore'), REINCLUDED);
 
-      const result = w.apply(ws, DIRS, SYNCED);
+      const result = await w.apply(ws, DIRS, SYNCED);
 
       expect(result.outcome).toBe('removed-by-user');
       expect(gitignore()).toBe(REINCLUDED);

@@ -33,9 +33,10 @@
  * derived copy. Only whole directories of skill/command/agent copies are listed.
  */
 
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join, posix } from 'path';
+import { promisify } from 'util';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { atomicWriteWithRetry } from '../fs/atomic-write';
 import { isLinkedWorktreeRootSync } from '../workspace/linked-worktree';
@@ -93,7 +94,7 @@ export interface HarnessGitignoreDeps {
   listTrackedPaths?: (
     workspaceRoot: string,
     relPaths: readonly string[],
-  ) => ReadonlySet<string> | null;
+  ) => ReadonlySet<string> | null | Promise<ReadonlySet<string> | null>;
 }
 
 /** Unset means on. An ignore block is the behaviour a user expects by default. */
@@ -125,11 +126,11 @@ export class HarnessGitignoreWriter {
    *   block is rebuilt every pass, so a skill that is no longer synced loses
    *   its rule.
    */
-  apply(
+  async apply(
     workspaceRoot: string,
     dirs: readonly string[],
     skillPaths: readonly string[] = [],
-  ): GitignoreResult {
+  ): Promise<GitignoreResult> {
     // A linked worktree's `.gitignore` is a TRACKED file of the shared
     // repository (#1469). Rebuilding the block there turns a change in which
     // CLIs this pass detected into an uncommitted diff on the task branch, so
@@ -212,7 +213,7 @@ export class HarnessGitignoreWriter {
         ? text.slice(0, existing.start) + text.slice(existing.end)
         : text;
     const dirPatterns = selectPatterns(dirs, outside);
-    const skillPatterns = this.selectSkillPatterns(
+    const skillPatterns = await this.selectSkillPatterns(
       workspaceRoot,
       dirs,
       dirPatterns,
@@ -286,13 +287,13 @@ export class HarnessGitignoreWriter {
    * ignores it and git tracks none of its files. A project-owned skill is
    * never hidden.
    */
-  private selectSkillPatterns(
+  private async selectSkillPatterns(
     workspaceRoot: string,
     dirs: readonly string[],
     dirPatterns: readonly string[],
     skillPaths: readonly string[],
     outsideText: string,
-  ): string[] {
+  ): Promise<string[]> {
     if (skillPaths.length === 0) return [];
     const managed = new Set(
       dirs.map(toPattern).filter((p): p is string => p !== null),
@@ -317,19 +318,19 @@ export class HarnessGitignoreWriter {
     if (candidates.size === 0) return [];
 
     const list = [...candidates];
-    const tracked = this.listTracked(workspaceRoot, list);
+    const tracked = await this.listTracked(workspaceRoot, list);
     if (tracked === null) return [];
     return list
       .filter((rel) => !tracked.has(rel))
       .map((rel) => `${rel}/`);
   }
 
-  private listTracked(
+  private async listTracked(
     workspaceRoot: string,
     relPaths: readonly string[],
-  ): ReadonlySet<string> | null {
+  ): Promise<ReadonlySet<string> | null> {
     try {
-      return (this.deps.listTrackedPaths ?? gitTrackedPaths)(
+      return await (this.deps.listTrackedPaths ?? gitTrackedPaths)(
         workspaceRoot,
         relPaths,
       );
@@ -471,17 +472,24 @@ function ruleMatches(body: string, rel: string): boolean {
   return !insideOnly && rel === base;
 }
 
+const execFileAsync = promisify(execFile);
+
 /**
  * The subset of `relPaths` that hold a git-tracked file, from one
  * `git ls-files` call. `null` when git cannot answer.
+ *
+ * Runs `git` off the main thread (async `execFile`, not `execFileSync`): this
+ * is called from the Electron main process during startup, and a synchronous
+ * spawn-and-wait here would stall the event loop for the whole process while
+ * `git` runs (TASK startup-rpc-timeouts).
  */
-function gitTrackedPaths(
+async function gitTrackedPaths(
   workspaceRoot: string,
   relPaths: readonly string[],
-): ReadonlySet<string> | null {
+): Promise<ReadonlySet<string> | null> {
   let output: string;
   try {
-    output = execFileSync(
+    ({ stdout: output } = await execFileAsync(
       'git',
       ['ls-files', '-z', '--', ...relPaths.map((rel) => `${rel}/`)],
       {
@@ -489,9 +497,8 @@ function gitTrackedPaths(
         encoding: 'utf-8',
         timeout: 10_000,
         windowsHide: true,
-        stdio: ['ignore', 'pipe', 'ignore'],
       },
-    );
+    ));
   } catch {
     // degradation-audit: optional-capability - no repository, no git binary or
     // a timeout reads as "unknown", and the caller writes no per-skill rule.
