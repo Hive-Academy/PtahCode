@@ -440,6 +440,15 @@ describe('SystemMessageTransformer', () => {
       expect((events[1] as { delta: string }).delta).toBe('output text');
     });
 
+    it('passes unrelated utilization stdout through unchanged', () => {
+      const content = 'Current capacity: 20% used';
+      const events = transformer.transformLocalCommandOutput(
+        { content, session_id: 'sess-x' } as never,
+        makeHelpers(),
+      );
+      expect(events[1]).toMatchObject({ delta: content });
+    });
+
     it('renders /usage stdout as one ptah-ui block', () => {
       const usage = readFileSync(
         join(

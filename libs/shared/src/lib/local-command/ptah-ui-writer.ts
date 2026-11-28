@@ -16,19 +16,29 @@ const MAX_TEXT_LENGTH = 80;
  * escaped everywhere (the escapes decode identically in both positions), and
  * control characters are removed. Long values are shortened with an ellipsis.
  */
-export function escapePtahUi(value: string, maxLength = MAX_TEXT_LENGTH): string {
+export function escapePtahUi(
+  value: string,
+  maxLength = MAX_TEXT_LENGTH,
+): string {
   let text = cleanText(value);
   const chars = [...text];
   if (chars.length > maxLength)
-    text = `${chars.slice(0, maxLength - 1).join('').trimEnd()}…`;
+    text = `${chars
+      .slice(0, maxLength - 1)
+      .join('')
+      .trimEnd()}…`;
   return text.replace(/[\\|$]/g, (char) => `\\${char}`);
 }
 
 /** A grammar `number`/`udecimal`: at most one decimal, no exponent. */
 export function formatPtahUiNumber(value: number): string {
-  if (!Number.isFinite(value)) return '0';
   const rounded = Math.round(Math.abs(value) * 10) / 10;
-  const text = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  if (!Number.isFinite(rounded) || rounded >= 1e21) {
+    throw new RangeError('Value exceeds the ptah-ui decimal range');
+  }
+  const text = Number.isInteger(rounded)
+    ? rounded.toFixed(0)
+    : rounded.toFixed(1);
   return value < 0 && rounded !== 0 ? `-${text}` : text;
 }
 

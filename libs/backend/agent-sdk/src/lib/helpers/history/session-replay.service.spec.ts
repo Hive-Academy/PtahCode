@@ -418,10 +418,31 @@ describe('SessionReplayService', () => {
       'utf8',
     );
 
+    const command = (name = 'usage', timestamp?: string) => ({
+      ...u({ role: 'user', content: `<command-name>/${name}</command-name>` }),
+      timestamp,
+    });
+    const output = (
+      shape: 'user' | 'system',
+      stdout = usage,
+      uuid = 'cmd-record',
+    ): SessionHistoryMessage => {
+      const content = `<local-command-stdout>${stdout}</local-command-stdout>`;
+      return shape === 'user'
+        ? { type: 'user', message: { role: 'user', content }, uuid }
+        : ({
+            type: 'system',
+            subtype: 'local_command',
+            content,
+            uuid,
+          } as SessionHistoryMessage);
+    };
+
     it('replays a /usage system/local_command record as an assistant ptah-ui card', () => {
       const events = service.replayToStreamEvents(
         'sess-cmd',
         [
+          command(),
           {
             type: 'system',
             subtype: 'local_command',
@@ -447,58 +468,171 @@ describe('SessionReplayService', () => {
       ).toBe(true);
     });
 
-    it('keeps dropping a local_command record whose stdout is not a report', () => {
-      const events = service.replayToStreamEvents(
-        'sess-cmd',
-        [
-          {
-            type: 'system',
-            subtype: 'local_command',
-            uuid: 'cmd-2',
-            content: '<local-command-stdout>Done.</local-command-stdout>',
-          } as unknown as SessionHistoryMessage,
-        ],
-        [],
-      );
-
-      expect(events).toEqual([]);
-    });
-
-    it('stamps an untimed card with its neighbour record timestamp, not the clock', () => {
-      const card = {
+    it('replays context stdout paired with a system command echo', () => {
+      const echo = {
         type: 'system',
         subtype: 'local_command',
-        uuid: 'cmd-3',
-        content: `<local-command-stdout>${usage}</local-command-stdout>`,
-      } as unknown as SessionHistoryMessage;
-      const neighbour = (timestamp: string) =>
-        ({
-          type: 'system',
-          subtype: 'local_command',
-          uuid: `n-${timestamp}`,
-          timestamp,
-          content: '<local-command-stdout>Done.</local-command-stdout>',
-        }) as unknown as SessionHistoryMessage;
-      const before = Date.parse('2026-01-01T00:00:00.000Z');
-      const after = Date.parse('2026-01-02T00:00:00.000Z');
+        content: '<command-name>/context</command-name>',
+      } as const;
+      const context = '## Context Usage\n\n**Tokens:** 1k / 2k (50%)';
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [echo, output('system', context)],
+        [],
+      );
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[1]).toMatchObject({
+        delta: expect.stringContaining('title Context usage'),
+      });
+    });
+
+    describe.each(['user', 'system'] as const)('%s stdout records', (shape) => {
+      it.each([
+        ['meta', { isMeta: true }],
+        ['synthetic', { isSynthetic: true }],
+        ['tool-sourced', { sourceToolUseID: 'tool-1' }],
+        ['tool provenance without an ID', { sourceToolUseID: '' }],
+      ])(
+        'keeps %s records hidden even with a matching command',
+        (_name, flags) => {
+          expect(
+            service.replayToStreamEvents(
+              'sess-cmd',
+              [command(), { ...output(shape), ...flags }],
+              [],
+            ),
+          ).toEqual([]);
+        },
+      );
+
+      it.each([
+        '<command-name>/usage</command-name>',
+        '<command-message>usage</command-message>',
+        '<skill-format>true</skill-format>',
+      ])('keeps reports containing metadata hidden (%s)', (metadata) => {
+        expect(
+          service.replayToStreamEvents(
+            'sess-cmd',
+            [command(), output(shape, usage + '\n' + metadata)],
+            [],
+          ),
+        ).toEqual([]);
+      });
+
+      it.each([
+        ['no command echo', [], usage],
+        ['an unrelated command', [command('status')], usage],
+        ['a mismatched report', [command('context')], usage],
+        [
+          'an unrelated stdout signature',
+          [command()],
+          'Current capacity: 20% used',
+        ],
+        ['unrecognized stdout', [command()], 'Done.'],
+      ] as const)('keeps stdout hidden with %s', (_name, preceding, stdout) => {
+        expect(
+          service.replayToStreamEvents(
+            'sess-cmd',
+            [...preceding, output(shape, stdout)],
+            [],
+          ),
+        ).toEqual([]);
+      });
+
+      it('consumes the command echo after its stdout record', () => {
+        const events = service.replayToStreamEvents(
+          'sess-cmd',
+          [command(), output(shape, 'Done.'), output(shape)],
+          [],
+        );
+        expect(events).toEqual([]);
+      });
+    });
+
+    it('uses the preceding timed record or the following timed record for the first untimed card', () => {
+      const before = '2026-01-01T00:00:00.000Z';
+      const after = '2026-01-02T00:00:00.000Z';
+      const card = output('system');
+      const following = { ...output('system', 'Done.'), timestamp: after };
 
       const preceded = service.replayToStreamEvents(
         'sess-cmd',
+        [command('usage', before), card, following],
+        [],
+      );
+      expect(preceded[0]).toMatchObject({ timestamp: Date.parse(before) });
+      const followed = service.replayToStreamEvents(
+        'sess-cmd',
+        [command(), card, following],
+        [],
+      );
+      expect(followed[0]).toMatchObject({ timestamp: Date.parse(after) });
+    });
+
+    it('sorts consecutive untimed cards after the preceding assistant completion', () => {
+      const assistant = a({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Answer' }],
+      });
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
         [
-          neighbour('2026-01-01T00:00:00.000Z'),
-          card,
-          neighbour('2026-01-02T00:00:00.000Z'),
+          assistant,
+          command(),
+          output('system'),
+          command(),
+          output('user', usage, 'second'),
         ],
         [],
       );
-      expect(preceded[0]).toMatchObject({ timestamp: before });
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+        'message_start',
+        'text_delta',
+        'message_complete',
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[3].timestamp).toBeGreaterThan(events[2].timestamp);
+      expect(events[6].timestamp).toBeGreaterThan(events[5].timestamp);
+    });
 
-      const followed = service.replayToStreamEvents(
-        'sess-cmd',
-        [card, neighbour('2026-01-02T00:00:00.000Z')],
-        [],
-      );
-      expect(followed[0]).toMatchObject({ timestamp: after });
+    it('replays an all-untimed transcript with identical event timestamps', () => {
+      const messages = [
+        {
+          ...a({
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Answer' }],
+          }),
+          timestamp: undefined,
+        },
+        command(),
+        output('system'),
+        command(),
+        output('user', usage, 'second'),
+      ];
+      const timestamps = () =>
+        service
+          .replayToStreamEvents('sess-cmd', messages, [])
+          .map((event) => event.timestamp);
+      const clock = jest.spyOn(Date, 'now');
+      try {
+        clock.mockReturnValue(1000);
+        const first = timestamps();
+        clock.mockReturnValue(2000);
+        expect(first).toHaveLength(9);
+        expect(first[0]).toBe(0);
+        expect(timestamps()).toEqual(first);
+      } finally {
+        clock.mockRestore();
+      }
     });
   });
 

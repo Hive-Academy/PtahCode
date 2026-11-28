@@ -56,6 +56,7 @@ import {
 import {
   isHiddenTranscriptRecord,
   isSkillOrMetaContent,
+  isSkillOrMetaText,
 } from '../../message-transform/message-transform-helpers';
 import {
   buildHistoricalBackgroundStartedEvent,
@@ -170,59 +171,32 @@ export class SessionReplayService {
     private readonly modelResolver: IModelResolver,
   ) {}
 
-  /**
-   * The record's own timestamp, else the nearest preceding record's, else the
-   * nearest following record's; null when no record has one. Keeps a replayed
-   * card's position deterministic instead of stamping it with the wall clock.
-   */
-  private neighbourTimestamp(
-    messages: readonly SessionHistoryMessage[],
-    index: number,
-  ): number | null {
-    const at = (i: number): number | null => {
-      const parsed = Date.parse(messages[i]?.timestamp ?? '');
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-    for (let i = index; i >= 0; i--) {
-      const ts = at(i);
-      if (ts !== null) return ts;
-    }
-    for (let i = index + 1; i < messages.length; i++) {
-      const ts = at(i);
-      if (ts !== null) return ts;
-    }
-    return null;
+  private localCommandText(msg: SessionHistoryMessage): string | undefined {
+    const content: unknown =
+      msg.type === 'system' && msg.subtype === 'local_command'
+        ? (msg as { readonly content?: unknown }).content
+        : msg.type === 'user'
+          ? msg.message?.content
+          : undefined;
+    return typeof content === 'string' ? content : undefined;
   }
 
-  /**
-   * The ptah-ui card for a recorded `/usage` or `/context` stdout, matching
-   * what `SystemMessageTransformer.transformLocalCommandOutput` streams live.
-   * Transcripts store that stdout wrapped in `<local-command-stdout>`, either
-   * as the top-level `content` of a `system`/`local_command` record or, in
-   * older transcripts, as the text of a `user` record. Returns null for every
-   * other record and for any output the formatter leaves unchanged, so other
-   * commands keep their existing replay behaviour.
-   */
-  private localCommandCardText(msg: SessionHistoryMessage): string | null {
-    let raw: unknown;
-    if (msg.type === 'system' && msg.subtype === 'local_command') {
-      raw = (msg as { readonly content?: unknown }).content;
-    } else if (
-      msg.type === 'user' &&
-      typeof msg.message?.content === 'string' &&
-      !isHiddenTranscriptRecord(msg)
-    ) {
-      raw = msg.message.content;
-    }
-    if (typeof raw !== 'string') return null;
-    const match =
-      /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/.exec(
-        raw,
-      );
-    if (!match) return null;
-    const stdout = match[1];
-    const formatted = formatLocalCommandOutput(stdout);
-    return formatted === stdout ? null : formatted;
+  private isToolSourced(msg: SessionHistoryMessage): boolean {
+    return 'sourceToolUseID' in msg && msg.sourceToolUseID !== undefined;
+  }
+
+  private localCommandName(
+    msg: SessionHistoryMessage | undefined,
+  ): 'usage' | 'context' | undefined {
+    if (!msg || isHiddenTranscriptRecord(msg) || this.isToolSourced(msg))
+      return undefined;
+    const text = this.localCommandText(msg);
+    if (!text || text.includes('<local-command-stdout>')) return undefined;
+    const command =
+      /(?:^|\n)\s*<command-name>\/(usage|context)<\/command-name>/.exec(
+        text,
+      )?.[1];
+    return command === 'usage' || command === 'context' ? command : undefined;
   }
 
   /**
@@ -283,14 +257,36 @@ export class SessionReplayService {
     const allToolResults =
       this.correlationService.extractAllToolResults(effectiveMessages);
     let currentMessageId: string | null = null;
-    let currentMessageTimestamp: number = Date.now();
+    let currentMessageTimestamp = 0;
+    const recordTimestamps = effectiveMessages.map((msg) =>
+      Date.parse(msg.timestamp ?? ''),
+    );
+    let precedingTimestamp = recordTimestamps.find(Number.isFinite);
+    let latestEmittedTimestamp = -Infinity;
+    let checkedEventCount = 0;
     let blockIndex = 0;
     let messageSequence = 0;
     let currentMessageUsage: MessageUsageData | undefined;
 
     for (const [msgIndex, msg] of effectiveMessages.entries()) {
-      const commandCard = this.localCommandCardText(msg);
-      if (commandCard !== null) {
+      const recordTimestamp = recordTimestamps[msgIndex];
+      if (Number.isFinite(recordTimestamp))
+        precedingTimestamp = recordTimestamp;
+
+      const stdout = this.localCommandText(msg)?.match(
+        /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/,
+      )?.[1];
+      if (stdout !== undefined) {
+        if (
+          isHiddenTranscriptRecord(msg) ||
+          this.isToolSourced(msg) ||
+          isSkillOrMetaText(stdout.trimStart())
+        )
+          continue;
+        const command = this.localCommandName(effectiveMessages[msgIndex - 1]);
+        if (!command) continue;
+        const commandCard = formatLocalCommandOutput(stdout, command);
+        if (commandCard === stdout) continue;
         if (currentMessageId) {
           events.push(
             this.eventFactory.createMessageComplete(
@@ -306,10 +302,26 @@ export class SessionReplayService {
           messageSequence = 0;
           currentMessageUsage = undefined;
         }
-        const cardMessageId = `cmd_${msg.uuid || this.eventFactory.generateId()}`;
-        const cardTimestamp =
-          this.neighbourTimestamp(effectiveMessages, msgIndex) ??
-          currentMessageTimestamp;
+        const cardMessageId = `cmd_${msg.uuid ?? this.eventFactory.generateId()}`;
+        let cardTimestamp = recordTimestamp;
+        if (!Number.isFinite(cardTimestamp)) {
+          // The preceding record's events can extend past its record timestamp.
+          for (; checkedEventCount < events.length; checkedEventCount++) {
+            const timestamp = events[checkedEventCount].timestamp;
+            if (Number.isFinite(timestamp)) {
+              latestEmittedTimestamp = Math.max(
+                latestEmittedTimestamp,
+                timestamp,
+              );
+            }
+          }
+          const afterEvents = latestEmittedTimestamp + 0.001;
+          cardTimestamp = Math.max(
+            precedingTimestamp ?? afterEvents,
+            afterEvents,
+          );
+          if (!Number.isFinite(cardTimestamp)) cardTimestamp = 0;
+        }
         events.push(
           this.eventFactory.createMessageStart(
             sessionId,
@@ -341,12 +353,7 @@ export class SessionReplayService {
 
       if (msg.type === 'user' && msg.message?.content) {
         if (isHiddenTranscriptRecord(msg)) continue;
-        if (
-          (msg as unknown as Record<string, unknown>)['sourceToolUseID'] !==
-          undefined
-        ) {
-          continue;
-        }
+        if (this.isToolSourced(msg)) continue;
         const contentRaw = msg.message.content;
         if (
           isSkillOrMetaContent(
@@ -389,10 +396,7 @@ export class SessionReplayService {
               !completedTaskIds.has(notification.taskId)
             ) {
               completedTaskIds.add(notification.taskId);
-              const parsedTimestamp = Date.parse(msg.timestamp ?? '');
-              const notificationTimestamp = Number.isFinite(parsedTimestamp)
-                ? parsedTimestamp
-                : Date.now();
+              const notificationTimestamp = precedingTimestamp ?? 0;
               const event: AgentCompletedEvent = {
                 id: `history-task-${msg.uuid ?? `${notification.taskId}-${eventIndex}`}`,
                 eventType: 'agent_completed',
@@ -458,9 +462,7 @@ export class SessionReplayService {
         const content = this.eventFactory.extractTextContent(
           msg.message.content,
         );
-        const timestamp = msg.timestamp
-          ? new Date(msg.timestamp).getTime()
-          : Date.now();
+        const timestamp = precedingTimestamp ?? 0;
         let userSeq = 0;
         const imageCount = Array.isArray(msg.message.content)
           ? (msg.message.content as ContentBlock[]).filter(
@@ -523,9 +525,7 @@ export class SessionReplayService {
         ) {
           continue;
         }
-        const msgTimestamp = msg.timestamp
-          ? new Date(msg.timestamp).getTime()
-          : Date.now();
+        const msgTimestamp = precedingTimestamp ?? 0;
         if (!currentMessageId) {
           currentMessageId = msg.uuid || this.eventFactory.generateId();
           currentMessageTimestamp = msgTimestamp;

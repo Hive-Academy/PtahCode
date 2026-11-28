@@ -9,7 +9,7 @@ import {
 
 const MAX_CONTRIBUTORS = 10;
 const MAX_TOP_ROWS = 12;
-const MAX_GRID_COLUMNS = 4;
+const MAX_LIMIT_CARDS = 4;
 const CHART_LABEL_LENGTH = 48;
 
 function writeWindow(writer: PtahUiWriter, window: UsageWindow): void {
@@ -35,7 +35,8 @@ function writeWindow(writer: PtahUiWriter, window: UsageWindow): void {
     if (!kind) continue;
     for (const item of top.items) {
       const name = escapePtahUi(item.name);
-      if (name) rows.push(`${kind} | ${name} | ${formatPtahUiNumber(item.pct)}%`);
+      if (name)
+        rows.push(`${kind} | ${name} | ${formatPtahUiNumber(item.pct)}%`);
     }
     if (top.more > 0)
       rows.push(`${kind} | +${formatPtahUiNumber(top.more)} more | —`);
@@ -52,7 +53,8 @@ function writeWindow(writer: PtahUiWriter, window: UsageWindow): void {
   }
   if (points.length > 0) {
     writer.line(1, 'chart bar Contributors (% of usage)');
-    for (const point of points) writer.line(2, `${point.label} | ${point.value}`);
+    for (const point of points)
+      writer.line(2, `${point.label} | ${point.value}`);
   }
   if (shownRows.length > 0) {
     writer.line(1, 'table');
@@ -72,8 +74,8 @@ export function renderUsagePtahUi(report: UsageReport): string | null {
 
   const limits = report.limits.filter((limit) => escapePtahUi(limit.label));
   if (limits.length > 0) {
-    writer.line(0, `grid ${Math.min(limits.length, MAX_GRID_COLUMNS)}`);
-    for (const limit of limits) {
+    writer.line(0, `grid ${Math.min(limits.length, MAX_LIMIT_CARDS)}`);
+    for (const limit of limits.slice(0, MAX_LIMIT_CARDS)) {
       writer.line(1, `card ${escapePtahUi(limit.label)}`);
       const window = escapePtahUi(limit.window) || 'Used';
       writer.line(
@@ -82,6 +84,17 @@ export function renderUsagePtahUi(report: UsageReport): string | null {
       );
       const reset = limit.reset ? escapePtahUi(limit.reset) : '';
       if (reset) writer.line(2, `badge neutral ${reset}`);
+    }
+  }
+  if (limits.length > MAX_LIMIT_CARDS) {
+    writer.line(0, 'table');
+    writer.line(1, 'Limit | Used | Reset');
+    for (const limit of limits.slice(MAX_LIMIT_CARDS)) {
+      const reset = escapePtahUi(limit.reset ?? '') || '—';
+      writer.line(
+        1,
+        `${escapePtahUi(limit.label)} | ${formatPercentValue(limit.pct)}% | ${reset}`,
+      );
     }
   }
 

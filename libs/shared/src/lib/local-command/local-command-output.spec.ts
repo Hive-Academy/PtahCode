@@ -64,7 +64,9 @@ describe('parseUsageOutput', () => {
     expect(report.notes).toContain(
       'You are currently using your subscription to power your Claude Code usage',
     );
-    expect(report.windows.map((w) => [w.title, w.requests, w.sessions])).toEqual([
+    expect(
+      report.windows.map((w) => [w.title, w.requests, w.sessions]),
+    ).toEqual([
       ['Last 24h', 427, 15],
       ['Last 7d', 18_780, 63],
     ]);
@@ -112,9 +114,9 @@ describe('parseContextOutput', () => {
       tokens: { value: 11_800, text: '11.8k' },
       pct: 1.2,
     });
-    expect(report.categories.find((c) => c.name === 'Free space')?.tokens.value).toBe(
-      921_500,
-    );
+    expect(
+      report.categories.find((c) => c.name === 'Free space')?.tokens.value,
+    ).toBe(921_500);
     expect(report.mcpTools).toHaveLength(7);
     expect(report.mcpTools[2]).toEqual({
       name: 'mcp__ptah__ptah_agent_spawn',
@@ -154,11 +156,28 @@ describe('formatLocalCommandOutput', () => {
   it.each([
     ['usage', USAGE],
     ['context', CONTEXT],
-  ])('turns the %s fixture into a ptah-ui block that compiles', (_name, text) => {
-    const formatted = formatLocalCommandOutput(text);
-    const body = bodyOf(formatted);
-    const compiled = compilePtahUiBlock(body, 'local-command-test');
-    expect(compiled.ok ? null : compiled.reason).toBeNull();
+  ])(
+    'turns the %s fixture into a ptah-ui block that compiles',
+    (_name, text) => {
+      const formatted = formatLocalCommandOutput(text);
+      const body = bodyOf(formatted);
+      const compiled = compilePtahUiBlock(body, 'local-command-test');
+      expect(compiled.ok ? null : compiled.reason).toBeNull();
+    },
+  );
+
+  it('puts excess weekly limits into a table and compiles all 51 limits', () => {
+    const text = 'Current week: 4% used\n'.repeat(51);
+    const body = bodyOf(formatLocalCommandOutput(text));
+    expect(body.match(/^ {2}card /gm)).toHaveLength(4);
+    expect(body.match(/^ {2}Current week \| 4% \| —$/gm)).toHaveLength(47);
+    expect(compilePtahUiBlock(body, 'many-limits').ok).toBe(true);
+  });
+
+  it('returns raw usage when a chart percentage would use exponent notation', () => {
+    const text =
+      'Last 24h · 3 requests · 1 session\n  1000000000000000000000% Oversized';
+    expect(formatLocalCommandOutput(text)).toBe(text);
   });
 
   it('never shows memory file paths', () => {
@@ -214,8 +233,6 @@ describe('formatLocalCommandOutput', () => {
   });
 
   it('renders a usage report with no displayable data as null', () => {
-    const report = parseUsageOutput('Last 24h · 3 requests');
-    expect(report?.windows).toHaveLength(1);
     expect(
       renderUsagePtahUi({
         kind: 'usage',
@@ -241,13 +258,17 @@ describe('formatLocalCommandOutput', () => {
     'Last week · 3 apples',
     '# Heading\n\n- item one\n- item two\n\n**Last** time we met: 10% off',
     'Current status: 40% done',
+    'Current capacity: 20% used',
+    'Last 24h · 3 requests',
   ])('does not treat non-usage text as a usage report (%#)', (text) => {
     expect(parseUsageOutput(text)).toBeNull();
     expect(formatLocalCommandOutput(text)).toBe(text);
   });
 
   it('renders a context report without data as null', () => {
-    const report = parseContextOutput('## Context Usage\n**Tokens:** 1k / 2k\n');
+    const report = parseContextOutput(
+      '## Context Usage\n**Tokens:** 1k / 2k\n',
+    );
     expect(report).not.toBeNull();
     expect(renderContextPtahUi(report!)).not.toBeNull();
   });

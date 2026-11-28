@@ -364,6 +364,7 @@ describe('artifact replay/live visible-text parity (TASK_2026_414)', () => {
           subtype: 'local_command_output',
           session_id: SESSION_ID,
           content: usageStdout,
+          uuid: 'cmd-record',
         } as never,
         SESSION_ID as never,
       );
@@ -372,6 +373,7 @@ describe('artifact replay/live visible-text parity (TASK_2026_414)', () => {
       const replay = createReplayService().replayToStreamEvents(
         SESSION_ID,
         [
+          replayUser('<command-name>/usage</command-name>'),
           {
             type: 'system',
             subtype: 'local_command',
@@ -382,25 +384,40 @@ describe('artifact replay/live visible-text parity (TASK_2026_414)', () => {
         ],
         [],
       );
-      const live = visibleText(liveUsage());
+      const liveEvents = liveUsage();
+      const live = visibleText(liveEvents);
 
       expect(live).toHaveLength(1);
       expect(live[0].startsWith('```ptah-ui')).toBe(true);
       expect(visibleText(replay)).toEqual(live);
+      expect(liveEvents.map((event) => event.messageId)).toEqual([
+        'cmd_cmd-record',
+        'cmd_cmd-record',
+        'cmd_cmd-record',
+      ]);
+      expect(replay.map((event) => event.messageId)).toEqual(
+        liveEvents.map((event) => event.messageId),
+      );
     });
 
     it('replays an older user stdout record as the live ptah-ui card', () => {
       const replay = createReplayService().replayToStreamEvents(
         SESSION_ID,
         [
+          replayUser('<command-name>/usage</command-name>'),
           replayUser(
             `<local-command-stdout>${usageStdout}</local-command-stdout>`,
+            { uuid: 'cmd-record' },
           ),
         ],
         [],
       );
 
-      expect(visibleText(replay)).toEqual(visibleText(liveUsage()));
+      const live = liveUsage();
+      expect(visibleText(replay)).toEqual(visibleText(live));
+      expect(replay.map((event) => event.messageId)).toEqual(
+        live.map((event) => event.messageId),
+      );
     });
   });
 });

@@ -14,14 +14,10 @@ import {
 
 /** `Current week (Fable): 4% used · resets Dec 5, 5am (Africa/Cairo)` */
 const LIMIT_LINE =
-  /^(Current [^:(]+?)\s*(?:\(([^)]*)\))?\s*:\s*(\d+(?:\.\d+)?)%\s*used(?:\s*[·•]\s*(.+))?$/;
-/**
- * `Last 24h · 427 requests · 15 sessions`. At least one request or session
- * count is required, so prose such as `Last updated: …` is not a header.
- */
+  /^(Current week)\s*(?:\(([^)]*)\))?\s*:\s*(\d+(?:\.\d+)?)%\s*used(?:\s*[·•]\s*(.+))?$/;
+/** `Last 24h · 427 requests · 15 sessions`. */
 const WINDOW_LINE =
-  /^(Last\s+\S+)((?:\s*[·•]\s*[\d,]+\s+(?:requests?|sessions?))+)\s*$/i;
-const WINDOW_COUNT = /([\d,]+)\s+([A-Za-z]+)/g;
+  /^(Last\s+\S+)\s*[·•]\s*([\d,]+)\s+requests?\s*[·•]\s*([\d,]+)\s+sessions?\s*$/i;
 /** `  45%  Run fewer sessions at once · up to 5 at once` */
 const CONTRIBUTOR_LINE = /^\s+(\d+(?:\.\d+)?)%\s+(.+)$/;
 /** `  Top skills: /session-handoff 21%, /agent-lanes 5%` */
@@ -53,20 +49,13 @@ function parseLimit(match: RegExpExecArray): UsageLimit | null {
 }
 
 function parseWindowHeader(match: RegExpExecArray): MutableWindow {
-  const window: MutableWindow = {
+  return {
     title: cleanText(match[1]),
-    requests: null,
-    sessions: null,
+    requests: parseNumber(match[2]),
+    sessions: parseNumber(match[3]),
     contributors: [],
     tops: [],
   };
-  for (const count of match[2].matchAll(WINDOW_COUNT)) {
-    const value = parseNumber(count[1]);
-    const unit = count[2].toLowerCase();
-    if (unit.startsWith('request')) window.requests = value;
-    else if (unit.startsWith('session')) window.sessions = value;
-  }
-  return window;
 }
 
 function parseContributor(match: RegExpExecArray): UsageContributor | null {
@@ -99,8 +88,7 @@ function parseTop(match: RegExpExecArray): UsageTopList {
 
 /**
  * Parses Claude Code `/usage` stdout. Returns `null` unless the text has a
- * weekly-limit line or a window header with a request/session count, so it
- * is not a usage report. Never throws.
+ * weekly-limit line or a window header with request and session counts.
  */
 export function parseUsageOutput(text: string): UsageReport | null {
   if (typeof text !== 'string' || !text) return null;

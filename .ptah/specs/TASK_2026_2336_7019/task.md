@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2336_7019
-status: backlog
+status: in_review
 type: FEATURE
 title: Render /usage and /context as inline dashboard cards
 depends_on: []
-created: "2026-11-28T11:22:27.540Z"
-updated: "2026-11-28T11:22:27.540Z"
-description: "Polish ptah-ui inline surfaces and render /usage and /context output as native ptah-ui cards, live and on replay"
+created: '2026-11-28T11:22:27.540Z'
+updated: '2026-11-28T11:59:19.840Z'
+description: >-
+  Polish ptah-ui inline surfaces and render /usage and /context output as native
+  ptah-ui cards, live and on replay
 estimate: L
 ---
 
