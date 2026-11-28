@@ -60,6 +60,26 @@ describe('DashboardStatComponent', () => {
     fixture.detectChanges();
     expect(element.querySelector('[aria-expanded]')).not.toBeNull();
   });
+  it('does not intercept Escape when hasDetails is false even with stale expanded viewState', () => {
+    const { fixture, element } = setup({ ...node, description: undefined });
+    const emitted = jest.fn();
+    fixture.componentInstance.viewStateChange.subscribe(emitted);
+    fixture.componentRef.setInput('viewState', { expanded: true });
+    fixture.detectChanges();
+    const parent = document.createElement('div');
+    let parentSawEscape = 0;
+    parent.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Escape') parentSawEscape += 1;
+    });
+    parent.appendChild(element);
+    try {
+      element.querySelector('section')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(parentSawEscape).toBe(1);
+      expect(emitted).not.toHaveBeenCalled();
+    } finally {
+      parent.remove();
+    }
+  });
   it('offers selection only for selectable stats and emits the contract target', () => {
     const { fixture, element } = setup();
     const emitted = jest.fn();

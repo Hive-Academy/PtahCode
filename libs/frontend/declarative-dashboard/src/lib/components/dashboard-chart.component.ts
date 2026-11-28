@@ -21,8 +21,9 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
   standalone: true,
   imports: [PtahButtonDirective, PtahIconButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { class: 'flex min-w-0 flex-1 flex-col' },
   template: `
-    <section ptahSurface variant="inset" padding="md" class="group flex h-full min-w-0 flex-col gap-2 text-base-content" (keydown.escape)="collapse($event)">
+    <section ptahSurface variant="inset" padding="md" class="group flex h-full min-w-0 flex-1 flex-col gap-2 text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex min-w-0 items-start gap-2">
         <div class="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 class="break-words text-sm font-semibold">{{ node().title?.text ?? 'Chart' }}</h3>
@@ -91,7 +92,7 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
             </div>
           }
         } @else {
-          <svg viewBox="0 0 600 280" role="img" [attr.aria-label]="node().title?.text ?? 'Chart'" class="w-full"
+          <svg [attr.viewBox]="svgViewBox()" role="img" [attr.aria-label]="node().title?.text ?? 'Chart'" class="w-full"
             [class.max-h-64]="!viewState().expanded">
             <svg:title>{{ node().title?.text ?? 'Chart' }}</svg:title>
             <svg:desc>Use Show as table to read every point{{ node().selectable ? ' and select a point' : '' }}.</svg:desc>
@@ -115,14 +116,14 @@ const SERIES_FILLS = ['fill-primary', 'fill-secondary', 'fill-accent', 'fill-inf
             <line x1="60" x2="540" [attr.y1]="geometry().baseline" [attr.y2]="geometry().baseline" stroke="currentColor" stroke-opacity="0.35" />
             @if (categoryLabels(); as categories) {
               @for (category of categories; track $index) {
-                <text [attr.x]="category.x" y="242" text-anchor="middle" font-size="15" fill="currentColor" aria-hidden="true"
+                <text [attr.x]="category.x" [attr.y]="categoryLabelY()" text-anchor="middle" font-size="15" fill="currentColor" aria-hidden="true"
                   class="text-base-content-muted" data-testid="chart-category">{{ category.shortLabel }}<svg:title>{{ category.label }}</svg:title></text>
               }
             } @else {
-              <text x="60" y="242" font-size="14" fill="currentColor" class="text-base-content-muted">{{ geometry().firstX }}</text>
-              <text x="540" y="242" text-anchor="end" font-size="14" fill="currentColor" class="text-base-content-muted">{{ geometry().lastX }}</text>
+              <text x="60" [attr.y]="categoryLabelY()" font-size="14" fill="currentColor" class="text-base-content-muted">{{ geometry().firstX }}</text>
+              <text x="540" [attr.y]="categoryLabelY()" text-anchor="end" font-size="14" fill="currentColor" class="text-base-content-muted">{{ geometry().lastX }}</text>
             }
-            <text x="300" y="270" text-anchor="middle" font-size="14" fill="currentColor" class="text-base-content-muted">{{ node().xLabel?.text }}</text>
+            <text x="300" [attr.y]="xLabelY()" text-anchor="middle" font-size="14" fill="currentColor" class="text-base-content-muted">{{ node().xLabel?.text }}</text>
             <text x="60" y="20" font-size="14" fill="currentColor" class="text-base-content-muted">{{ node().yLabel?.text }}</text>
             @for (series of geometry().series; track $index) {
               @if (node().kind === 'line-chart') {
@@ -198,6 +199,11 @@ export class DashboardChartComponent {
     return this.node().kind === 'bar-chart' && rows.length > 0 && rows.length <= MAX_CATEGORY_LABELS
       && rows[0].barWidth >= MIN_VALUE_LABEL_BAR_WIDTH;
   });
+  /** Negative bar value labels sit below the plot bottom (y=220..237), so shift axis labels down to clear them. */
+  public readonly hasNegativeValueLabels = computed(() => this.showValueLabels() && this.geometry().minY < 0);
+  public readonly svgViewBox = computed(() => (this.hasNegativeValueLabels() ? '0 0 600 300' : '0 0 600 280'));
+  public readonly categoryLabelY = computed(() => (this.hasNegativeValueLabels() ? 262 : 242));
+  public readonly xLabelY = computed(() => (this.hasNegativeValueLabels() ? 290 : 270));
 
   public seriesStroke(index: number): string { return SERIES_STROKES[index % SERIES_STROKES.length]; }
   public patternId(index: number): string { return `ptah-chart-${this.instanceId}-hatch-${index}`; }

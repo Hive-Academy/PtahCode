@@ -139,15 +139,26 @@ describe('DashboardChartComponent', () => {
     expect(element.querySelectorAll('[data-testid="chart-category"]')).toHaveLength(0);
     expect(element.querySelector('svg[role="img"]')?.textContent).toContain('9');
   });
-  it('writes compact value labels above positive and below negative bars', () => {
+  it('writes compact value labels above positive and below negative bars without overlapping category labels', () => {
     const { element } = setup({ ...node, kind: 'bar-chart',
       series: [{ name: 'A', points: [{ x: 'Mon', y: 1200 }, { x: 'Tue', y: -300 }] }] });
+    const svg = element.querySelector('svg[role="img"]')!;
+    expect(svg.getAttribute('viewBox')).toBe('0 0 600 300');
     const values = Array.from(element.querySelectorAll('[data-testid="chart-value"]'));
     expect(values.map(value => value.textContent)).toEqual(['1.2K', '-300']);
     const bars = element.querySelectorAll('svg[role="img"] > rect');
     expect(Number(values[0].getAttribute('y'))).toBeLessThan(Number(bars[0].getAttribute('y')));
     const negativeBottom = Number(bars[1].getAttribute('y')) + Number(bars[1].getAttribute('height'));
-    expect(Number(values[1].getAttribute('y'))).toBeGreaterThan(negativeBottom);
+    const negativeValueY = Number(values[1].getAttribute('y'));
+    expect(negativeValueY).toBeGreaterThan(negativeBottom);
+    const categories = Array.from(element.querySelectorAll('[data-testid="chart-category"]'));
+    // Category labels shift down so negative value labels (font-size 15) clear them with room to spare.
+    expect(Number(categories[1].getAttribute('y')) - negativeValueY).toBeGreaterThanOrEqual(20);
+    // Positive-only bar charts keep the compact viewBox and standard category baseline.
+    const positiveOnly = setup({ ...node, kind: 'bar-chart',
+      series: [{ name: 'A', points: [{ x: 'Mon', y: 10 }, { x: 'Tue', y: 20 }] }] }).element;
+    expect(positiveOnly.querySelector('svg[role="img"]')?.getAttribute('viewBox')).toBe('0 0 600 280');
+    expect(positiveOnly.querySelector('[data-testid="chart-category"]')?.getAttribute('y')).toBe('242');
   });
   it('omits value labels on line charts and on bars too narrow to hold them', () => {
     expect(setup().element.querySelector('[data-testid="chart-value"]')).toBeNull();

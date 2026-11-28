@@ -110,9 +110,9 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
     DashboardAvatarComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // A column flex host lets a card stretch to its grid row's height; inline
-  // kinds (badge, avatar, ...) align to the start so they keep their own width.
-  host: { class: 'flex min-w-0 flex-col', '[class.items-start]': 'inlineKind()' },
+  // A column flex host with flex-1 lets cards, charts, stats and vertical dividers stretch
+  // to their grid/row height; inline kinds (badge, avatar, ...) stay intrinsic-sized.
+  host: { class: 'flex min-w-0 flex-col', '[class.flex-1]': '!inlineKind()', '[class.items-start]': 'inlineKind()' },
   template: `
     <ng-template #child let-child>
       <ptah-surface-node [node]="child" [surfaceId]="surfaceId()" [layoutWidth]="layoutWidth()" [componentStates]="componentStates()"
@@ -229,7 +229,7 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
       }
       @case ('divider') {
         @if (dividerNode(); as divider) {
-          <ptah-dashboard-divider [node]="divider" />
+          <ptah-dashboard-divider [class.flex-1]="divider.direction === 'vertical'" [node]="divider" />
         }
       }
       @case ('text-block') {

@@ -183,6 +183,34 @@ describe('SurfaceNodeComponent', () => {
     expect(titles(setup(chart).element, 'ptah-dashboard-chart ~ div ptah-dashboard-stat h3')).toEqual(['under-chart']);
   });
 
+  it('propagates equal-height flex-1 on non-inline hosts and vertical dividers, keeping inline kinds intrinsic', () => {
+    const [card, stat, chart, badge, vDivider, hDivider] = v2Nodes([
+      { id: 'c', kind: 'card', children: [] },
+      { id: 's', kind: 'stat', value: 1 },
+      { id: 'b', kind: 'bar-chart', series },
+      { id: 'tag', kind: 'badge', tone: 'neutral', text: { text: 'Ok' } },
+      { id: 'dv', kind: 'divider', direction: 'vertical' },
+      { id: 'dh', kind: 'divider', direction: 'horizontal' },
+    ]);
+    for (const [node, childSelector] of [[card, 'ptah-surface-layout'], [stat, 'ptah-dashboard-stat'],
+      [chart, 'ptah-dashboard-chart']] as const) {
+      const { element } = setup(node);
+      const hostClasses = Array.from(element.querySelector('ptah-surface-node')!.classList);
+      expect(hostClasses).toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col', 'min-w-0']));
+      expect(hostClasses).not.toContain('items-start');
+      expect(Array.from(element.querySelector(childSelector)!.classList))
+        .toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col', 'min-w-0']));
+    }
+    const badgeHost = Array.from(setup(badge).element.querySelector('ptah-surface-node')!.classList);
+    expect(badgeHost).toContain('items-start');
+    expect(badgeHost).not.toContain('flex-1');
+
+    const verticalView = setup(vDivider).element;
+    expect(verticalView.querySelector('ptah-surface-node')!.classList.contains('flex-1')).toBe(true);
+    expect(verticalView.querySelector('ptah-dashboard-divider')!.classList.contains('flex-1')).toBe(true);
+    expect(setup(hDivider).element.querySelector('ptah-dashboard-divider')!.classList.contains('flex-1')).toBe(false);
+  });
+
   it('forwards every child output unchanged, with the component id on presentation writes', () => {
     const [card] = v2Nodes([{ id: 'form', kind: 'card', actions: [{ id: 'send', action: 'surface.submit', label: { text: 'Send' } }],
       children: [

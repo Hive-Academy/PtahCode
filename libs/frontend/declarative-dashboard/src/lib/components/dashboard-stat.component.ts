@@ -49,11 +49,11 @@ const TREND_ARROWS = { up: 'M12 19V5M6 11l6-6 6 6', down: 'M12 5v14M6 13l6 6 6-6
     PtahIconButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block min-w-0' },
+  host: { class: 'flex min-w-0 flex-1 flex-col' },
   styles: [TREND_STYLES],
   template: `
     <!-- Compact tile (prototype stats row): label, inline delta and the expand toggle share one header line. -->
-    <section class="flex h-full min-w-0 flex-col rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-base-content" (keydown.escape)="collapse($event)">
+    <section class="flex h-full min-w-0 flex-1 flex-col rounded-lg border border-base-300 bg-base-200 px-3 py-2 text-base-content" (keydown.escape)="collapse($event)">
       <div class="flex items-center gap-1">
         <h3 class="min-w-0 flex-1 break-words text-[10px] uppercase leading-tight tracking-wider text-base-content-muted">{{ node().title?.text ?? 'Stat' }}</h3>
         @if (node().delta !== undefined) {
@@ -129,7 +129,7 @@ export class DashboardStatComponent {
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
   public toggleExpanded(): void { this.viewStateChange.emit({ ...this.viewState(), expanded: !this.viewState().expanded }); }
   public collapse(event: Event): void {
-    if (!this.viewState().expanded) return;
+    if (!this.hasDetails() || !this.viewState().expanded) return;
     event.stopPropagation();
     this.viewStateChange.emit({ ...this.viewState(), expanded: false });
     this.expandButton()?.nativeElement.focus();

@@ -26,7 +26,10 @@ import type { SurfaceRenderable, SurfaceViewState } from './surface-view-state';
 const markup = '<img src=x onerror=alert(1)><script>alert(2)</script>';
 const text = { text: markup };
 const INERT_ACTIONS = SURFACE_ACTIONS.filter(action => action !== 'surface.submit' && action !== 'dashboard.select');
-const series = [{ name: markup, points: [{ x: markup, y: 1 }, { x: 'b', y: 2 }] }];
+const series = [
+  { name: markup, points: [{ x: markup, y: 1 }, { x: 'b', y: 2 }] },
+  { name: markup, points: [{ x: 'b', y: 3 }] },
+];
 
 function v2(components: readonly SurfaceComponent[], dataModel: SurfaceDataModel = {}): SurfaceRenderable {
   return { contract: 'dashboard-spec/2', dataModel, surface: { schemaVersion: 'dashboard-spec/2',
@@ -159,11 +162,17 @@ describe('trust boundary: producer text renders literally', () => {
     expect(texts(element, 'ptah-dashboard-list section > p')).toEqual([markup]);
     expect(texts(element, 'ptah-dashboard-list li p')).toEqual([markup, markup]);
     expect(texts(element, 'ptah-dashboard-chart h3')).toEqual([markup, markup]);
-    expect(texts(element, 'ptah-dashboard-chart section > p')).toEqual([markup, markup]);
-    expect(texts(element, 'ptah-dashboard-chart ul li')).toEqual([markup, markup]);
-    // Axis labels (x then y) and the first x value, as SVG text.
+    expect(texts(element, 'ptah-dashboard-chart h3 + p')).toEqual([markup, markup]);
+    expect(texts(element, 'ptah-dashboard-chart ul li')).toEqual([markup, markup, markup, markup]);
+    // Axis labels (x and y) render literally; categorical x values keep a truncated literal label plus full <svg:title>.
     for (const chart of Array.from(element.querySelectorAll('ptah-dashboard-chart'))) {
-      expect(texts(chart as HTMLElement, 'svg text').filter(value => value === markup)).toHaveLength(3);
+      expect(texts(chart as HTMLElement, 'svg text').filter(value => value === markup)).toHaveLength(2);
+      const firstCategory = chart.querySelector('[data-testid="chart-category"]')!;
+      const shortLabel = firstCategory.childNodes[0].textContent ?? '';
+      expect(shortLabel.endsWith('…')).toBe(true);
+      expect(shortLabel.length).toBeGreaterThan(10);
+      expect(markup.startsWith(shortLabel.slice(0, -1))).toBe(true);
+      expect(firstCategory.querySelector('title')?.textContent).toBe(markup);
     }
     expectInert(element);
   });
@@ -184,7 +193,7 @@ describe('trust boundary: producer text renders literally', () => {
   it('v1: chart series names in the table view', () => {
     const element = render(v1([{ id: 'line', kind: 'line-chart', title: text, series }]), interactionOf(),
       { components: { line: { chartAsTable: true } }, drafts: {} });
-    expect(texts(element, 'tbody th')).toEqual([markup, markup]);
+    expect(texts(element, 'tbody th')).toEqual([markup, markup, markup]);
     expect(texts(element, 'tbody td').filter(value => value === markup)).toHaveLength(1);
     expectInert(element);
   });

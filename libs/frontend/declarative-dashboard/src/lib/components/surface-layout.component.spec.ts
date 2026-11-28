@@ -178,13 +178,44 @@ describe('SurfaceLayoutComponent', () => {
       expect(SURFACE_FLOW_STYLES).toContain('.dp-row-item-inline { flex: 0 1 auto;');
     });
 
+    it('keeps display:grid on a stat group when it is also a horizontal row item', () => {
+      const { element } = setup({ id: 'row', kind: 'stack', direction: 'horizontal', children: [
+        ...stats(2),
+        { id: 'col', kind: 'stack', children: stats(1) } as SurfaceComponent] });
+      const group = element.querySelector('[data-testid="stat-group"]')!;
+      expect(group.classList.contains('dp-stat-group')).toBe(true);
+      expect(group.classList.contains('dp-row-item')).toBe(true);
+      // Higher specificity than .dp-row-item so display:grid is never clobbered by display:flex.
+      expect(SURFACE_FLOW_STYLES).toContain('.dp-stat-group.dp-row-item { display: grid; }');
+      expect(SURFACE_FLOW_STYLES.indexOf('.dp-stat-group.dp-row-item')).toBeGreaterThan(
+        SURFACE_FLOW_STYLES.indexOf('.dp-row-item {'),
+      );
+    });
+
+    it('gives a vertical divider in a horizontal stack a non-growing full-height wrapper', () => {
+      const { element } = setup({ id: 'row', kind: 'stack', direction: 'horizontal', children: [
+        { id: 'left', kind: 'stack', children: stats(1) } as SurfaceComponent,
+        { id: 'sep-v', kind: 'divider', direction: 'vertical' } as SurfaceComponent,
+        { id: 'sep-h', kind: 'divider', direction: 'horizontal' } as SurfaceComponent,
+        { id: 'right', kind: 'stack', children: stats(1) } as SurfaceComponent,
+      ] });
+      const items = Array.from(element.querySelector('.flex-row')!.children);
+      expect(items).toHaveLength(4);
+      expect(items[1].classList.contains('dp-row-item-divider')).toBe(true);
+      expect(items[1].classList.contains('dp-row-item')).toBe(false);
+      expect(items[1].classList.contains('dp-row-item-inline')).toBe(false);
+      expect(items[2].classList.contains('dp-row-item')).toBe(true);
+      expect(items[2].classList.contains('dp-row-item-divider')).toBe(false);
+      expect(SURFACE_FLOW_STYLES).toContain('.dp-row-item-divider { flex: 0 0 auto; align-self: stretch; display: flex; flex-direction: column; }');
+    });
+
     it('does not regroup grid children, and stretches a card to its row height', () => {
       const { element, host, rerender } = setup({ id: 'g', kind: 'grid', columns: 2, children: stats(2) });
       expect(element.querySelector('[data-testid="stat-group"]')).toBeNull();
       host.node.set(layout({ id: 'c', kind: 'card', title: { text: 'Card' }, children: stats(1) })); rerender();
       const card = element.querySelector('[data-kind="card"]')!;
       expect(Array.from(card.classList)).toEqual(expect.arrayContaining(['h-full', 'flex-1', 'flex-col']));
-      expect(Array.from(element.querySelector('ptah-surface-layout')!.classList)).toEqual(expect.arrayContaining(['flex', 'flex-col', 'min-w-0']));
+      expect(Array.from(element.querySelector('ptah-surface-layout')!.classList)).toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col', 'min-w-0']));
     });
 
     it('keeps position-plus-id keys for duplicate ids in a stat run', () => {

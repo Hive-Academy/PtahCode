@@ -102,6 +102,8 @@ export const SURFACE_FLOW_STYLES = `
   .dp-stat-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 0.5rem; min-width: 0; }
   .dp-row-item { flex: 1 1 14rem; min-width: min(100%, 14rem); display: flex; flex-direction: column; }
   .dp-row-item-inline { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; }
+  .dp-row-item-divider { flex: 0 0 auto; align-self: stretch; display: flex; flex-direction: column; }
+  .dp-stat-group.dp-row-item { display: grid; }
 `;
 
 /** Kinds that keep their intrinsic size in a row and are never stretched to fill a cell. */
@@ -179,7 +181,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
   standalone: true,
   imports: [NgTemplateOutlet, PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'flex min-w-0 flex-col' },
+  host: { class: 'flex min-w-0 flex-1 flex-col' },
   styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES, SURFACE_FLOW_STYLES],
   template: `
     <ng-template #children>
@@ -198,7 +200,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
               }
             </div>
           } @else if (horizontal()) {
-            <div [class.dp-row-item]="!isInlineKind(group.entry.child)" [class.dp-row-item-inline]="isInlineKind(group.entry.child)" data-testid="row-item">
+            <div [class]="rowItemClass(group.entry.child)" data-testid="row-item">
               <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
             </div>
           } @else {
@@ -377,6 +379,10 @@ export class SurfaceLayoutComponent {
   }
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
   public isInlineKind(child: SurfaceNode): boolean { return INLINE_SURFACE_KINDS.has(child.kind); }
+  public rowItemClass(child: SurfaceNode): string {
+    if (child.kind === 'divider' && child.direction === 'vertical') return 'dp-row-item-divider';
+    return this.isInlineKind(child) ? 'dp-row-item-inline' : 'dp-row-item';
+  }
   public statusId(index: number): string { return `${this.instanceId}-status-${index}`; }
   public statusText(action: SurfaceAction): string { return submitStatusText(this.actionStates().get(action.id)); }
   public isSent(action: SurfaceAction): boolean { return this.actionStates().get(action.id)?.status === 'applied'; }
