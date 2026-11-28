@@ -74,6 +74,19 @@ interface PropagationOutcome {
   libraryPass: LibraryPassStatus;
 }
 
+function normalizeInstalls(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+function compareSkillsByInstallsDesc(a: SkillShEntry, b: SkillShEntry): number {
+  return (
+    normalizeInstalls(b.installs) - normalizeInstalls(a.installs) ||
+    a.skillId.localeCompare(b.skillId) ||
+    a.source.localeCompare(b.source) ||
+    a.name.localeCompare(b.name)
+  );
+}
+
 const CURATED_POPULAR_SKILLS: SkillShEntry[] = [
   {
     source: 'vercel-labs/agent-skills',
@@ -248,7 +261,7 @@ export class SkillsShRpcHandlers {
         try {
           const apiSkills = await this.apiClient.search(sanitizedQuery);
           const enriched = await this.enrichWithInstallStatus(apiSkills);
-          return { skills: enriched };
+          return { skills: [...enriched].sort(compareSkillsByInstallsDesc) };
         } catch (error: unknown) {
           const message =
             error instanceof Error ? error.message : String(error);
@@ -276,7 +289,9 @@ export class SkillsShRpcHandlers {
           };
         }
 
-        const skills = this.parseSkillsOutput(result.stdout);
+        const skills = this.parseSkillsOutput(result.stdout).sort(
+          compareSkillsByInstallsDesc,
+        );
         this.logger.debug('RPC: skillsSh:search success', {
           resultCount: skills.length,
         });
@@ -793,14 +808,17 @@ export class SkillsShRpcHandlers {
           );
         }
 
-        this.popularCache = { data: skills, timestamp: Date.now() };
-        return { skills };
+        const sorted = [...skills].sort(compareSkillsByInstallsDesc);
+        this.popularCache = { data: sorted, timestamp: Date.now() };
+        return { skills: sorted };
       } catch (error) {
         this.logger.error(
           'RPC: skillsSh:getPopular failed',
           error instanceof Error ? error : new Error(String(error)),
         );
-        return { skills: CURATED_POPULAR_SKILLS };
+        return {
+          skills: [...CURATED_POPULAR_SKILLS].sort(compareSkillsByInstallsDesc),
+        };
       }
     });
   }
@@ -827,8 +845,9 @@ export class SkillsShRpcHandlers {
           const detected = await this.detectTechnologies(workspaceRoot);
 
           const recommendedSkills = this.matchSkillsToTechnologies(detected);
-          const enriched =
-            await this.enrichWithInstallStatus(recommendedSkills);
+          const enriched = [
+            ...(await this.enrichWithInstallStatus(recommendedSkills)),
+          ].sort(compareSkillsByInstallsDesc);
 
           this.logger.debug('RPC: skillsSh:detectRecommended success', {
             frameworks: detected.frameworks,
@@ -1030,11 +1049,11 @@ export class SkillsShRpcHandlers {
     skills: SkillShEntry[],
   ): Promise<SkillShEntry[]> {
     const installed = await this.getInstalledSkillNames();
-    for (const skill of skills) {
-      skill.isInstalled =
-        installed.has(skill.skillId) || installed.has(skill.name.toLowerCase());
-    }
-    return skills;
+    return skills.map((skill) => ({
+      ...skill,
+      isInstalled:
+        installed.has(skill.skillId) || installed.has(skill.name.toLowerCase()),
+    }));
   }
 
   /**

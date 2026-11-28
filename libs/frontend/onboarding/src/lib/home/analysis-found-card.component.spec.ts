@@ -2,18 +2,31 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Router } from '@angular/router';
 import { LoggingService } from '@ptah-extension/core';
-import { WizardRpcService } from '@ptah-extension/setup-wizard';
+import {
+  WizardAnalysisRunner,
+  WizardRpcService,
+} from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from '../analyze/analysis-step.store';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
-import { AnalysisFoundCardComponent, analysisAge } from './analysis-found-card.component';
+import {
+  AnalysisFoundCardComponent,
+  analysisAge,
+} from './analysis-found-card.component';
 
 const now = Date.parse('2026-11-01T12:00:00.000Z');
-const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
+const daysAgo = (days: number) =>
+  new Date(now - days * 86_400_000).toISOString();
 
 describe('analysisAge', () => {
   it('uses relative age and the semantic 7/30 day boundaries', () => {
-    expect(analysisAge(daysAgo(0), now)).toMatchObject({ label: 'today', bucket: 'success' });
-    expect(analysisAge(daysAgo(1), now)).toMatchObject({ label: '1 day ago', bucket: 'success' });
+    expect(analysisAge(daysAgo(0), now)).toMatchObject({
+      label: 'today',
+      bucket: 'success',
+    });
+    expect(analysisAge(daysAgo(1), now)).toMatchObject({
+      label: '1 day ago',
+      bucket: 'success',
+    });
     expect(analysisAge(daysAgo(7), now)?.bucket).toBe('success');
     expect(analysisAge(daysAgo(8), now)?.bucket).toBe('warning');
     expect(analysisAge(daysAgo(12), now)?.label).toBe('12 days ago');
@@ -26,6 +39,18 @@ describe('analysisAge', () => {
 describe('AnalysisFoundCardComponent', () => {
   const activePath = signal<string | null>('/workspace');
   const readyForActivePath = signal(true);
+  const runnerIsRunning = signal(false);
+  const runnerIsCanceling = signal(false);
+  const runnerActiveWorkspace = signal<string | null>(null);
+  const runner = {
+    isRunning: runnerIsRunning,
+    isCanceling: runnerIsCanceling,
+    isRunningForWorkspace: (path: string | null | undefined) => {
+      if (!runnerIsRunning() && !runnerIsCanceling()) return false;
+      const active = runnerActiveWorkspace();
+      return active === null || active === path;
+    },
+  };
   const getAnalysisStatus = jest.fn();
   const useAnalysis = jest.fn();
   const clearSelection = jest.fn();
@@ -38,28 +63,53 @@ describe('AnalysisFoundCardComponent', () => {
     jest.spyOn(Date, 'now').mockReturnValue(now);
     activePath.set('/workspace');
     readyForActivePath.set(true);
+    runnerIsRunning.set(false);
+    runnerIsCanceling.set(false);
+    runnerActiveWorkspace.set(null);
     getAnalysisStatus.mockReset();
     useAnalysis.mockReset();
     clearSelection.mockReset();
     navigate.mockReset();
     warn.mockReset();
-    TestBed.configureTestingModule({ providers: [
-      { provide: WizardRpcService, useValue: { getAnalysisStatus } },
-      { provide: AnalysisStepStore, useValue: { useAnalysis, clearSelection } },
-      { provide: OnboardingWorkspaceStore, useValue: { activePath, readyForActivePath } },
-      { provide: Router, useValue: { navigate } },
-      { provide: LoggingService, useValue: { warn } },
-    ] });
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: WizardRpcService, useValue: { getAnalysisStatus } },
+        { provide: WizardAnalysisRunner, useValue: runner },
+        {
+          provide: AnalysisStepStore,
+          useValue: { useAnalysis, clearSelection },
+        },
+        {
+          provide: OnboardingWorkspaceStore,
+          useValue: { activePath, readyForActivePath },
+        },
+        { provide: Router, useValue: { navigate } },
+        { provide: LoggingService, useValue: { warn } },
+      ],
+    });
   });
   it('hides missing status and loads a found slug on Use it', async () => {
     getAnalysisStatus.mockResolvedValueOnce({ state: 'missing' });
     const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
     fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('[data-testid="analysis-found-card"]')).toBeNull();
-    getAnalysisStatus.mockResolvedValueOnce({ state: 'fresh', reason: 'ok', analysisDir: '.ptah/analysis/slug', analyzedAt: daysAgo(1), sharing: 'ignored-by-gitignore' });
-    activePath.set('/other'); fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="analysis-found-card"]',
+      ),
+    ).toBeNull();
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/slug',
+      analyzedAt: daysAgo(1),
+      sharing: 'ignored-by-gitignore',
+    });
+    activePath.set('/other');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
     expect(element.textContent).toContain('Analysis found · fresh');
     expect(element.textContent).toContain('!.ptah/analysis/');
@@ -71,8 +121,18 @@ describe('AnalysisFoundCardComponent', () => {
   });
   it('waits for the backend switch and ignores a late response from the old folder', async () => {
     let resolveA!: (value: unknown) => void;
-    getAnalysisStatus.mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }));
-    getAnalysisStatus.mockResolvedValueOnce({ state: 'fresh', reason: 'ok', analysisDir: '.ptah/analysis/B', analyzedAt: daysAgo(1) });
+    getAnalysisStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/B',
+      analyzedAt: daysAgo(1),
+    });
     const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
     fixture.detectChanges();
     expect(getAnalysisStatus).toHaveBeenCalledTimes(1);
@@ -80,55 +140,155 @@ describe('AnalysisFoundCardComponent', () => {
     activePath.set('/B');
     fixture.detectChanges();
     expect(getAnalysisStatus).toHaveBeenCalledTimes(1);
-    resolveA({ state: 'fresh', reason: 'ok', analysisDir: '.ptah/analysis/A', analyzedAt: daysAgo(1) });
+    resolveA({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/A',
+      analyzedAt: daysAgo(1),
+    });
     await Promise.resolve();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).not.toContain('Analysis found');
     readyForActivePath.set(true);
     fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(getAnalysisStatus).toHaveBeenCalledTimes(2);
     expect(fixture.nativeElement.textContent).toContain('Analysis found');
     useAnalysis.mockResolvedValue('loaded');
-    (fixture.nativeElement.querySelector('button') as HTMLButtonElement).click();
+    (
+      fixture.nativeElement.querySelector('button') as HTMLButtonElement
+    ).click();
     await fixture.whenStable();
     expect(useAnalysis).toHaveBeenCalledWith('B');
   });
   it('shows a retryable status failure and logs it without displaying raw details', async () => {
     getAnalysisStatus.mockRejectedValueOnce(new Error('secret RPC detail'));
-    getAnalysisStatus.mockResolvedValueOnce({ state: 'fresh', reason: 'ok', analysisDir: '.ptah/analysis/retry', analyzedAt: daysAgo(12) });
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/retry',
+      analyzedAt: daysAgo(12),
+    });
     const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
     fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.textContent).toContain('Could not check for a saved analysis');
+    expect(element.textContent).toContain(
+      'Could not check for a saved analysis',
+    );
     expect(element.textContent).not.toContain('secret RPC detail');
-    expect(warn).toHaveBeenCalledWith('AnalysisFoundCard', 'Could not check saved analysis', expect.anything());
+    expect(warn).toHaveBeenCalledWith(
+      'AnalysisFoundCard',
+      'Could not check saved analysis',
+      expect.anything(),
+    );
     (element.querySelector('button') as HTMLButtonElement).click();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(element.textContent).toContain('12 days ago');
     expect(element.textContent).toContain('consider re-running');
-    expect(element.textContent).not.toContain('Could not check for a saved analysis');
+    expect(element.textContent).not.toContain(
+      'Could not check for a saved analysis',
+    );
   });
   it('clears a load failure on switch and sends Re-run to a fresh analysis', async () => {
-    getAnalysisStatus.mockResolvedValue({ state: 'fresh', reason: 'ok', analysisDir: '.ptah/analysis/saved', analyzedAt: daysAgo(1) });
+    getAnalysisStatus.mockResolvedValue({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/saved',
+      analyzedAt: daysAgo(1),
+    });
     useAnalysis.mockResolvedValueOnce('failed');
     const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
     fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
     (element.querySelector('button') as HTMLButtonElement).click();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(element.textContent).toContain('Could not load this analysis');
     readyForActivePath.set(false);
     activePath.set('/other');
     fixture.detectChanges();
     readyForActivePath.set(true);
     fixture.detectChanges();
-    await fixture.whenStable(); fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
     expect(element.textContent).not.toContain('Could not load this analysis');
     (element.querySelectorAll('button')[1] as HTMLButtonElement).click();
     expect(clearSelection).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(['/onboarding', 'analyze'], { queryParams: { rerun: '1' } });
+    expect(navigate).toHaveBeenCalledWith(['/onboarding', 'analyze'], {
+      queryParams: { rerun: '1' },
+    });
+  });
+
+  it('replaces Re-run with View progress and blocks rerun=1 while analysis is active for the workspace', async () => {
+    runnerActiveWorkspace.set('/workspace');
+    runnerIsRunning.set(true);
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/saved',
+      analyzedAt: daysAgo(1),
+    });
+    const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    const buttons = [...element.querySelectorAll('button')];
+    expect(buttons.map((b) => b.textContent?.trim())).toEqual([
+      'Use it',
+      'View progress',
+    ]);
+    buttons[1].click();
+    expect(clearSelection).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/onboarding', 'analyze']);
+
+    navigate.mockReset();
+    fixture.componentInstance['rerun']();
+    expect(clearSelection).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/onboarding', 'analyze']);
+  });
+
+  it('hides an incomplete stale card while analysis is actively running', async () => {
+    runnerActiveWorkspace.set('/workspace');
+    runnerIsRunning.set(true);
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'stale',
+      reason: 'incomplete',
+      analysisDir: '.ptah/analysis/in-progress',
+      analyzedAt: daysAgo(0),
+    });
+    const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector(
+        '[data-testid="analysis-found-card"]',
+      ),
+    ).toBeNull();
+  });
+
+  it('still allows Re-run when analysis is active for a different workspace', async () => {
+    runnerActiveWorkspace.set('/other-workspace');
+    runnerIsRunning.set(true);
+    getAnalysisStatus.mockResolvedValueOnce({
+      state: 'fresh',
+      reason: 'ok',
+      analysisDir: '.ptah/analysis/saved',
+      analyzedAt: daysAgo(1),
+    });
+    const fixture = TestBed.createComponent(AnalysisFoundCardComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const element = fixture.nativeElement as HTMLElement;
+    const buttons = [...element.querySelectorAll('button')];
+    expect(buttons[1].textContent?.trim()).toBe('Re-run');
   });
 });

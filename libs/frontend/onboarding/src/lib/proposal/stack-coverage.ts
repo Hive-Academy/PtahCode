@@ -84,11 +84,7 @@ export interface SkillVerdictCounts {
 }
 
 export type StackCoverageVerdict =
-  | 'install'
-  | 'build'
-  | 'install-and-build'
-  | 'no-skill'
-  | 'not-judged';
+  'install' | 'build' | 'install-and-build' | 'no-skill' | 'not-judged';
 
 export interface StackCoverageItem {
   /** Stable judge item ID when derived from a SkillJudgeResult. */
@@ -171,6 +167,25 @@ export function canonicalCandidateId(
   const raw =
     typeof keyOrSkill === 'string' ? keyOrSkill : skillSelectionKey(keyOrSkill);
   return raw.trim().toLowerCase();
+}
+
+function normalizeInstalls(installs: number): number {
+  return Number.isFinite(installs) && installs > 0 ? installs : 0;
+}
+
+/** Deterministic descending download-count comparator with stable tie-breakers. */
+export function compareSkillsByInstallsDesc(
+  a: SkillShEntry,
+  b: SkillShEntry,
+): number {
+  const installsDiff =
+    normalizeInstalls(b.installs) - normalizeInstalls(a.installs);
+  if (installsDiff !== 0) return installsDiff;
+  return (
+    a.skillId.localeCompare(b.skillId) ||
+    a.source.localeCompare(b.source) ||
+    a.name.localeCompare(b.name)
+  );
 }
 
 /** Summarize an item's judge outcomes into a single coverage verdict status. */
@@ -524,6 +539,9 @@ export function buildJudgeItemRows(
         installedOutcomeReason: installReasonById.get(cid) ?? null,
       });
     }
+    candidates.sort((a, b) =>
+      compareSkillsByInstallsDesc(a.candidate.skill, b.candidate.skill),
+    );
 
     const combinedManual = new Map<string, SkillShEntry>();
     for (const skill of retainedItemSearch.get(judgeItem.itemId) ?? []) {
@@ -559,7 +577,9 @@ export function buildJudgeItemRows(
       buildOutcomes,
       noSkillOutcomes,
       candidates,
-      manualCandidates: [...combinedManual.values()],
+      manualCandidates: [...combinedManual.values()].sort(
+        compareSkillsByInstallsDesc,
+      ),
       selectedCandidateIds: selectedForItem,
       covered: selectedForItem.size > 0,
       originalSearchFailed,
@@ -610,6 +630,9 @@ export function computeJudgeResidualCandidates(
       itemNames,
     });
   }
+  residual.sort((a, b) =>
+    compareSkillsByInstallsDesc(a.candidate.skill, b.candidate.skill),
+  );
   return residual;
 }
 

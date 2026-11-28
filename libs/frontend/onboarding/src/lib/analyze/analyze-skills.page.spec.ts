@@ -32,7 +32,10 @@ jest.mock('@ptah-extension/setup-wizard', () => ({
   WizardRpcService: class WizardRpcService {},
 }));
 
-const DEFAULT_PAIR: ModelPair = { provider: 'claude', model: 'claude-sonnet-4' };
+const DEFAULT_PAIR: ModelPair = {
+  provider: 'claude',
+  model: 'claude-sonnet-4',
+};
 
 function emptyJudge(
   overrides: Partial<SkillJudgeResult> = {},
@@ -146,7 +149,10 @@ function makeJudgedResultWithInstallAndBuild(): WizardRecommendAnalysisSkillsRes
             {
               candidateId: 'owner/repo/legacy-ng',
               eligible: false,
-              rejection: { reason: 'Targets legacy NgModules', stage: 'decision' },
+              rejection: {
+                reason: 'Targets legacy NgModules',
+                stage: 'decision',
+              },
             },
           ],
           outcomes: [
@@ -1503,7 +1509,9 @@ describe('AnalyzeSkillsPage', () => {
         ([method]) => method === 'wizard:recommend-analysis-skills',
       ),
     ).toHaveLength(recCallsBeforeBlockedRerun + 1);
-    expect(element.querySelector('[data-testid="setup-model-blocked"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="setup-model-blocked"]'),
+    ).toBeNull();
   });
 
   it('shows the navigation error when Skip skills fails on the Setup-blocked screen', async () => {
@@ -1614,7 +1622,9 @@ describe('AnalyzeSkillsPage', () => {
       const panel = element.querySelector('ptah-state-panel[state="error"]');
       expect(panel).not.toBeNull();
       expect(panel?.textContent).toContain(expectedMessage);
-      expect(panel?.textContent).not.toContain('RAW_INTERNAL_ERROR_DO_NOT_LEAK');
+      expect(panel?.textContent).not.toContain(
+        'RAW_INTERNAL_ERROR_DO_NOT_LEAK',
+      );
       const tryAgainBtn = [...(panel?.querySelectorAll('button') ?? [])].find(
         (btn) => btn.textContent?.trim() === 'Try again',
       );
@@ -1634,9 +1644,10 @@ describe('AnalyzeSkillsPage', () => {
       );
       expect(backBtn).toBeDefined();
       backBtn?.click();
-      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith([
-        '/onboarding/analyze',
-      ]);
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(
+        ['/onboarding/analyze'],
+        { queryParams: { analysis: 'saved' } },
+      );
       fixture.destroy();
     }
   });
@@ -1649,7 +1660,9 @@ describe('AnalyzeSkillsPage', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
-    expect(element.querySelector('ptah-state-panel[state="error"]')).not.toBeNull();
+    expect(
+      element.querySelector('ptah-state-panel[state="error"]'),
+    ).not.toBeNull();
     expect(element.textContent).toContain('Try again');
     expect(element.textContent).toContain('Back');
 
@@ -1819,8 +1832,12 @@ describe('AnalyzeSkillsPage', () => {
     expect(call).toHaveBeenCalledTimes(callsBeforeRerun);
     expect(page.state.searching()).toBe(true);
     expect([...page.state.selectedIds()]).toEqual(['owner/repo/angular']);
-    expect(page.state.openDraft()?.body).toContain('Preserve this unsaved draft.');
-    const confirmAlert = element.querySelector('[data-testid="dirty-draft-confirm"]');
+    expect(page.state.openDraft()?.body).toContain(
+      'Preserve this unsaved draft.',
+    );
+    const confirmAlert = element.querySelector(
+      '[data-testid="dirty-draft-confirm"]',
+    );
     expect(confirmAlert).not.toBeNull();
     expect(confirmAlert?.textContent).toContain('unsaved edits');
 
@@ -1829,7 +1846,9 @@ describe('AnalyzeSkillsPage', () => {
       .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-keep"]')
       ?.click();
     fixture.detectChanges();
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
     resolveSearch({
       isSuccess: () => true,
       data: { skills: [rerunSkill] },
@@ -1844,7 +1863,9 @@ describe('AnalyzeSkillsPage', () => {
       Promise.resolve({ isSuccess: () => true, data: rerunResult });
     page.retry();
     fixture.detectChanges();
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).not.toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).not.toBeNull();
 
     element
       .querySelector<HTMLButtonElement>('[data-testid="dirty-draft-discard"]')
@@ -1858,7 +1879,9 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.openDraft()).toBeNull();
     expect(page.summary()?.detectedItems[0].name).toBe('Vitest');
     expect([...page.state.selectedIds()]).toEqual(['owner/repo/vitest']);
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
   });
 
   it('blocks Re-run and Try again with a visible reason while a draft Create or preview is in flight', async () => {
@@ -1890,7 +1913,9 @@ describe('AnalyzeSkillsPage', () => {
       '[data-testid="rerun-skill-search"]',
     );
     expect(rerunBtn?.disabled).toBe(true);
-    const reasonEl = element.querySelector('[data-testid="rerun-blocked-reason"]');
+    const reasonEl = element.querySelector(
+      '[data-testid="rerun-blocked-reason"]',
+    );
     expect(reasonEl?.textContent).toContain('skill creation');
 
     const callsBeforeRetry = call.mock.calls.length;
@@ -1912,7 +1937,8 @@ describe('AnalyzeSkillsPage', () => {
 
     expect(rerunBtn?.disabled).toBe(true);
     expect(
-      element.querySelector('[data-testid="rerun-blocked-reason"]')?.textContent,
+      element.querySelector('[data-testid="rerun-blocked-reason"]')
+        ?.textContent,
     ).toContain('draft generation');
     page.retry();
     await fixture.whenStable();
@@ -2151,7 +2177,8 @@ describe('AnalyzeSkillsPage', () => {
 
     // User opens and edits a draft while rerun is already in flight
     const dirtyOpened = page.state.openManualDraft('item-nx');
-    if (dirtyOpened.status !== 'ok') throw new Error('Second manual draft failed');
+    if (dirtyOpened.status !== 'ok')
+      throw new Error('Second manual draft failed');
     page.state.updateDraftFields({
       body: '## Unsaved\n\nDo not discard silently.',
     });
@@ -2168,7 +2195,9 @@ describe('AnalyzeSkillsPage', () => {
     const confirmAlert = element.querySelector(
       '[data-testid="dirty-draft-confirm"]',
     );
-    expect(confirmAlert?.textContent).toContain('New skill recommendations are ready');
+    expect(confirmAlert?.textContent).toContain(
+      'New skill recommendations are ready',
+    );
 
     // Confirming calls applyRecommendationResult again with { discardDirtyDraft: true }
     const applySpy = jest.spyOn(page.state, 'applyRecommendationResult');
@@ -2185,7 +2214,9 @@ describe('AnalyzeSkillsPage', () => {
     expect(page.state.openDraft()).toBeNull();
     expect(page.selectionReset()).toBe(true);
     expect(runPill.badges()[1]?.pair).toBe('claude / claude-sonnet-4');
-    expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+    expect(
+      element.querySelector('[data-testid="dirty-draft-confirm"]'),
+    ).toBeNull();
   });
 
   it.each(['replacement', 'edit'] as const)(
@@ -2215,7 +2246,8 @@ describe('AnalyzeSkillsPage', () => {
       await fixture.whenStable();
       fixture.detectChanges();
       expect(
-        element.querySelector('[data-testid="dirty-draft-confirm"]')?.textContent,
+        element.querySelector('[data-testid="dirty-draft-confirm"]')
+          ?.textContent,
       ).toContain('Discard edits and apply');
 
       if (change === 'replacement') {
@@ -2237,7 +2269,81 @@ describe('AnalyzeSkillsPage', () => {
       expect(apply).not.toHaveBeenCalled();
       expect(page.state.openDraft()).toBe(currentDraft);
       expect(page.summary()).toBe(initialResult);
-      expect(element.querySelector('[data-testid="dirty-draft-confirm"]')).toBeNull();
+      expect(
+        element.querySelector('[data-testid="dirty-draft-confirm"]'),
+      ).toBeNull();
     },
   );
+
+  it('preserves the analysis query param when navigating back', async () => {
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'saved' },
+    });
+  });
+
+  it('navigates back without queryParams when no analysis query param or loaded analysis is present', async () => {
+    loaded.set(null);
+    TestBed.overrideProvider(AnalysisStepStore, {
+      useValue: {
+        loaded,
+        selected: signal(null),
+        useAnalysis: jest.fn(),
+      },
+    });
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: {
+        snapshot: { queryParamMap: convertToParamMap({}) },
+        queryParamMap: of(convertToParamMap({})),
+      },
+    });
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {});
+  });
+
+  it('[m1] preserves the loaded analysis slug when navigating back after entering via ?run=', async () => {
+    loaded.set({
+      manifest: { runId: 'run-1', slug: 'from-loaded-manifest' },
+    } as { manifest: { runId: string; slug: string } });
+    const selected = signal<string | null>(null);
+    TestBed.overrideProvider(AnalysisStepStore, {
+      useValue: {
+        loaded,
+        selected,
+        useAnalysis: jest.fn(),
+      },
+    });
+    const query = convertToParamMap({ run: 'generation-1' });
+    TestBed.overrideProvider(ActivatedRoute, {
+      useValue: {
+        snapshot: { queryParamMap: query },
+        queryParamMap: of(query),
+      },
+    });
+    const router = TestBed.inject(Router);
+    const fixture = TestBed.createComponent(AnalyzeSkillsPage);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'from-loaded-manifest' },
+    });
+
+    selected.set('from-selected-slug');
+    await fixture.componentInstance.back();
+    expect(router.navigate).toHaveBeenLastCalledWith(['/onboarding/analyze'], {
+      queryParams: { analysis: 'from-selected-slug' },
+    });
+  });
 });

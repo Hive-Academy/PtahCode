@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  Injector,
   computed,
   effect,
   inject,
@@ -9,10 +10,24 @@ import {
 import { Router } from '@angular/router';
 import { LoggingService } from '@ptah-extension/core';
 import type { AnalysisStatus } from '@ptah-extension/shared';
-import { WizardRpcService } from '@ptah-extension/setup-wizard';
+import {
+  WizardAnalysisRunner,
+  WizardRpcService,
+} from '@ptah-extension/setup-wizard';
 import { AnalysisStepStore } from '../analyze/analysis-step.store';
 import { OnboardingWorkspaceStore } from '../shell/onboarding-workspace.store';
 import { PtahButtonDirective, PtahSurfaceDirective } from '@ptah-extension/ui';
+
+function resolveOptionalAnalysisRunner(
+  injector: Injector,
+): WizardAnalysisRunner | null {
+  try {
+    return injector.get(WizardAnalysisRunner, null);
+  } catch {
+    // degradation-audit: optional-capability - Analysis found card falls back to inactive when runner is unavailable in isolated harnesses.
+    return null;
+  }
+}
 
 export type AnalysisAgeBucket = 'success' | 'warning' | 'error';
 
@@ -42,7 +57,7 @@ export function analysisAge(
   imports: [PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (status(); as result) {
+    @if (visibleStatus(); as result) {
       <section
         ptahSurface
         padding="md"
@@ -95,7 +110,13 @@ export function analysisAge(
           >
             Use it
           </button>
-          <button ptahButton type="button" (click)="rerun()">Re-run</button>
+          @if (analysisActive()) {
+            <button ptahButton type="button" (click)="viewProgress()">
+              View progress
+            </button>
+          } @else {
+            <button ptahButton type="button" (click)="rerun()">Re-run</button>
+          }
         </div>
       </section>
     }
@@ -114,12 +135,27 @@ export function analysisAge(
 })
 export class AnalysisFoundCardComponent {
   private readonly rpc = inject(WizardRpcService);
+  private readonly runner = resolveOptionalAnalysisRunner(inject(Injector));
   private readonly analysis = inject(AnalysisStepStore);
   private readonly workspace = inject(OnboardingWorkspaceStore);
   private readonly router = inject(Router);
   private readonly logger = inject(LoggingService);
   private readonly statusValue = signal<AnalysisStatus | null>(null);
   protected readonly status = this.statusValue.asReadonly();
+  protected readonly analysisActive = computed(() => {
+    if (!this.runner) return false;
+    const path = this.workspace.activePath();
+    if (typeof this.runner.isRunningForWorkspace === 'function') {
+      return this.runner.isRunningForWorkspace(path);
+    }
+    return this.runner.isRunning() || this.runner.isCanceling();
+  });
+  protected readonly visibleStatus = computed(() => {
+    const result = this.status();
+    if (!result) return null;
+    if (this.analysisActive() && result.reason === 'incomplete') return null;
+    return result;
+  });
   protected readonly error = signal<string | null>(null);
   protected readonly busy = signal(false);
   protected readonly unavailable = signal(false);
@@ -192,8 +228,17 @@ export class AnalysisFoundCardComponent {
     }
   }
 
+  protected viewProgress(): void {
+    if (!this.workspace.readyForActivePath()) return;
+    void this.router.navigate(['/onboarding', 'analyze']);
+  }
+
   protected rerun(): void {
     if (!this.workspace.readyForActivePath()) return;
+    if (this.analysisActive()) {
+      this.viewProgress();
+      return;
+    }
     this.analysis.clearSelection();
     void this.router.navigate(['/onboarding', 'analyze'], {
       queryParams: { rerun: '1' },

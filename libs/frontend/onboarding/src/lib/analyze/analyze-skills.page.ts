@@ -39,10 +39,7 @@ import { OnboardingRunPillService } from '../shell/onboarding-run-pill.service';
 import { AnalysisStepStore } from './analysis-step.store';
 
 type SetupRecoveryAction =
-  | 'choose-provider'
-  | 'choose-model'
-  | 'sign-in'
-  | 'retry';
+  'choose-provider' | 'choose-model' | 'sign-in' | 'retry';
 
 export interface SetupBlockView {
   readonly message: string;
@@ -407,7 +404,9 @@ function fallbackSetupBlock(hasPriorResult: boolean): SetupBlockView {
               data-testid="rerun-skill-search"
               [busy]="state.loading()"
               [title]="rerunDisabledTitle()"
-              [disabled]="selectionBusy() || !canRetry() || leaving() || draftBusy()"
+              [disabled]="
+                selectionBusy() || !canRetry() || leaving() || draftBusy()
+              "
               (click)="retry()"
             >
               Re-run skill search
@@ -479,7 +478,9 @@ export class AnalyzeSkillsPage implements OnInit {
   });
   public readonly selectionBusy = computed(
     () =>
-      this.state.loading() || this.state.previewing() || this.state.consentOpen(),
+      this.state.loading() ||
+      this.state.previewing() ||
+      this.state.consentOpen(),
   );
   public readonly rerunBlockedReason = computed<string | null>(() => {
     const draft = this.state.openDraft();
@@ -687,10 +688,10 @@ export class AnalyzeSkillsPage implements OnInit {
     const draft = this.state.openDraft();
     return Boolean(
       draft?.dirty &&
-        draft.revision === confirmed.draftRevision &&
-        draft.name === confirmed.draftSnapshot.name &&
-        draft.description === confirmed.draftSnapshot.description &&
-        draft.body === confirmed.draftSnapshot.body,
+      draft.revision === confirmed.draftRevision &&
+      draft.name === confirmed.draftSnapshot.name &&
+      draft.description === confirmed.draftSnapshot.description &&
+      draft.body === confirmed.draftSnapshot.body,
     );
   }
 
@@ -991,7 +992,8 @@ export class AnalyzeSkillsPage implements OnInit {
       await this.continueToGuidance();
       return;
     }
-    if (this.selectionBusy() || this.leaving() || this.state.draftOpen()) return;
+    if (this.selectionBusy() || this.leaving() || this.state.draftOpen())
+      return;
     if (!this.state.selectedIds().size) {
       await this.continueToGuidance();
       return;
@@ -1130,6 +1132,14 @@ export class AnalyzeSkillsPage implements OnInit {
     }
   }
   public async back(): Promise<void> {
-    await this.router.navigate(['/onboarding/analyze']);
+    const analysis =
+      this.route.snapshot.queryParamMap.get('analysis') ??
+      this.analysis.selected() ??
+      this.analysis.loaded()?.manifest.slug ??
+      null;
+    await this.router.navigate(
+      ['/onboarding/analyze'],
+      analysis ? { queryParams: { analysis } } : {},
+    );
   }
 }

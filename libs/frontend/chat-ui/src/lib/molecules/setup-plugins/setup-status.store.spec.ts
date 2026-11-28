@@ -83,7 +83,11 @@ describe('SetupStatusStore', () => {
         {
           provide: VSCodeService,
           useValue: {
-            config: () => ({ workspaceRoot: '/workspace', isVSCode: !electron, isElectron: electron }),
+            config: () => ({
+              workspaceRoot: '/workspace',
+              isVSCode: !electron,
+              isElectron: electron,
+            }),
           },
         },
         { provide: GenerationWorkflowLauncherService, useValue: launcher },
@@ -122,6 +126,53 @@ describe('SetupStatusStore', () => {
     await store.refresh();
     expect(store.scanReady()).toBe(false);
     expect(store.scanProjectType()).toBeNull();
+  });
+
+  it('ignores active, running, paused, and failed analyses for scanReady while accepting completed and legacy ones', async () => {
+    TestBed.flushEffects();
+    await store.refresh();
+
+    // Active running analysis must not flip scanReady to true
+    analyses = [{ ...analysis, lifecycle: 'running', isActive: true }];
+    await store.refresh();
+    expect(store.scanReady()).toBe(false);
+    expect(store.scanProjectType()).toBeNull();
+
+    // Non-active running, paused, failed, or isActive-only entries are ignored
+    analyses = [
+      { ...analysis, lifecycle: 'running', isActive: false },
+      { ...analysis, lifecycle: 'paused', isActive: false },
+      { ...analysis, lifecycle: 'failed', isActive: false },
+      { ...analysis, lifecycle: 'completed', isActive: true },
+    ];
+    await store.refresh();
+    expect(store.scanReady()).toBe(false);
+    expect(store.scanProjectType()).toBeNull();
+
+    // Completed analysis (even behind an active running one) sets scanReady and its projectType
+    analyses = [
+      {
+        ...analysis,
+        projectType: 'In-flight run',
+        lifecycle: 'running',
+        isActive: true,
+      },
+      {
+        ...analysis,
+        projectType: ' Completed Nx workspace ',
+        lifecycle: 'completed',
+        isActive: false,
+      },
+    ];
+    await store.refresh();
+    expect(store.scanReady()).toBe(true);
+    expect(store.scanProjectType()).toBe('Completed Nx workspace');
+
+    // Legacy analysis without lifecycle or isActive remains valid
+    analyses = [{ ...analysis, projectType: 'Legacy app' }];
+    await store.refresh();
+    expect(store.scanReady()).toBe(true);
+    expect(store.scanProjectType()).toBe('Legacy app');
   });
 
   it('keeps the scan check unknown until the first answer and after a failed first read', async () => {
@@ -296,15 +347,25 @@ describe('SetupStatusStore', () => {
     electron = true;
     await store.openFolder();
     expect(addFolder).toHaveBeenCalledTimes(1);
-    expect(rpc.call).not.toHaveBeenCalledWith('command:execute', expect.anything(), expect.anything());
+    expect(rpc.call).not.toHaveBeenCalledWith(
+      'command:execute',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('reports an Electron picker failure without exposing its raw error', async () => {
     electron = true;
     addFolder.mockResolvedValueOnce('failed');
     await store.openFolder();
-    expect(store.folderError()).toBe('Could not open a folder. Please try again.');
-    expect(rpc.call).not.toHaveBeenCalledWith('command:execute', expect.anything(), expect.anything());
+    expect(store.folderError()).toBe(
+      'Could not open a folder. Please try again.',
+    );
+    expect(rpc.call).not.toHaveBeenCalledWith(
+      'command:execute',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('does not track catalog state in the scope effect or duplicate status reads on retry', async () => {

@@ -628,8 +628,18 @@ describe('SkillShBrowserComponent', () => {
       responders.set('skillsSh:search', () =>
         ok({
           skills: [
-            entry({ source: 'acme/skills', skillId: 'nx', name: 'Nx' }),
-            entry({ source: 'acme/skills', skillId: 'jest', name: 'Jest' }),
+            entry({
+              source: 'acme/skills',
+              skillId: 'nx',
+              name: 'Nx',
+              installs: 20_000,
+            }),
+            entry({
+              source: 'acme/skills',
+              skillId: 'jest',
+              name: 'Jest',
+              installs: 10_000,
+            }),
           ],
         }),
       );
@@ -678,6 +688,107 @@ describe('SkillShBrowserComponent', () => {
       expect(rendered).toHaveLength(1);
       expect(rendered[0].textContent).toContain('Find Skills');
       expect(host(fixture).textContent).toContain('Popular Skills');
+    });
+  });
+
+  describe('install count sorting', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    const cardHeadings = (grid: Element): string[] =>
+      Array.from(grid.querySelectorAll('ptah-catalog-card')).map(
+        (card) =>
+          card
+            .querySelector('h3, [data-testid="catalog-card-heading"]')
+            ?.textContent?.trim() ??
+          card.textContent?.trim() ??
+          '',
+      );
+
+    it('sorts popular and recommended skills by installs descending with deterministic tie-breakers', async () => {
+      const fixture = await mount(
+        [
+          entry({ skillId: 'low', name: 'Low', installs: 100 }),
+          entry({ skillId: 'neg', name: 'Negative', installs: -50 }),
+          entry({ skillId: 'nan', name: 'NotANumber', installs: Number.NaN }),
+          entry({ skillId: 'top', name: 'Top', installs: 50_000 }),
+          entry({
+            source: 'zeta/skills',
+            skillId: 'tie',
+            name: 'Tie Zeta',
+            installs: 5_000,
+          }),
+          entry({
+            source: 'alpha/skills',
+            skillId: 'tie',
+            name: 'Tie Alpha',
+            installs: 5_000,
+          }),
+        ],
+        [],
+        [
+          entry({ skillId: 'rec-mid', name: 'Rec Mid', installs: 1_000 }),
+          entry({ skillId: 'rec-top', name: 'Rec Top', installs: 9_000 }),
+          entry({ skillId: 'rec-zero', name: 'Rec Zero', installs: 0 }),
+        ],
+      );
+
+      expect(
+        fixture.componentInstance
+          .recommendedDisplaySkills()
+          .map((s) => s.skillId),
+      ).toEqual(['rec-top', 'rec-mid', 'rec-zero']);
+
+      expect(
+        fixture.componentInstance
+          .popularSkills()
+          .map((s) => `${s.source}@${s.skillId}`),
+      ).toEqual([
+        'vercel-labs/skills@top',
+        'alpha/skills@tie',
+        'zeta/skills@tie',
+        'vercel-labs/skills@low',
+        'vercel-labs/skills@nan',
+        'vercel-labs/skills@neg',
+      ]);
+
+      const grids = host(fixture).querySelectorAll('ptah-catalog-grid');
+      expect(grids).toHaveLength(2);
+      expect(cardHeadings(grids[0])[0]).toContain('Rec Top');
+      expect(cardHeadings(grids[1])[0]).toContain('Top');
+    });
+
+    it('sorts search results by installs descending', async () => {
+      const fixture = await mount([entry()]);
+      responders.set('skillsSh:search', () =>
+        ok({
+          skills: [
+            entry({ skillId: 'small', name: 'Small', installs: 200 }),
+            entry({ skillId: 'huge', name: 'Huge', installs: 99_000 }),
+            entry({ skillId: 'medium', name: 'Medium', installs: 4_500 }),
+          ],
+        }),
+      );
+
+      jest.useFakeTimers();
+      const field = host(fixture).querySelector<HTMLInputElement>(
+        'input[type="search"]',
+      );
+      if (!field) throw new Error('no search field');
+      field.value = 'skill';
+      field.dispatchEvent(new Event('input'));
+      jest.advanceTimersByTime(300);
+      jest.useRealTimers();
+      await settle(fixture);
+
+      expect(
+        fixture.componentInstance.searchResults().map((s) => s.skillId),
+      ).toEqual(['huge', 'medium', 'small']);
+      const rendered = cards(fixture);
+      expect(rendered[0].textContent).toContain('Huge');
+      expect(rendered[1].textContent).toContain('Medium');
+      expect(rendered[2].textContent).toContain('Small');
     });
   });
 

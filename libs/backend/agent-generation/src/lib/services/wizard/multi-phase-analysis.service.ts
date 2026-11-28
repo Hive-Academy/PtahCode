@@ -19,7 +19,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import { join, relative } from 'path';
+import { join, relative, resolve } from 'path';
 import { AnalysisClaudeMdLinker } from '../analysis-claude-md-linker';
 import {
   PLATFORM_TOKENS,
@@ -153,6 +153,29 @@ class PhaseSessionMissingError extends Error {
   }
 }
 
+/** Snapshot of an actively executing in-process multi-phase analysis run. */
+export interface ActiveMultiPhaseAnalysisInfo {
+  readonly workspacePath: string;
+  readonly runId: string | null;
+  readonly slug: string | null;
+  readonly startedAt: string;
+}
+
+interface ActiveRunRecord {
+  readonly workspacePath: string;
+  readonly normalizedWorkspacePath: string;
+  readonly startedAt: string;
+  readonly abortController: AbortController;
+  promise: Promise<Result<MultiPhaseManifest, Error>> | null;
+  runId: string | null;
+  slug: string | null;
+}
+
+function normalizeWorkspacePath(workspacePath: string): string {
+  const resolved = resolve(workspacePath);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 /**
  * MultiPhaseAnalysisService
  *
@@ -164,7 +187,8 @@ class PhaseSessionMissingError extends Error {
  */
 @injectable()
 export class MultiPhaseAnalysisService {
-  private activeAbortController: AbortController | null = null;
+  private activeRun: ActiveRunRecord | null = null;
+  private readonly settlingByWorkspace = new Map<string, Promise<unknown>>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -183,11 +207,46 @@ export class MultiPhaseAnalysisService {
   ) {}
 
   /**
+   * Return metadata for the currently active in-process analysis run,
+   * optionally filtered to a specific workspace path.
+   */
+  getActiveRun(workspacePath?: string): ActiveMultiPhaseAnalysisInfo | null {
+    const run = this.activeRun;
+    if (!run || run.abortController.signal.aborted) {
+      return null;
+    }
+    if (
+      workspacePath !== undefined &&
+      normalizeWorkspacePath(workspacePath) !== run.normalizedWorkspacePath
+    ) {
+      return null;
+    }
+    return {
+      workspacePath: run.workspacePath,
+      runId: run.runId,
+      slug: run.slug,
+      startedAt: run.startedAt,
+    };
+  }
+
+  /**
+   * Whether a non-aborted analysis run is currently active in-process for
+   * the given workspace path.
+   */
+  isRunningForWorkspace(workspacePath: string): boolean {
+    return this.getActiveRun(workspacePath) !== null;
+  }
+
+  /**
    * Execute the full multi-phase analysis pipeline.
    *
    * With `options.resume === true` a valid version-4 manifest is continued:
    * completed phases are skipped only after their inputs and output bytes
    * verify. A legacy v3 directory is archived before a fresh v4 run starts.
+   *
+   * When a non-aborted run is already active for the same workspace, callers
+   * join and receive the active run's promise rather than aborting and wiping
+   * its in-progress slug directory.
    *
    * @param workspacePath - Workspace root path to analyze
    * @param options - Pipeline configuration
@@ -209,6 +268,20 @@ export class MultiPhaseAnalysisService {
           `Multi-phase analysis requires the MCP server. mcpRunning=${mcpServerRunning}`,
         ),
       );
+    }
+
+    const normalizedWorkspacePath = normalizeWorkspacePath(workspacePath);
+    const joinableBeforeSetup = this.findJoinableRun(normalizedWorkspacePath);
+    if (joinableBeforeSetup) {
+      this.logger.info(
+        `${SERVICE_TAG} Joining active multi-phase analysis for workspace`,
+        {
+          workspace: workspacePath,
+          runId: joinableBeforeSetup.runId,
+          slug: joinableBeforeSetup.slug,
+        },
+      );
+      return joinableBeforeSetup.promise;
     }
 
     // Use the launch-scoped Setup snapshot when provided by the handler;
@@ -238,6 +311,21 @@ export class MultiPhaseAnalysisService {
       snapshot = resolution.snapshot;
     }
 
+    // Re-check after awaiting Setup resolution in case a concurrent call for
+    // the same workspace started a run while this caller was resolving Setup.
+    const joinableAfterSetup = this.findJoinableRun(normalizedWorkspacePath);
+    if (joinableAfterSetup) {
+      this.logger.info(
+        `${SERVICE_TAG} Joining active multi-phase analysis for workspace`,
+        {
+          workspace: workspacePath,
+          runId: joinableAfterSetup.runId,
+          slug: joinableAfterSetup.slug,
+        },
+      );
+      return joinableAfterSetup.promise;
+    }
+
     const analysisPair: ModelPair = {
       provider: snapshot.providerId,
       model: snapshot.model,
@@ -251,15 +339,104 @@ export class MultiPhaseAnalysisService {
       mcpServerRunning,
       resume,
     });
-    if (this.activeAbortController) {
-      this.activeAbortController.abort('new_analysis_started');
-      this.activeAbortController = null;
+    if (this.activeRun) {
+      const previous = this.activeRun;
+      this.activeRun = null;
+      this.trackAbortedRunSettlement(previous);
+      if (!previous.abortController.signal.aborted) {
+        previous.abortController.abort('new_analysis_started');
+      }
     }
     const masterAbortController = new AbortController();
-    this.activeAbortController = masterAbortController;
+    const resolvedWorkspacePath = resolve(workspacePath);
+    const folderName = workspacePath.split(/[\\/]/).pop() || 'project';
+    const initialSlug =
+      typeof this.storageService.getRunDir === 'function'
+        ? this.storageService.getRunDir(workspacePath, folderName).slug
+        : null;
+    const runRecord: ActiveRunRecord = {
+      workspacePath: resolvedWorkspacePath,
+      normalizedWorkspacePath,
+      startedAt: new Date().toISOString(),
+      abortController: masterAbortController,
+      promise: null,
+      runId: null,
+      slug: initialSlug,
+    };
+    this.activeRun = runRecord;
 
+    const runPromise = this.executeAnalysisRun(
+      workspacePath,
+      analysisPair,
+      auth,
+      mcpServerRunning,
+      mcpPort,
+      pluginPaths,
+      resume,
+      runRecord,
+    );
+    runRecord.promise = runPromise;
+    return runPromise;
+  }
+
+  private trackAbortedRunSettlement(aborted: ActiveRunRecord): void {
+    const { normalizedWorkspacePath, promise } = aborted;
+    if (!promise) return;
+    const settled = promise.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.settlingByWorkspace.set(normalizedWorkspacePath, settled);
+    void settled.finally(() => {
+      if (this.settlingByWorkspace.get(normalizedWorkspacePath) === settled) {
+        this.settlingByWorkspace.delete(normalizedWorkspacePath);
+      }
+    });
+  }
+
+  private findJoinableRun(
+    normalizedWorkspacePath: string,
+  ):
+    | (ActiveRunRecord & {
+        promise: Promise<Result<MultiPhaseManifest, Error>>;
+      })
+    | null {
+    const run = this.activeRun;
+    if (
+      run &&
+      !run.abortController.signal.aborted &&
+      run.normalizedWorkspacePath === normalizedWorkspacePath &&
+      run.promise !== null
+    ) {
+      return run as ActiveRunRecord & {
+        promise: Promise<Result<MultiPhaseManifest, Error>>;
+      };
+    }
+    return null;
+  }
+
+  private async executeAnalysisRun(
+    workspacePath: string,
+    analysisPair: ModelPair,
+    auth: OneShotAuthOverride,
+    mcpServerRunning: boolean,
+    mcpPort: number | undefined,
+    pluginPaths: string[] | undefined,
+    resume: boolean,
+    runRecord: ActiveRunRecord,
+  ): Promise<Result<MultiPhaseManifest, Error>> {
+    const masterAbortController = runRecord.abortController;
     let checkpoint: AnalysisRunCheckpoint | null = null;
     try {
+      const priorSettling = this.settlingByWorkspace.get(
+        runRecord.normalizedWorkspacePath,
+      );
+      if (priorSettling) {
+        await priorSettling;
+      }
+      if (masterAbortController.signal.aborted) {
+        return Result.err(new Error('Analysis cancelled before start'));
+      }
       const folderName = workspacePath.split(/[\\/]/).pop() || 'project';
       checkpoint = await AnalysisRunCheckpoint.open(
         this.storageService,
@@ -271,6 +448,8 @@ export class MultiPhaseAnalysisService {
         resume,
       );
       const { slugDir, manifest } = checkpoint;
+      runRecord.runId = manifest.runId;
+      runRecord.slug = manifest.slug;
 
       this.logger.info(`${SERVICE_TAG} Analysis run opened`, {
         runId: manifest.runId,
@@ -500,8 +679,8 @@ export class MultiPhaseAnalysisService {
       this.logger.error(`${SERVICE_TAG} Multi-phase analysis failed`, errorObj);
       return Result.err(errorObj);
     } finally {
-      if (this.activeAbortController === masterAbortController) {
-        this.activeAbortController = null;
+      if (this.activeRun === runRecord) {
+        this.activeRun = null;
       }
     }
   }
@@ -511,10 +690,14 @@ export class MultiPhaseAnalysisService {
    * `pending` (its partial file is kept) and the manifest is left resumable.
    */
   cancelAnalysis(): void {
-    if (this.activeAbortController) {
+    if (this.activeRun) {
       this.logger.info(`${SERVICE_TAG} Pausing active multi-phase analysis`);
-      this.activeAbortController.abort('user_cancelled');
-      this.activeAbortController = null;
+      const aborted = this.activeRun;
+      this.activeRun = null;
+      this.trackAbortedRunSettlement(aborted);
+      if (!aborted.abortController.signal.aborted) {
+        aborted.abortController.abort('user_cancelled');
+      }
     } else {
       this.logger.debug(
         `${SERVICE_TAG} cancelAnalysis called but no active analysis`,

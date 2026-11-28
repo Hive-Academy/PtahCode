@@ -83,12 +83,14 @@ export function askedFromLane(
   phases: readonly LaneQuestion[],
   offered: ReadonlyMap<string, readonly DecisionOption[]>,
 ): readonly AskedQuestion[] {
-  return phases.filter((phase) => offered.has(phase.phaseId)).map((phase) => ({
-    phaseId: phase.phaseId,
-    labels: (offered.get(phase.phaseId) ?? []).map(
-      (_, index) => `o${index + 1}`,
-    ),
-  }));
+  return phases
+    .filter((phase) => offered.has(phase.phaseId))
+    .map((phase) => ({
+      phaseId: phase.phaseId,
+      labels: (offered.get(phase.phaseId) ?? []).map(
+        (_, index) => `o${index + 1}`,
+      ),
+    }));
 }
 
 export function askedFromFixed(
@@ -138,7 +140,10 @@ export async function callSystemOne(
     if (admission !== undefined && metrics !== undefined) {
       const remainingMs = admission.remainingMs();
       timeoutCapMs = Math.floor(remainingMs);
-      if (admission.signal.aborted || timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) {
+      if (
+        admission.signal.aborted ||
+        timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS
+      ) {
         return emptyOutcome('deadline');
       }
       const { rates, targetKey } = admission;
@@ -146,7 +151,8 @@ export async function callSystemOne(
       if (!acquired) return emptyOutcome('model-busy');
       const rate = admission.configuredRate ?? rates.rate(targetKey);
       if (rate !== undefined) {
-        const costMs = metrics.promptTokens * 1000 / rate + DECISION_RETURN_MARGIN_MS;
+        const costMs =
+          (metrics.promptTokens * 1000) / rate + DECISION_RETURN_MARGIN_MS;
         const effectiveBudgetMs = Math.min(remainingMs, admission.maxTimeoutMs);
         if (costMs > effectiveBudgetMs) {
           return emptyOutcome(
@@ -160,19 +166,35 @@ export async function callSystemOne(
     const started = admission?.now();
     if (admission?.signal.aborted) return emptyOutcome('deadline');
     let measured = false;
-    const measure = (usage: number | null, aborted: boolean, completed: boolean): void => {
+    const measure = (
+      usage: number | null,
+      aborted: boolean,
+      completed: boolean,
+    ): void => {
       if (measured || metrics === undefined) return;
       measured = true;
       const inputTokens = usage ?? metrics.promptTokens;
       if (admission !== undefined && started !== undefined) {
         const elapsedMs = admission.now() - started;
         if (aborted) {
-          admission.rates.recordAbort(admission.targetKey, metrics.promptTokens, elapsedMs);
+          admission.rates.recordAbort(
+            admission.targetKey,
+            metrics.promptTokens,
+            elapsedMs,
+          );
         } else if (completed) {
-          admission.rates.recordCompleted(admission.targetKey, inputTokens, elapsedMs);
+          admission.rates.recordCompleted(
+            admission.targetKey,
+            inputTokens,
+            elapsedMs,
+          );
         }
       }
-      logInputTokens(metrics.logger, inputTokens, usage === null ? 'bytes/4' : 'usage');
+      logInputTokens(
+        metrics.logger,
+        inputTokens,
+        usage === null ? 'bytes/4' : 'usage',
+      );
     };
     const onAbort = (): void => {
       release();
@@ -188,7 +210,8 @@ export async function callSystemOne(
       release();
       measure(
         result?.ok ? tokenCount(result.result.usage?.input_tokens) : null,
-        admission?.signal.aborted === true || result?.ok === false && result.cause === 'timeout',
+        admission?.signal.aborted === true ||
+          (result?.ok === false && result.cause === 'timeout'),
         result?.ok === true,
       );
     }
@@ -282,18 +305,18 @@ export async function callStructured(
     model: input.model,
   });
   const pending = dispatch.completer.complete(input);
+  const deadlineMs =
+    dispatch.timeoutMs !== undefined
+      ? dispatch.timeoutMs + DECISION_RETURN_MARGIN_MS
+      : STRUCTURED_DEADLINE_MS;
   let payload: unknown;
   try {
-    const raced = await raceDeadline(
-      pending,
-      STRUCTURED_DEADLINE_MS,
-      (error) => {
-        logger.warn(
-          '[lane-routing] structured decision rejected after the deadline',
-          structuredFacts(error),
-        );
-      },
-    );
+    const raced = await raceDeadline(pending, deadlineMs, (error) => {
+      logger.warn(
+        '[lane-routing] structured decision rejected after the deadline',
+        structuredFacts(error),
+      );
+    });
     if (raced.expired) {
       return {
         sent: true,

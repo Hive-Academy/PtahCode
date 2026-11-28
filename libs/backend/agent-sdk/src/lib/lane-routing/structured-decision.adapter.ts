@@ -69,8 +69,12 @@ interface StructuredDecisionQuery {
 
 const PROVIDER_AUTH_ERROR_NAME = 'ProviderAuthError';
 const LOG_TAG = '[structured-decision]';
-/** One round-trip. The SDK retries a schema miss itself. No tools run. */
-const STRUCTURED_DECISION_MAX_TURNS = 1;
+/**
+ * Up to three turns. With `outputFormat: { type: 'json_schema' }`, the SDK
+ * uses a StructuredOutput tool turn and can exceed a single turn on a text
+ * preamble or schema retry. No workspace tools run.
+ */
+const STRUCTURED_DECISION_MAX_TURNS = 3;
 
 @injectable()
 export class StructuredDecisionAdapter implements StructuredDecisionCompleter {
@@ -206,13 +210,20 @@ export class StructuredDecisionAdapter implements StructuredDecisionCompleter {
     for await (const msg of handle.stream) {
       if (signal.aborted) throw abortFailure();
       network.observe(msg);
-      if (
-        isSuccessResult(msg) &&
-        msg.structured_output !== undefined &&
-        msg.structured_output !== null
-      ) {
-        structured = msg.structured_output;
-        sawStructured = true;
+      if (isSuccessResult(msg)) {
+        if (
+          msg.structured_output !== undefined &&
+          msg.structured_output !== null
+        ) {
+          structured = msg.structured_output;
+          sawStructured = true;
+        } else if (typeof msg.result === 'string') {
+          const parsed = extractJsonObject(msg.result);
+          if (parsed !== null) {
+            structured = parsed;
+            sawStructured = true;
+          }
+        }
       }
       if (isResultMessage(msg)) break;
     }
@@ -257,4 +268,84 @@ function errorName(error: unknown): string {
 
 function providerLabel(providerId: string): string {
   return providerId.slice(0, 64);
+}
+
+/** Character visits the balanced-object fallback may spend, per input char. */
+const FALLBACK_SCAN_BUDGET_FACTOR = 8;
+/** Floor for the fallback budget so short replies scan fully. */
+const FALLBACK_SCAN_MIN_BUDGET = 65_536;
+
+/**
+ * Fallback JSON object extractor when an SDK success result omits
+ * `structured_output` and places JSON in `msg.result`. Handles raw JSON,
+ * fenced ```json blocks, or the first balanced `{ ... }` object safely.
+ */
+function extractJsonObject(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+
+  const direct = parseJsonObject(trimmed);
+  if (direct !== null) return direct;
+
+  for (const [, body] of trimmed.matchAll(
+    /```json\b[ \t]*\r?\n?([\s\S]*?)```/gi,
+  )) {
+    const fenced = parseJsonObject(body.trim());
+    if (fenced !== null) return fenced;
+  }
+
+  // Each restart rescans the rest of the text, so adversarial input (many
+  // unclosed `{`) is quadratic. Bound the total work and give up past it.
+  let budget = Math.max(
+    FALLBACK_SCAN_MIN_BUDGET,
+    trimmed.length * FALLBACK_SCAN_BUDGET_FACTOR,
+  );
+  let start = trimmed.indexOf('{');
+  while (start !== -1) {
+    if (trimmed.indexOf('}', start + 1) === -1) return null;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < trimmed.length; index++) {
+      if (--budget < 0) return null;
+      const char = trimmed[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') inString = false;
+      } else if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        depth++;
+      } else if (char === '}') {
+        depth--;
+        if (depth === 0) {
+          budget -= index + 1 - start;
+          if (budget < 0) return null;
+          const candidate = parseJsonObject(trimmed.slice(start, index + 1));
+          if (candidate !== null) return candidate;
+          break;
+        }
+      }
+    }
+    start = trimmed.indexOf('{', start + 1);
+  }
+  return null;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+    ) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    // degradation-audit: optional-capability - Non-JSON text candidates are skipped during fallback extraction.
+    return null;
+  }
 }

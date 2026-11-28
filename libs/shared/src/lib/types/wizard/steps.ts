@@ -19,4 +19,8 @@ export interface SavedAnalysisMetadata {
   model: string;
   /** Total analysis duration in milliseconds */
   durationMs: number;
+  /** Persisted manifest lifecycle state. */
+  lifecycle?: 'running' | 'paused' | 'completed' | 'failed';
+  /** True when this analysis run is actively executing in-process. */
+  isActive?: boolean;
 }

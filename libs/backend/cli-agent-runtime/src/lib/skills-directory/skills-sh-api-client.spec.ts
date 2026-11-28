@@ -1,6 +1,11 @@
 import 'reflect-metadata';
 
-import { SkillsShApiClient, SkillsApiError } from './skills-sh-api-client';
+import type { SkillShEntry } from '@ptah-extension/shared';
+import {
+  SkillsShApiClient,
+  SkillsApiError,
+  compareSkillShEntriesByInstallsDesc,
+} from './skills-sh-api-client';
 
 class StubLogger {
   debug = jest.fn();
@@ -254,6 +259,165 @@ describe('SkillsShApiClient', () => {
         fetchMock.mock.calls.filter((c) => isEnrichmentCall(c[0])),
       ).toEqual([]);
     });
+
+    // -------------------------------------------------------------------
+    // Download ordering. Results must be sorted by installs descending
+    // before enrichment and across cached reads.
+    // -------------------------------------------------------------------
+
+    it('sorts unsorted upstream responses by installs descending with deterministic tie-breakers', async () => {
+      const { client } = makeClient();
+      const fetchMock = stubApi({
+        skills: [
+          {
+            id: 'z-owner/repo/tied-skill',
+            skillId: 'tied-skill',
+            name: 'tied-skill',
+            installs: 500,
+            source: 'z-owner/repo',
+          },
+          {
+            id: 'owner/repo/low-skill',
+            skillId: 'low-skill',
+            name: 'low-skill',
+            installs: 12,
+            source: 'owner/repo',
+          },
+          {
+            id: 'owner/repo/neg-skill',
+            skillId: 'neg-skill',
+            name: 'neg-skill',
+            installs: -25,
+            source: 'owner/repo',
+          },
+          {
+            id: 'owner/repo/zero-skill',
+            skillId: 'zero-skill',
+            name: 'zero-skill',
+            installs: 0,
+            source: 'owner/repo',
+          },
+          {
+            id: 'a-owner/repo/tied-skill',
+            skillId: 'tied-skill',
+            name: 'tied-skill',
+            installs: 500,
+            source: 'a-owner/repo',
+          },
+          {
+            id: 'owner/repo/alpha-tied',
+            skillId: 'alpha-tied',
+            name: 'alpha-tied',
+            installs: 500,
+            source: 'z-owner/repo',
+          },
+          {
+            id: 'owner/repo/top-skill',
+            skillId: 'top-skill',
+            name: 'top-skill',
+            installs: 9500,
+            source: 'owner/repo',
+          },
+        ],
+      });
+      globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+      const first = await client.search('react');
+      expect(
+        first.map((s) => `${s.source}/${s.skillId}:${s.installs}`),
+      ).toEqual([
+        'owner/repo/top-skill:9500',
+        'z-owner/repo/alpha-tied:500',
+        'a-owner/repo/tied-skill:500',
+        'z-owner/repo/tied-skill:500',
+        'owner/repo/low-skill:12',
+        'owner/repo/neg-skill:-25',
+        'owner/repo/zero-skill:0',
+      ]);
+
+      // Cached path returns the same sorted list.
+      const second = await client.search('react');
+      expect(second).toBe(first);
+      expect(apiCalls(fetchMock)).toHaveLength(1);
+    });
+
+    it('sorts skills before enrichment so the top-8 cap enriches the highest-download skills first', async () => {
+      const { client } = makeClient();
+      // Upstream sends 12 skills in ascending download order (lowest first).
+      const upstreamSkills = Array.from({ length: 12 }, (_, idx) => ({
+        id: `org/repo/skill-${String(idx).padStart(2, '0')}`,
+        skillId: `skill-${String(idx).padStart(2, '0')}`,
+        name: `skill-${String(idx).padStart(2, '0')}`,
+        installs: (idx + 1) * 100,
+        source: 'org/repo',
+      }));
+
+      const probedSkillIds: string[] = [];
+      const fetchMock = jest.fn(async (url: unknown) => {
+        if (isEnrichmentCall(url)) {
+          const match = /\/skills\/([^/]+)\/SKILL\.md$/.exec(String(url));
+          if (match) {
+            probedSkillIds.push(match[1]);
+            return {
+              ok: true,
+              status: 200,
+              text: async () =>
+                `---\nname: ${match[1]}\ndescription: Enriched ${match[1]}\n---\n`,
+            };
+          }
+          return { ok: false, status: 404, text: async () => '' };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ skills: upstreamSkills }),
+        };
+      });
+      globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+      const results = await client.search('react', 20);
+
+      // Enricher must have probed the 8 highest-install skills (skill-11 .. skill-04) in order.
+      expect(probedSkillIds).toEqual([
+        'skill-11',
+        'skill-10',
+        'skill-09',
+        'skill-08',
+        'skill-07',
+        'skill-06',
+        'skill-05',
+        'skill-04',
+      ]);
+
+      // Returned list stays strictly sorted by installs descending after enrichment.
+      expect(results.map((s) => s.skillId)).toEqual([
+        'skill-11',
+        'skill-10',
+        'skill-09',
+        'skill-08',
+        'skill-07',
+        'skill-06',
+        'skill-05',
+        'skill-04',
+        'skill-03',
+        'skill-02',
+        'skill-01',
+        'skill-00',
+      ]);
+
+      // Top 8 have enriched descriptions; bottom 4 remain unenriched.
+      expect(results.slice(0, 8).map((s) => s.description)).toEqual([
+        'Enriched skill-11',
+        'Enriched skill-10',
+        'Enriched skill-09',
+        'Enriched skill-08',
+        'Enriched skill-07',
+        'Enriched skill-06',
+        'Enriched skill-05',
+        'Enriched skill-04',
+      ]);
+      expect(results.slice(8).every((s) => s.description === '')).toBe(true);
+    });
   });
 
   // -------------------------------------------------------------------
@@ -263,7 +427,7 @@ describe('SkillsShApiClient', () => {
   // -------------------------------------------------------------------
 
   describe('searchPage', () => {
-    /** `count` ranked rows named skill-0 … skill-(count-1). */
+    /** `count` ranked rows named skill-0 … skill-(count-1) with descending installs. */
     function rankedApi(available: number): jest.Mock {
       return jest.fn(async (url: unknown) => {
         if (isEnrichmentCall(url)) {
@@ -276,20 +440,21 @@ describe('SkillsShApiClient', () => {
             ...apiSkill,
             id: `owner/repo/skill-${i}`,
             skillId: `skill-${i}`,
+            installs: available - i,
           }),
         );
         return { ok: true, status: 200, json: async () => ({ skills: rows }) };
       });
     }
 
-    it('requests one row past the window so hasMore is observed, not guessed', async () => {
+    it('slices every window from one fixed pool so hasMore is observed, not guessed', async () => {
       const { client } = makeClient();
       const fetchMock = rankedApi(100);
       globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
       const page = await client.searchPage('react', 10, 20);
 
-      expect(apiCalls(fetchMock)[0][0]).toContain('limit=31');
+      expect(apiCalls(fetchMock)[0][0]).toContain('limit=200');
       expect(page.skills.map((s) => s.skillId)).toEqual([
         'skill-20',
         'skill-21',
@@ -303,7 +468,40 @@ describe('SkillsShApiClient', () => {
         'skill-29',
       ]);
       expect(page).toMatchObject({ offset: 20, limit: 10, hasMore: true });
-      expect(page.total).toBeUndefined();
+      // The 200-row pool came back with 100 rows, so the total is known.
+      expect(page.total).toBe(100);
+    });
+
+    it('pages a prefix-stable but unsorted upstream without duplicates or gaps', async () => {
+      const { client } = makeClient();
+      const upstream = [
+        { skillId: 'A', installs: 100 },
+        { skillId: 'B', installs: 10 },
+        { skillId: 'C', installs: 1000 },
+        { skillId: 'D', installs: 5 },
+        { skillId: 'E', installs: 500 },
+      ];
+      globalThis.fetch = jest.fn(async (url: unknown) => {
+        if (isEnrichmentCall(url)) {
+          return { ok: false, status: 404, text: async () => '' };
+        }
+        const limit = Number(/limit=(\d+)/.exec(String(url))?.[1] ?? '0');
+        const skills = upstream.slice(0, limit).map((row) => ({
+          ...apiSkill,
+          id: `o/r/${row.skillId}`,
+          skillId: row.skillId,
+          installs: row.installs,
+        }));
+        return { ok: true, status: 200, json: async () => ({ skills }) };
+      }) as unknown as typeof globalThis.fetch;
+
+      const seen: string[] = [];
+      for (const offset of [0, 2, 4]) {
+        const page = await client.searchPage('react', 2, offset);
+        seen.push(...page.skills.map((s) => s.skillId));
+      }
+
+      expect(seen).toEqual(['C', 'E', 'A', 'B', 'D']);
     });
 
     it('reports a total only once the upstream ran out', async () => {
@@ -362,6 +560,89 @@ describe('SkillsShApiClient', () => {
       expect(skills.map((s) => s.skillId)).toEqual(
         Array.from({ length: 10 }, (_, i) => `skill-${i}`),
       );
+    });
+
+    it('returns searchPage windows strictly ordered by installs descending for unsorted upstream data', async () => {
+      const { client } = makeClient();
+      globalThis.fetch = stubApi({
+        skills: [
+          { ...apiSkill, id: 'o/r/low', skillId: 'low', installs: 20 },
+          { ...apiSkill, id: 'o/r/highest', skillId: 'highest', installs: 900 },
+          { ...apiSkill, id: 'o/r/mid', skillId: 'mid', installs: 300 },
+          { ...apiSkill, id: 'o/r/second', skillId: 'second', installs: 600 },
+        ],
+      }) as unknown as typeof globalThis.fetch;
+
+      const page1 = await client.searchPage('react', 2, 0);
+      expect(page1.skills.map((s) => s.skillId)).toEqual(['highest', 'second']);
+      expect(page1.hasMore).toBe(true);
+
+      const page2 = await client.searchPage('react', 2, 2);
+      expect(page2.skills.map((s) => s.skillId)).toEqual(['mid', 'low']);
+      expect(page2.hasMore).toBe(false);
+    });
+  });
+
+  describe('compareSkillShEntriesByInstallsDesc', () => {
+    function makeEntry(overrides: Partial<SkillShEntry>): SkillShEntry {
+      return {
+        source: 'org/repo',
+        skillId: 'skill-a',
+        name: 'Skill A',
+        description: '',
+        installs: 0,
+        isInstalled: false,
+        id: 'org/repo/skill-a',
+        slug: 'skill-a',
+        url: 'https://skills.sh/org/repo/skill-a',
+        ...overrides,
+      };
+    }
+
+    it('treats non-finite and negative installs as 0 and breaks ties by skillId, source, then name', () => {
+      const entries = [
+        makeEntry({
+          skillId: 'b',
+          source: 'org/repo',
+          name: 'B',
+          installs: Number.NaN,
+        }),
+        makeEntry({
+          skillId: 'a',
+          source: 'z/repo',
+          name: 'Z Name',
+          installs: -10,
+        }),
+        makeEntry({
+          skillId: 'a',
+          source: 'a/repo',
+          name: 'B Name',
+          installs: Number.NEGATIVE_INFINITY,
+        }),
+        makeEntry({
+          skillId: 'a',
+          source: 'a/repo',
+          name: 'A Name',
+          installs: Number.POSITIVE_INFINITY,
+        }),
+        makeEntry({ skillId: 'c', source: 'org/repo', name: 'C', installs: 1 }),
+        makeEntry({ skillId: 'd', source: 'org/repo', name: 'D', installs: 0 }),
+      ];
+
+      const sorted = [...entries].sort(compareSkillShEntriesByInstallsDesc);
+
+      expect(
+        sorted.map(
+          (e) => `${e.skillId}|${e.source}|${e.name}|${String(e.installs)}`,
+        ),
+      ).toEqual([
+        'c|org/repo|C|1',
+        'a|a/repo|A Name|Infinity',
+        'a|a/repo|B Name|-Infinity',
+        'a|z/repo|Z Name|-10',
+        'b|org/repo|B|NaN',
+        'd|org/repo|D|0',
+      ]);
     });
   });
 

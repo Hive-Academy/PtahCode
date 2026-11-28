@@ -30,9 +30,8 @@ jest.mock('node:fs/promises', () => ({
   ...jest.requireActual<typeof import('node:fs/promises')>('node:fs/promises'),
 }));
 
-const fs = jest.requireMock<typeof import('node:fs/promises')>(
-  'node:fs/promises',
-);
+const fs =
+  jest.requireMock<typeof import('node:fs/promises')>('node:fs/promises');
 
 const entry: SkillShEntry = {
   source: 'owner/repo',
@@ -170,7 +169,7 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
     },
   );
 
-  it('prefers a described match and logs invalid identity rows', async () => {
+  it('ranks higher installs ahead of described lower-install matches and logs invalid identity rows', async () => {
     const result = await service.recommendAnalysis({
       items: [item],
       summarySource: 'structured',
@@ -180,11 +179,32 @@ describe('SkillRecommendationService.recommendAnalysis', () => {
         { ...entry, source: '' },
       ],
     });
-    expect(result.skills[0].skill.skillId).toBe('angular-guide');
+    expect(result.skills[0].skill.skillId).toBe('angular');
+    expect(result.judge.items[0].candidateIds).toEqual([
+      'owner/repo/angular',
+      'owner/repo/angular-guide',
+    ]);
     expect(logger.debug).toHaveBeenCalledWith(
       '[SkillRecommendation] Invalid registry row dropped',
       { item: 'Angular' },
     );
+  });
+
+  it('uses description as a tie-breaker when installs are equal', async () => {
+    const result = await service.recommendAnalysis({
+      items: [item],
+      summarySource: 'structured',
+      search: async () => [
+        { ...entry, skillId: 'angular', description: '', installs: 100 },
+        {
+          ...entry,
+          skillId: 'angular-guide',
+          description: 'Angular patterns',
+          installs: 100,
+        },
+      ],
+    });
+    expect(result.skills[0].skill.skillId).toBe('angular-guide');
   });
 
   it('preserves optional registry fields on both recommendation paths', async () => {
@@ -629,32 +649,35 @@ describe('SkillRecommendationService judge assembly, identity, and deadlines', (
     ['Deprecated Playwright helper', false],
     ['This skill is now deprecated. Use the replacement.', false],
     ['Marked deprecated APIs in React 19 and how to migrate them', true],
-  ])('classifies a deprecation description in heuristic fallback: %s', async (description, eligible) => {
-    const result = await service.recommendAnalysis({
-      items: [
-        {
-          kind: 'test-tool',
-          name: 'Playwright',
-          evidence: 'playwright.config.ts present',
-          sourcePhase: 'stack',
-        },
-      ],
-      summarySource: 'structured',
-      search: async () => [
-        {
-          ...entry,
-          skillId: 'playwright-helper',
-          name: 'Playwright',
-          description,
-        },
-      ],
-    });
+  ])(
+    'classifies a deprecation description in heuristic fallback: %s',
+    async (description, eligible) => {
+      const result = await service.recommendAnalysis({
+        items: [
+          {
+            kind: 'test-tool',
+            name: 'Playwright',
+            evidence: 'playwright.config.ts present',
+            sourcePhase: 'stack',
+          },
+        ],
+        summarySource: 'structured',
+        search: async () => [
+          {
+            ...entry,
+            skillId: 'playwright-helper',
+            name: 'Playwright',
+            description,
+          },
+        ],
+      });
 
-    expect(result.rankedBy).toBe('heuristic');
-    expect(result.judge.items[0].candidateAssessments[0]).toMatchObject({
-      eligible,
-    });
-  });
+      expect(result.rankedBy).toBe('heuristic');
+      expect(result.judge.items[0].candidateAssessments[0]).toMatchObject({
+        eligible,
+      });
+    },
+  );
 
   it('keeps full first-seen candidate pool and independent per-item assessments without cross-item truncation', async () => {
     const { recommendationService, execute } = createJudgeHarness();
@@ -756,13 +779,13 @@ describe('SkillRecommendationService judge assembly, identity, and deadlines', (
           : [sharedCandidate, deprecatedCandidate, playwrightAlt],
     });
 
-    // Global candidate pool keeps all four candidates in first-seen order.
+    // Global candidate pool keeps all four candidates ordered by installs descending.
     expect(
       result.judge.candidates.map(({ candidateId }) => candidateId),
     ).toEqual([
       'org/shared/angular-playwright',
-      'org/angular/angular-patterns',
       'org/old/playwright-legacy',
+      'org/angular/angular-patterns',
       'org/playwright/playwright-e2e',
     ]);
     // Both items retain the shared candidate independently in candidateIds.
@@ -1093,8 +1116,12 @@ describe('SkillRecommendationService judge assembly, identity, and deadlines', (
     // 2 s pre-search latency (Setup resolution + saved-analysis load).
     await jest.advanceTimersByTimeAsync(2_000);
 
-    const { judgeService, rankSkillCandidates, execute, logger: localLogger } =
-      createJudgeHarness();
+    const {
+      judgeService,
+      rankSkillCandidates,
+      execute,
+      logger: localLogger,
+    } = createJudgeHarness();
 
     // 30 distinct stack items.
     const thirtyItems: StackSummaryItem[] = Array.from(
