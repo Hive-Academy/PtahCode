@@ -22,33 +22,34 @@ const ANNOUNCE_DELAY_MS = 50;
 /**
  * Drawer-aware placement of the page toast. Global (ViewEncapsulation.None) because it keys on `body:has()` and
  * reserves space in the drawer body, which is outside this component; every rule is scoped by the
- * `ptah-settings-toast-*` classes, so nothing else is styled. Beside-mode thresholds: a `max-w-lg` panel (32rem)
+ * `ptah-settings-toast-*` classes, so nothing else is styled. The drawer is portaled, with its width class on
+ * the CDK overlay pane. Beside-mode thresholds: a `max-w-lg` panel (32rem)
  * needs 32rem + 16rem toast + 3rem gutters = 51rem; any other panel is treated as the default `max-w-2xl`
  * (42rem) and needs 61rem.
  */
 export const TOAST_PLACEMENT_STYLES = `
-  body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region {
+  body:has(.ptah-drawer-panel) .ptah-settings-toast-region {
     bottom: calc(var(--ptah-space-12) * 2 + var(--ptah-space-4));
     max-width: min(30rem, calc(100vw - var(--ptah-space-12)));
   }
-  body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region .ptah-settings-toast-message {
+  body:has(.ptah-drawer-panel) .ptah-settings-toast-region .ptah-settings-toast-message {
     max-height: 3lh;
     overflow-y: auto;
     overflow-wrap: anywhere;
     overscroll-behavior: contain;
   }
   @media (width < 51rem) {
-    body:has(.ptah-settings-toast-region) ptah-native-drawer [role='dialog'] [data-testid='native-drawer-body'] {
+    body:has(.ptah-settings-toast-region) .ptah-drawer-panel [data-testid='native-drawer-body'] {
       padding-bottom: calc(var(--ptah-space-12) * 3);
     }
   }
   @media (width < 61rem) {
-    body:has(.ptah-settings-toast-region) ptah-native-drawer [role='dialog']:not(.max-w-lg) [data-testid='native-drawer-body'] {
+    body:has(.ptah-settings-toast-region) .cdk-overlay-pane:not(.max-w-lg) .ptah-drawer-panel [data-testid='native-drawer-body'] {
       padding-bottom: calc(var(--ptah-space-12) * 3);
     }
   }
   @media (width >= 51rem) {
-    body:has(ptah-native-drawer [role='dialog'].max-w-lg) .ptah-settings-toast-region {
+    body:has(.cdk-overlay-pane.max-w-lg .ptah-drawer-panel) .ptah-settings-toast-region {
       bottom: var(--ptah-space-6);
       left: var(--ptah-space-6);
       right: auto;
@@ -56,7 +57,7 @@ export const TOAST_PLACEMENT_STYLES = `
     }
   }
   @media (width >= 61rem) {
-    body:has(ptah-native-drawer [role='dialog']) .ptah-settings-toast-region {
+    body:has(.ptah-drawer-panel) .ptah-settings-toast-region {
       bottom: var(--ptah-space-6);
       left: var(--ptah-space-6);
       right: auto;

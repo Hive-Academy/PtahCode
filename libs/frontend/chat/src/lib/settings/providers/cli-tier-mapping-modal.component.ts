@@ -2,7 +2,6 @@ import { PtahFieldComponent } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
   Injector,
   afterNextRender,
   computed,
@@ -12,6 +11,7 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { Layers, LucideAngularModule, X } from 'lucide-angular';
 import {
@@ -113,8 +113,8 @@ export class CliTierMappingModalComponent {
   private readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly loader = inject(PROVIDER_MODELS_LOADER);
-  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
+  private readonly modal = viewChild(NativeModalComponent);
 
   readonly open = input(false);
   readonly target = input<CliTierMappingTarget | null>(null);
@@ -308,7 +308,10 @@ export class CliTierMappingModalComponent {
   private focusAfterRender(selector: string): void {
     afterNextRender(
       () =>
-        this.host.nativeElement.querySelector<HTMLElement>(selector)?.focus(),
+        this.modal()
+          ?.panel()
+          ?.nativeElement.querySelector<HTMLElement>(selector)
+          ?.focus(),
       { injector: this.injector },
     );
   }

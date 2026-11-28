@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { DecisionModelBaseUrlFieldComponent } from './decision-model-row.base-url-field.component';
 
@@ -26,7 +27,7 @@ describe('DecisionModelBaseUrlFieldComponent info', () => {
     trigger?.click();
     fixture.detectChanges();
     expect(trigger?.getAttribute('aria-expanded')).toBe('true');
-    expect(host.querySelector('[role="dialog"]')?.textContent?.trim()).toBe(
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelector('[role="dialog"]')?.textContent?.trim()).toBe(
       expected,
     );
     expect(host.querySelector('.ptah-field__message')).toBeNull();

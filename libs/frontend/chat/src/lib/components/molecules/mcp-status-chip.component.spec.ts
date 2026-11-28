@@ -13,6 +13,7 @@
  *  - The claude.ai notice is INFORMATION, not an error, and names the provider
  *    the session actually runs on.
  */
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { AppStateManager, ClaudeRpcService } from '@ptah-extension/core';
 import { SessionMcpStatusRegistry } from '@ptah-extension/chat-state';
@@ -451,7 +452,8 @@ describe('McpStatusChipComponent', () => {
       await createComponent({ sessionId: 's1' });
       await openPopover();
 
-      const text = hostElement.textContent ?? '';
+      const text =
+        TestBed.inject(OverlayContainer).getContainerElement().textContent ?? '';
       expect(text).toContain('claude.ai connectors are not loaded');
       expect(text).toContain('Switch the provider to Claude login');
       expect(text.toLowerCase()).not.toContain('error');
@@ -464,7 +466,9 @@ describe('McpStatusChipComponent', () => {
       await openPopover();
 
       expect(component.providerLabel()).toBe('OpenAI Codex');
-      expect(hostElement.textContent).toContain('OpenAI Codex');
+      expect(
+        TestBed.inject(OverlayContainer).getContainerElement().textContent,
+      ).toContain('OpenAI Codex');
     });
 
     it('says "another provider" rather than guessing when the read fails', async () => {

@@ -33,6 +33,14 @@ const result: AgentGetRoutingEvidenceResult = {
       models: [],
     },
   ],
+  laneFunnels: [{
+    laneId: 'codex', family: 'codex',
+    funnel: {
+      spawned: 1, completed: 1, delivered: 1, reviewed: 1, approved: 1,
+      capacityDropped: 0, failed: 0, noDeliverable: 0, rejected: 0,
+      unverified: 0, unresolvedRevise: 0, reviseRounds: 0,
+    },
+  }],
   decisionModels: [],
 };
 const unavailable = {

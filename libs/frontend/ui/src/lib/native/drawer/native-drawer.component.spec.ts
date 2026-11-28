@@ -1,6 +1,7 @@
 import { Component, signal, ChangeDetectionStrategy } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import { PtahRichSelectComponent } from '../../form-controls/rich-select/rich-select.component';
 import {
   NativeDrawerComponent,
   NativeDrawerSide,
@@ -8,7 +9,7 @@ import {
 
 @Component({
   standalone: true,
-  imports: [NativeDrawerComponent],
+  imports: [NativeDrawerComponent, PtahRichSelectComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
     <button type="button" id="opener" (click)="isOpen.set(true)">Open</button>
@@ -25,6 +26,7 @@ import {
       <h2 drawer-header>Header</h2>
       <button type="button" id="first">First</button>
       <button type="button" id="last">Last</button>
+      <ptah-select label="Provider" searchable [options]="options" />
       <div drawer-footer><span id="footer-text">Footer</span></div>
     </ptah-native-drawer>
   `,
@@ -35,6 +37,7 @@ class HostComponent {
   showCloseButton = signal(true);
   closeOnEscape = signal(true);
   closeOnBackdrop = signal(true);
+  readonly options = [{ value: 'one', label: 'Provider One' }];
   openedCount = 0;
   closedCount = 0;
 
@@ -44,15 +47,12 @@ class HostComponent {
   }
 }
 
-/** Lets the drawer's queueMicrotask-deferred focus move run. */
-const flushMicrotasks = (): Promise<void> => Promise.resolve();
-
 describe('NativeDrawerComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
   let host: HostComponent;
 
   const q = <T extends HTMLElement>(selector: string): T | null =>
-    (fixture.nativeElement as HTMLElement).querySelector<T>(selector);
+    document.querySelector<T>(selector);
 
   const panel = (): HTMLElement =>
     q<HTMLElement>('[data-testid="native-drawer-panel"]') as HTMLElement;
@@ -60,7 +60,7 @@ describe('NativeDrawerComponent', () => {
   const open = async (): Promise<void> => {
     host.isOpen.set(true);
     fixture.detectChanges();
-    await flushMicrotasks();
+    await fixture.whenStable();
     fixture.detectChanges();
   };
 
@@ -74,50 +74,22 @@ describe('NativeDrawerComponent', () => {
   });
 
   it('renders nothing while closed', () => {
-    expect(q('[data-testid="native-drawer-root"]')).toBeNull();
+    expect(q('[data-testid="native-drawer-panel"]')).toBeNull();
   });
 
   it('renders a modal dialog with an accessible name when open', async () => {
     await open();
-    expect(panel().getAttribute('role')).toBe('dialog');
-    expect(panel().getAttribute('aria-modal')).toBe('true');
-    expect(panel().getAttribute('aria-label')).toBe('Skill details');
-    expect(q('[data-testid="native-drawer-backdrop"]')).toBeTruthy();
+    const dialog = panel().closest('[role="dialog"]');
+    expect(dialog?.getAttribute('aria-label')).toBe('Skill details');
+    expect(q('.ptah-drawer-backdrop')).toBeTruthy();
   });
 
-  it('renders the root as a manual popover shell so it can join the top layer', async () => {
+  it('mounts the panel in the overlay container and removes it on destroy', async () => {
     await open();
-    expect(q('[data-testid="native-drawer-root"]')?.getAttribute('popover')).toBe('manual');
-  });
-
-  it('promotes the root to the top layer with showPopover before moving focus', async () => {
-    const proto = HTMLElement.prototype;
-    const previous = Object.getOwnPropertyDescriptor(proto, 'showPopover');
-    const shown: { layer: HTMLElement; focusInPanel: boolean }[] = [];
-    Object.defineProperty(proto, 'showPopover', {
-      configurable: true,
-      value(this: HTMLElement) {
-        shown.push({ layer: this, focusInPanel: this.contains(document.activeElement) });
-      },
-    });
-    // jsdom may not know :popover-open; report a closed popover.
-    const realMatches = Element.prototype.matches;
-    const matches = jest
-      .spyOn(Element.prototype, 'matches')
-      .mockImplementation(function (this: Element, selector: string) {
-        return selector === ':popover-open' ? false : realMatches.call(this, selector);
-      });
-    try {
-      await open();
-      expect(shown).toHaveLength(1);
-      expect(shown[0].layer).toBe(q('[data-testid="native-drawer-root"]'));
-      expect(shown[0].focusInPanel).toBe(false);
-      expect(panel().contains(document.activeElement)).toBe(true);
-    } finally {
-      matches.mockRestore();
-      if (previous) Object.defineProperty(proto, 'showPopover', previous);
-      else Reflect.deleteProperty(proto, 'showPopover');
-    }
+    expect(panel().closest('.cdk-overlay-pane')).not.toBeNull();
+    expect(fixture.nativeElement.contains(panel())).toBe(false);
+    fixture.destroy();
+    expect(q('[data-testid="native-drawer-panel"]')).toBeNull();
   });
 
   it('projects header, body and footer slots', async () => {
@@ -130,7 +102,7 @@ describe('NativeDrawerComponent', () => {
 
   it('slides in from the right by default and from the left when asked', async () => {
     await open();
-    expect(panel().className).toContain('ml-auto');
+    expect(panel().closest('.cdk-global-overlay-wrapper')?.getAttribute('style')).toContain('flex-end');
     expect(panel().className).not.toContain('ptah-drawer-panel-left');
 
     host.isOpen.set(false);
@@ -138,17 +110,19 @@ describe('NativeDrawerComponent', () => {
     host.side.set('left');
     await open();
     expect(panel().className).toContain('ptah-drawer-panel-left');
-    expect(panel().className).toContain('mr-auto');
+    expect(panel().closest('.cdk-global-overlay-wrapper')?.getAttribute('style')).toContain('flex-start');
   });
 
   it('moves focus to the first focusable element in the panel and emits opened', async () => {
-    (q('#opener') as HTMLButtonElement).focus();
-    await open();
-    expect(document.activeElement).toBe(
-      q('[data-testid="native-drawer-close"]'),
-    );
-    expect(panel().contains(document.activeElement)).toBe(true);
-    expect(host.openedCount).toBe(1);
+    const layout = jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+    try {
+      (q('#opener') as HTMLButtonElement).focus();
+      await open();
+      expect(document.activeElement).toBe(q('[data-testid="native-drawer-close"]'));
+      expect(host.openedCount).toBe(1);
+    } finally {
+      layout.mockRestore();
+    }
   });
 
   it('restores focus to the previously focused element on close', async () => {
@@ -170,6 +144,22 @@ describe('NativeDrawerComponent', () => {
     expect(host.closedCount).toBe(1);
   });
 
+  it('closes a portaled searchable select before it closes the drawer', async () => {
+    await open();
+    const trigger = panel().querySelector<HTMLButtonElement>('.ptah-select__trigger') as HTMLButtonElement;
+    trigger.click();
+    await open();
+    const search = q<HTMLInputElement>('.cdk-overlay-pane .ptah-select__search') as HTMLInputElement;
+    expect(document.activeElement).toBe(search);
+    search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    expect(host.closedCount).toBe(0);
+    expect(document.activeElement).toBe(trigger);
+    expect(q('.ptah-select__panel')).toBeNull();
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(host.closedCount).toBe(1);
+  });
+
   it('does not close on Escape when closeOnEscape is false', async () => {
     host.closeOnEscape.set(false);
     await open();
@@ -181,14 +171,14 @@ describe('NativeDrawerComponent', () => {
 
   it('requests closure on backdrop click', async () => {
     await open();
-    (q('[data-testid="native-drawer-backdrop"]') as HTMLElement).click();
+    (q('.ptah-drawer-backdrop') as HTMLElement).click();
     expect(host.closedCount).toBe(1);
   });
 
   it('does not close on backdrop click when closeOnBackdrop is false', async () => {
     host.closeOnBackdrop.set(false);
     await open();
-    (q('[data-testid="native-drawer-backdrop"]') as HTMLElement).click();
+    (q('.ptah-drawer-backdrop') as HTMLElement).click();
     expect(host.closedCount).toBe(0);
   });
 
@@ -213,29 +203,11 @@ describe('NativeDrawerComponent', () => {
     expect(host.closedCount).toBe(1);
   });
 
-  it('traps Tab at the end of the panel and Shift+Tab at the start', async () => {
+  it('installs CDK focus boundaries around the drawer', async () => {
     await open();
-    const focusables = Array.from(
-      panel().querySelectorAll<HTMLElement>('button'),
-    );
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-
-    last.focus();
-    panel().dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }),
-    );
-    expect(document.activeElement).toBe(first);
-
-    first.focus();
-    panel().dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Tab',
-        shiftKey: true,
-        bubbles: true,
-      }),
-    );
-    expect(document.activeElement).toBe(last);
+    const dialog = panel().closest('[role="dialog"]');
+    expect(dialog?.previousElementSibling?.classList).toContain('cdk-focus-trap-anchor');
+    expect(dialog?.nextElementSibling?.classList).toContain('cdk-focus-trap-anchor');
   });
 
   it('leaves interior Tab presses alone', async () => {

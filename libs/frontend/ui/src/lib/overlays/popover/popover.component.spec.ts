@@ -10,6 +10,7 @@ import { PopoverComponent } from './popover.component';
   imports: [PopoverComponent],
   changeDetection: ChangeDetectionStrategy.Eager,
   template: `
+    <input id="outside-input" aria-label="Outside control" />
     <ptah-popover
       [isOpen]="isOpen()"
       [position]="position()"
@@ -118,6 +119,26 @@ describe('PopoverComponent', () => {
   });
 
   describe('Focus Trap', () => {
+    it.each([true, false])('restores focus on close only when it remains in the panel (%s)', async (inside) => {
+      const root: HTMLElement = fixture.nativeElement;
+      const trigger = root.querySelector<HTMLElement>('#trigger-btn');
+      const outside = root.querySelector<HTMLElement>('#outside-input');
+      hostComponent.hasBackdrop.set(false);
+      trigger?.focus();
+      hostComponent.isOpen.set(true);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      const focused = inside ? document.querySelector<HTMLElement>('#first-btn') : outside;
+      focused?.focus();
+      expect(document.activeElement).toBe(focused);
+      hostComponent.isOpen.set(false);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      expect(document.activeElement).toBe(inside ? trigger : outside);
+    });
+
     it('should render popover content with focusable elements', async () => {
       hostComponent.isOpen.set(true);
       fixture.detectChanges();
@@ -219,7 +240,11 @@ describe('PopoverComponent', () => {
       ) as HTMLElement;
       expect(popoverPanel).toBeTruthy();
 
-      const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape' });
+      const escapeEvent = new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      });
       popoverPanel.dispatchEvent(escapeEvent);
       fixture.detectChanges();
 

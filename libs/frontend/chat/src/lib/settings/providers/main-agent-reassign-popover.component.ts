@@ -3,6 +3,7 @@ import {
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   Component,
+  DestroyRef,
   viewChild,
   ElementRef,
   Injector,
@@ -37,6 +38,7 @@ import {
   PtahInputDirective,
   PtahRichSelectComponent,
   savedModelListNotice,
+  watchAncestorScroll,
   type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
 import { isProviderSessionProviderId } from '@ptah-extension/shared';
@@ -106,6 +108,8 @@ export class MainAgentReassignPopoverComponent {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly loader = inject(PROVIDER_MODELS_LOADER);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly popover = viewChild(NativePopoverComponent);
+  private readonly panel = computed(() => this.popover()?.panel()?.nativeElement);
   private readonly injector = inject(Injector);
   private readonly changeDetector = inject(ChangeDetectorRef);
 
@@ -380,6 +384,14 @@ export class MainAgentReassignPopoverComponent {
     return this.accountChanged() && !this.awaitingConfirm();
   });
   constructor() {
+    // Window resize refits from the host binding. Scrolling the settings or
+    // providers pane moves this trigger without a resize; those containers are
+    // not CDK scrollables, so the ancestor listener refits the same way.
+    const host = this.element.nativeElement;
+    const stopScroll = watchAncestorScroll(host, () => {
+      if (this.open()) this.fitToViewport();
+    });
+    inject(DestroyRef).onDestroy(stopScroll);
     effect(() => {
       if (!this.open()) return;
       untracked(() => {
@@ -486,10 +498,7 @@ export class MainAgentReassignPopoverComponent {
     if (!pending || !pending.writable || this.busy()) return;
     this.providerConfirmed.set(true);
     afterNextRender(
-      () =>
-        this.element.nativeElement
-          .querySelector<HTMLButtonElement>('[data-testid="main-agent-save"]')
-          ?.focus(),
+      () => this.saveButton()?.focus(),
       { injector: this.injector },
     );
   }
@@ -504,8 +513,8 @@ export class MainAgentReassignPopoverComponent {
     this.providerChoice.set(null);
     this.rescope.set(false);
     this.providerConfirmed.set(false);
-    this.element.nativeElement
-      .querySelector<HTMLElement>('#main-agent-provider')
+    this.panel()
+      ?.querySelector<HTMLElement>('#main-agent-provider')
       ?.focus();
   }
   protected onModel(value: string): void {
@@ -515,8 +524,8 @@ export class MainAgentReassignPopoverComponent {
       // The select leaves the DOM; focus the field once it has rendered, so focus (and Esc) stay in the popover.
       afterNextRender(
         () =>
-          this.element.nativeElement
-            .querySelector<HTMLInputElement>('input#main-agent-model')
+          this.panel()
+            ?.querySelector<HTMLInputElement>('input#main-agent-model')
             ?.focus(),
         { injector: this.injector },
       );
@@ -534,8 +543,8 @@ export class MainAgentReassignPopoverComponent {
     this.manual.set(false);
     afterNextRender(
       () =>
-        this.element.nativeElement
-          .querySelector<HTMLInputElement>('input#main-agent-model')
+        this.panel()
+          ?.querySelector<HTMLInputElement>('input#main-agent-model')
           ?.focus(),
       { injector: this.injector },
     );
@@ -632,8 +641,8 @@ export class MainAgentReassignPopoverComponent {
           if (focusWasOnSave) {
             afterNextRender(
               () =>
-                this.element.nativeElement
-                  .querySelector<HTMLElement>('#main-agent-account')
+                this.panel()
+                  ?.querySelector<HTMLElement>('#main-agent-account')
                   ?.focus(),
               { injector: this.injector },
             );
@@ -679,7 +688,7 @@ export class MainAgentReassignPopoverComponent {
     this.fitToViewport();
     const target = this.initialFocus();
     if (target) {
-      const field = this.element.nativeElement.querySelector<HTMLElement>(
+      const field = this.panel()?.querySelector<HTMLElement>(
         `[data-focus="${target}"]`,
       );
       (
@@ -690,14 +699,14 @@ export class MainAgentReassignPopoverComponent {
   protected fitToViewport(): void {
     const host = this.element.nativeElement;
     const trigger = host.querySelector<HTMLElement>('.popover-trigger');
-    const panel = host.querySelector<HTMLElement>(
+    const frame = this.panel();
+    const panel = frame?.querySelector<HTMLElement>(
       '[data-testid="main-agent-popover"]',
     );
     const view = host.ownerDocument.defaultView;
-    if (!trigger || !panel || !view) return;
+    if (!trigger || !frame || !panel || !view) return;
     const { top, bottom } = trigger.getBoundingClientRect();
-    const frame = panel.closest<HTMLElement>('.popover-panel');
-    const chrome = frame ? frame.offsetHeight - panel.offsetHeight : 0;
+    const chrome = frame.offsetHeight - panel.offsetHeight;
     const reserve = DEFAULT_OVERLAY_OFFSET + chrome + 8;
     this.maxHeight.set(
       capPopoverHeight(
@@ -705,6 +714,7 @@ export class MainAgentReassignPopoverComponent {
         view.innerHeight - chrome - 16,
       ),
     );
+    this.popover()?.reposition();
   }
   private async saveModelAndEffort(
     applyTo: SettingScope,
@@ -809,9 +819,9 @@ export class MainAgentReassignPopoverComponent {
     this.accountSelect()?.value.set(value);
   }
   private saveButton(): HTMLButtonElement | null {
-    return this.element.nativeElement.querySelector<HTMLButtonElement>(
+    return this.panel()?.querySelector<HTMLButtonElement>(
       '[data-testid="main-agent-save"]',
-    );
+    ) ?? null;
   }
   private captureAccountIntent(): AccountIntent | null {
     const value = this.accountDraft();

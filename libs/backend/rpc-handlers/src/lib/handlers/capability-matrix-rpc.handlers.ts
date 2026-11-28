@@ -12,7 +12,7 @@ import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import { TOKENS, RpcUserError } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
-import { LANE_ROUTING_TOKENS, type CapabilityMatrixViewReader, type RotationStateReader } from '@ptah-extension/lane-routing';
+import { LANE_ROUTING_TOKENS, type CapabilityMatrixViewReader, type RotationStore } from '@ptah-extension/lane-routing';
 import type {
   AgentCapabilityMatrixCell,
   AgentCapabilityMatrixProfile,
@@ -94,14 +94,22 @@ export class CapabilityMatrixRpcHandlers {
       throw this.unavailable('capability matrix view did not match the contract');
     }
     const result = toResult(view.data);
-    if (!this.runtimeContainer.isRegistered(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE, true)) return result;
+    if (!this.runtimeContainer.isRegistered(LANE_ROUTING_TOKENS.ROTATION_STORE, true)) {
+      return { ...result, lastPicks: [], lastPicksUnavailable: false };
+    }
     try {
-      const rotation = this.runtimeContainer.resolve<RotationStateReader>(LANE_ROUTING_TOKENS.ROUTE_DECIDE_SERVICE);
-      const picks = rotation.getLastPicks();
-      return { ...result, lastPicks: RotationPicksSchema.parse(picks.entries), lastPicksUnavailable: picks.reason !== null };
+      const rotation = this.runtimeContainer.resolve<Pick<RotationStore, 'load'>>(
+        LANE_ROUTING_TOKENS.ROTATION_STORE,
+      );
+      const { state, reason } = rotation.load();
+      return {
+        ...result,
+        lastPicks: RotationPicksSchema.parse(state.entries),
+        lastPicksUnavailable: reason !== null,
+      };
     } catch (error: unknown) {
       this.logger.warn('RPC: rotation state could not be read', error instanceof Error ? error : new Error('rotation state read failed'));
-      return result;
+      return { ...result, lastPicks: [], lastPicksUnavailable: true };
     }
   }
 

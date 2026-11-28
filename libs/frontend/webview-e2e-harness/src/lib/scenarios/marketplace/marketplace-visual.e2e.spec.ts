@@ -276,12 +276,12 @@ for (const host of ['vscode', 'electron'] as const) {
       // (`native-drawer.component.ts:134-158`) was firing this capture
       // mid-animation (Batch 25b's finding — a test-timing bug, not the
       // product overflow this was originally reported as). Wait for the
-      // backdrop fade + panel slide (both live under `shell`) to actually
+      // panel slide (portaled onto the overlay, not under `shell`) to actually
       // finish, THEN fail loudly rather than silently capture if the panel
       // is not fully inside the viewport — the exact symptom of a capture
       // still mid-slide.
       const drawerPanel = page.locator('[data-testid="native-drawer-panel"]');
-      await waitForAnimationsSettled(shell);
+      await waitForAnimationsSettled(drawerPanel);
       const drawerBox = await drawerPanel.boundingBox();
       const drawerViewport = page.viewportSize();
       expect(drawerBox, 'drawer panel has no bounding box — not actually open').not.toBeNull();

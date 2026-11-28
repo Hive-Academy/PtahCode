@@ -291,11 +291,14 @@ export class ClaudeLaneAccountCellComponent {
   }
 
   private items(): HTMLButtonElement[] {
+    // The menu is projected into the CDK overlay, outside this host.
+    const title = this.host.nativeElement.ownerDocument.getElementById(
+      this.titleId,
+    );
+    const menu = title?.closest('[data-testid="cli-matrix-account-menu"]');
+    if (!menu) return [];
     return Array.from(
-      // The top-layer panel stays a DOM descendant of this host (showPopover does not move it).
-      this.host.nativeElement.querySelectorAll<HTMLButtonElement>(
-        '[role="menu"] [role="menuitemradio"]',
-      ),
+      menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
     );
   }
 

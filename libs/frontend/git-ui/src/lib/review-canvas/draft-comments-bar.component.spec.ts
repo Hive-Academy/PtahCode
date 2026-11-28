@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -45,8 +46,12 @@ describe('DraftCommentsBarComponent', () => {
   let send: jest.Mock<Promise<AgentFeedbackSendResult>>;
 
   function q(testId: string): HTMLElement | null {
-    return (fixture.nativeElement as HTMLElement).querySelector(
-      `[data-testid="${testId}"]`,
+    const selector = `[data-testid="${testId}"]`;
+    return (
+      (fixture.nativeElement as HTMLElement).querySelector(selector) ??
+      TestBed.inject(OverlayContainer)
+        .getContainerElement()
+        .querySelector(selector)
     );
   }
 

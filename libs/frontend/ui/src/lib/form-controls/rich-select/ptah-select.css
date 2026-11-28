@@ -264,18 +264,15 @@
   height: 100%;
 }
 
-/* Panel: out of flow before and after FloatingUIService places it, and an
-   opaque fill (--ptah-select-panel-bg has no alpha), a clear edge and the
-   overlay shadow. No backdrop filter: nothing behind the panel shows. */
+/* The CDK pane sets the field width and the space available at this placement. */
 .ptah-select__panel {
-  position: fixed;
-  z-index: var(--ptah-z-menu);
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   max-height: var(--ptah-select-panel-max-h);
-  /* A long option must not push the panel past the viewport edge. */
-  max-width: min(32rem, calc(100vw - var(--ptah-space-4)));
-  /* The panel can sit in a nowrap container (a table control cell). */
   white-space: normal;
   padding: var(--ptah-select-panel-pad);
   border: var(--ptah-border-width) solid var(--ptah-select-panel-edge);
@@ -312,7 +309,7 @@
 }
 
 /* Keyboard focus marks the search row without a second input box. */
-.ptah-select :is(.ptah-select__search, #ptah-select):focus-visible:is(.ptah-select__search, #ptah-control) {
+.ptah-select__panel .ptah-select__search:focus-visible {
   outline: none;
   box-shadow: none;
 }
@@ -323,9 +320,11 @@
 
 .ptah-select__list {
   flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
   outline: none;
 }

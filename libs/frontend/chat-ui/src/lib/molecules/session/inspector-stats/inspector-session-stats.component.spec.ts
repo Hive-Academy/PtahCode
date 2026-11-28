@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ModelStateService } from '@ptah-extension/core';
@@ -33,6 +34,21 @@ function required<T>(value: T | null): T {
 }
 
 describe(InspectorSessionStatsComponent.name, () => {
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
+  const query = <T extends Element = HTMLElement>(
+    root: HTMLElement,
+    selector: string,
+  ): T | null =>
+    root.querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
+  const queryAll = <T extends Element = HTMLElement>(
+    root: HTMLElement,
+    selector: string,
+  ): T[] => [
+    ...root.querySelectorAll<T>(selector),
+    ...overlay().querySelectorAll<T>(selector),
+  ];
+
   function render(overrides: Partial<SessionStatsInputs> = {}) {
     TestBed.configureTestingModule({
       imports: [InspectorSessionStatsComponent],
@@ -86,7 +102,7 @@ describe(InspectorSessionStatsComponent.name, () => {
 
     models.click();
     fixture.detectChanges();
-    const detail = required(root.querySelector('ptah-session-model-breakdown'));
+    const detail = required(query(root, 'ptah-session-model-breakdown'));
     const details = detail.querySelector('[data-testid="model-source-details"]');
     expect(details?.classList.contains('sr-only')).toBe(true);
     expect(details?.textContent).toContain(sourceText);
@@ -191,14 +207,14 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(models.textContent).toMatch(/Models\s*1\s*Opus 4.7/);
     expect(models.tabIndex).toBe(0);
     expect(models.getAttribute('aria-haspopup')).toBe('dialog');
-    const panel = () => root.querySelector<HTMLElement>('[role="dialog"] ptah-session-model-breakdown');
+    const panel = () => query(root, '[role="dialog"] ptah-session-model-breakdown');
     expect(models.getAttribute('aria-controls')).toBeNull();
     expect(panel()).toBeNull();
     models.focus();
     models.click();
     fixture.detectChanges();
     expect(models.getAttribute('aria-expanded')).toBe('true');
-    expect(root.querySelector(`#${models.getAttribute('aria-controls')}`)).toBeTruthy();
+    expect(query(root, `#${models.getAttribute('aria-controls')}`)).toBeTruthy();
     expect(panel()?.textContent).toContain('SDK scope — orchestrator and SDK subagents, no CLI lanes');
     expect(panel()?.textContent).not.toMatch(/Lanes with tokens/);
     fixture.componentRef.setInput('stats', { ...stats, sessionId: 'second' });
@@ -211,7 +227,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     models.click();
     fixture.detectChanges();
     expect(panel()).toBeTruthy();
-    models.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    required(panel()).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     fixture.detectChanges();
     expect(models.getAttribute('aria-expanded')).toBe('false');
     expect(panel()).toBeNull();
@@ -251,7 +267,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(title).toContain('Earlier in this session: Fable 5.2.');
     models.click();
     fixture.detectChanges();
-    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    const when = queryAll(root, '[data-testid="model-usage-when"]').map((node) => node.textContent?.trim());
     expect(when).toEqual(['earlier in this session', 'current']);
   });
 
@@ -269,7 +285,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     });
     models.click();
     fixture.detectChanges();
-    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    const when = queryAll(root, '[data-testid="model-usage-when"]').map((node) => node.textContent?.trim());
     expect(when).toEqual(['earlier in this session', 'current', 'earlier in this session']);
   });
 
@@ -285,7 +301,7 @@ describe(InspectorSessionStatsComponent.name, () => {
     });
     models.click();
     fixture.detectChanges();
-    const when = [...root.querySelectorAll('[data-testid="model-usage-when"]')].map((node) => node.textContent?.trim());
+    const when = queryAll(root, '[data-testid="model-usage-when"]').map((node) => node.textContent?.trim());
     expect(when).toEqual(['earlier in this session', 'current']);
   });
 
@@ -299,11 +315,11 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1/);
     models.click();
     fixture.detectChanges();
-    const rows = root.querySelectorAll('[data-testid="model-usage-row"]');
+    const rows = queryAll(root, '[data-testid="model-usage-row"]');
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toMatch(/Cache read\s*300.*Cache creation\s*40/);
     expect(rows[0].textContent).toContain('—');
-    const subtotals = root.querySelectorAll('[data-testid="model-usage-total"]');
+    const subtotals = queryAll(root, '[data-testid="model-usage-total"]');
     expect(subtotals).toHaveLength(1);
     expect(subtotals[0].textContent).toContain('SDK subtotal');
   });

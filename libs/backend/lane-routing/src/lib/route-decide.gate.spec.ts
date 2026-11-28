@@ -1919,6 +1919,7 @@ describe('performance-backed gate routing', () => {
             cells: () => [pairCell],
             routedRuns: () => 0,
             decisionModels: () => [],
+            laneFunnels: () => [],
           },
         };
       },

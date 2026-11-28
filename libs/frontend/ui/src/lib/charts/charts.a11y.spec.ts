@@ -7,9 +7,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { PtahDonutComponent } from './donut.component';
 import { PtahMeterComponent } from './meter.component';
 import { PtahRingComponent } from './ring.component';
 import { PtahSparklineComponent } from './sparkline.component';
+import { PtahStackedBarComponent } from './stacked-bar.component';
 import { PtahStatComponent } from './stat.component';
 
 function render<T>(type: Type<T>, inputs: Record<string, unknown>): HTMLElement {
@@ -20,6 +22,32 @@ function render<T>(type: Type<T>, inputs: Record<string, unknown>): HTMLElement 
 }
 
 const ARIA_VALUES = ['aria-valuemin', 'aria-valuemax', 'aria-valuenow'];
+
+describe.each([
+  ['stacked bar', PtahStackedBarComponent, 'Outcomes: Approved: 3, Failed: 0'],
+  ['donut', PtahDonutComponent, 'Outcomes: 3 reviews total. Approved: 3, Failed: 0'],
+])('%s accessibility', (_name, type: Type<unknown>, accessibleName) => {
+  it('names one image with the chart data and hides its visual details from assistive technology', () => {
+    const el = render(type, {
+      label: 'Outcomes',
+      ...(type === PtahDonutComponent ? { centerCaption: 'reviews' } : {}),
+      segments: [
+        { label: 'Approved', value: 3, color: 'var(--state-ink-done)' },
+        { label: 'Failed', value: 0, color: 'var(--state-ink-err)' },
+      ],
+    });
+    const images = el.querySelectorAll('[role="img"]');
+    expect(images).toHaveLength(1);
+    expect(images[0].getAttribute('aria-label')).toBe(accessibleName);
+    expect(images[0].querySelector('g[aria-hidden="true"]')).not.toBeNull();
+    expect(el.querySelector('[tabindex]')).toBeNull();
+  });
+
+  it('gives empty data an accessible name', () => {
+    const el = render(type, { label: 'Outcomes', segments: [] });
+    expect(el.querySelector('[role="img"]')?.getAttribute('aria-label')).toMatch(/^Outcomes: .*No data$/);
+  });
+});
 
 describe.each([
   ['ptah-meter', PtahMeterComponent],

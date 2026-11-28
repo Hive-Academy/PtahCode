@@ -13,6 +13,13 @@ export interface PtahMeterSegment {
   readonly label: string;
 }
 
+/** A contribution to a stacked bar or donut. Pass a theme token as a CSS color. */
+export interface PtahChartSegment {
+  readonly label: string;
+  readonly value: number;
+  readonly color: string;
+}
+
 /** ARIA role of a determinate meter bar. */
 export type PtahMeterRole = 'meter' | 'progressbar';
 

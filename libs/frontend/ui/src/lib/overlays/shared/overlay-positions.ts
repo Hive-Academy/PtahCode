@@ -5,7 +5,58 @@
  * These match existing CSS positioning patterns (absolute bottom-full, left-0, right-0).
  */
 
-import { ConnectedPosition } from '@angular/cdk/overlay';
+import type { CdkConnectedOverlayConfig, ConnectedPosition } from '@angular/cdk/overlay';
+import type { Placement } from '@floating-ui/dom';
+
+export const CONNECTED_OVERLAY_POLICY: CdkConnectedOverlayConfig = {
+  viewportMargin: 8,
+  flexibleDimensions: true,
+  growAfterOpen: true,
+  push: true,
+  disableClose: true,
+};
+
+// CDK delivers outside clicks from the newest pane to the oldest, followed
+// by the DOM backdrop click. A child can consume dismissal for this click.
+const dismissedClicks = new WeakSet<MouseEvent>();
+
+export function claimOverlayDismissal(event: MouseEvent): boolean {
+  if (dismissedClicks.has(event)) return false;
+  dismissedClicks.add(event);
+  return true;
+}
+
+// Projection can outlive the panel that contains the anchor. Drain its
+// connected children before detaching the parent or restoring parent focus.
+const connectedChildren = new Set<{ anchor: HTMLElement; detach: () => void }>();
+
+export function registerConnectedChild(anchor: HTMLElement, detach: () => void): () => void {
+  const child = { anchor, detach };
+  connectedChildren.add(child);
+  return () => connectedChildren.delete(child);
+}
+
+export function detachConnectedChildren(panel: HTMLElement): void {
+  for (const child of connectedChildren) {
+    if (panel.contains(child.anchor)) child.detach();
+  }
+}
+
+export function connectedPopoverPositions(
+  placement: Placement,
+  offset: number,
+): ConnectedPosition[] {
+  const [side, alignment] = placement.split('-');
+  const direction = { top: 'above', bottom: 'below', left: 'before', right: 'after' }[side] ?? 'below';
+  return POPOVER_POSITION_MAP[direction].map((position) => {
+    const vertical = position.originY !== 'center';
+    const x = alignment === 'start' || alignment === 'end' ? alignment : 'center';
+    const y = alignment === 'start' ? 'top' : alignment === 'end' ? 'bottom' : 'center';
+    return vertical
+      ? { ...position, originX: x, overlayX: x, offsetY: Math.sign(position.offsetY ?? 0) * offset }
+      : { ...position, originY: y, overlayY: y, offsetX: Math.sign(position.offsetX ?? 0) * offset };
+  });
+}
 
 /**
  * Default dropdown positions: below first, above as fallback

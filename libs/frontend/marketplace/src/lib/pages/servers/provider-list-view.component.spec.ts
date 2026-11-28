@@ -168,13 +168,18 @@ describe('ProviderListViewComponent', () => {
     });
 
     it('traps focus in the drawer: focus moves into the panel on open', async () => {
-      await page.mount();
-      page.openButtonOf(REF.firecrawl)?.focus();
-      page.openButtonOf(REF.firecrawl)?.click();
-      await page.settle();
+      const layout = jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+      try {
+        await page.mount();
+        page.openButtonOf(REF.firecrawl)?.focus();
+        page.openButtonOf(REF.firecrawl)?.click();
+        await page.settle();
 
-      const panel = page.byTestId('native-drawer-panel');
-      expect(panel?.contains(document.activeElement)).toBe(true);
+        const panel = page.byTestId('native-drawer-panel');
+        expect(panel?.contains(document.activeElement)).toBe(true);
+      } finally {
+        layout.mockRestore();
+      }
     });
 
     it('does not steal focus in the docked frame', async () => {

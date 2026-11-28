@@ -111,7 +111,7 @@ const FOCUS =
     <div
       role="dialog"
       [attr.aria-labelledby]="titleId()"
-      class="surface-3 max-w-[calc(100vw-2rem)] space-y-2 rounded-xl p-3 text-left text-xs"
+      class="surface-3 min-w-0 max-w-[calc(100vw-2rem)] space-y-2 rounded-xl p-3 text-left text-xs [overflow-wrap:anywhere]"
       [style.width.rem]="instanceModel() ? 24 : 17"
       data-testid="cli-matrix-popover"
       [attr.data-field]="field()"

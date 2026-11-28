@@ -50,6 +50,7 @@ describe('shared control layout', () => {
   it('lets long options wrap in the panel, also inside a nowrap table cell, within the viewport', () => {
     const panel = body(select, '.ptah-select__panel');
     expect(panel).toContain('white-space: normal;');
-    expect(panel).toContain('max-width: min(32rem, calc(100vw - var(--ptah-space-4)));');
+    expect(panel).toContain('width: 100%;');
+    expect(panel).toContain('min-width: 0;');
   });
 });

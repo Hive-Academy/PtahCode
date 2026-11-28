@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * Blocked-paths disclosure specs.
  *
@@ -31,6 +32,10 @@ import {
   HARNESS_BLOCKED_APPROVED_ACTIONS,
 } from '@ptah-extension/shared';
 import { HarnessHealthBadgeComponent } from './harness-health-badge.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function ok<T>(data: T) {
   return {
@@ -88,7 +93,7 @@ describe('harness health card — blocked-paths disclosure', () => {
   };
 
   const testId = (id: string): HTMLElement | null =>
-    host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+    host.querySelector<HTMLElement>(`[data-testid="${id}"]`) ?? overlay().querySelector<HTMLElement>(`[data-testid="${id}"]`);
 
   /**
    * Rendered text with runs of whitespace collapsed. Template line wrapping is

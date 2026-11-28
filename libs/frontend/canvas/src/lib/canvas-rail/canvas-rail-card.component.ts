@@ -256,7 +256,8 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
              panel keeps the panel inside the viewport (a right/left placement
              only shifts vertically and clipped at 400 px). -->
         <ptah-native-popover
-          class="[&>.popover-trigger]:block [&>.popover-panel]:p-0"
+          #renamePopover
+          class="[&>.popover-trigger]:block"
           [isOpen]="renameOpen()"
           placement="bottom-end"
           [hasBackdrop]="true"
@@ -293,6 +294,7 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
             <span aria-hidden="true">⋮</span>
           </button>
           <div
+            #menu
             content
             role="menu"
             aria-label="Session actions"
@@ -455,6 +457,10 @@ export class CanvasRailCardComponent implements SessionCardActions {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly renameKeydown = (event: KeyboardEvent) => this.onRenameKeydown(event);
   private readonly actions = viewChild<ElementRef<HTMLElement>>('actions');
+  private readonly menu = viewChild<ElementRef<HTMLElement>>('menu');
+  private readonly renamePopover = viewChild('renamePopover', {
+    read: NativePopoverComponent,
+  });
   private readonly trigger =
     viewChild<ElementRef<HTMLButtonElement>>('trigger');
   private readonly renameInput = viewChild<ElementRef<HTMLInputElement>>('renameInput');
@@ -674,6 +680,7 @@ export class CanvasRailCardComponent implements SessionCardActions {
   }
   onRenameOpened(): void {
     if (!this.renameOpen()) return;
+    this.renamePopover()?.panel()?.nativeElement.classList.add('p-0');
     this.host.nativeElement.ownerDocument.addEventListener('keydown', this.renameKeydown);
     const input = this.renameInput()?.nativeElement;
     input?.focus();
@@ -783,7 +790,7 @@ export class CanvasRailCardComponent implements SessionCardActions {
   }
   private menuItems(): HTMLElement[] {
     return [
-      ...(this.actions()?.nativeElement.querySelectorAll<HTMLElement>(
+      ...(this.menu()?.nativeElement.querySelectorAll<HTMLElement>(
         '[role="menuitem"]',
       ) ?? []),
     ];

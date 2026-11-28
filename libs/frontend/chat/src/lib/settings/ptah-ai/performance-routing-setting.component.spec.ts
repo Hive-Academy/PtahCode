@@ -55,6 +55,12 @@ describe('PerformanceRoutingSettingComponent', () => {
 
     await create();
 
+    expect(
+      root().querySelector('ptah-form-section, [data-glass-surface]'),
+    ).toBeNull();
+    expect(toggle()?.labels?.[0]?.textContent?.trim()).toBe(
+      'Use measured performance',
+    );
     expect(call).toHaveBeenCalledWith('settings:get', { key: KEY }, OPTIONS);
     expect(toggle()?.checked).toBe(checked);
   });

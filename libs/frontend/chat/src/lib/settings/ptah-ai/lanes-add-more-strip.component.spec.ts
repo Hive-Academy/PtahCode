@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -9,6 +10,10 @@ import { NativePopoverComponent } from '@ptah-extension/ui';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
 import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 const notInstalled = (
   cli: 'pi' | 'opencode',
@@ -51,7 +56,7 @@ describe('LanesAddMoreStripComponent', () => {
   let fixture: ComponentFixture<LanesAddMoreStripComponent>;
   const element = () => fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
-    element().querySelector<T>(selector);
+    element().querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
 
   function mount(rows: readonly SystemCliMatrixRow[] = [notInstalled('opencode'), notInstalled('pi')]) {
     TestBed.configureTestingModule({
@@ -101,7 +106,7 @@ describe('LanesAddMoreStripComponent', () => {
     install.click();
     fixture.detectChanges();
     expect(install.getAttribute('aria-expanded')).toBe('true');
-    const content = q('[data-testid="cli-provider-card-pi"] [data-testid="cli-provider-popover-content"]');
+    const content = overlay().querySelector('[data-testid="cli-provider-popover-content"]');
     expect(content?.querySelector('code')?.textContent).toBe('npm install -g pi');
     expect(content?.textContent).toContain('Install Pi, then Re-detect.');
     const popover = fixture.debugElement
@@ -112,10 +117,10 @@ describe('LanesAddMoreStripComponent', () => {
     // One open popover at a time.
     q<HTMLButtonElement>('[data-testid="lanes-strip-install-opencode"]')!.click();
     fixture.detectChanges();
-    expect(element().querySelectorAll('[data-testid="cli-provider-popover-content"]')).toHaveLength(1);
-    expect(q('[data-testid="cli-provider-card-opencode"] code')).toBeNull();
+    expect(overlay().querySelectorAll('[data-testid="cli-provider-popover-content"]')).toHaveLength(1);
+    expect(overlay().querySelector('[data-testid="cli-provider-popover-content"] code')).toBeNull();
     Array.from(
-      q('[data-testid="cli-provider-card-opencode"]')!.querySelectorAll('button'),
+      overlay().querySelectorAll('button'),
     )
       .find((button) => button.textContent?.trim() === 'Re-detect')
       ?.click();
@@ -128,7 +133,7 @@ describe('LanesAddMoreStripComponent', () => {
     q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')!.click();
     fixture.detectChanges();
     const redetect = Array.from(
-      q('[data-testid="cli-provider-card-pi"]')!.querySelectorAll<HTMLButtonElement>('button'),
+      overlay().querySelectorAll<HTMLButtonElement>('button'),
     ).find((button) => button.textContent?.trim() === 'Re-detect');
     expect(redetect?.disabled).toBe(true);
   });
@@ -138,12 +143,12 @@ describe('LanesAddMoreStripComponent', () => {
     const install = q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')!;
     install.click();
     fixture.detectChanges();
-    Array.from(q('[data-testid="cli-provider-card-pi"]')!.querySelectorAll('button'))
+    Array.from(overlay().querySelectorAll('button'))
       .find((button) => button.getAttribute('aria-label') === 'Close')
       ?.click();
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(q('[data-testid="cli-provider-popover-content"]')).toBeNull();
+    expect(overlay().querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
     expect(document.activeElement).toBe(install);
   });
 
@@ -154,12 +159,12 @@ describe('LanesAddMoreStripComponent', () => {
     fixture.detectChanges();
     fixture.componentInstance.closeGuide('opencode');
     fixture.detectChanges();
-    expect(q('[data-testid="cli-provider-popover-content"]')).not.toBeNull();
+    expect(overlay().querySelector('[data-testid="cli-provider-popover-content"]')).not.toBeNull();
     (document.activeElement as HTMLElement | null)?.blur();
     fixture.componentInstance.closeGuide('pi');
     fixture.detectChanges();
     await fixture.whenStable();
-    expect(q('[data-testid="cli-provider-popover-content"]')).toBeNull();
+    expect(overlay().querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
     expect(document.activeElement).not.toBe(install);
   });
 

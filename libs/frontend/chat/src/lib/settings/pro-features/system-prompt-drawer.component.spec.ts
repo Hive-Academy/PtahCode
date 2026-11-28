@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { Component, Input, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ClaudeRpcService, WorkspaceScopeService } from '@ptah-extension/core';
@@ -101,7 +102,7 @@ describe('SystemPromptDrawerComponent', () => {
 
     fixture = TestBed.createComponent(TestHostComponent);
     host = fixture.componentInstance;
-    element = fixture.nativeElement as HTMLElement;
+    element = TestBed.inject(OverlayContainer).getContainerElement();
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();

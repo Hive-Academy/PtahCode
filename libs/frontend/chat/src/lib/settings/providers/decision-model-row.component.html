@@ -161,9 +161,21 @@
                   <p
                     class="text-xs text-base-content"
                     data-testid="decision-no-providers"
+                    role="status"
                   >
-                    No provider is configured. Set one up on Providers first.
+                    No providers connected.
                   </p>
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="link"
+                    size="sm"
+                    [disabled]="busy() || disabled()"
+                    (click)="connectProvider()"
+                    data-testid="decision-connect-provider"
+                  >
+                    Connect a provider
+                  </button>
                 }
               }
               @if (draft().kind === 'custom') {

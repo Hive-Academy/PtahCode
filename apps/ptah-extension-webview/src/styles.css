@@ -429,7 +429,9 @@ ANUBIS MYSTICAL EFFECTS - Glass Morphism & Divine Gradients
   }
 
   :where(ptah-settings) .btn[aria-disabled='true'],
-  :where(ptah-settings) .btn[aria-disabled='true']:hover {
+  :where(ptah-settings) .btn[aria-disabled='true']:hover,
+  :where(.ptah-settings-overlay) .btn[aria-disabled='true'],
+  :where(.ptah-settings-overlay) .btn[aria-disabled='true']:hover {
     --tw-border-opacity: 0;
     background-color: var(--fallback-n, oklch(var(--n) / var(--tw-bg-opacity)));
     --tw-bg-opacity: 0.2;
@@ -438,14 +440,16 @@ ANUBIS MYSTICAL EFFECTS - Glass Morphism & Divine Gradients
     cursor: not-allowed;
   }
 
-  :where(ptah-settings) button[aria-disabled='true']:not(.btn) {
+  :where(ptah-settings) button[aria-disabled='true']:not(.btn),
+  :where(.ptah-settings-overlay) button[aria-disabled='true']:not(.btn) {
     cursor: not-allowed;
     opacity: 0.6;
   }
 
   /* Batch 54.1: fields, selects, checkboxes, toggles and radios disabled while a save runs keep focus too
      (ptahBusyDisabled); they dim like a non-.btn button. */
-  :where(ptah-settings) :is(input, select, textarea)[aria-disabled='true'] {
+  :where(ptah-settings) :is(input, select, textarea)[aria-disabled='true'],
+  :where(.ptah-settings-overlay) :is(input, select, textarea)[aria-disabled='true'] {
     cursor: not-allowed;
     opacity: 0.6;
   }
@@ -997,15 +1001,9 @@ html.ptah-vt-active .ptah-msg-enter {
   z-index: 1;
 }
 
-/* The native drawer host has display: contents. Its manual popover stays open
-   during Angular's host leave; animate only the panel, never its blur backdrop. */
-ptah-native-drawer.ptah-motion-leave .ptah-drawer-panel {
-  animation: ptahMotionLeave var(--ptah-motion-out) var(--ptah-ease-gentle-in) forwards;
-}
-
-:root[data-glass='on'] ptah-native-drawer.ptah-motion-leave .ptah-drawer-panel {
-  animation: none;
-  display: none;
+.cdk-overlay-backdrop.ptah-drawer-backdrop {
+  background-color: rgb(0 0 0 / 60%);
+  backdrop-filter: blur(2px);
 }
 
 [data-motion-clone='pending'] {
@@ -2623,11 +2621,11 @@ Ensures proper contrast for buttons, icons, and text in warm cream backgrounds
   /* ===== Popover/Overlay Backgrounds ===== */
   /* Native popovers should have solid backgrounds. The substring match must not reach NativePopoverComponent's
      trigger wrapper (`popover-trigger`): it drew a square border around every popover trigger in light theme,
-     e.g. the Settings scope badge (TASK_2026_555 Gate V 28). Nor the full-viewport `ptah-popover-layer`:
+     e.g. the Settings scope badge (TASK_2026_555 Gate V 28). Skip the full-viewport CDK host:
      an opaque layer blanked the whole app behind every open menu in light theme. Nor the CDK popover host
      (`cdk-overlay-popover`), which is a full-viewport bounding box while a tooltip is open. */
   .ptah-native-popover-panel,
-  [class*='popover']:not(.popover-trigger):not(.ptah-popover-layer):not(.cdk-overlay-popover) {
+  [class*='popover']:not(.popover-trigger):not(.cdk-overlay-popover) {
     background-color: oklch(var(--b1));
     border: 1px solid oklch(var(--b3));
   }

@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -27,6 +28,10 @@ import {
   MACHINE_SCOPE_COPY,
   SYNC_SKIPPED_COPY,
 } from './agent-model-editor.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 /** jsdom implements no HTMLDialogElement methods (same stub as reconcile-guard.spec). */
 beforeAll(() => {
@@ -210,7 +215,7 @@ describe('AgentModelEditorComponent', () => {
   const q = <T extends HTMLElement = HTMLElement>(
     testId: string,
     scope: ParentNode = root(),
-  ): T | null => scope.querySelector<T>(`[data-testid="${testId}"]`);
+  ): T | null => scope.querySelector<T>(`[data-testid="${testId}"]`) ?? (scope === root() ? overlay().querySelector<T>(`[data-testid="${testId}"]`) : null);
   const row = (provider: string): HTMLElement =>
     root().querySelector<HTMLElement>(
       `[data-testid="agent-model-row"][data-provider="${provider}"]`,

@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
@@ -19,6 +20,10 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 import { VoiceDownloadProgressService } from '../../services/voice-download-progress.service';
 import { LocalSttPanelComponent } from './local-stt-panel.component';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 function localConfig(
   overrides: Partial<VoiceProviderConfigLocalDto> = {},
 ): VoiceProviderConfigLocalDto {
@@ -76,7 +81,7 @@ describe('LocalSttPanelComponent', () => {
     host.querySelector<HTMLButtonElement>('button[role="combobox"]')?.click();
     fixture.detectChanges();
     const label = richSelect(testId).options().find(option => option.value === value)?.label;
-    const option = Array.from(host.querySelectorAll<HTMLElement>('[role="option"]'))
+    const option = Array.from(overlay().querySelectorAll<HTMLElement>('[role="option"]'))
       .find(button => button.textContent?.includes(label ?? '\0'));
     if (!option) throw new Error(`Missing option ${value}`);
     option.click();

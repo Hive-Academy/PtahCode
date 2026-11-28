@@ -48,7 +48,7 @@ async function scrollTops(page: Page): Promise<number> {
 
 /** Waits for the drawer's own entry animations, so a mid-slide frame is never captured. */
 async function waitForDrawer(page: Page): Promise<void> {
-  await page.locator('[data-testid="native-drawer-root"]').evaluate((element) => Promise.all(element.getAnimations({ subtree: true })
+  await page.locator('[data-testid="native-drawer-panel"]').evaluate((element) => Promise.all(element.getAnimations({ subtree: true })
     .filter((animation) => animation instanceof CSSAnimation && animation.animationName.includes('ptah-drawer-'))
     .map((animation) => animation.finished)));
   await waitForSettled(page);

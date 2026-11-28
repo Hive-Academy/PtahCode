@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { TaskStatus } from '@ptah-extension/shared';
 import {
@@ -43,13 +44,20 @@ describe('TaskCreateDialogComponent', () => {
     return { fixture, drafts, cancels };
   }
 
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
   const q = <T extends HTMLElement>(
     fixture: ComponentFixture<TaskCreateDialogComponent>,
     id: string,
-  ) =>
-    (fixture.nativeElement as HTMLElement).querySelector<T>(
-      `[data-testid="${id}"]`,
+  ) => {
+    const selector = `[data-testid="${id}"]`;
+    return (
+      (fixture.nativeElement as HTMLElement).querySelector<T>(selector) ??
+      overlay().querySelector<T>(selector)
     );
+  };
+  const panel = (fixture: ComponentFixture<TaskCreateDialogComponent>) =>
+    q(fixture, 'native-modal-dialog') as HTMLElement;
 
   function type(
     fixture: ComponentFixture<TaskCreateDialogComponent>,
@@ -121,37 +129,45 @@ describe('TaskCreateDialogComponent', () => {
 
   it('cancels on Escape and from the Cancel button', async () => {
     const { fixture, cancels } = await render();
-    const dialog = (fixture.nativeElement as HTMLElement).querySelector(
-      'dialog',
-    );
 
-    dialog?.dispatchEvent(new Event('cancel'));
+    panel(fixture).dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
     q(fixture, 'tasks-create-cancel')?.click();
 
     expect(cancels).toHaveLength(2);
   });
 
-  it('prevents the native cancel event while a create is in flight', async () => {
+  it('prevents cancellation while a create is in flight', async () => {
     const { fixture, cancels } = await render('backlog', true);
-    const event = new Event('cancel', { cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
 
-    (fixture.nativeElement as HTMLElement)
-      .querySelector('dialog')
-      ?.dispatchEvent(event);
+    panel(fixture).dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(true);
     expect(cancels).toEqual([]);
+    expect(panel(fixture).isConnected).toBe(true);
   });
 
-  it('lets the native cancel event through and emits cancelled when idle', async () => {
+  it('consumes Escape and emits cancelled when idle', async () => {
     const { fixture, cancels } = await render();
-    const event = new Event('cancel', { cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    });
 
-    (fixture.nativeElement as HTMLElement)
-      .querySelector('dialog')
-      ?.dispatchEvent(event);
+    panel(fixture).dispatchEvent(event);
 
-    expect(event.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
     expect(cancels).toHaveLength(1);
   });
 
@@ -159,16 +175,21 @@ describe('TaskCreateDialogComponent', () => {
     const { fixture, drafts, cancels } = await render('backlog', true);
     type(fixture, 'Ship the board');
 
-    (fixture.nativeElement as HTMLElement)
-      .querySelector('dialog')
-      ?.dispatchEvent(new Event('cancel', { cancelable: true }));
-    (fixture.nativeElement as HTMLElement)
-      .querySelector<HTMLButtonElement>('.modal-backdrop button')
+    panel(fixture).dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    overlay()
+      .querySelector<HTMLElement>('.cdk-overlay-backdrop')
       ?.click();
     submit(fixture);
 
     expect(cancels).toEqual([]);
     expect(drafts).toEqual([]);
+    expect(panel(fixture).isConnected).toBe(true);
     expect(q<HTMLButtonElement>(fixture, 'tasks-create-submit')?.disabled).toBe(
       true,
     );
@@ -197,14 +218,11 @@ describe('TaskCreateDialogComponent', () => {
 
   it('uses the native modal with a named title and token spacing', async () => {
     const { fixture } = await render();
-    const modal = q(fixture, 'tasks-create-dialog');
-    const dialog = modal?.querySelector('dialog');
-    expect(dialog?.open).toBe(true);
-    expect(dialog?.getAttribute('aria-labelledby')).toBe('task-create-title');
-    expect(dialog?.querySelector('.modal-box')?.className).toContain(
-      'max-w-sm',
-    );
-    expect(modal?.querySelector('form.flex')?.className).toContain(
+    expect(q(fixture, 'tasks-create-dialog')).not.toBeNull();
+    const container = overlay().querySelector('cdk-dialog-container');
+    expect(container?.getAttribute('aria-labelledby')).toBe('task-create-title');
+    expect(panel(fixture).className).toContain('max-w-sm');
+    expect(panel(fixture).querySelector('form.flex')?.className).toContain(
       'gap-[var(--ptah-gap-field)]',
     );
   });

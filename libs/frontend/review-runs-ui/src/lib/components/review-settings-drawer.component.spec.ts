@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import type { OperatorSettings, RepositorySettings, ReviewLaneSettings } from '@ptah-extension/review-contracts';
@@ -62,7 +63,7 @@ function setup(
   fixture.componentRef.setInput('lanes', emptyLanes);
   for (const [key, value] of Object.entries(options.inputs ?? {})) fixture.componentRef.setInput(key, value);
   fixture.detectChanges();
-  return { fixture, store, root: fixture.nativeElement as HTMLElement };
+  return { fixture, store, root: TestBed.inject(OverlayContainer).getContainerElement() };
 }
 
 /** Lets the native drawer's queued focus move (and its `opened` output) run. */
@@ -81,11 +82,11 @@ const typeInto = (input: HTMLInputElement, value: string) => {
 describe('ReviewSettingsDrawerComponent', () => {
   describe('shell', () => {
     it('is a native drawer dialog named "Review settings" that focuses its title once opened', async () => {
-      const { root } = setup();
-      const dialog = root.querySelector('ptah-native-drawer [role="dialog"]') as HTMLElement;
+      const { fixture, root } = setup();
+      const dialog = root.querySelector('cdk-dialog-container[role="dialog"]') as HTMLElement;
       expect(dialog.getAttribute('aria-label')).toBe('Review settings');
-      expect(dialog.getAttribute('aria-modal')).toBe('true');
-      expect(root.querySelector('[data-testid="native-drawer-root"]')?.getAttribute('popover')).toBe('manual');
+      expect(dialog.closest('.cdk-overlay-pane')).not.toBeNull();
+      expect((fixture.nativeElement as HTMLElement).closest('[aria-hidden="true"]')).not.toBeNull();
       expect(root.querySelector('[data-testid="native-drawer-close"]')).toBeNull();
       await flush();
       expect(document.activeElement).toBe(root.querySelector('#review-settings-title'));
@@ -95,7 +96,7 @@ describe('ReviewSettingsDrawerComponent', () => {
       const { fixture, root } = setup();
       const close = jest.fn();
       fixture.componentInstance.closed.subscribe(close);
-      (root.querySelector('[data-testid="native-drawer-backdrop"]') as HTMLElement).click();
+      (root.querySelector('.cdk-overlay-backdrop.ptah-drawer-backdrop') as HTMLElement).click();
       expect(close).not.toHaveBeenCalled();
       (root.querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
       expect(close).toHaveBeenCalledTimes(1);
@@ -115,13 +116,23 @@ describe('ReviewSettingsDrawerComponent', () => {
       const last = focusables[focusables.length - 1];
       expect(first.getAttribute('aria-label')).toBe('Close review settings');
       expect(last.textContent?.trim()).toBe('Save review settings');
-      last.focus();
-      panel(root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
-      expect(document.activeElement).toBe(first);
-      panel(root).dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }),
-      );
-      expect(document.activeElement).toBe(last);
+      const dialog = panel(root).closest('cdk-dialog-container');
+      const start = dialog?.previousElementSibling;
+      const end = dialog?.nextElementSibling;
+      expect(start?.classList).toContain('cdk-focus-trap-anchor');
+      expect(end?.classList).toContain('cdk-focus-trap-anchor');
+
+      const layout = jest.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+      try {
+        // jsdom does not perform native Tab traversal. Focus the CDK anchors
+        // that Chromium reaches from the last and first controls.
+        end?.dispatchEvent(new FocusEvent('focus'));
+        expect(document.activeElement).toBe(first);
+        start?.dispatchEvent(new FocusEvent('focus'));
+        expect(document.activeElement).toBe(last);
+      } finally {
+        layout.mockRestore();
+      }
     });
 
     it('returns focus to the opener when the parent @if removes the drawer', async () => {
@@ -151,8 +162,8 @@ describe('ReviewSettingsDrawerComponent', () => {
       opener.click();
       fixture.detectChanges();
       await flush();
-      expect(document.activeElement).toBe(fixture.nativeElement.querySelector('#review-settings-title'));
-      (fixture.nativeElement.querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
+      expect(document.activeElement).toBe(TestBed.inject(OverlayContainer).getContainerElement().querySelector('#review-settings-title'));
+      (TestBed.inject(OverlayContainer).getContainerElement().querySelector('button[aria-label="Close review settings"]') as HTMLButtonElement).click();
       fixture.detectChanges();
       expect(fixture.nativeElement.querySelector('ptah-review-settings-drawer')).toBeNull();
       expect(document.activeElement).toBe(opener);
@@ -346,7 +357,7 @@ describe('ReviewSettingsDrawerComponent', () => {
       expect(store.setPublicationPause).toHaveBeenCalledWith(true);
     });
 
-    it('renders confirm dialogs outside the drawer panel, so Escape there does not close the drawer', () => {
+    it('keeps confirmation accessible in the drawer overlay and handles Escape locally', () => {
       const { fixture, root } = setup({ inputs: { hasToken: true } });
       const close = jest.fn();
       fixture.componentInstance.closed.subscribe(close);
@@ -354,8 +365,8 @@ describe('ReviewSettingsDrawerComponent', () => {
       fixture.detectChanges();
       const dialog = root.querySelector('#review-remove-token-confirm')?.closest('[role="dialog"]') as HTMLElement;
       expect(dialog).not.toBeNull();
-      expect(panel(root).contains(dialog)).toBe(false);
-      expect(dialog.closest('[popover="manual"]')).not.toBeNull();
+      expect(dialog.closest('[aria-hidden="true"]')).toBeNull();
+      expect(dialog.closest('[popover]')?.getAttribute('popover')).toBe('manual');
       dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
       fixture.detectChanges();
       expect(close).not.toHaveBeenCalled();

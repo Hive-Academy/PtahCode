@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { TestBed } from '@angular/core/testing';
 import { computed, signal } from '@angular/core';
 import {
@@ -32,6 +33,10 @@ import {
   SkillCloneDetail,
   type LibraryChangeNotice,
 } from '../../services/skill-clones-state.service';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 function vscodeServiceStub(isElectron: boolean): Partial<VSCodeService> {
   return {
@@ -369,7 +374,7 @@ function setup(opts: {
 
   const el = () => fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement>(testId: string): T | null =>
-    el().querySelector<T>(`[data-testid="${testId}"]`);
+    el().querySelector<T>(`[data-testid="${testId}"]`) ?? overlay().querySelector<T>(`[data-testid="${testId}"]`);
   const all = (testId: string): HTMLElement[] =>
     Array.from(el().querySelectorAll(`[data-testid="${testId}"]`));
   const click = async (testId: string): Promise<void> => {
@@ -511,7 +516,7 @@ describe('SkillClonesViewComponent — detail drawer', () => {
       ).toBe('No grade');
 
       openFirstCard();
-      const drawer = el().querySelector('ptah-clone-detail-drawer');
+      const drawer = overlay().querySelector('[data-testid="native-drawer-panel"]');
       expect(
         drawer
           ?.querySelector('[data-testid="clone-metric-invocations"]')
@@ -534,20 +539,20 @@ describe('SkillClonesViewComponent — detail drawer', () => {
 
     expect(state.loadDetail).toHaveBeenCalledWith('deep-research', 'skill');
     expect(
-      el().querySelector('[data-testid="native-drawer-panel"]'),
+      overlay().querySelector('[data-testid="native-drawer-panel"]'),
     ).toBeTruthy();
   });
 
   it('loads the scorecard detail only for agent entries', () => {
     const state = makeStateStub([clone({ kind: 'agent', slug: 'planner' })]);
     state.scorecards.set({ planner: scorecard() });
-    const { el, selectTab, openFirstCard } = setup({ state });
+    const { selectTab, openFirstCard } = setup({ state });
 
     selectTab(1);
     openFirstCard();
 
     expect(state.loadScorecardDetail).toHaveBeenCalledWith('planner');
-    expect(el().querySelector('[data-testid="drawer-scorecard"]')).toBeTruthy();
+    expect(overlay().querySelector('[data-testid="drawer-scorecard"]')).toBeTruthy();
   });
 
   it('renders the body through the markdown chokepoint, never raw innerHTML', () => {
@@ -1414,10 +1419,10 @@ describe('SkillClonesViewComponent — body save', () => {
   });
 
   it('saves the edited body, then reloads the detail and the list', async () => {
-    const { click, state, fixture, el } = openDrawerWithBody('# body');
+    const { click, state, fixture } = openDrawerWithBody('# body');
 
     await click('drawer-body-edit-btn');
-    const textarea = el().querySelector(
+    const textarea = overlay().querySelector(
       '[data-testid="clone-body-editor-textarea"]',
     ) as HTMLTextAreaElement;
     textarea.value = '# edited';
@@ -1443,9 +1448,9 @@ describe('SkillClonesViewComponent — body save', () => {
     harness: ReturnType<typeof setup>,
     text: string,
   ): Promise<void> {
-    const { click, fixture, el, q, settle } = harness;
+    const { click, fixture, q, settle } = harness;
     await click('drawer-body-edit-btn');
-    const textarea = el().querySelector(
+    const textarea = overlay().querySelector(
       '[data-testid="clone-body-editor-textarea"]',
     ) as HTMLTextAreaElement;
     textarea.value = text;
@@ -1573,7 +1578,7 @@ describe('SkillClonesViewComponent — body save', () => {
 
       const el = () => fixture.nativeElement as HTMLElement;
       const q = <T extends HTMLElement>(testId: string): T | null =>
-        el().querySelector<T>(`[data-testid="${testId}"]`);
+        el().querySelector<T>(`[data-testid="${testId}"]`) ?? overlay().querySelector<T>(`[data-testid="${testId}"]`);
       const settle = async (): Promise<void> => {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
         fixture.detectChanges();
@@ -1596,7 +1601,7 @@ describe('SkillClonesViewComponent — body save', () => {
     }
 
     it('withholds Edit until the SELECTED entry’s own body has landed', async () => {
-      const { q, el, settle, openCard, resolveDetail, fixture } =
+      const { q, settle, openCard, resolveDetail, fixture } =
         realStateSetup();
       await settle();
 
@@ -1615,7 +1620,7 @@ describe('SkillClonesViewComponent — body save', () => {
       staleEdit?.click();
       fixture.detectChanges();
       expect(
-        el().querySelector<HTMLTextAreaElement>(
+        overlay().querySelector<HTMLTextAreaElement>(
           '[data-testid="clone-body-editor-textarea"]',
         ),
       ).toBeNull();
@@ -1629,7 +1634,7 @@ describe('SkillClonesViewComponent — body save', () => {
       // `[ngModel]` writes to the DOM on the tick after the editor is created.
       await settle();
       expect(
-        el().querySelector<HTMLTextAreaElement>(
+        overlay().querySelector<HTMLTextAreaElement>(
           '[data-testid="clone-body-editor-textarea"]',
         )?.value,
       ).toBe('# beta body');
@@ -1637,12 +1642,12 @@ describe('SkillClonesViewComponent — body save', () => {
   });
 
   it('surfaces a save failure as a toast without refreshing the list', async () => {
-    const { click, state, fixture, el, q, settle } =
+    const { click, state, fixture, q, settle } =
       openDrawerWithBody('# body');
     state.saveCloneBody.mockRejectedValueOnce(new Error('save refused'));
 
     await click('drawer-body-edit-btn');
-    const textarea = el().querySelector(
+    const textarea = overlay().querySelector(
       '[data-testid="clone-body-editor-textarea"]',
     ) as HTMLTextAreaElement;
     textarea.value = '# edited';

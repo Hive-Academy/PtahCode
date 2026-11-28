@@ -55,6 +55,7 @@ import {
   type WizardExternalAction,
 } from './provider-setup-wizard.component';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
+import { settingsProviderConnections } from './provider-connection-options';
 
 /** The page toast's current message: drawer and setup outcomes are said there, never inline. */
 const toastMessage = () =>
@@ -317,7 +318,7 @@ describe('ProvidersSettingsComponent', () => {
       })
       .compileComponents();
     fixture = TestBed.createComponent(ProvidersSettingsComponent);
-    element = fixture.nativeElement as HTMLElement;
+    element = document.body;
   });
   afterEach(() => {
     fixture.destroy();
@@ -329,7 +330,7 @@ describe('ProvidersSettingsComponent', () => {
     fixture.detectChanges();
   }
   function button(label: string): HTMLButtonElement {
-    const result = Array.from(element.querySelectorAll('button')).find(
+    const result = Array.from(document.querySelectorAll('button')).find(
       (node) => node.textContent?.trim() === label,
     );
     if (!result) throw new Error(`Missing button: ${label}`);
@@ -337,7 +338,7 @@ describe('ProvidersSettingsComponent', () => {
   }
   function activeBadges() {
     return Array.from(
-      element.querySelectorAll('[data-testid="status-badge"]'),
+      document.querySelectorAll('[data-testid="status-badge"]'),
     ).filter((node) => node.textContent?.includes('Active for main agent'));
   }
   function wizard(): WizardStub {
@@ -352,13 +353,13 @@ describe('ProvidersSettingsComponent', () => {
 
   describe('connection detail drawer', () => {
     const drawer = () =>
-      element.querySelector('[data-testid="connection-detail-drawer"]');
+      document.querySelector('[data-testid="connection-detail-drawer"]');
     const statusText = () =>
       element
         .querySelector('[data-testid="connection-status"]')
         ?.textContent?.trim();
     const checkButton = () =>
-      element.querySelector<HTMLButtonElement>(
+      document.querySelector<HTMLButtonElement>(
         '[data-testid="connection-check"]',
       );
     async function openDrawer(id: string, opener?: HTMLElement) {
@@ -374,13 +375,13 @@ describe('ProvidersSettingsComponent', () => {
     it('removal (a loaded list without the id) closes the drawer, clears it, and returns focus to the opener', async () => {
       state.route.set(ready(route));
       await render();
-      const opener = element.querySelector<HTMLElement>(
+      const opener = document.querySelector<HTMLElement>(
         'h2[data-focus="connections"]',
       ) as HTMLElement;
       await openDrawer('second', opener);
       expect(drawer()).not.toBeNull();
       (
-        element.querySelector('[data-testid="connection-check"]') as HTMLElement
+        document.querySelector('[data-testid="connection-check"]') as HTMLElement
       ).focus();
 
       state.connections.set(ready([connection('first')]));
@@ -417,7 +418,7 @@ describe('ProvidersSettingsComponent', () => {
       state.route.set({ status: 'loading', data: route, error: null });
       await render();
       expect(
-        element.querySelector('[data-testid="connection-status-skeleton"]'),
+        document.querySelector('[data-testid="connection-status-skeleton"]'),
       ).toBeNull();
       expect(statusText()).toBe('Checking…');
       expect(isDisabledControl(checkButton())).toBe(true);
@@ -435,7 +436,7 @@ describe('ProvidersSettingsComponent', () => {
       await render();
       expect(statusText()).toBe('Check failed');
       expect(
-        element.querySelector('[data-testid="connection-overview"]')
+        document.querySelector('[data-testid="connection-overview"]')
           ?.textContent,
       ).not.toContain('Could not load this section');
       expect(isDisabledControl(checkButton())).toBe(false);
@@ -507,7 +508,7 @@ describe('ProvidersSettingsComponent', () => {
         await render();
         expect(statusText()).toBe('Check failed');
         expect(
-          element.querySelector('[data-testid="connection-overview"]')
+          document.querySelector('[data-testid="connection-overview"]')
             ?.textContent,
         ).not.toContain('verified');
         expect(checkButton()?.textContent?.trim()).toBe('Retry check');
@@ -579,12 +580,12 @@ describe('ProvidersSettingsComponent', () => {
         );
         state.route.set(ready(route));
         await render();
-        const retry = element.querySelector<HTMLButtonElement>(
+        const retry = document.querySelector<HTMLButtonElement>(
           '[data-connection-id="second"] [data-testid="card-key-unreadable-retry"]',
         );
         expect(retry).not.toBeNull();
         expect(
-          element.querySelector(
+          document.querySelector(
             '[data-connection-id="first"] [data-testid="card-key-unreadable"]',
           ),
         ).toBeNull();
@@ -593,7 +594,7 @@ describe('ProvidersSettingsComponent', () => {
         await render();
         expect(state.refreshConnections).toHaveBeenCalledTimes(1);
         await openDrawer('second');
-        Array.from(element.querySelectorAll<HTMLElement>('[role="tab"]'))
+        Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
           .find((tab) => tab.textContent?.trim() === 'Credentials')
           ?.click();
         await render();
@@ -620,7 +621,7 @@ describe('ProvidersSettingsComponent', () => {
         await render();
         const codexCount = () =>
           Array.from(
-            element.querySelectorAll(
+            document.querySelectorAll(
               '[data-testid="provider-connection-card"]',
             ),
           )
@@ -638,7 +639,7 @@ describe('ProvidersSettingsComponent', () => {
         expect(codexCount()).toBe('Used by 2');
         await openDrawer('openai-codex');
         expect(
-          element.querySelector('[data-used-by="codex-cli"]')?.textContent,
+          document.querySelector('[data-used-by="codex-cli"]')?.textContent,
         ).toContain('Codex CLI');
         state.orchestration.set(
           ready({
@@ -648,7 +649,7 @@ describe('ProvidersSettingsComponent', () => {
         );
         await render();
         expect(codexCount()).toBe('Used by 1');
-        expect(element.querySelector('[data-used-by="codex-cli"]')).toBeNull();
+        expect(document.querySelector('[data-used-by="codex-cli"]')).toBeNull();
       });
 
       it('attributes Enhancement to its selected provider from the enhancement slice', async () => {
@@ -659,7 +660,7 @@ describe('ProvidersSettingsComponent', () => {
         await render();
         await openDrawer('second');
         expect(
-          element.querySelector('[data-used-by="enhancement"]')?.textContent,
+          document.querySelector('[data-used-by="enhancement"]')?.textContent,
         ).toContain('Enhancement');
       });
     });
@@ -675,12 +676,12 @@ describe('ProvidersSettingsComponent', () => {
 
     describe('Credentials writes (Batch 21)', () => {
       const byId = (id: string) =>
-        element.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+        document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
       async function credentialsTab(id: string) {
         state.route.set(ready(route));
         await render();
         await openDrawer(id);
-        Array.from(element.querySelectorAll<HTMLElement>('[role="tab"]'))
+        Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
           .find((tab) => tab.textContent?.trim() === 'Credentials')
           ?.click();
         await render();
@@ -858,7 +859,7 @@ describe('ProvidersSettingsComponent', () => {
         );
         await render();
         await openDrawer('second');
-        Array.from(element.querySelectorAll<HTMLElement>('[role="tab"]'))
+        Array.from(document.querySelectorAll<HTMLElement>('[role="tab"]'))
           .find((tab) => tab.textContent?.trim() === 'Credentials')
           ?.click();
         await render();
@@ -891,7 +892,7 @@ describe('ProvidersSettingsComponent', () => {
       it('the drawer stacks above the page save toast, so the toast never covers its footer Close', async () => {
         await credentialsTab('second');
         expect(
-          element.querySelector('ptah-connection-detail-drawer')?.parentElement
+          document.querySelector('ptah-connection-detail-drawer')?.parentElement
             ?.className,
         ).toContain('z-[60]');
       });
@@ -965,7 +966,7 @@ describe('ProvidersSettingsComponent', () => {
     });
     const badges = () =>
       Array.from(
-        element.querySelectorAll<HTMLElement>('[data-testid="scope-badge"]'),
+        document.querySelectorAll<HTMLElement>('[data-testid="scope-badge"]'),
       );
     beforeEach(() => {
       state.route.set(ready(route));
@@ -982,11 +983,11 @@ describe('ProvidersSettingsComponent', () => {
     it('shows one badge per overridden field, naming it, and nothing for the inherited ones (RUX-6)', async () => {
       await render();
       expect(
-        element.querySelector('[data-testid="setting-scope-row"]'),
+        document.querySelector('[data-testid="setting-scope-row"]'),
       ).toBeNull();
       // Batch 52.6: the node head holds one badge per overridden layer; its dialog lists the field badges.
       const layers = Array.from(
-        element.querySelectorAll<HTMLButtonElement>(
+        document.querySelectorAll<HTMLButtonElement>(
           '[data-testid="main-scope-layer"]',
         ),
       );
@@ -1029,7 +1030,7 @@ describe('ProvidersSettingsComponent', () => {
         await render();
         expect(state.clearScopeOverride).not.toHaveBeenCalled();
         expect(
-          element.querySelector('[data-testid="clear-ends-sessions"]')
+          document.querySelector('[data-testid="clear-ends-sessions"]')
             ?.textContent,
         ).toContain('ends running chat sessions');
         expect(element.textContent).not.toContain('Undo');
@@ -1045,17 +1046,17 @@ describe('ProvidersSettingsComponent', () => {
 
   describe('Main Agent popover (Batch 26)', () => {
     const popover = () =>
-      element.querySelector<HTMLElement>('[data-testid="main-agent-popover"]');
+      document.querySelector<HTMLElement>('[data-testid="main-agent-popover"]');
     async function reassign() {
-      element
-        .querySelector<HTMLButtonElement>(
-          '[data-testid="routing-node-main-agent"] [data-testid="routing-node-action"]',
-        )
-        ?.click();
+      const trigger = document.querySelector<HTMLButtonElement>(
+        '[data-testid="routing-node-main-agent"] [data-testid="routing-node-action"]',
+      );
+      trigger?.click();
       await render();
+      return trigger;
     }
 
-    it("the old main-agent block is gone; the Main Agent node's Reassign opens the popover, anchored in that node", async () => {
+    it("the old main-agent block is gone; the Main Agent node's Reassign opens a CDK popover from that node", async () => {
       state.route.set(ready(route));
       await render();
       for (const gone of [
@@ -1065,17 +1066,18 @@ describe('ProvidersSettingsComponent', () => {
         'Save provider to…',
       ]) {
         expect(
-          Array.from(element.querySelectorAll('button')).some(
+          Array.from(document.querySelectorAll('button')).some(
             (node) => node.textContent?.trim() === gone,
           ),
         ).toBe(false);
       }
-      expect(element.querySelector('#providers-main-heading')).toBeNull();
+      expect(document.querySelector('#providers-main-heading')).toBeNull();
       expect(popover()).toBeNull();
-      await reassign();
+      const trigger = await reassign();
       expect(
-        popover()?.closest('[data-testid="routing-node-main-agent"]'),
+        trigger?.closest('[data-testid="routing-node-main-agent"]'),
       ).not.toBeNull();
+      expect(popover()?.closest('.cdk-overlay-pane')).not.toBeNull();
     });
 
     it('the cards carry no "Use for main agent" (prototype, Gate V 28); Reassign → provider select reaches the D6 confirm (uncheckable note kept)', async () => {
@@ -1097,7 +1099,7 @@ describe('ProvidersSettingsComponent', () => {
       );
       await render();
       for (const card of Array.from(
-        element.querySelectorAll('ptah-provider-connection-card'),
+        document.querySelectorAll('ptah-provider-connection-card'),
       )) {
         expect(card.textContent).not.toContain('Use for main agent');
       }
@@ -1109,14 +1111,14 @@ describe('ProvidersSettingsComponent', () => {
       if (!select) throw new Error('Missing provider select');
       select.value.set('second');
       await render();
-      const confirm = element.querySelector(
+      const confirm = document.querySelector(
         '[data-testid="main-agent-provider-confirm"]',
       );
       expect(confirm?.textContent).toContain(
         'New main-agent requests use second. Changing the provider ends running chat sessions in this workspace.',
       );
       expect(
-        element.querySelector('[data-testid="activation-unchecked-note"]')
+        document.querySelector('[data-testid="activation-unchecked-note"]')
           ?.textContent,
       ).toContain('cannot check this connection');
       Array.from(confirm?.querySelectorAll('button') ?? [])
@@ -1176,12 +1178,12 @@ describe('ProvidersSettingsComponent', () => {
       providerId: 'first',
     });
     // Batch 28b: the compact searchable control; opening it lists the options.
-    const input = element.querySelector<HTMLInputElement>(
+    const input = document.querySelector<HTMLInputElement>(
       '[data-testid="main-agent-model"] input',
     );
     input?.click();
     await render();
-    const options = Array.from(element.querySelectorAll('[role="option"]')).map(
+    const options = Array.from(document.querySelectorAll('[role="option"]')).map(
       (option) => option.textContent?.trim(),
     );
     expect(options).toContain('Catalogue model [Tool: No]');
@@ -1205,7 +1207,7 @@ describe('ProvidersSettingsComponent', () => {
     await render();
     expect(activeBadges()).toHaveLength(1);
     expect(
-      element.querySelectorAll('ptah-provider-connection-card'),
+      document.querySelectorAll('ptah-provider-connection-card'),
     ).toHaveLength(2);
     state.commit.set({ ...idle, status: 'saving' });
     await render();
@@ -1214,7 +1216,7 @@ describe('ProvidersSettingsComponent', () => {
   it('distinguishes a loaded empty route from an unloaded route (Main Agent node)', async () => {
     await render();
     expect(
-      element.querySelector(
+      document.querySelector(
         '[data-testid="routing-node-main-agent"] [data-testid="routing-node-skeleton"]',
       ),
     ).not.toBeNull();
@@ -1235,7 +1237,7 @@ describe('ProvidersSettingsComponent', () => {
     expect(element.textContent).toContain('No connections configured.');
     expect(element.textContent).toContain('Connect a provider to get started.');
     expect(
-      element.querySelector('ptah-state-panel[state="empty"]'),
+      document.querySelector('ptah-state-panel[state="empty"]'),
     ).not.toBeNull();
   });
   it('renders each resolvedModel arm of the route (Main Agent node)', async () => {
@@ -1278,14 +1280,14 @@ describe('ProvidersSettingsComponent', () => {
       ]),
     );
     await render();
-    const labels = Array.from(element.querySelectorAll('button')).map((node) =>
+    const labels = Array.from(document.querySelectorAll('button')).map((node) =>
       node.textContent?.trim(),
     );
     expect(labels).not.toContain('Sign in to Copilot');
     expect(labels).not.toContain('Check Copilot sign-in');
     // The card's own action remains.
     expect(
-      element.querySelectorAll('[data-testid="btn-sign-in"]'),
+      document.querySelectorAll('[data-testid="btn-sign-in"]'),
     ).toHaveLength(1);
   });
   it('shows a running Kimi Code sign-in on the page with Cancel, and hides it once it ends', async () => {
@@ -1296,7 +1298,7 @@ describe('ProvidersSettingsComponent', () => {
     });
     await render();
     expect(
-      element.querySelector('[data-testid="providers-kimi-login"]'),
+      document.querySelector('[data-testid="providers-kimi-login"]'),
     ).not.toBeNull();
     element
       .querySelector<HTMLButtonElement>(
@@ -1310,7 +1312,7 @@ describe('ProvidersSettingsComponent', () => {
     state.kimiCodeLogin.set({ status: 'cancelled' });
     await render();
     expect(
-      element.querySelector('[data-testid="providers-kimi-login"]'),
+      document.querySelector('[data-testid="providers-kimi-login"]'),
     ).toBeNull();
   });
   it.each([
@@ -1322,7 +1324,7 @@ describe('ProvidersSettingsComponent', () => {
       state.kimiCodeLogin.set({ status });
       await render();
       expect(
-        element.querySelector('[data-testid="providers-kimi-login"]') !== null,
+        document.querySelector('[data-testid="providers-kimi-login"]') !== null,
       ).toBe(shown);
     },
   );
@@ -1330,10 +1332,10 @@ describe('ProvidersSettingsComponent', () => {
     state.kimiCodeLogin.set({ status: 'failed' });
     await render();
     expect(
-      element.querySelector('[data-testid="providers-kimi-login"]'),
+      document.querySelector('[data-testid="providers-kimi-login"]'),
     ).not.toBeNull();
     expect(
-      element.querySelector('[data-testid="providers-kimi-login-cancel"]'),
+      document.querySelector('[data-testid="providers-kimi-login-cancel"]'),
     ).toBeNull();
   });
   it('passes the Kimi Code sign-in progress to the wizard only for Kimi Code', async () => {
@@ -1371,7 +1373,7 @@ describe('ProvidersSettingsComponent', () => {
     // The wizard's block is the page's last @defer, and the only one with an @error.
     await blocks[blocks.length - 1].render(DeferBlockState.Error);
     fixture.detectChanges();
-    const alert = element.querySelector(
+    const alert = document.querySelector(
       '[data-testid="provider-wizard-load-error"]',
     );
     expect(alert?.getAttribute('role')).toBe('alert');
@@ -1379,13 +1381,13 @@ describe('ProvidersSettingsComponent', () => {
       'The setup wizard could not be loaded. Close this message and try again.',
     );
     (
-      element.querySelector(
+      document.querySelector(
         '[data-testid="provider-wizard-load-error-close"]',
       ) as HTMLButtonElement
     ).click();
     await render();
     expect(
-      element.querySelector('[data-testid="provider-wizard-load-error"]'),
+      document.querySelector('[data-testid="provider-wizard-load-error"]'),
     ).toBeNull();
     expect(consumed).toEqual(['second']);
   });
@@ -1406,11 +1408,11 @@ describe('ProvidersSettingsComponent', () => {
     expect(consumed).toEqual(['second']);
     wizard().closed.emit();
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     // Not reopened by an unrelated render.
     state.refresh();
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
   });
   it('keeps successful sections usable when another read fails and retries only that read', async () => {
     state.route.set({
@@ -1420,7 +1422,7 @@ describe('ProvidersSettingsComponent', () => {
     });
     await render();
     expect(
-      element.querySelectorAll('ptah-provider-connection-card'),
+      document.querySelectorAll('ptah-provider-connection-card'),
     ).toHaveLength(2);
     expect(isDisabledControl(button('Connect provider'))).toBe(false);
     // Batch 28: the route's failure and Retry live in the Main Agent node (its region), not in a page list.
@@ -1437,14 +1439,14 @@ describe('ProvidersSettingsComponent', () => {
     it('has no page title, no "Refresh settings" and no Reload (#21); the Main agent section comes before Connections', async () => {
       state.route.set(ready(route));
       await render();
-      expect(element.querySelector('h1')).toBeNull();
-      const labels = Array.from(element.querySelectorAll('button')).map(
+      expect(document.querySelector('h1')).toBeNull();
+      const labels = Array.from(document.querySelectorAll('button')).map(
         (node) => node.textContent?.trim() ?? '',
       );
       expect(labels).not.toContain('Refresh settings');
       expect(labels.some((label) => /reload/i.test(label))).toBe(false);
-      const main = element.querySelector('[data-testid="main-agent-section"]');
-      const heading = element.querySelector('#providers-connections-heading');
+      const main = document.querySelector('[data-testid="main-agent-section"]');
+      const heading = document.querySelector('#providers-connections-heading');
       expect(heading?.textContent?.trim()).toBe('Connections');
       expect(
         main &&
@@ -1452,7 +1454,7 @@ describe('ProvidersSettingsComponent', () => {
           main.compareDocumentPosition(heading) &
             Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
-      expect(element.querySelector('[data-read-loading]')).toBeNull();
+      expect(document.querySelector('[data-read-loading]')).toBeNull();
     });
     it('the header counts configured and catalog providers, and "Connect provider" starts setup', async () => {
       state.connections.set(
@@ -1474,7 +1476,7 @@ describe('ProvidersSettingsComponent', () => {
           ?.textContent?.replace(/\s+/g, ' ')
           .trim(),
       ).toBe('2 configured');
-      const connect = element.querySelector<HTMLButtonElement>(
+      const connect = document.querySelector<HTMLButtonElement>(
         '[data-testid="connect-provider"]',
       );
       expect(connect?.className).toContain('btn-primary');
@@ -1491,7 +1493,7 @@ describe('ProvidersSettingsComponent', () => {
         ]),
       );
       await render();
-      const input = element.querySelector<HTMLInputElement>(
+      const input = document.querySelector<HTMLInputElement>(
         '[data-testid="connections-filter"]',
       );
       if (!input) throw new Error('Missing filter');
@@ -1505,49 +1507,49 @@ describe('ProvidersSettingsComponent', () => {
       input.dispatchEvent(new Event('input'));
       await render();
       expect(
-        element.querySelectorAll('ptah-provider-connection-card'),
+        document.querySelectorAll('ptah-provider-connection-card'),
       ).toHaveLength(1);
       input.value = 'zzz';
       input.dispatchEvent(new Event('input'));
       await render();
       expect(
-        element.querySelectorAll('ptah-provider-connection-card'),
+        document.querySelectorAll('ptah-provider-connection-card'),
       ).toHaveLength(0);
       expect(
-        element.querySelector('[data-testid="connections-filter-empty"]')
+        document.querySelector('[data-testid="connections-filter-empty"]')
           ?.textContent,
       ).toContain('No connections match “zzz”.');
       button('Clear filter').click();
       await render();
       expect(
-        element.querySelectorAll('ptah-provider-connection-card'),
+        document.querySelectorAll('ptah-provider-connection-card'),
       ).toHaveLength(2);
     });
     it('the list uses a wide card grid and the catalog badge opens an accessible provider list', async () => {
       await render();
-      const grid = element.querySelector('[data-testid="connections-grid"]');
+      const grid = document.querySelector('[data-testid="connections-grid"]');
       expect(grid?.getAttribute('data-ptah-pattern')).toBe('card-grid');
       expect(grid?.getAttribute('data-variant')).toBe('wide');
       expect(grid?.className).toContain(
         'grid-cols-[repeat(auto-fill,minmax(min(var(--ptah-card-grid-min-wide),100%),1fr))]',
       );
       expect(grid?.className).toContain('items-start');
-      const hint = element.querySelector('[data-testid="catalog-hint"]');
+      const hint = document.querySelector('[data-testid="catalog-hint"]');
       expect(hint?.tagName).toBe('BUTTON');
       expect(hint?.getAttribute('aria-expanded')).toBe('false');
       expect(hint?.getAttribute('aria-haspopup')).toBe('dialog');
       expect(
-        element.querySelector('[data-testid="catalog-hint-text"]'),
+        document.querySelector('[data-testid="catalog-hint-text"]'),
       ).toBeNull();
       (hint as HTMLButtonElement).click();
       await render();
       expect(hint?.getAttribute('aria-expanded')).toBe('true');
       expect(
-        element.querySelector('[data-testid="catalog-hint-text"]')?.tagName,
+        document.querySelector('[data-testid="catalog-hint-text"]')?.tagName,
       ).toBe('UL');
       // The capped popover panel is the one vertical scroll owner (decision 32).
       expect(
-        element.querySelector('[data-testid="catalog-hint-text"]')?.className,
+        document.querySelector('[data-testid="catalog-hint-text"]')?.className,
       ).not.toMatch(/max-h-|overflow-y-auto/);
       hint?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -1561,7 +1563,7 @@ describe('ProvidersSettingsComponent', () => {
           ?.getAttribute('data-testid'),
       ).toBe('connect-provider');
       expect(
-        element.querySelector('[data-testid="connect-another-provider"]'),
+        document.querySelector('[data-testid="connect-another-provider"]'),
       ).toBeNull();
     });
     it('a failed read shows "Retry {label}" in its own region and retries only that read', async () => {
@@ -1576,11 +1578,11 @@ describe('ProvidersSettingsComponent', () => {
         error: 'Could not load this section. Retry.',
       });
       await render();
-      const region = element.querySelector('[data-testid="main-agent-region"]');
+      const region = document.querySelector('[data-testid="main-agent-region"]');
       expect(
         region?.querySelector('[data-read-error="scopes"]')?.textContent,
       ).toContain('Setting sources could not be loaded.');
-      const connections = element.querySelector(
+      const connections = document.querySelector(
         'section[aria-labelledby="providers-connections-heading"]',
       );
       const connectionsAlert = connections?.querySelector(
@@ -1615,16 +1617,16 @@ describe('ProvidersSettingsComponent', () => {
     fixture.componentRef.setInput('focusTarget', 'connections');
     await render();
     expect(document.activeElement).toBe(
-      element.querySelector('#providers-connections-heading'),
+      document.querySelector('#providers-connections-heading'),
     );
   });
   it('groups the Main agent and Connections without a panel, split by a hairline', async () => {
     await render();
-    const card = element.querySelector(
+    const card = document.querySelector(
       '[data-testid="providers-main-connections-card"]',
     );
     expect(card?.tagName.toLowerCase()).toBe('div');
-    expect(element.querySelectorAll('ptah-surface-section')).toHaveLength(0);
+    expect(document.querySelectorAll('ptah-surface-section')).toHaveLength(0);
     const main = card?.querySelector('[data-testid="main-agent-section"]');
     const connections = card?.querySelector(
       '[data-testid="providers-connections-card"]',
@@ -1651,22 +1653,43 @@ describe('ProvidersSettingsComponent', () => {
     });
     await render();
     expect(
-      element.querySelector('ptah-provider-consumer-assignments'),
+      document.querySelector('ptah-provider-consumer-assignments'),
     ).toBeNull();
-    expect(element.querySelector('ptah-cli-orchestration-matrix')).toBeNull();
+    expect(document.querySelector('ptah-cli-orchestration-matrix')).toBeNull();
     expect(
-      element.querySelector('[data-focus="background-models"]'),
+      document.querySelector('[data-focus="background-models"]'),
     ).toBeNull();
-    expect(element.querySelector('[data-read-error="cli-models"]')).toBeNull();
+    expect(document.querySelector('[data-read-error="cli-models"]')).toBeNull();
   });
   it('the more-providers route opens a blank wizard and returns focus to Connect provider', async () => {
+    const consumed = jest.fn(() => fixture.componentRef.setInput('focusTarget', null));
+    fixture.componentInstance.focusTargetConsumed.subscribe(consumed);
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
+    expect(consumed).toHaveBeenCalledTimes(1);
     expect(wizard().deepLinkProviderId()).toBe('');
     wizard().closed.emit();
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     expect(document.activeElement).toBe(button('Connect provider'));
+
+    fixture.componentRef.setInput('focusTarget', 'more-providers');
+    await render();
+    expect(wizard().deepLinkProviderId()).toBe('');
+    expect(consumed).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a key-backed Kimi Code connection when its CLI login is stale', () => {
+    const keyBacked: ProvidersConnection = {
+      ...connection('kimi-code'),
+      authMode: 'cli',
+      tokenStale: true,
+      credentialSource: 'api-key',
+    };
+    expect(settingsProviderConnections([keyBacked])).toEqual([keyBacked]);
+    expect(settingsProviderConnections([{ ...keyBacked, credentialSource: 'cli-login' }])).toEqual([]);
+    expect(settingsProviderConnections([{ ...keyBacked, keyUnreadable: true }])).toEqual([]);
+    expect(settingsProviderConnections([{ ...connection('keyless'), hasKey: false }])).toEqual([]);
   });
 
   it('opens the wizard directly from the header and restores focus on close', async () => {
@@ -1675,7 +1698,7 @@ describe('ProvidersSettingsComponent', () => {
     expect(wizard().deepLinkProviderId()).toBe('');
     wizard().closed.emit();
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     expect(document.activeElement).toBe(button('Connect provider'));
   });
 
@@ -1711,19 +1734,21 @@ describe('ProvidersSettingsComponent', () => {
     expect(state.refreshConnections).toHaveBeenCalledTimes(1);
     wizard().signInShortcut.emit('github-copilot');
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     expect(state.performExternalAuth).toHaveBeenLastCalledWith('github-copilot', 'sign-in');
     expect(announce).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(button('Connect provider'));
   });
 
-  it('explains the Connect provider gate in precedence order and opens after recovery', async () => {
+  it('keeps the wizard request pending through the Connect provider gates and opens after recovery', async () => {
     const loadedScopes = state.scopes();
     const loadedConnections = state.connections();
     const failed = { status: 'error', data: null, error: 'Read failed' } as const;
     state.commit.set({ ...idle, status: 'saving' });
     state.scopes.set(failed);
     state.connections.set(failed);
+    const consumed = jest.fn();
+    fixture.componentInstance.focusTargetConsumed.subscribe(consumed);
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
     const connect = button('Connect provider');
@@ -1731,13 +1756,14 @@ describe('ProvidersSettingsComponent', () => {
       expect(connect.disabled).toBe(false);
       expect(connect.getAttribute('aria-disabled')).toBe('true');
       const reasonId = connect.getAttribute('aria-describedby');
-      const text = element.querySelector('#' + reasonId)?.textContent?.replace(/\s+/g, ' ').trim();
+      const text = document.querySelector('#' + reasonId)?.textContent?.replace(/\s+/g, ' ').trim();
       expect(text).toBe(reason);
-      expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+      expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
+      expect(consumed).not.toHaveBeenCalled();
     };
     expect(document.activeElement).toBe(connect);
     expectBlocked('Providers could not be loaded. Your saved settings have not changed.');
-    expect(element.querySelector('[data-read-error="connections"] [role="alert"]')).not.toBeNull();
+    expect(document.querySelector('[data-read-error="connections"] [role="alert"]')).not.toBeNull();
     button('Retry providers').click();
     expect(state.refreshConnections).toHaveBeenCalledTimes(1);
 
@@ -1754,20 +1780,20 @@ describe('ProvidersSettingsComponent', () => {
     state.scopes.set(loadedScopes);
     await render();
     expectBlocked('Wait for the current save to finish.');
-    const filter = element.querySelector<HTMLInputElement>('[data-testid="connections-filter"]');
+    const filter = document.querySelector<HTMLInputElement>('[data-testid="connections-filter"]');
     filter?.focus();
     connect.click();
     await render();
     expect(document.activeElement).toBe(connect);
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
 
     state.commit.set(idle);
     await render();
     expect(connect.hasAttribute('aria-disabled')).toBe(false);
     expect(connect.hasAttribute('aria-describedby')).toBe(false);
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
-    await openWizard(connect);
+    expect(wizard().open()).toBe(true);
     expect(wizard().deepLinkProviderId()).toBe('');
+    expect(consumed).toHaveBeenCalledTimes(1);
   });
 
   it('passes the actual cancellation result and rejects missing verification results', async () => {
@@ -1812,7 +1838,7 @@ describe('ProvidersSettingsComponent', () => {
         'Not saved: Main agent. Not confirmed: Credential. Check the current values before retrying.',
     );
     expect(
-      element.querySelector('[data-testid="providers-commit-feedback"]'),
+      document.querySelector('[data-testid="providers-commit-feedback"]'),
     ).toBeNull();
     expect(element.textContent).not.toContain('private-draft-key');
   });
@@ -1845,7 +1871,7 @@ describe('ProvidersSettingsComponent', () => {
   it('m2: a connection saved through the wizard clears the filter, so the new card is never hidden by old filter text', async () => {
     state.route.set(ready(route));
     await render();
-    const input = element.querySelector<HTMLInputElement>(
+    const input = document.querySelector<HTMLInputElement>(
       '[data-testid="connections-filter"]',
     );
     if (!input) throw new Error('Missing filter');
@@ -1868,12 +1894,12 @@ describe('ProvidersSettingsComponent', () => {
     expect(wizard().commitState()).toBe('saved');
     expect(input.value).toBe('');
     expect(
-      element.querySelectorAll('ptah-provider-connection-card'),
+      document.querySelectorAll('ptah-provider-connection-card'),
     ).toHaveLength(3);
   });
   it('m2: a failed wizard save keeps the filter as typed', async () => {
     await render();
-    const input = element.querySelector<HTMLInputElement>(
+    const input = document.querySelector<HTMLInputElement>(
       '[data-testid="connections-filter"]',
     );
     if (!input) throw new Error('Missing filter');
@@ -1892,12 +1918,12 @@ describe('ProvidersSettingsComponent', () => {
     fixture.componentRef.setInput('focusTarget', 'connections');
     await render();
     expect(document.activeElement).toBe(
-      element.querySelector('[data-focus="connections"]'),
+      document.querySelector('[data-focus="connections"]'),
     );
     fixture.componentRef.setInput('focusTarget', 'more-providers');
     await render();
     expect(document.activeElement).toBe(
-      element.querySelector('[data-focus="more-providers"]'),
+      document.querySelector('[data-focus="more-providers"]'),
     );
   });
   it('cancels without committing and restores the invoking control', async () => {
@@ -1906,7 +1932,7 @@ describe('ProvidersSettingsComponent', () => {
     await openWizard(trigger);
     wizard().closed.emit();
     await render();
-    expect(element.querySelector('ptah-provider-setup-wizard')).toBeNull();
+    expect(document.querySelector('ptah-provider-setup-wizard')).toBeNull();
     expect(state.connectProvider).not.toHaveBeenCalled();
     expect(state.cancelVerification).toHaveBeenCalled();
     expect(document.activeElement).toBe(trigger);
@@ -1925,7 +1951,7 @@ describe('ProvidersSettingsComponent', () => {
   });
   describe('the card carries its own check (Batch 53, B38-1/B38-2)', () => {
     const card = (id: string) =>
-      element.querySelector<HTMLElement>(
+      document.querySelector<HTMLElement>(
         `ptah-provider-connection-card[data-connection-id="${id}"]`,
       );
     const failedSecond = {
@@ -2062,7 +2088,7 @@ describe('ProvidersSettingsComponent', () => {
     // Each card's details trigger covers the whole card (≥ 40px): the card is its target.
     const cardTrigger = (node: Element) =>
       node.getAttribute('data-testid') === 'provider-card-details-trigger';
-    const actions = Array.from(element.querySelectorAll('button'));
+    const actions = Array.from(document.querySelectorAll('button'));
     expect(actions.some((node) => cardAction(node) && !cardTrigger(node))).toBe(
       true,
     );
@@ -2152,24 +2178,16 @@ describe('ProvidersSettingsComponent deep links with the real wizard', () => {
     );
   }
   function selectedProvider(): string | null {
-    const radio = (
-      fixture.nativeElement as HTMLElement
-    ).querySelector<HTMLInputElement>('input[name="wizard-provider"]:checked');
+    const radio = document.querySelector<HTMLInputElement>('input[name="wizard-provider"]:checked');
     return radio?.value ?? null;
   }
   async function discardWizard() {
     const wizard = realWizard();
     if (!wizard) throw new Error('wizard not open');
     // Cancel with a draft (the selection) asks for review; confirm the discard.
-    (fixture.nativeElement as HTMLElement)
-      .querySelector<HTMLButtonElement>('[data-testid="wizard-cancel"]')
-      ?.click();
+    document.querySelector<HTMLButtonElement>('[data-testid="wizard-cancel"]')?.click();
     await render();
-    (fixture.nativeElement as HTMLElement)
-      .querySelector<HTMLButtonElement>(
-        '[data-testid="wizard-discard-confirm"]',
-      )
-      ?.click();
+    document.querySelector<HTMLButtonElement>('[data-testid="wizard-discard-confirm"]')?.click();
     await render();
   }
 
@@ -2357,7 +2375,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
       })
       .compileComponents();
     fixture = TestBed.createComponent(ProvidersSettingsComponent);
-    element = fixture.nativeElement as HTMLElement;
+    element = document.body;
     await render();
   }
   afterEach(() => {
@@ -2370,7 +2388,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
     fixture.detectChanges();
   }
   const card = (id: string) =>
-    element.querySelector(
+    document.querySelector(
       `ptah-provider-connection-card[data-connection-id="${id}"]`,
     );
   const badge = (id = 'claude-cli') =>
@@ -2451,7 +2469,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
     it('offers Connect Codex when its connection is missing', async () => {
       await setup(true);
       await requestDrawer(CODEX_REQUEST);
-      const connect = element.querySelector<HTMLButtonElement>(
+      const connect = document.querySelector<HTMLButtonElement>(
         '[data-testid="connect-codex"]',
       );
       expect(connect?.textContent).toContain('Connect Codex');
@@ -2538,7 +2556,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
     beforeEach(() => setup(true));
 
     it('P6-A10: the popover "Sign in" closes it and opens the Claude drawer on Accounts; a card open is on Overview again', async () => {
-      const reassign = element.querySelector<HTMLButtonElement>(
+      const reassign = document.querySelector<HTMLButtonElement>(
         '[data-testid="routing-node-main-agent"] [data-testid="routing-node-action"]',
       );
       reassign?.focus();
@@ -2564,7 +2582,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
     });
 
     it('no longer mounts the old Accounts section on the page', () => {
-      expect(element.querySelector('ptah-accounts-section')).toBeNull();
+      expect(document.querySelector('ptah-accounts-section')).toBeNull();
     });
 
     it('reads the account list once and the cached ambient status (no forced probe) when the page shows', () => {
@@ -2579,7 +2597,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
       expect(badgeText()).toBe('3 connected');
       expect(badge('first')).toBeNull();
       expect(
-        element.querySelectorAll('[data-testid="connected-accounts-badge"]'),
+        document.querySelectorAll('[data-testid="connected-accounts-badge"]'),
       ).toHaveLength(1);
       expect(card('claude-cli')?.textContent).not.toContain('Account p-');
     });
@@ -2657,7 +2675,7 @@ describe('ProvidersSettingsComponent named Claude accounts (P5 F5, D41)', () => 
 
       await closeDrawerFromFooter();
       expect(
-        element.querySelector('[data-testid="connection-detail-drawer"]'),
+        document.querySelector('[data-testid="connection-detail-drawer"]'),
       ).toBeNull();
       expect(accounts.refresh).toHaveBeenCalledTimes(1);
       expect(accounts.refresh).toHaveBeenCalledWith('claude');

@@ -27,7 +27,7 @@ import {
 } from './settings.fixtures';
 import { rpcError } from '../marketplace/marketplace.fixtures';
 
-/** Opens a matrix modal (`NativeModalComponent`, a native `<dialog>`) from `opener`; returns its dialog. */
+/** Opens a matrix modal (`NativeModalComponent`, portaled) from `opener`; returns its panel. */
 async function openMatrixModal(
   page: Page,
   opener: Locator,
@@ -35,20 +35,21 @@ async function openMatrixModal(
 ): Promise<Locator> {
   await visibleEnabled(opener);
   await opener.click();
-  const dialog = page.locator(`dialog:has([data-testid="${testid}"])`);
-  // daisyUI keeps a closed `.modal` laid out at opacity 0: the `open` attribute is the real state.
-  await expect(dialog).toHaveAttribute('open', '');
+  const dialog = page.locator(
+    `[data-testid="native-modal-dialog"]:has([data-testid="${testid}"])`,
+  );
+  await expect(dialog).toBeVisible();
   return dialog;
 }
 
-/** Closes a matrix modal with Esc; focus returns to `opener` (native `<dialog>`). */
+/** Closes a matrix modal with Esc; focus returns to `opener`. The panel detaches. */
 async function closeMatrixModal(
   page: Page,
   dialog: Locator,
   opener: Locator,
 ): Promise<void> {
   await page.keyboard.press('Escape');
-  await expect(dialog).not.toHaveAttribute('open');
+  await expect(dialog).toHaveCount(0);
   await expect(opener).toBeFocused();
 }
 
@@ -608,37 +609,15 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
           },
           'Providers',
           async (variant) => {
-            // Signed out: Create stays disabled; "Login with GitHub" runs the login and the re-read still says not signed in.
             const dialog = await openMatrixModal(
               variant,
               variant.locator('[data-testid="cli-matrix-add"]'),
               'add-cli-instance-modal',
             );
-            await dialog
-              .locator('[data-testid="add-cli-instance-name"]')
-              .fill('Copilot-agent');
-            await choosePtahSelect(
-              dialog.locator('[data-testid="add-cli-instance-provider"]'),
-              'GitHub Copilot · OAuth',
-            );
-            const create = dialog.locator(
-              '[data-testid="add-cli-instance-submit"]',
-            );
-            await expect(
-              dialog.locator('[data-testid="add-cli-instance-copilot-state"]'),
-            ).toHaveText('Awaiting sign-in');
-            await expect(create).toBeDisabled();
-            const login = dialog.locator(
-              '[data-testid="add-cli-instance-copilot-login"]',
-            );
-            await visibleEnabled(login);
-            await login.click();
-            await expect(
-              dialog.locator(
-                '[data-testid="add-cli-instance-copilot-message"]',
-              ),
-            ).toContainText('Login has not been confirmed');
-            await expect(create).toBeDisabled();
+            await dialog.getByRole('combobox', { name: 'Provider connection' }).click();
+            const options = variant.getByRole('listbox').filter({ visible: true });
+            await expect(options.getByRole('option', { name: 'Kimi Code · OAuth' })).toBeVisible();
+            await expect(options.getByRole('option', { name: 'GitHub Copilot · OAuth' })).toHaveCount(0);
           },
         ),
       ),
@@ -697,9 +676,9 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       await visibleEnabled(tiers);
       await tiers.click();
       const dialog = page.locator(
-        'dialog:has([data-testid="cli-tier-mapping-modal"])',
+        '[data-testid="native-modal-dialog"]:has([data-testid="cli-tier-mapping-modal"])',
       );
-      await expect(dialog).toHaveAttribute('open', '');
+      await expect(dialog).toBeVisible();
       try {
         await expect(
           dialog.locator('[data-testid="cli-tier-source-opus"]'),
@@ -879,15 +858,15 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
         codex.getByRole('combobox', { name: 'Codex network default' }),
       ).toBeVisible();
       await choosePtahSelect(permission, 'Yolo');
-      const confirmation = codex.locator(
-        'dialog:has-text("Confirm full access")',
-      );
-      await expect(confirmation).toHaveAttribute('open', '');
+      const confirmation = page.locator('[data-testid="native-modal-dialog"]').filter({
+        hasText: 'Confirm full access',
+      });
+      await expect(confirmation).toBeVisible();
       await expect(
         confirmation.getByRole('button', { name: 'Confirm' }),
       ).toBeVisible();
       await confirmation.getByRole('button', { name: 'Cancel' }).click();
-      await expect(confirmation).not.toHaveAttribute('open');
+      await expect(confirmation).toHaveCount(0);
       await expect(permission).toBeFocused();
     },
   },

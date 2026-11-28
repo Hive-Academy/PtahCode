@@ -36,6 +36,7 @@ import {
   MainAgentScopeBadgesComponent,
   type MainAgentScopeField,
 } from './main-agent-scope-badges.component';
+import { settingsProviderConnections } from './provider-connection-options';
 import { ProviderConnectionCardComponent } from './provider-connection-card.component';
 import {
   applyRecordedCheck,
@@ -653,6 +654,7 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   /** Emitted once the wizard was opened for {@link requestedProviderId}. */
   readonly requestedProviderConsumed = output<string>();
   readonly focusTarget = input<ProvidersSettingsFocusTarget | null>(null);
+  readonly focusTargetConsumed = output<void>();
   /** Opens the requested connection drawer once the connection list is ready (Electron only: Accounts is D34). */
   readonly requestedDrawer = input<ProvidersSettingsDrawerRequest | null>(null);
   readonly requestedDrawerConsumed = output<void>();
@@ -907,18 +909,12 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   });
   protected readonly connections = computed(() => {
     const selected = this.state.route().data?.driverProviderId;
-    const unique = new Map(
-      (this.state.connections().data ?? []).map((entry) => [entry.id, entry]),
-    );
-    // TASK_2026_719 P5 F3: Accounts live only in the Claude (Subscription) drawer, so where accounts exist its card
-    // stays on the page even without an installed CLI, keeping Manage → Accounts reachable.
-    return [...unique.values()]
-      .filter(
-        (entry) =>
-          entry.configured ||
-          entry.id === selected ||
-          (this.accountsAvailable && this.isClaudeCli(entry)),
-      )
+    return settingsProviderConnections(
+      this.state.connections().data ?? [],
+      (entry) =>
+        entry.id === selected ||
+        (this.accountsAvailable && this.isClaudeCli(entry)),
+    )
       .sort(
         (left, right) =>
           Number(right.id === this.activeId()) -
@@ -1227,8 +1223,16 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         return;
       }
       if (target === 'more-providers') {
-        this.focusedTarget = target;
-        untracked(() => this.openWizard(''));
+        if (this.wizardOpen()) return;
+        if (!this.canStartSetup()) {
+          untracked(() => this.focusConnectProvider());
+          return;
+        }
+        untracked(() => {
+          if (!this.openWizard('')) return;
+          this.focusedTarget = target;
+          this.focusTargetConsumed.emit();
+        });
         return;
       }
       const node = this.element.nativeElement.querySelector<HTMLElement>(
@@ -1450,9 +1454,9 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     if (this.drawerOpener?.isConnected) this.drawerOpener.focus();
     this.openWizard(providerId);
   }
-  protected openWizard(providerId: string): void {
+  protected openWizard(providerId: string): boolean {
     if (!providerId) this.focusConnectProvider();
-    if (!this.canStartSetup() || this.wizardOpen()) return;
+    if (!this.canStartSetup() || this.wizardOpen()) return false;
     this.wizardContext.set(this.state.reviewContext());
     this.returnFocus = this.element.nativeElement.ownerDocument
       .activeElement as HTMLElement | null;
@@ -1460,6 +1464,7 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.wizardSession.update((session) => session + 1);
     this.wizardCommitState.set('idle');
     this.wizardOpen.set(true);
+    return true;
   }
   readonly verifyDraftConnection = async (
     params: AuthVerifyDraftConnectionParams,

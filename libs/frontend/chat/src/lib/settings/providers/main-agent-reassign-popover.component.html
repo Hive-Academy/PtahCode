@@ -18,7 +18,7 @@
     content
     role="dialog"
     aria-labelledby="main-agent-popover-title"
-    class="flex w-[21rem] max-w-[calc(100vw-2rem)] flex-col overflow-y-auto text-xs"
+    class="flex w-[21rem] min-w-0 max-w-[calc(100vw-2rem)] flex-col overflow-y-auto text-xs [overflow-wrap:anywhere]"
     [style.max-height.px]="maxHeight()"
     data-testid="main-agent-popover"
   >

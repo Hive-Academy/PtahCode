@@ -1,11 +1,11 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
   inject,
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import type {
   OperatorSettings,
@@ -76,7 +76,7 @@ export class ReviewSettingsDrawerComponent {
   protected readonly SendIcon = Send;
   protected readonly PauseIcon = Pause;
   protected readonly SaveIcon = Save;
-  private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly drawer = viewChild.required(NativeDrawerComponent);
   readonly store = inject(ReviewRunsStore);
   readonly confirmation = signal<
     'pause-off' | 'live-enable' | 'remove-token' | 'replace-token' | null
@@ -213,7 +213,7 @@ export class ReviewSettingsDrawerComponent {
   confirmReplaceToken(): void {
     this.confirmation.set(null);
     const input =
-      this.element.nativeElement.querySelector<HTMLInputElement>(
+      this.drawer().panel()?.nativeElement.querySelector<HTMLInputElement>(
         '#review-bot-token',
       );
     if (input) void this.writeToken(input);
@@ -259,7 +259,7 @@ export class ReviewSettingsDrawerComponent {
   }
   /** Runs on the native drawer's `opened`, after it moved focus into the panel (parity: title focus). */
   focusTitle(): void {
-    this.element.nativeElement
+    this.drawer().panel()?.nativeElement
       .querySelector<HTMLElement>('#review-settings-title')
       ?.focus();
   }

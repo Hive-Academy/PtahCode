@@ -4,13 +4,16 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  afterRenderEffect,
   computed,
   effect,
   inject,
   input,
   output,
   signal,
+  untracked,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import {
   AlertTriangle,
@@ -34,7 +37,9 @@ import {
   type ProviderModelSelection,
 } from '@ptah-extension/ui';
 import {
+  AppStateManager,
   ProvidersSettingsStateService,
+  WorkspaceScopeService,
   type ProvidersEditContext,
   type ProvidersSettingsPatch,
 } from '@ptah-extension/core';
@@ -51,12 +56,14 @@ import {
   buildConsumerRows,
   consumerPatch,
   formatProviderDisplayName,
+  inheritedConsumerProvider,
   providerReadiness,
   setupModelIssue,
   type ProviderConsumerId,
   type BackgroundConsumerRow,
   type SettingsPatchConsumerId,
 } from './provider-consumer-rows';
+import { settingsProviderConnections } from './provider-connection-options';
 import { DecisionModelRowComponent } from './decision-model-row.component';
 import { DRAWER_WRITE_NO_CONTEXT } from './connection-drawer/drawer-write';
 const FOCUS =
@@ -186,7 +193,6 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   placement="bottom-start"
                   [hasBackdrop]="true"
                   backdropClass="transparent"
-                  [capToViewport]="false"
                   (opened)="onPopoverOpened(row.id)"
                   (closed)="cancelEdit()"
                 >
@@ -212,7 +218,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       [providerId]="
                         row.id === 'setup'
                           ? setupDisplayProvider()
-                          : row.provider || state.route().data?.driverProviderId || ''
+                           : row.fallbackProvider?.id || row.provider || inheritedProvider()?.id || ''
                       "
                       fallback="Bot"
                       size="sm"
@@ -234,10 +240,10 @@ const TIMEOUT_DEFAULT_SEC = 120;
                       content
                       role="dialog"
                       [attr.aria-label]="'Reassign ' + row.name"
-                      class="relative w-[27rem] max-w-[calc(100vw-2rem)] space-y-2 whitespace-normal p-2 text-left text-xs"
+                      class="relative w-[27rem] max-w-[calc(100vw-2rem)] space-y-2 whitespace-normal text-left text-xs [overflow-wrap:anywhere]"
                       [attr.data-testid]="'consumer-editor-' + row.id"
                     >
-                      <span class="absolute right-3 top-3 z-10">
+                      <span class="absolute right-2 top-1 z-10">
                         <button
                           type="button"
                           ptahIconButton
@@ -252,13 +258,23 @@ const TIMEOUT_DEFAULT_SEC = 120;
                           />
                         </button>
                       </span>
+                      @let fallback = currentDraft().provider === row.provider ? row.fallbackProvider : null;
+                      @if (fallback) {
+                        <p role="status" class="px-[var(--ptah-space-2)] text-base-content-muted" data-testid="saved-provider-fallback">
+                          The saved {{ providerName(row.provider) }} override is unavailable.
+                          Memory curation uses {{ fallback.name }} until the override is available.
+                        </p>
+                      }
                       <ptah-provider-model-picker
                         [label]="row.name"
                         [provider]="currentDraft().provider"
                         [model]="currentDraft().model"
+                        [inheritedProvider]="row.id === 'setup' ? null : inheritedProvider()"
+                        [savedProviderFallback]="fallback?.id ?? ''"
                         [defaultTier]="row.defaultTier"
+                        [richSelect]="true"
                         [requiresToolUse]="row.requiresToolUse"
-                        [extraProviders]="extraProviders()"
+                        [connectedProviders]="extraProviders()"
                         [excludedProviders]="row.unsupportedProviders"
                         [disabled]="
                           row.id === 'setup'
@@ -268,7 +284,16 @@ const TIMEOUT_DEFAULT_SEC = 120;
                         (selectionChange)="onDraftChange(row.id, $event)"
                         [attr.data-testid]="'picker-' + row.id"
                       />
-                      @if (draftProviderReadiness(); as readiness) {
+                      @if (state.connections().status === 'ready' && !extraProviders().length) {
+                        <p role="status">No providers connected.</p>
+                        <button type="button" ptahButton variant="link" size="sm" (click)="connectProvider()">
+                          Connect a provider
+                        </button>
+                      }
+                      @if (row.id !== 'setup' && !currentDraft().provider && state.route().status === 'loading') {
+                        <p role="status" class="px-[var(--ptah-space-2)] text-base-content-muted">Resolving the active provider…</p>
+                      }
+                      @if (!fallback && draftProviderReadiness(); as readiness) {
                         <div
                           class="flex flex-wrap items-center gap-1.5 rounded border border-base-content/10 p-2"
                           [attr.role]="readiness.blocking ? 'alert' : 'status'"
@@ -671,7 +696,9 @@ const TIMEOUT_DEFAULT_SEC = 120;
 })
 export class ProviderConsumerAssignmentsComponent {
   protected readonly state = inject(ProvidersSettingsStateService);
+  private readonly appState = inject(AppStateManager);
   private readonly feedback = inject(SettingsSaveFeedbackService);
+  private readonly workspace = inject(WorkspaceScopeService);
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
   protected readonly AlertTriangleIcon = AlertTriangle;
@@ -703,10 +730,34 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly timeoutDraftSec = signal<number>(0);
   private readonly timeoutInputRef =
     viewChild<ElementRef<HTMLInputElement>>('timeoutInput');
+  private readonly popovers = viewChildren(NativePopoverComponent);
+  private readonly pickers = viewChildren(ProviderModelPickerComponent);
+  private readonly openPopover = computed(() =>
+    this.popovers().find((popover) => popover.isOpen()),
+  );
   private appliedDeepLinkId: ProviderConsumerId | null = null;
-  private setupFocusTarget: 'cell' | 'provider' | 'model' | null = null;
+  private readonly setupFocusTarget = signal<'cell' | 'provider' | 'model' | null>(null);
   private context: ProvidersEditContext | null = null;
+  private editScopeKey: string | null = null;
   constructor() {
+    effect(() => {
+      const scopeKey = this.workspace.scopeKey();
+      if (this.activeEditId() && this.editScopeKey !== scopeKey)
+        untracked(() => this.cancelEdit());
+    });
+    effect((onCleanup) => {
+      const popover = this.openPopover();
+      const panel = popover?.panel()?.nativeElement;
+      if (!panel || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => popover.reposition());
+      observer.observe(panel);
+      onCleanup(() => observer.disconnect());
+    });
+    afterRenderEffect(() => {
+      // NativePopoverComponent focuses its panel before it emits `opened`.
+      // Cell focus belongs to that event; only field focus needs later retries.
+      if (this.setupFocusTarget() !== 'cell') this.focusSetupTarget();
+    });
     // Deep link stays reactive: a later input change still opens the popover.
     // Each new value applies once, so a user cancel is not fought.
     effect(() => {
@@ -725,7 +776,7 @@ export class ProviderConsumerAssignmentsComponent {
           return;
         this.appliedDeepLinkId = deepLinkId;
         if (deepLinkId === 'setup') {
-          this.setupFocusTarget = 'cell';
+          this.setupFocusTarget.set('cell');
           if (this.activeEditId() === 'setup') {
             afterNextRender(() => this.onPopoverOpened('setup'), {
               injector: this.injector,
@@ -744,9 +795,9 @@ export class ProviderConsumerAssignmentsComponent {
   protected readonly extraProviders = computed<
     readonly ProviderIdentityOption[]
   >(() =>
-    (this.state.route().data?.providers ?? []).map((p) => ({
-      id: p.id,
-      name: formatProviderDisplayName(p.id),
+    settingsProviderConnections(this.state.connections().data ?? []).map((connection) => ({
+      id: connection.id,
+      name: connection.name,
     })),
   );
   protected readonly timeoutMeta = computed(
@@ -793,12 +844,23 @@ export class ProviderConsumerAssignmentsComponent {
         memory: this.state.memory(),
         enhancement: this.state.enhancement(),
       },
-      this.state.route().data,
+      this.effectiveRoute(),
       (key) => this.state.scopeEntry(key),
     ),
   );
+  private readonly effectiveRoute = computed(() => {
+    const { status, data } = this.state.route();
+    return status === 'ready' && data?.ready && data.route !== 'unresolved'
+      ? data
+      : null;
+  });
+  protected readonly inheritedProvider = computed(() =>
+    inheritedConsumerProvider(this.effectiveRoute()),
+  );
   protected readonly draftProviderReadiness = computed(() => {
     const row = this.rows().find((r) => r.id === this.activeEditId());
+    if (!this.currentDraft().provider && this.state.route().status === 'loading')
+      return null;
     return row && row.id !== 'setup' ? this.readinessFor(row) : null;
   });
   private readonly setupState = computed(
@@ -824,10 +886,12 @@ export class ProviderConsumerAssignmentsComponent {
   );
   private readinessFor(row: BackgroundConsumerRow) {
     const route = this.state.route().data;
+    const provider = this.currentDraft().provider;
+    const inheritedId = this.inheritedProvider()?.id;
     return providerReadiness(
-      this.currentDraft().provider,
+      provider || (inheritedId && row.unsupportedProviders.includes(inheritedId) ? inheritedId : ''),
       route?.providers ?? [],
-      route?.route !== 'unresolved' && !!route?.driverProviderId,
+      !!inheritedId,
       row.unsupportedProviders,
     );
   }
@@ -842,13 +906,14 @@ export class ProviderConsumerAssignmentsComponent {
     if (!row || !row.loaded || this.busy()) return;
     if (this.activeEditId() === 'setup') this.state.clearSetupDraftFeedback();
     this.context = this.state.reviewContext();
+    this.editScopeKey = this.workspace.scopeKey();
     this.currentDraft.set({ provider: row.provider, model: row.model });
     this.activeEditId.set(id);
   }
   protected cancelEdit(): void {
     const id = this.activeEditId();
     if (id === 'setup') this.state.clearSetupDraftFeedback();
-    this.setupFocusTarget = null;
+    this.setupFocusTarget.set(null);
     this.activeEditId.set(null);
     if (!id) return;
     afterNextRender(
@@ -870,23 +935,49 @@ export class ProviderConsumerAssignmentsComponent {
     });
     if (id !== 'setup') void this.saveDraft(id);
   }
+  protected connectProvider(): void {
+    this.cancelEdit();
+    this.appState.requestSettingsTab({ tab: 'providers', section: 'more-providers' });
+  }
+
   protected onSetupProvider(providerId: string): void {
     this.setupProviderRequested.emit(providerId);
   }
   protected chooseSetupPart(part: 'provider' | 'model'): void {
-    this.setupFocusTarget = part;
+    this.setupFocusTarget.set(part);
     if (this.activeEditId() !== 'setup') this.toggleEdit('setup');
     else this.onPopoverOpened('setup');
   }
   protected onPopoverOpened(id: ProviderConsumerId): void {
-    const target = this.setupFocusTarget;
-    if (id !== 'setup' || !target || this.activeEditId() !== 'setup') return;
-    this.setupFocusTarget = null;
-    const selector =
-      target === 'cell'
-        ? '[data-testid="consumer-edit-setup"]'
-        : `[data-testid="picker-setup"] [data-testid="provider-model-picker-${target}"]`;
-    this.element.nativeElement.querySelector<HTMLElement>(selector)?.focus();
+    if (id === 'setup') this.focusSetupTarget();
+  }
+  private focusSetupTarget(): void {
+    const target = this.setupFocusTarget();
+    const panel = this.openPopover()?.panel()?.nativeElement;
+    if (!target || this.activeEditId() !== 'setup' || !panel) return;
+    if (target === 'cell') {
+      const control = this.element.nativeElement.querySelector<HTMLElement>(
+        '[data-testid="consumer-edit-setup"]',
+      );
+      control?.focus();
+      if (control && document.activeElement === control) {
+        this.setupFocusTarget.set(null);
+      }
+      return;
+    }
+    const picker = this.pickers().at(0);
+    if (!picker || (target === 'model' && picker.modelsLoading())) return;
+    const control = panel.querySelector<HTMLElement>(
+      `[data-testid="provider-model-picker-${target}"] [role="combobox"]`,
+    );
+    if (
+      !control ||
+      control.matches(':disabled') ||
+      control.getAttribute('aria-disabled') === 'true'
+    )
+      return;
+    control.focus();
+    if (document.activeElement === control) this.setupFocusTarget.set(null);
   }
   protected saveSetupDraft(): void {
     if (this.setupDraftComplete()) void this.commitSetup(this.currentDraft());
@@ -911,7 +1002,8 @@ export class ProviderConsumerAssignmentsComponent {
     this.assignmentSaving.set(true);
     let savedAssignment = false;
     try {
-      while (!this.disabled()) {
+      const scopeKey = this.editScopeKey;
+      while (!this.disabled() && this.activeEditId() === id && this.workspace.scopeKey() === scopeKey) {
         // Each write (and its Undo) starts from the latest refreshed row.
         const row = this.rows().find((r) => r.id === id);
         if (!row) return;

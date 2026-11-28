@@ -2,13 +2,15 @@
 
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import { signal } from '@angular/core';
-import { By } from '@angular/platform-browser';
-import { NativePopoverComponent, PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import { getDebugNode, signal } from '@angular/core';
+import { OverlayContainer } from '@angular/cdk/overlay';
+import { PROVIDER_MODELS_LOADER, PtahRichSelectComponent } from '@ptah-extension/ui';
 import { rpcSuccess } from '@ptah-extension/core/testing';
 import {
   ClaudeRpcService,
   ProvidersSettingsStateService,
+  type ProvidersConnection,
+  WorkspaceScopeService,
   type ProvidersEditContext,
   type ProvidersEffectiveRoute,
   type ProvidersSettingsCommit,
@@ -43,6 +45,24 @@ import {
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 class MockProvidersSettingsStateService {
+  readonly connections = signal<ProvidersSettingsSection<readonly ProvidersConnection[]>>({
+    status: 'ready',
+    data: ([
+      { id: 'anthropic', name: 'Claude API', authMode: 'apiKey', hasKey: true },
+      { id: 'ollama', name: 'Ollama', authMode: 'local-native', hasKey: false },
+      { id: 'claude-cli', name: 'Claude (Subscription)', authMode: 'cli', hasKey: false },
+      { id: 'openai-codex', name: 'OpenAI Codex', authMode: 'oauth', hasKey: false },
+      { id: 'kimi-code', name: 'Kimi Code', authMode: 'oauth', hasKey: false },
+    ] satisfies Pick<ProvidersConnection, 'id' | 'name' | 'authMode' | 'hasKey'>[]).map((connection) => ({
+      ...connection,
+      configured: true,
+      custom: false,
+      defaultsResolvable: true,
+      accountLabel: null,
+      tokenStale: false,
+    })),
+    error: null,
+  });
   readonly workspacePair = { provider: 'anthropic', model: 'claude-3-5-sonnet' };
   readonly setupModel = signal<ProvidersSettingsSection<ProvidersSetupRowState>>({
     status: 'ready',
@@ -248,7 +268,9 @@ function query(
   fixture: ComponentFixture<unknown>,
   testId: string,
 ): HTMLElement | null {
-  return fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+  const selector = `[data-testid="${testId}"]`;
+  return fixture.nativeElement.querySelector(selector)
+    ?? TestBed.inject(OverlayContainer).getContainerElement().querySelector(selector);
 }
 
 function button(
@@ -283,18 +305,27 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     button(fixture, `consumer-edit-${id}`)?.click();
     await settle();
   }
-  const providerSelect = (id: BackgroundConsumerId) =>
-    query(fixture, `picker-${id}`)?.querySelector(
-      '[data-testid="provider-model-picker-provider"]',
-    ) as HTMLSelectElement;
-  const modelSelect = (id: BackgroundConsumerId) =>
-    query(fixture, `picker-${id}`)?.querySelector(
-      '[data-testid="provider-model-picker-model"]',
-    ) as HTMLSelectElement;
-  /**
-   * A picker choice, as the user makes it; the popover saves on it. Microtasks only: a saved choice starts the
-   * toast's dismiss timer, which `whenStable()` would wait out.
-   */
+  const pickerSelect = (id: BackgroundConsumerId, field: 'provider' | 'model') => {
+    const select = query(fixture, `picker-${id}`)?.querySelector<HTMLElement>(
+      `[data-testid="provider-model-picker-${field}"]`,
+    );
+    if (!select) throw new Error(`Missing ${id} ${field} picker`);
+    return select;
+  };
+  const providerSelect = (id: BackgroundConsumerId) => pickerSelect(id, 'provider');
+  const modelSelect = (id: BackgroundConsumerId) => pickerSelect(id, 'model');
+  const selectControl = (select: HTMLElement) => {
+    const node = getDebugNode(select);
+    if (!node) throw new Error('Missing picker debug node');
+    return node.injector.get(PtahRichSelectComponent) as PtahRichSelectComponent<string>;
+  };
+  const selectValue = (select: HTMLElement) => selectControl(select).value();
+  const options = (select: HTMLElement) => selectControl(select).options();
+  const trigger = (select: HTMLElement) => {
+    const combobox = select.querySelector<HTMLButtonElement>('[role="combobox"]');
+    if (!combobox) throw new Error('Missing combobox');
+    return combobox;
+  };
   /** Microtasks only (a save starts the toast's dismiss timer, which `whenStable()` would wait out). */
   async function flushSave(): Promise<void> {
     for (let i = 0; i < 3; i += 1) {
@@ -316,16 +347,19 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     return input;
   }
   async function choose(
-    select: HTMLSelectElement,
+    select: HTMLElement,
     value: string,
   ): Promise<void> {
-    select.value = value;
-    select.dispatchEvent(new Event('change'));
-    for (let i = 0; i < 3; i += 1) {
-      fixture.detectChanges();
-      for (let j = 0; j < 8; j += 1) await Promise.resolve();
-    }
+    const label = options(select).find((option) => option.value === value)?.label;
+    const control = trigger(select);
+    control.click();
     fixture.detectChanges();
+    const list = document.getElementById(control.getAttribute('aria-controls') ?? '');
+    const option = Array.from(list?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])
+      .find((entry) => entry.textContent?.trim() === label);
+    if (!option) throw new Error(`Missing option ${value}`);
+    option.click();
+    await flushSave();
   }
   beforeEach(async () => {
     mockState = new MockProvidersSettingsStateService();
@@ -371,6 +405,23 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     fixture.detectChanges();
   });
 
+  it('offers connected providers and keeps a disconnected saved assignment visible', async () => {
+    mockState.memoryStore.set({
+      status: 'ready',
+      data: { curatorProvider: 'openrouter', curatorModel: 'saved-model' },
+      error: null,
+    });
+    fixture.detectChanges();
+    await openRow('memory-curator');
+    const select = providerSelect('memory-curator');
+    expect(selectValue(select)).toBe('openrouter');
+    expect(options(select)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 'anthropic', label: 'Claude API' }),
+      expect.objectContaining({ value: 'openrouter', label: 'OpenRouter (unavailable)' }),
+    ]));
+    expect(options(select).some(({ value }) => value === 'requesty')).toBe(false);
+  });
+
   it('renders Setup first, followed by the other consumer rows and the decision model', async () => {
     await settle();
     const table = query(fixture, 'consumer-table');
@@ -390,11 +441,6 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     await settle();
     expect(query(fixture, 'picker-setup')).toBeNull();
     mockState.publishSetup(null);
-    fixture.detectChanges();
-    const popover = fixture.debugElement
-      .query(By.css('[data-testid="consumer-row-setup"] ptah-native-popover'))
-      .injector.get(NativePopoverComponent);
-    await new Promise<void>((resolve) => popover.opened.subscribe(resolve));
     await settle();
     expect(opened).toHaveBeenCalledTimes(1);
     expect(opened).toHaveBeenCalledWith('setup');
@@ -403,11 +449,31 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     expect(document.activeElement?.getAttribute('data-testid')).toBe('consumer-edit-setup');
   });
 
+  it('focuses the model picker in the attached Setup recovery panel', async () => {
+    mockState.setupModel.set({
+      status: 'ready',
+      data: {
+        state: { kind: 'invalid', source: 'setup', cause: 'model-missing', provider: 'anthropic', model: null },
+        committed: { provider: 'anthropic', model: '' },
+        commitSeq: 0,
+      },
+      error: null,
+    });
+    await settle();
+    const recovery = Array.from(
+      query(fixture, 'consumer-row-setup')?.querySelectorAll('button') ?? [],
+    ).find((entry) => entry.textContent?.trim() === 'Choose a model');
+    if (!recovery) throw new Error('Missing Setup model recovery action');
+    recovery.click();
+    await settle();
+    expect(document.activeElement).toBe(trigger(modelSelect('setup')));
+  });
+
   it('keeps provider and model choices local until Save, then shows the receipt and can Undo to Unset', async () => {
     const originalCalls = mockRpc.call.mock.calls.length;
     await openRow('setup');
     expect(button(fixture, 'setup-save')?.disabled).toBe(true);
-    expect([...providerSelect('setup').options].map((option) => option.value))
+    expect(options(providerSelect('setup')).map((option) => option.value))
       .not.toContain('openai-codex');
     await choose(providerSelect('setup'), 'anthropic');
     expect(mockState.commitSetupPair).not.toHaveBeenCalled();
@@ -431,7 +497,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     expect(mockState.commitSetupPair).toHaveBeenCalledTimes(1);
     expect(query(fixture, 'consumer-summary-setup')?.textContent).toContain('Workspace model: anthropic / claude-3-5-sonnet');
     await openRow('setup');
-    expect(providerSelect('setup').value).toBe('');
+    expect(selectValue(providerSelect('setup'))).toBe('');
   });
 
   it('blocks reopening Setup until a pending save settles and then applies the deep link', async () => {
@@ -528,7 +594,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     expect(query(fixture, 'setup-commit-feedback')?.getAttribute('role')).toBe('alert');
     expect(query(fixture, 'setup-commit-feedback')?.textContent).toContain(message);
     expect(query(fixture, 'consumer-tier-setup')?.textContent).toContain('Following workspace');
-    expect(modelSelect('setup').value).toBe('claude-3-5-haiku');
+    expect(selectValue(modelSelect('setup'))).toBe('claude-3-5-haiku');
     button(fixture, 'consumer-close-setup')?.click();
     await settle();
     expect(query(fixture, 'setup-commit-feedback')).toBeNull();
@@ -578,7 +644,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
       error: null,
     });
     await openRow('enhancement');
-    expect(modelSelect('enhancement').value).toBe('');
+    expect(selectValue(modelSelect('enhancement'))).toBe('');
     await choose(modelSelect('enhancement'), 'claude-3-5-sonnet');
     expect(mockState.saveSettings).toHaveBeenCalledWith(
       { enhancement: { provider: 'anthropic', model: 'claude-3-5-sonnet' } },
@@ -595,7 +661,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
 
     expect(reviewContext).toHaveBeenCalledTimes(2);
     expect(mockState.saveSettings).not.toHaveBeenCalled();
-    expect(providerSelect('enhancement').value).toBe('');
+    expect(selectValue(providerSelect('enhancement'))).toBe('');
     expect(feedback.toast()).toMatchObject({
       tone: 'alert',
       message: expect.stringContaining('Could not save'),
@@ -627,11 +693,11 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     await openRow('enhancement');
     await choose(providerSelect('enhancement'), 'anthropic');
     expect(feedback.saving()).toBe(true);
-    expect(isDisabledControl(modelSelect('enhancement'))).toBe(false);
+    expect(isDisabledControl(trigger(modelSelect('enhancement')))).toBe(false);
 
     await choose(modelSelect('enhancement'), 'claude-3-5-haiku');
     await choose(modelSelect('enhancement'), 'claude-3-5-sonnet');
-    expect(modelSelect('enhancement').value).toBe('claude-3-5-sonnet');
+    expect(selectValue(modelSelect('enhancement'))).toBe('claude-3-5-sonnet');
     expect(mockState.saveSettings).toHaveBeenCalledTimes(1);
 
     finishProviderSave();
@@ -646,8 +712,8 @@ describe('ProviderConsumerAssignmentsComponent', () => {
       provider: 'anthropic',
       model: 'claude-3-5-sonnet',
     });
-    expect(providerSelect('enhancement').value).toBe('anthropic');
-    expect(modelSelect('enhancement').value).toBe('claude-3-5-sonnet');
+    expect(selectValue(providerSelect('enhancement'))).toBe('anthropic');
+    expect(selectValue(modelSelect('enhancement'))).toBe('claude-3-5-sonnet');
     const label = query(fixture, 'consumer-summary-enhancement')?.textContent;
     expect(label).toContain('anthropic');
     expect(label).toContain('claude-3-5-sonnet');
@@ -667,7 +733,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     await openRow('enhancement');
     await choose(providerSelect('enhancement'), 'anthropic');
     await choose(providerSelect('enhancement'), 'ollama');
-    expect(providerSelect('enhancement').value).toBe('ollama');
+    expect(selectValue(providerSelect('enhancement'))).toBe('ollama');
     expect(query(fixture, 'readiness-alert-enhancement')).toBeTruthy();
 
     finishProviderSave();
@@ -675,7 +741,7 @@ describe('ProviderConsumerAssignmentsComponent', () => {
 
     expect(mockState.saveSettings).toHaveBeenCalledTimes(1);
     expect(mockState.enhancement().data?.provider).toBe('anthropic');
-    expect(providerSelect('enhancement').value).toBe('anthropic');
+    expect(selectValue(providerSelect('enhancement'))).toBe('anthropic');
     expect(query(fixture, 'readiness-alert-enhancement')).toBeNull();
   });
 
@@ -761,9 +827,114 @@ describe('ProviderConsumerAssignmentsComponent', () => {
     );
   });
 
+  it('loads the active catalog for a saved curator override with a missing key', async () => {
+    const initial = mockState.routeStore().data;
+    if (!initial) throw new Error('Missing initial route');
+    mockState.memoryStore.set({
+      status: 'ready',
+      data: { curatorProvider: 'openrouter', curatorModel: '' },
+      error: null,
+    });
+    mockState.routeStore.set({
+      status: 'ready',
+      error: null,
+      data: {
+        ...initial,
+        route: 'cli',
+        driverProviderId: 'claude-cli',
+        resolvedAuthModality: 'cli',
+        providers: [
+          { id: 'claude-cli', type: 'cli', status: 'connected' },
+          { id: 'openrouter', type: 'apiKey', status: 'needs-key' },
+          { id: 'anthropic', type: 'apiKey', status: 'connected' },
+        ],
+      },
+    });
+
+    await openRow('memory-curator');
+
+    expect(mockModelsLoader.listModels.mock.calls).toEqual([['claude-cli']]);
+    expect(selectValue(providerSelect('memory-curator'))).toBe('openrouter');
+    expect(mockState.memoryStore().data?.curatorProvider).toBe('openrouter');
+    expect(query(fixture, 'provider-model-picker-error')).toBeNull();
+    expect(query(fixture, 'readiness-alert-memory-curator')).toBeNull();
+    expect(query(fixture, 'saved-provider-fallback')?.textContent).toContain('saved OpenRouter override is unavailable');
+    expect(query(fixture, 'consumer-summary-memory-curator')?.textContent).toContain('Claude (Subscription)');
+    expect(mockState.saveSettings).not.toHaveBeenCalled();
+
+    await choose(providerSelect('memory-curator'), 'anthropic');
+    expect(mockModelsLoader.listModels.mock.calls).toEqual([['claude-cli'], ['anthropic']]);
+    expect(query(fixture, 'saved-provider-fallback')).toBeNull();
+    expect(mockState.saveSettings).toHaveBeenCalledWith(
+      { memory: { curatorProvider: 'anthropic', curatorModel: '' } },
+      expect.any(Object),
+    );
+  });
+
+  it('waits for the effective route, then shows the Claude Subscription role default without requesting OpenRouter', async () => {
+    const initial = mockState.routeStore().data;
+    if (!initial) throw new Error('Missing initial route');
+    const subscription: ProvidersEffectiveRoute = {
+      ...initial,
+      route: 'cli',
+      driverProviderId: 'claude-cli',
+      resolvedAuthModality: 'cli',
+      resolvedModel: { kind: 'model', id: 'claude-sonnet-5-5' },
+      providers: [
+        { id: 'claude-cli', type: 'cli', status: 'connected' },
+        { id: 'openrouter', type: 'apiKey', status: 'needs-key' },
+      ],
+    };
+    mockState.routeStore.set({
+      status: 'loading',
+      data: { ...initial, driverProviderId: 'openrouter' },
+      error: null,
+    });
+    await openRow('memory-curator');
+    expect(query(fixture, 'consumer-editor-memory-curator')?.textContent).toContain('Resolving the active provider');
+    expect(mockModelsLoader.listModels).not.toHaveBeenCalled();
+
+    mockState.routeStore.set({ status: 'ready', data: subscription, error: null });
+    await settle();
+    expect(trigger(providerSelect('memory-curator')).textContent).toContain('Claude (Subscription) (inherited)');
+    expect(trigger(modelSelect('memory-curator')).textContent).toContain('haiku tier');
+    expect(query(fixture, 'consumer-summary-memory-curator')?.textContent).toContain('Default (haiku tier)');
+    expect(mockModelsLoader.listModels.mock.calls).toEqual([['claude-cli']]);
+    expect(query(fixture, 'provider-model-picker-error')).toBeNull();
+    expect(mockState.saveSettings).not.toHaveBeenCalled();
+
+    await choose(modelSelect('memory-curator'), 'claude-3-5-haiku');
+    expect(mockState.saveSettings).toHaveBeenLastCalledWith(
+      { memory: { curatorProvider: '', curatorModel: 'claude-3-5-haiku' } },
+      expect.any(Object),
+    );
+  });
+
+  it('clears the old editor on a workspace switch and loads the new route independently', async () => {
+    let finishOldRequest!: (value: { models: []; error: string }) => void;
+    mockModelsLoader.listModels.mockReturnValueOnce(
+      new Promise((resolve) => { finishOldRequest = resolve; }),
+    );
+    await openRow('memory-curator');
+    expect(mockModelsLoader.listModels.mock.calls).toEqual([['anthropic']]);
+    const scope = TestBed.inject(WorkspaceScopeService);
+    scope.switchTo('/another');
+    const route = mockState.routeStore().data;
+    if (!route) throw new Error('Missing initial route');
+    mockState.routeStore.set({ status: 'ready', data: { ...route, driverProviderId: 'openai' }, error: null });
+    await settle();
+    expect(query(fixture, 'picker-memory-curator')).toBeNull();
+
+    await openRow('memory-curator');
+    finishOldRequest({ models: [], error: 'old workspace error' });
+    await settle();
+    expect(mockModelsLoader.listModels.mock.calls).toEqual([['anthropic'], ['openai']]);
+    expect(query(fixture, 'provider-model-picker-error')).toBeNull();
+  });
+
   describe('curator on an unsupported provider (Codex)', () => {
     const optionValues = (id: BackgroundConsumerId) =>
-      Array.from(providerSelect(id).options).map((o) => o.value);
+      options(providerSelect(id)).map((o) => o.value);
 
     it('does not offer Codex to the curator, but still to Enhancement', async () => {
       await openRow('memory-curator');
@@ -775,6 +946,20 @@ describe('ProviderConsumerAssignmentsComponent', () => {
       expect(optionValues('enhancement')).toContain('openai-codex');
     });
 
+    it('shows the inherited unsupported provider without fetching its catalog', async () => {
+      const route = mockState.routeStore().data;
+      if (!route) throw new Error('Missing initial route');
+      mockState.routeStore.set({
+        status: 'ready',
+        data: { ...route, driverProviderId: 'openai-codex' },
+        error: null,
+      });
+      await openRow('memory-curator');
+      expect(trigger(providerSelect('memory-curator')).textContent).toContain('OpenAI Codex');
+      expect(query(fixture, 'readiness-alert-memory-curator')?.getAttribute('role')).toBe('alert');
+      expect(mockModelsLoader.listModels).not.toHaveBeenCalled();
+    });
+
     it('keeps a saved Codex value, labels it and blocks it without a setup action', async () => {
       mockState.memoryStore.set({
         status: 'ready',
@@ -783,9 +968,9 @@ describe('ProviderConsumerAssignmentsComponent', () => {
       });
       await openRow('memory-curator');
       const select = providerSelect('memory-curator');
-      expect(select.value).toBe('openai-codex');
-      const option = Array.from(select.options).find((o) => o.value === 'openai-codex');
-      expect(option?.textContent?.trim()).toBe('OpenAI Codex (not supported here)');
+      expect(selectValue(select)).toBe('openai-codex');
+      const option = options(select).find((o) => o.value === 'openai-codex');
+      expect(option?.label).toBe('OpenAI Codex (not supported here)');
       const alert = query(fixture, 'readiness-alert-memory-curator');
       expect(alert?.getAttribute('role')).toBe('alert');
       expect(query(fixture, 'readiness-message-memory-curator')?.textContent?.trim()).toBe(
@@ -801,7 +986,14 @@ describe('ProviderConsumerAssignmentsComponent', () => {
         error: null,
       });
       await openRow('memory-curator');
-      await choose(modelSelect('memory-curator'), 'claude-3-5-sonnet');
+      const input = inputEl(fixture, 'provider-model-picker-manual-input');
+      if (!input) throw new Error('Missing manual model field');
+      input.value = 'claude-3-5-sonnet';
+      input.dispatchEvent(new Event('input'));
+      fixture.detectChanges();
+      button(fixture, 'provider-model-picker-manual-apply')?.click();
+      await flushSave();
+      expect(mockModelsLoader.listModels).not.toHaveBeenCalled();
       expect(mockState.saveSettings).not.toHaveBeenCalled();
       // Moving off Codex saves as usual.
       await choose(providerSelect('memory-curator'), 'anthropic');

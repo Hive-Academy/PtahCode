@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { signal } from '@angular/core';
@@ -98,7 +99,7 @@ describe('LocalTtsPanelComponent', () => {
     host.querySelector<HTMLButtonElement>('button[role="combobox"]')?.click();
     fixture.detectChanges();
     const label = richSelect(testId).options().find(option => option.value === value)?.label;
-    const option = Array.from(host.querySelectorAll<HTMLElement>('[role="option"]'))
+    const option = Array.from(TestBed.inject(OverlayContainer).getContainerElement().querySelectorAll<HTMLElement>('[role="option"]'))
       .find(button => button.textContent?.includes(label ?? '\0'));
     if (!option) throw new Error(`Missing option ${value}`);
     option.click();
@@ -123,8 +124,8 @@ describe('LocalTtsPanelComponent', () => {
     const host = byTestId('local-tts-voice-select');
     host.querySelector<HTMLButtonElement>('button[role="combobox"]')?.click();
     fixture.detectChanges();
-    expect(host.querySelectorAll('[role="option"]')).toHaveLength(2);
-    expect(host.querySelectorAll('[role="group"]')).toHaveLength(2);
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelectorAll('[role="option"]')).toHaveLength(2);
+    expect(TestBed.inject(OverlayContainer).getContainerElement().querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(host.closest('ptah-field')?.querySelector('[data-appearance="floating"]')).not.toBeNull();
   });
   it('keeps short model help below a full-row custom field with Save at the end', async () => {

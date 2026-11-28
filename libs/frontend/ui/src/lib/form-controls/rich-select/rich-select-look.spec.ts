@@ -164,7 +164,7 @@ describe('ptah-select look (round 2)', () => {
       const el = host(root, id);
       (el.querySelector('.ptah-select__trigger') as HTMLButtonElement).click();
       fixture.detectChanges();
-      const found = el.querySelector('.ptah-select__search') !== null;
+      const found = document.querySelector('.cdk-overlay-pane .ptah-select__search') !== null;
       (el.querySelector('.ptah-select__trigger') as HTMLButtonElement).click();
       fixture.detectChanges();
       return found;
@@ -177,7 +177,7 @@ describe('ptah-select look (round 2)', () => {
 
   it('draws the panel on an opaque token surface, out of flow, with an edge and a shadow', () => {
     const panel = ruleBody('.ptah-select__panel');
-    expect(panel).toMatch(/position:\s*fixed/);
+    expect(panel).toMatch(/width:\s*100%/);
     expect(panel).toMatch(/background-color:\s*var\(--ptah-select-panel-bg\)/);
     expect(panel).toMatch(/border:\s*var\(--ptah-border-width\) solid var\(--ptah-select-panel-edge\)/);
     expect(panel).toMatch(/box-shadow:\s*var\(--ptah-elevation-3\)/);
@@ -190,7 +190,7 @@ describe('ptah-select look (round 2)', () => {
 
   it('keeps the quiet focus of the panel search: no outline or shadow, the row marks focus', () => {
     const search = RULES.find(([selectors]) =>
-      selectors.some((s) => s.startsWith('.ptah-select :is(.ptah-select__search') && s.includes(':focus-visible')),
+      selectors.some((s) => s.startsWith('.ptah-select__panel .ptah-select__search') && s.includes(':focus-visible')),
     );
     expect(search?.[1]).toMatch(/outline:\s*none/);
     expect(search?.[1]).toMatch(/box-shadow:\s*none/);

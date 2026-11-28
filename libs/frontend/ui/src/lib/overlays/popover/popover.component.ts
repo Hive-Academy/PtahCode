@@ -1,16 +1,23 @@
 import { A11yModule, FocusTrap, FocusTrapFactory } from '@angular/cdk/a11y';
 import { ConnectedPosition, OverlayModule } from '@angular/cdk/overlay';
 import {
+  afterNextRender,
   ChangeDetectionStrategy,
   Component,
   ElementRef,
   inject,
+  Injector,
   input,
   OnDestroy,
   output,
   viewChild,
 } from '@angular/core';
-import { POPOVER_POSITION_MAP } from '../shared/overlay-positions';
+import {
+  claimOverlayDismissal,
+  CONNECTED_OVERLAY_POLICY,
+  POPOVER_POSITION_MAP,
+} from '../shared/overlay-positions';
+import { restorePopoverFocus } from '../shared/restore-popover-focus';
 
 /**
  * PopoverComponent - Modal-like Popover with Focus Trap
@@ -54,21 +61,22 @@ import { POPOVER_POSITION_MAP } from '../shared/overlay-positions';
     </div>
 
     <ng-template
-      cdkConnectedOverlay
+      [cdkConnectedOverlay]="overlayPolicy"
       [cdkConnectedOverlayOrigin]="trigger"
       [cdkConnectedOverlayOpen]="isOpen()"
       [cdkConnectedOverlayPositions]="getPositions()"
       [cdkConnectedOverlayHasBackdrop]="hasBackdrop()"
       [cdkConnectedOverlayBackdropClass]="backdropClass()"
-      (backdropClick)="handleBackdropClick()"
+      (backdropClick)="handleBackdropClick($event)"
+      (overlayKeydown)="handleKeydown($event)"
       (attach)="handleAttach()"
       (detach)="handleDetach()"
     >
       <div
+        data-glass-surface="overlay"
         #popoverContent
         class="popover-panel surface-3 rounded-xl p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
         tabindex="-1"
-        (keydown.escape)="handleEscape()"
       >
         <ng-content select="[content]" />
       </div>
@@ -76,8 +84,13 @@ import { POPOVER_POSITION_MAP } from '../shared/overlay-positions';
   `,
 })
 export class PopoverComponent implements OnDestroy {
+  protected readonly overlayPolicy = CONNECTED_OVERLAY_POLICY;
   private readonly focusTrapFactory = inject(FocusTrapFactory);
+  private readonly injector = inject(Injector);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private focusTrap: FocusTrap | null = null;
+  private previousFocus: HTMLElement | null = null;
+  private closeRequested = false;
 
   readonly popoverContent =
     viewChild<ElementRef<HTMLElement>>('popoverContent');
@@ -91,10 +104,7 @@ export class PopoverComponent implements OnDestroy {
   readonly backdropClicked = output<void>();
 
   ngOnDestroy(): void {
-    if (this.focusTrap) {
-      this.focusTrap.destroy();
-      this.focusTrap = null;
-    }
+    this.releaseFocus();
   }
 
   /**
@@ -116,11 +126,15 @@ export class PopoverComponent implements OnDestroy {
    * Called automatically when cdkConnectedOverlay opens.
    */
   handleAttach(): void {
-    const content = this.popoverContent();
-    if (content) {
-      this.focusTrap = this.focusTrapFactory.create(content.nativeElement);
-      this.focusTrap.focusInitialElementWhenReady();
-    }
+    this.closeRequested = false;
+    const active = this.host.nativeElement.ownerDocument.activeElement;
+    this.previousFocus = active instanceof HTMLElement ? active : null;
+    afterNextRender(() => {
+      const content = this.popoverContent()?.nativeElement;
+      if (!this.isOpen() || !content?.isConnected) return;
+      this.focusTrap = this.focusTrapFactory.create(content);
+      if (!this.focusTrap.focusInitialElement()) content.focus();
+    }, { injector: this.injector });
     this.opened.emit();
   }
 
@@ -129,18 +143,24 @@ export class PopoverComponent implements OnDestroy {
    * Called automatically when cdkConnectedOverlay closes.
    */
   handleDetach(): void {
-    this.focusTrap?.destroy();
-    this.focusTrap = null;
-    this.closed.emit();
+    this.releaseFocus();
+    if (!this.closeRequested) this.closed.emit();
   }
 
   /**
    * Handles backdrop click event.
    * Emits backdropClicked event and signals parent to close popover.
    */
-  handleBackdropClick(): void {
+  handleBackdropClick(event: MouseEvent): void {
+    if (!claimOverlayDismissal(event)) return;
     this.backdropClicked.emit();
-    this.closed.emit();
+    this.handleEscape();
+  }
+
+  protected handleKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    this.handleEscape();
   }
 
   /**
@@ -148,6 +168,16 @@ export class PopoverComponent implements OnDestroy {
    * Signals parent to close popover.
    */
   handleEscape(): void {
+    this.closeRequested = true;
     this.closed.emit();
+  }
+
+  private releaseFocus(): void {
+    const panel = this.popoverContent()?.nativeElement;
+    this.focusTrap?.destroy();
+    this.focusTrap = null;
+    const previous = this.previousFocus;
+    this.previousFocus = null;
+    restorePopoverFocus(previous, panel);
   }
 }

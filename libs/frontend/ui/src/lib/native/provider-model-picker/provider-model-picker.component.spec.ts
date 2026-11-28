@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import type {
   ProviderListModelsResult,
   ProviderModelInfo,
@@ -83,6 +84,38 @@ describe('ProviderModelPickerComponent', () => {
   function select(fixture: { nativeElement: unknown }, testId: string) {
     return el(fixture, testId) as HTMLSelectElement;
   }
+
+  it('keys a scoped catalog and its feedback to the current inherited or explicit provider', async () => {
+    let resolveOld!: (value: ProviderListModelsResult) => void;
+    listModels
+      .mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve; }))
+      .mockResolvedValueOnce({ ...result([]), error: 'OpenRouter key required' })
+      .mockResolvedValueOnce(result([]));
+    const fixture = await create({ inheritedProvider: null, richSelect: true });
+    expect(listModels).not.toHaveBeenCalled();
+
+    fixture.componentRef.setInput('inheritedProvider', { id: 'claude-cli', name: 'Claude (Subscription)' });
+    fixture.detectChanges();
+    expect(listModels.mock.calls).toEqual([['claude-cli']]);
+    fixture.componentRef.setInput('provider', 'openrouter');
+    fixture.componentRef.setInput('model', 'vendor/saved-model');
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    resolveOld({ ...result([]), error: 'stale Claude error' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(el(fixture, 'provider-model-picker-model')?.textContent).toContain('vendor/saved-model');
+    expect(el(fixture, 'provider-model-picker-error')?.textContent).toContain('OpenRouter key required');
+    (el(fixture, 'provider-model-picker-retry') as HTMLButtonElement).click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(listModels.mock.calls).toEqual([['claude-cli'], ['openrouter'], ['openrouter']]);
+    expect(el(fixture, 'provider-model-picker-error')).toBeNull();
+    expect(el(fixture, 'provider-model-picker-empty')).not.toBeNull();
+    expect(el(fixture, 'provider-model-picker-model')?.textContent).toContain('vendor/saved-model');
+  });
 
   // ---------------------------------------------------------------------
   // P1-9 part (a) — the injector surface IS the cross-host guarantee.
@@ -453,13 +486,12 @@ describe('ProviderModelPickerComponent', () => {
       expect(labelOf(fixture)).toBe("Default (active provider's sonnet tier)");
     });
 
-    it("names the chosen provider's own tier model when the registry declares one", async () => {
+    it('shows the tier alias when a runtime mapping can override the static tier model', async () => {
       const entry = TIERED_PROVIDERS.find((p) => p.defaultTiers?.haiku);
       expect(entry).toBeDefined();
+      listModels.mockResolvedValue(result([model({ id: 'custom-fast-model', name: 'Custom fast model' })]));
       const fixture = await create({ provider: entry?.id });
-      expect(labelOf(fixture)).toBe(
-        `Default (${entry?.defaultTiers?.haiku ?? ''})`,
-      );
+      expect(labelOf(fixture)).toBe(`Default (${entry?.name} haiku tier)`);
     });
 
     it('falls back to a named tier for a provider with no declared mapping', async () => {
@@ -481,7 +513,7 @@ describe('ProviderModelPickerComponent', () => {
       fixture.detectChanges();
 
       expect(labelOf(fixture)).toBe(
-        `Default (${withTiers?.defaultTiers?.haiku ?? ''})`,
+        `Default (${withTiers?.name} haiku tier)`,
       );
     });
   });
@@ -864,6 +896,36 @@ describe('ProviderModelPickerComponent', () => {
   });
 
   describe('catalog retry', () => {
+    it('blocks cached rich-select choices until a same-provider retry finishes', async () => {
+      const cached = model({ id: 'cached-model' });
+      let finishRetry: ((value: ProviderListModelsResult) => void) | undefined;
+      const pending = new Promise<ProviderListModelsResult>((resolve) => { finishRetry = resolve; });
+      listModels
+        .mockResolvedValueOnce({ ...result([cached]), error: 'Catalogue unavailable' })
+        .mockReturnValueOnce(pending);
+      const fixture = await create({ provider: 'openrouter', richSelect: true });
+      const changed = jest.fn();
+      fixture.componentInstance.selectionChange.subscribe(changed);
+      const picker = fixture.debugElement.query(By.css('ptah-select[data-testid="provider-model-picker-model"]'));
+      const trigger = (picker.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[role="combobox"]');
+      expect(trigger?.disabled).toBe(false);
+
+      (el(fixture, 'provider-model-picker-retry') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(trigger?.disabled).toBe(true);
+      picker.triggerEventHandler('valueChange', cached.id);
+      expect(changed).not.toHaveBeenCalled();
+
+      const fresh = model({ id: 'fresh-model' });
+      finishRetry?.(result([fresh]));
+      await pending;
+      await fixture.whenStable();
+      fixture.detectChanges();
+      expect(trigger?.disabled).toBe(false);
+      picker.triggerEventHandler('valueChange', fresh.id);
+      expect(changed).toHaveBeenCalledWith({ provider: 'openrouter', model: fresh.id });
+    });
+
     it('offers a Retry action in the error row that re-runs the load', async () => {
       listModels
         .mockRejectedValueOnce(new Error('transport down'))

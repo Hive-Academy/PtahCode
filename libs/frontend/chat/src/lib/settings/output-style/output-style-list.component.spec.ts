@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * OutputStyleListComponent specs.
  *
@@ -24,6 +25,10 @@ import type { OutputStyleFailedOperation } from './output-style.store';
 import { By } from '@angular/platform-browser';
 import { PtahRichSelectComponent } from '@ptah-extension/ui';
 import { isDisabledControl } from '../feedback/busy-disabled.testing';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 const BUILT_IN_DEFAULT: OutputStyleEntry = {
   name: 'default',
@@ -96,7 +101,7 @@ describe('OutputStyleListComponent — CLI parity control', () => {
   }
 
   function text(): string {
-    return fixture.nativeElement.textContent ?? '';
+    return [fixture.nativeElement.textContent, overlay().textContent].join(' ');
   }
 
   /** The style row radios carry `role="radio"`; index 1 is the user style. */
@@ -740,7 +745,7 @@ describe('OutputStyleListComponent — missing active style (E5/N1)', () => {
     expect(host.invalid()).toEqual([]);
     fixture.nativeElement.querySelector('[aria-label="Why this style is unavailable"]').click();
     fixture.detectChanges();
-    expect(banner().textContent).toContain(
+    expect(overlay().textContent).toContain(
       'is no longer available. Its file was removed or renamed outside Ptah, ' +
         'so new sessions run with the default behaviour.',
     );
@@ -753,7 +758,7 @@ describe('OutputStyleListComponent — missing active style (E5/N1)', () => {
 
     fixture.nativeElement.querySelector('[aria-label="Why this style is unavailable"]').click();
     fixture.detectChanges();
-    const copy = banner().textContent ?? '';
+    const copy = overlay().textContent ?? '';
 
     // The parse-failure cause is offered alongside removal, never instead of it.
     expect(copy).toContain(

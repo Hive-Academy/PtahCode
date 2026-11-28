@@ -3,8 +3,11 @@
 ptah-lanes-table {
   display: block;
   min-width: 0;
+  container: lanes-table / inline-size;
 }
 ptah-lanes-table .ptah-table-grid {
+  width: 100%;
+  max-width: 100%;
   table-layout: fixed;
 }
 ptah-lanes-table .ptah-table-grid th,
@@ -40,8 +43,32 @@ ptah-lanes-table .lane-default-value [data-popover-kind='model'] {
   text-align: start;
 }
 
-ptah-lanes-table [data-testid='lanes-colgroup'] col:nth-child(2) {
-  width: 26%;
+/* Wide columns. Fixed tracks are 4.25rem + 4.25rem + 2.5rem (11rem, about 18.5%
+   of a 950px table). The fluid tracks sum to 80% so the row stays inside the
+   table at 950px and wider. Order mode replaces the first track below. */
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-order {
+  width: 4.25rem;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-identity {
+  width: 22%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-status {
+  width: 18%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-permission {
+  width: 13%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-network {
+  width: 13%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-model {
+  width: 14%;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-enabled {
+  width: 4.25rem;
+}
+ptah-lanes-table [data-testid='lanes-colgroup'] > col.lane-expander {
+  width: 2.5rem;
 }
 ptah-lanes-table .ptah-table-control-cell > span,
 ptah-lanes-table .ptah-table-control-cell > ptah-lane-model-effort-cell {
@@ -51,8 +78,27 @@ ptah-lanes-table .ptah-table-control-cell > ptah-lane-model-effort-cell {
 ptah-lanes-table .lane-model-value {
   display: flex;
   width: 100%;
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
+}
+/* Permission, Network and Model stay in their columns. The shared control cell
+   gives every select a 8rem minimum, which is wider than the Network track and
+   paints over the Model label. Clip the cell and let the select shrink. */
+ptah-lanes-table td[data-testid='cli-matrix-model'],
+ptah-lanes-table .ptah-table:not([data-collapsed='true']) td[ptahCollapsible] {
+  overflow: hidden;
+  min-width: 0;
+}
+ptah-lanes-table td[ptahCollapsible] ptah-cli-lane-default-cell,
+ptah-lanes-table td[ptahCollapsible] ptah-select,
+ptah-lanes-table td[data-testid='cli-matrix-model'] ptah-lane-model-effort-cell {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+ptah-lanes-table .ptah-table-grid > tbody > tr[data-lane-kind] > th[scope='row'] {
+  min-width: 0;
 }
 ptah-lanes-table .lane-model-value > ptah-native-popover {
   min-width: 0;
@@ -253,6 +299,11 @@ ptah-lanes-table
 }
 ptah-lanes-table
   .ptah-table[data-collapsed='true'][data-model-column='true']
+  [data-lane-status] {
+  overflow: hidden;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
   .lane-model {
   width: 10rem;
 }
@@ -314,19 +365,58 @@ ptah-lanes-table .lane-model-part:is(span, #lane-model-part) {
   white-space: nowrap;
 }
 
+/* Give the model the whole track when a single line would mostly show effort. */
+@container lanes-table (max-width: 75rem) {
+  ptah-lanes-table td[data-testid='cli-matrix-model'] .lane-model-value {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-value
+    > ptah-native-popover:has([data-popover-kind='model']) {
+    flex-basis: 100%;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-value
+    > span[aria-hidden] {
+    display: none;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: start;
+  }
+  ptah-lanes-table
+    td[data-testid='cli-matrix-model']
+    .lane-model-part:is(span, #lane-model-part) {
+    white-space: normal;
+  }
+
+  ptah-lanes-table .ptah-table [data-lane-status] .lane-row-actions > button {
+    display: block;
+    margin-inline-start: 0;
+  }
+}
+
 /* The Status cell owns the menu anchor in every tier. The action wrapper has
    no box (and no transform), so recovery labels cannot move the menu. */
 ptah-lanes-table [data-lane-status] {
   position: relative;
   padding-inline-end: 2.5rem;
-  white-space: nowrap;
 }
 ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
   display: inline-flex;
+  max-width: 100%;
   vertical-align: middle;
   white-space: nowrap;
 }
 ptah-lanes-table [data-lane-status] .ptah-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
   word-break: normal;
@@ -372,7 +462,7 @@ ptah-lanes-table
   width: 1.5rem;
   min-width: 1.5rem;
 }
-/* Only compact stacks recovery under status; the menu stays at row center. */
+/* Keep status on its own line in the smallest tier. */
 ptah-lanes-table
   .ptah-table[data-collapsed='true']:not([data-model-column='true'])
   [data-lane-status]
@@ -549,9 +639,10 @@ ptah-lanes-table .lanes-group-push {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--ptah-gap-inline);
+  gap: var(--ptah-gap-controls);
   margin-inline-start: auto;
   min-width: 0;
+  max-width: 100%;
 }
 ptah-lanes-table .lanes-ptah-defaults {
   display: inline-flex;
@@ -559,17 +650,104 @@ ptah-lanes-table .lanes-ptah-defaults {
   max-width: 100%;
   font-weight: 400;
 }
+/* Override the shared detail cell's two-column description grid. */
+ptah-lanes-table .ptah-table-detail-cell .lanes-instance-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--ptah-gap-controls);
+  margin: 0 0 var(--ptah-gap-controls);
+  overflow-wrap: normal;
+}
+ptah-lanes-table .lanes-instance-header > div {
+  --lane-field-width: 7rem;
+  flex: 1 1 var(--lane-field-width);
+  min-inline-size: min(100%, var(--lane-field-width));
+}
+ptah-lanes-table .lanes-instance-header > .lanes-instance-permission {
+  --lane-field-width: 10rem;
+}
+ptah-lanes-table .lanes-instance-header > .lanes-instance-model {
+  --lane-field-width: 17rem;
+}
+ptah-lanes-table .lanes-instance-header dt {
+  color: var(--ptah-section-description-color);
+  font-size: var(--ptah-text-caption-size);
+}
+ptah-lanes-table .ptah-table-detail-cell .lanes-instance-header dd {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  height: var(--ptah-control-h-sm);
+  margin: 0;
+  font-size: var(--ptah-text-body-size);
+  white-space: nowrap;
+}
+ptah-lanes-table .lanes-instance-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+ptah-lanes-table .lanes-instance-header .lane-model-value {
+  flex-wrap: nowrap;
+}
+ptah-lanes-table
+  .lanes-instance-header
+  .lane-model-value
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  height: var(--ptah-control-h-sm);
+}
+
+/* Keep the compact instance model and effort together inside the identity cell. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true'])
+  tr[data-lane-kind='instance']
+  th[scope='row']
+  .lane-model-value {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+
+  & > ptah-native-popover:has([data-popover-kind='model']) {
+    flex-basis: auto;
+    width: auto;
+    overflow: hidden;
+  }
+  & [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  & [data-popover-kind='effort'] {
+    padding-inline: 0;
+  }
+}
 /* Ptah CLI rows: a 2px inset in the gold secondary token on the first cell (P24, same token as kind-ptah). */
 ptah-lanes-table tr[data-lane-kind='instance']:not([data-drop]) > :first-child {
   box-shadow: inset 2px 0 0 var(--color-secondary);
 }
 ptah-lanes-table .lanes-inherited {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--ptah-gap-inline);
+  row-gap: 0;
   min-width: 0;
+  max-width: 100%;
   font-size: var(--ptah-text-caption-size);
   color: var(--ptah-section-description-color);
+}
+ptah-lanes-table tr[data-lane-kind='instance'] .lanes-inherited {
+  flex-wrap: nowrap;
+  gap: var(--ptah-space-1);
+  white-space: nowrap;
+  min-height: var(--ptah-control-h-sm);
+}
+ptah-lanes-table .lanes-inherited-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 ptah-lanes-table .lanes-inherited-tag {
   opacity: 0.8;

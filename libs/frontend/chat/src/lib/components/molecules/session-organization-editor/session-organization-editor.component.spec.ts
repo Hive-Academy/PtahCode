@@ -1,3 +1,4 @@
+import { OverlayContainer } from '@angular/cdk/overlay';
 /**
  * SessionOrganizationEditorComponent specs (TASK_2026_580 C1.1.3).
  *
@@ -28,6 +29,10 @@ import {
   SessionOrganizationEditorComponent,
   httpsUrlOrNull,
 } from './session-organization-editor.component';
+
+function overlay(): HTMLElement {
+  return TestBed.inject(OverlayContainer).getContainerElement();
+}
 
 const SESSION_ID = 'a1b2c3d4-0000-4000-8000-000000000002';
 
@@ -169,13 +174,13 @@ describe('SessionOrganizationEditorComponent', () => {
 
     el('session-org-priority').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
     await settle();
-    [...el('session-org-priority').querySelectorAll<HTMLElement>('[role="option"]')]
+    [...overlay().querySelectorAll<HTMLElement>('[role="option"]')]
       .find((option) => option.textContent?.includes('Urgent'))!.click();
     await settle();
 
     el('session-org-status').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
     await settle();
-    [...el('session-org-status').querySelectorAll<HTMLElement>('[role="option"]')]
+    [...overlay().querySelectorAll<HTMLElement>('[role="option"]')]
       .find((option) => option.textContent?.includes('Done'))!.click();
     await settle();
 
@@ -320,7 +325,7 @@ describe('SessionOrganizationEditorComponent', () => {
 
     el('session-org-status').querySelector<HTMLButtonElement>('[role="combobox"]')!.click();
     await settle();
-    [...el('session-org-status').querySelectorAll<HTMLElement>('[role="option"]')]
+    [...overlay().querySelectorAll<HTMLElement>('[role="option"]')]
       .find((option) => option.textContent?.includes('Archived'))!.click();
     await settle();
     const alert = el('session-org-error');

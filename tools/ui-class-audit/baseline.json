@@ -226,7 +226,7 @@
     "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.html": {
-    "<dynamic>": 6,
+    "<dynamic>": 5,
     "btn": 1,
     "btn-warning": 1,
     "btn-xs": 1
@@ -394,11 +394,6 @@
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cli-lane-default-cell.component.ts": {
-    "btn": 1,
-    "btn-sm": 1,
-    "btn-warning": 1
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/cli-model-effort-popover.component.ts": {
     "<dynamic>": 2

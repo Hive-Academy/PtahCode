@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { OverlayContainer } from '@angular/cdk/overlay';
 import {
   ApplicationRef,
   ChangeDetectionStrategy,
@@ -759,8 +760,23 @@ describe('CanvasRailCardComponent', () => {
     host.querySelector<HTMLButtonElement>(
       'button[aria-label="Session actions"][aria-haspopup="menu"]',
     ) as HTMLButtonElement;
+  const overlay = (): HTMLElement =>
+    TestBed.inject(OverlayContainer).getContainerElement();
+  const query = <T extends Element = HTMLElement>(
+    host: HTMLElement,
+    selector: string,
+  ): T | null =>
+    host.querySelector<T>(selector) ?? overlay().querySelector<T>(selector);
+  const queryAll = <T extends Element = HTMLElement>(
+    host: HTMLElement,
+    selector: string,
+  ): T[] => [
+    ...host.querySelectorAll<T>(selector),
+    ...overlay().querySelectorAll<T>(selector),
+  ];
   const item = (host: HTMLElement, action: string) =>
-    host.querySelector<HTMLButtonElement>(
+    query<HTMLButtonElement>(
+      host,
       `[data-action="${action}"]`,
     ) as HTMLButtonElement;
   const settle = () => new Promise((resolve) => setTimeout(resolve));
@@ -772,7 +788,7 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    expect(host.querySelector('[role="menu"]')).not.toBeNull();
+    expect(query(host, '[role="menu"]')).not.toBeNull();
     return host;
   }
 
@@ -781,10 +797,10 @@ describe('CanvasRailCardComponent', () => {
     const host = await openMenu(fixture);
     expect(item(host, 'rename').textContent).toContain('Rename');
     expect(item(host, 'rename').getAttribute('aria-haspopup')).toBe('dialog');
-    expect(host.querySelector('[data-action="organize"]')).toBeNull();
-    expect(host.querySelector('[data-action="delete"]')).toBeNull();
+    expect(query(host, '[data-action="organize"]')).toBeNull();
+    expect(query(host, '[data-action="delete"]')).toBeNull();
     expect(
-      [...host.querySelectorAll('[role="menuitem"]')].map((node) =>
+      [...queryAll(host, '[role="menuitem"]')].map((node) =>
         node.getAttribute('data-action'),
       ),
     ).toEqual([
@@ -817,7 +833,7 @@ describe('CanvasRailCardComponent', () => {
     expect(up).not.toHaveBeenCalled();
     const host = await openMenu(fixture);
     expect(
-      [...host.querySelectorAll('[role="menuitem"]')].map((node) =>
+      [...queryAll(host, '[role="menuitem"]')].map((node) =>
         node.getAttribute('data-action'),
       ),
     ).toEqual([
@@ -841,7 +857,7 @@ describe('CanvasRailCardComponent', () => {
       );
       item(host, action).click();
     }
-    expect(host.querySelector('[role="menu"]')).not.toBeNull();
+    expect(query(host, '[role="menu"]')).not.toBeNull();
     expect(organizeOpen).not.toHaveBeenCalled();
     expect(openForSession).not.toHaveBeenCalled();
   });
@@ -851,12 +867,13 @@ describe('CanvasRailCardComponent', () => {
     const host = await openMenu(fixture);
     item(host, 'rename').click();
     fixture.detectChanges();
-    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(query(host, '[role="menu"]')).toBeNull();
     await settle();
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>(
+    const input = query<HTMLInputElement>(
+      host,
       'input[aria-label="Session name"]',
     )!;
     expect(input).not.toBeNull();
@@ -867,7 +884,7 @@ describe('CanvasRailCardComponent', () => {
     await settle();
     fixture.detectChanges();
     expect(rename).toHaveBeenCalledWith(sessionId, 'Alpha', 'Renamed');
-    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(query(host, '[role="dialog"]')).toBeNull();
     await settle();
     expect(document.activeElement).toBe(trigger(host));
   });
@@ -881,7 +898,8 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>(
+    const input = query<HTMLInputElement>(
+      host,
       'input[aria-label="Session name"]',
     )!;
     keydown(input, 'Escape');
@@ -900,12 +918,8 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const input = host.querySelector<HTMLInputElement>(
-      '[role="dialog"] input',
-    )!;
-    const buttons = host.querySelectorAll<HTMLButtonElement>(
-      '[role="dialog"] button',
-    );
+    const input = query<HTMLInputElement>(host, '[role="dialog"] input')!;
+    const buttons = queryAll<HTMLButtonElement>(host, '[role="dialog"] button');
     input.focus();
     expect(keydown(input, 'Tab', { shiftKey: true }).defaultPrevented).toBe(
       true,
@@ -935,19 +949,17 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    const panel = host.querySelector<HTMLElement>('[role="dialog"]')!;
+    const panel = query(host, '[role="dialog"]')!;
     expect(panel.classList).toContain('w-72');
     // FU-12: never wider than the viewport minus the 8 px shift padding per side,
     // and placed below the trigger so shift can move it along x into view.
     expect(panel.classList).toContain('max-w-[calc(100vw-1rem)]');
     expect(panel.classList).toContain('p-4');
-    expect(panel.closest('ptah-native-popover')?.className).toContain(
-      '[&>.popover-panel]:p-0',
-    );
     const renamePopover = fixture.debugElement
       .queryAll(By.directive(NativePopoverComponent))
       .map((node) => node.componentInstance as NativePopoverComponent)
       .find((popover) => popover.isOpen());
+    expect(renamePopover?.panel()?.nativeElement.classList).toContain('p-0');
     expect(renamePopover?.placement()).toBe('bottom-end');
     expect(panel.querySelector('h3')?.classList).toContain(
       'text-base-content-muted',
@@ -991,11 +1003,9 @@ describe('CanvasRailCardComponent', () => {
     fixture.detectChanges();
     await settle();
     fixture.detectChanges();
-    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(query(host, '[role="dialog"]')).not.toBeNull();
     expect(cell().classList).toContain('z-50');
-    host
-      .querySelectorAll<HTMLButtonElement>('[role="dialog"] button')[0]
-      .click();
+    queryAll<HTMLButtonElement>(host, '[role="dialog"] button')[0].click();
     fixture.detectChanges();
     expect(cell().classList).toContain('z-10');
     expect(cell().classList).not.toContain('z-50');
@@ -1022,7 +1032,8 @@ describe('CanvasRailCardComponent', () => {
       fixture.detectChanges();
       await settle();
       fixture.detectChanges();
-      const input = host.querySelector<HTMLInputElement>(
+      const input = query<HTMLInputElement>(
+        host,
         'input[aria-label="Session name"]',
       )!;
       expect(document.activeElement).toBe(input);
@@ -1032,13 +1043,13 @@ describe('CanvasRailCardComponent', () => {
     }
     const saveButton = (host: HTMLElement) =>
       [
-        ...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+        ...queryAll<HTMLButtonElement>(host, '[role="dialog"] button'),
       ].find(
         (button) => button.textContent?.trim() === 'Save',
       ) as HTMLButtonElement;
     const cancelButton = (host: HTMLElement) =>
       [
-        ...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+        ...queryAll<HTMLButtonElement>(host, '[role="dialog"] button'),
       ].find(
         (button) => button.textContent?.trim() === 'Cancel',
       ) as HTMLButtonElement;
@@ -1091,9 +1102,9 @@ describe('CanvasRailCardComponent', () => {
       keydown(input, 'Enter');
       fixture.detectChanges();
       await settle();
-      expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(query(host, '[role="dialog"]')).not.toBeNull();
       await finish(fixture);
-      expect(host.querySelector('[role="dialog"]')).toBeNull();
+      expect(query(host, '[role="dialog"]')).toBeNull();
       expect(document.activeElement).toBe(trigger(host));
     });
 
@@ -1104,7 +1115,7 @@ describe('CanvasRailCardComponent', () => {
       cancelButton(host).click();
       fixture.detectChanges();
       await settle();
-      expect(host.querySelector('[role="dialog"]')).toBeNull();
+      expect(query(host, '[role="dialog"]')).toBeNull();
       const elsewhere = document.createElement('button');
       document.body.appendChild(elsewhere);
       elsewhere.focus();
@@ -1126,7 +1137,7 @@ describe('CanvasRailCardComponent', () => {
       resolveRename('failed');
       await settle();
       fixture.detectChanges();
-      expect(second.host.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(query(second.host, '[role="dialog"]')).not.toBeNull();
       expect(document.activeElement).toBe(second.input);
       expect(fixture.componentInstance.renaming()).toBe(false);
       expect(fixture.componentInstance.renameError()).toBe('');
@@ -1143,12 +1154,12 @@ describe('CanvasRailCardComponent', () => {
       expect(live.textContent).toBe('');
       await settle();
       fixture.detectChanges();
-      expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(query(host, '[role="dialog"]')).not.toBeNull();
       expect(input.value).toBe('Renamed');
       expect(input.getAttribute('aria-describedby')).toBe(
         'rail-rename-error-a',
       );
-      expect(host.querySelector('#rail-rename-error-a')?.textContent).toBe(
+      expect(query(host, '#rail-rename-error-a')?.textContent).toBe(
         "Couldn't rename. Try again.",
       );
       expect(live.textContent).toBe("Couldn't rename. Try again.");
@@ -1317,7 +1328,7 @@ describe('CanvasRailCardComponent', () => {
       item(host, action).click();
       fixture.detectChanges();
       expect(spy).toHaveBeenCalledWith('a');
-      expect(host.querySelector('[role="menu"]')).toBeNull();
+      expect(query(host, '[role="menu"]')).toBeNull();
       expect(document.activeElement).toBe(trigger(host));
     }
     expect([beside, up, down].map((spy) => spy.mock.calls.length)).toEqual([
@@ -1344,7 +1355,7 @@ describe('CanvasRailCardComponent', () => {
       expect(openBeside.getAttribute('aria-disabled')).toBe('true');
       const describedBy = openBeside.getAttribute('aria-describedby');
       expect(
-        host.querySelector(`[id="${describedBy}"]`)?.textContent?.trim(),
+        query(host, `[id="${describedBy}"]`)?.textContent?.trim(),
       ).toBe(reason);
       expect(openBeside.textContent).toContain(reason);
       expect(
@@ -1358,13 +1369,14 @@ describe('CanvasRailCardComponent', () => {
       openBeside.click();
       fixture.detectChanges();
       expect(beside).not.toHaveBeenCalled();
-      expect(host.querySelector('[role="menu"]')).not.toBeNull();
+      expect(query(host, '[role="menu"]')).not.toBeNull();
     },
   );
 
   const menuLabels = (host: HTMLElement) =>
     Array.from(
-      host.querySelectorAll(
+      queryAll(
+        host,
         '[role="menu"] [role="menuitem"], [role="menu"] [role="separator"]',
       ),
     ).map((element) =>
@@ -1391,7 +1403,7 @@ describe('CanvasRailCardComponent', () => {
       'Close session',
     ]);
     expect(
-      host.querySelector('ptah-send-to-messaging')?.getAttribute('data-tab-id'),
+      query(host, 'ptah-send-to-messaging')?.getAttribute('data-tab-id'),
     ).toBe('a');
     fixture.componentInstance.closeMenu();
     fixture.detectChanges();
@@ -1421,7 +1433,7 @@ describe('CanvasRailCardComponent', () => {
     item(host, 'toggle-view').click();
     fixture.detectChanges();
     expect(toggleTabViewMode).toHaveBeenCalledWith('a');
-    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(query(host, '[role="menu"]')).toBeNull();
     expect(document.activeElement).toBe(trigger(host));
     // Another tile is active: Stop focuses this card's tile before aborting.
     running.set(true);
@@ -1437,7 +1449,7 @@ describe('CanvasRailCardComponent', () => {
     item(host, 'close-session').click();
     fixture.detectChanges();
     expect(closed).toHaveBeenCalledWith('a');
-    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(query(host, '[role="menu"]')).toBeNull();
   });
 
   it('logs and announces a failed Stop instead of leaving the rejection unhandled', async () => {
@@ -1521,7 +1533,7 @@ describe('CanvasRailCardComponent', () => {
     listbox.setAttribute('role', 'listbox');
     const option = document.createElement('button');
     listbox.appendChild(option);
-    host.querySelector('[role="menu"]')!.appendChild(listbox);
+    query(host, '[role="menu"]')!.appendChild(listbox);
     option.focus();
     const event = keydown(option, 'ArrowDown');
     expect(event.defaultPrevented).toBe(false);
@@ -1545,16 +1557,16 @@ describe('CanvasRailCardComponent', () => {
       .querySelector('[data-rail-actions]')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await openMenu(fixture);
-    host
-      .querySelector('[role="menu"]')
-      ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    query(host, '[role="menu"]')?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true }),
+    );
     item(host, 'move-up').click();
     expect(focusTile).not.toHaveBeenCalled();
-    host
-      .querySelector('div.fixed.inset-0')
+    overlay()
+      .querySelector('.cdk-overlay-backdrop')
       ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     fixture.detectChanges();
-    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(query(host, '[role="menu"]')).toBeNull();
     expect(focusTile).not.toHaveBeenCalled();
   });
 
@@ -1569,7 +1581,7 @@ describe('CanvasRailCardComponent', () => {
     const escape = keydown(item(host, 'rename'), 'Escape');
     fixture.detectChanges();
     expect(escape.defaultPrevented).toBe(true);
-    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(query(host, '[role="menu"]')).toBeNull();
     expect(trigger(host).getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(trigger(host));
   });

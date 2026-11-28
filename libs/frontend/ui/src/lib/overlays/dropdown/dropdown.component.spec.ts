@@ -140,6 +140,16 @@ describe('DropdownComponent', () => {
     }, 100);
   });
 
+  it('emits one close request when Escape is pressed on the trigger', () => {
+    component.isOpen.set(true);
+    fixture.detectChanges();
+    const trigger = (fixture.nativeElement as HTMLElement).querySelector('button');
+    trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    expect(component.closedCount).toBe(1);
+    expect(document.querySelector('.cdk-overlay-pane .dropdown-panel')).toBeNull();
+  });
+
   it('should emit backdropClicked and parent can close dropdown (closeOnBackdropClick pattern)', (done) => {
     component.closeOnBackdropClick.set(true);
     component.isOpen.set(true);

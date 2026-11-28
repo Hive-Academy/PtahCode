@@ -94,6 +94,29 @@ describe('provider consumer rows', () => {
     expect(direct.cellLabel).toContain('Kimi Code');
   });
 
+  it('shows the tier alias for a provider whose runtime can customize the tier', () => {
+    expect(formatResolvedSummary(null, 'claude-cli', '', 'haiku')).toBe(
+      'Claude (Subscription) · Default (haiku tier)',
+    );
+  });
+
+  it('shows the tier alias for a provider without a static tier mapping', () => {
+    expect(formatResolvedSummary(null, 'custom-provider', '', 'haiku')).toBe(
+      'custom-provider · Default (haiku tier)',
+    );
+  });
+
+  it('shows an explicitly chosen model with the inherited Claude Subscription provider', () => {
+    const subscriptionRoute = { driverProviderId: 'claude-cli', resolvedAuthModality: 'cli' };
+    const [, curator] = buildConsumerRows(
+      { ...sources(), memory: ready({ curatorProvider: '', curatorModel: 'claude-opus-4-6' }) },
+      subscriptionRoute,
+      () => null,
+    );
+    expect(curator.provider).toBe('');
+    expect(curator.cellLabel).toBe('Follows main agent → Claude (Subscription) → claude-opus-4-6');
+  });
+
   it('keeps provider readiness checks', () => {
     expect(providerReadiness('anthropic', [{ id: 'anthropic', status: 'connected' }], true)).toBeNull();
     expect(providerReadiness('', [], false)).toEqual(expect.objectContaining({ blocking: true }));

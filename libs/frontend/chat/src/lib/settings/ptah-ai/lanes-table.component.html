@@ -22,13 +22,13 @@
     </colgroup>
   } @else {
     <colgroup data-testid="lanes-colgroup">
-      <col class="w-[6%]" />
+      <col class="lane-order" />
       <col class="lane-identity" />
       <col class="lane-status" />
-      <col class="w-[14%]" />
-      <col class="w-[10%]" />
-      <col class="w-[14%]" />
-      <col class="w-[6%]" />
+      <col class="lane-permission" />
+      <col class="lane-network" />
+      <col class="lane-model" />
+      <col class="lane-enabled" />
       <col class="lane-expander" />
     </colgroup>
   }
@@ -140,9 +140,8 @@
                     <ptah-cli-lane-default-cell
                       cli="ptah-cli"
                       name="Ptah CLI"
-                      layout="compact"
+                      layout="defaults"
                       [showCaption]="false"
-                      resetVisibility="always"
                       [manifest]="defaults.manifest"
                       [saved]="defaults.saved"
                       [disabled]="busy() || !canWrite()"
@@ -361,12 +360,13 @@
           } @else {
             <span
               class="lanes-inherited"
-              title="From Ptah CLI defaults"
+              [title]="inherited().permission + ' (from Ptah CLI defaults)'"
               data-testid="lanes-inherited-permission"
             >
               <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
-              {{ inherited().permission }}
-              <span class="lanes-inherited-tag">(default)</span>
+              <span class="lanes-inherited-value">
+                {{ inherited().permission }} <span class="lanes-inherited-tag">(default)</span>
+              </span>
             </span>
           }
         </td>
@@ -386,12 +386,13 @@
           } @else {
             <span
               class="lanes-inherited"
-              title="From Ptah CLI defaults"
+              [title]="inherited().network + ' (from Ptah CLI defaults)'"
               data-testid="lanes-inherited-network"
             >
               <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
-              {{ inherited().network }}
-              <span class="lanes-inherited-tag">(default)</span>
+              <span class="lanes-inherited-value">
+                {{ inherited().network }} <span class="lanes-inherited-tag">(default)</span>
+              </span>
             </span>
           }
         </td>
@@ -467,76 +468,103 @@
               (tiers)="tiers.emit($event)"
               (test)="test.emit(row)"
             >
+              @if (row.kind === 'instance') {
+                <dl laneHeader class="lanes-instance-header" data-testid="lanes-instance-header">
+                  <div>
+                    <dt>Name</dt>
+                     <dd><span class="lanes-instance-text" [title]="row.name">{{ row.name }}</span></dd>
+                  </div>
+                  <div>
+                    <dt>Provider</dt>
+                     <dd><span class="lanes-instance-text" [title]="row.provider">{{ row.provider }}</span></dd>
+                  </div>
+                  <div class="lanes-instance-model">
+                    <dt>Model / Effort</dt>
+                    <dd>
+                      <ptah-lane-model-effort-cell
+                        [row]="row"
+                        place="detail"
+                        [openField]="openFieldOf(row, 'detail')"
+                        [interactive]="row.interactive"
+                        [canWrite]="canWrite()"
+                        [busy]="rowBusy(row)"
+                        (toggled)="togglePopover(row, $event, 'detail')"
+                        (closed)="closePopover()"
+                      />
+                    </dd>
+                  </div>
+                   <div class="lanes-instance-permission">
+                     <dt>Permission</dt>
+                    <dd class="lanes-inherited" title="From Ptah CLI defaults">
+                       <span class="lanes-instance-text">{{ inherited().permission }}</span>
+                       <span class="lanes-inherited-tag">(default)</span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Network</dt>
+                    <dd class="lanes-inherited" title="From Ptah CLI defaults">
+                       <span class="lanes-instance-text">{{ inherited().network }}</span>
+                       <span class="lanes-inherited-tag">(default)</span>
+                    </dd>
+                  </div>
+                </dl>
+              }
               <ng-container laneFacts>
-                @if (table.collapsed()) {
+                @if (table.collapsed() && row.kind === 'system') {
                   <dt>Permission</dt>
                   <dd class="lane-default-value">
-                    @if (row.kind === 'system') {
-                      <ptah-cli-lane-default-cell
-                        [cli]="row.cli"
-                        [name]="row.name"
-                        [manifest]="row.manifest"
-                        [saved]="defaults()?.[row.cli]"
-                        [disabled]="
-                          !row.installed || rowBusy(row) || !canWrite()
-                        "
-                        field="permission"
-                        [showCaption]="false"
-                        [showReason]="true"
-                        (selected)="
-                          defaultSelected.emit({ row, choice: $event })
-                        "
-                        (resetRequested)="defaultResetRequested.emit(row)"
-                      />
-                    } @else {
-                      <span class="lanes-inherited" title="From Ptah CLI defaults">
-                        <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
-                        {{ inherited().permission }}
-                        <span class="lanes-inherited-tag">(default)</span>
-                      </span>
-                    }
+                    <ptah-cli-lane-default-cell
+                      [cli]="row.cli"
+                      [name]="row.name"
+                      [manifest]="row.manifest"
+                      [saved]="defaults()?.[row.cli]"
+                      [disabled]="
+                        !row.installed || rowBusy(row) || !canWrite()
+                      "
+                      field="permission"
+                      [showCaption]="false"
+                      [showReason]="true"
+                      (selected)="
+                        defaultSelected.emit({ row, choice: $event })
+                      "
+                      (resetRequested)="defaultResetRequested.emit(row)"
+                    />
                   </dd>
                   <dt>Network</dt>
                   <dd class="lane-default-value">
-                    @if (row.kind === 'system') {
-                      <ptah-cli-lane-default-cell
-                        [cli]="row.cli"
-                        [name]="row.name"
-                        [manifest]="row.manifest"
-                        [saved]="defaults()?.[row.cli]"
-                        [disabled]="
-                          !row.installed || rowBusy(row) || !canWrite()
-                        "
-                        field="network"
-                        [showCaption]="false"
-                        [showReason]="true"
-                        (selected)="
-                          defaultSelected.emit({ row, choice: $event })
-                        "
-                        (resetRequested)="defaultResetRequested.emit(row)"
-                      />
-                    } @else {
-                      <span class="lanes-inherited" title="From Ptah CLI defaults">
-                        <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
-                        {{ inherited().network }}
-                        <span class="lanes-inherited-tag">(default)</span>
-                      </span>
-                    }
+                    <ptah-cli-lane-default-cell
+                      [cli]="row.cli"
+                      [name]="row.name"
+                      [manifest]="row.manifest"
+                      [saved]="defaults()?.[row.cli]"
+                      [disabled]="
+                        !row.installed || rowBusy(row) || !canWrite()
+                      "
+                      field="network"
+                      [showCaption]="false"
+                      [showReason]="true"
+                      (selected)="
+                        defaultSelected.emit({ row, choice: $event })
+                      "
+                      (resetRequested)="defaultResetRequested.emit(row)"
+                    />
                   </dd>
                 }
-                <dt>Model / Effort</dt>
-                <dd class="lane-default-value">
-                  <ptah-lane-model-effort-cell
-                    [row]="row"
-                    place="detail"
-                    [openField]="openFieldOf(row, 'detail')"
-                    [interactive]="row.interactive"
-                    [canWrite]="canWrite()"
-                    [busy]="rowBusy(row)"
-                    (toggled)="togglePopover(row, $event, 'detail')"
-                    (closed)="closePopover()"
-                  />
-                </dd>
+                @if (row.kind === 'system') {
+                  <dt>Model / Effort</dt>
+                  <dd class="lane-default-value">
+                    <ptah-lane-model-effort-cell
+                      [row]="row"
+                      place="detail"
+                      [openField]="openFieldOf(row, 'detail')"
+                      [interactive]="row.interactive"
+                      [canWrite]="canWrite()"
+                      [busy]="rowBusy(row)"
+                      (toggled)="togglePopover(row, $event, 'detail')"
+                      (closed)="closePopover()"
+                    />
+                  </dd>
+                }
               </ng-container>
               <span footer-actions>
                 @if (row.kind === 'system' && defaults()?.[row.cli]) {

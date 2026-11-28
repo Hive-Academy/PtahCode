@@ -87,17 +87,24 @@ describe('ClaudeLaneAccountCellComponent', () => {
   let ambient: AmbientFake;
   let announce: jest.Mock;
   const element = () => fixture.nativeElement as HTMLElement;
+  /** Menu content is portaled into the CDK overlay, outside the cell host. */
+  const overlay = () => document.querySelector('.cdk-overlay-pane');
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
-    element().querySelector<T>(selector);
+    element().querySelector<T>(selector) ??
+    overlay()?.querySelector<T>(selector) ??
+    null;
   const trigger = () =>
     q<HTMLButtonElement>('[data-testid="cli-matrix-account-trigger"]');
-  const menu = () => q('[role="menu"]');
+  const menu = () => overlay()?.querySelector<HTMLElement>('[role="menu"]') ?? null;
   const items = () =>
     Array.from(
-      element().querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'),
+      overlay()?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ??
+        [],
     );
   const item = (value: string) =>
-    q<HTMLButtonElement>(`[role="menuitemradio"][data-value="${value}"]`);
+    overlay()?.querySelector<HTMLButtonElement>(
+      `[role="menuitemradio"][data-value="${value}"]`,
+    ) ?? null;
 
   async function settle() {
     for (let i = 0; i < 3; i += 1) {
@@ -151,6 +158,9 @@ describe('ClaudeLaneAccountCellComponent', () => {
 
   afterEach(() => {
     fixture?.destroy();
+    document
+      .querySelectorAll('.cdk-overlay-container')
+      .forEach((node) => node.replaceChildren());
     TestBed.resetTestingModule();
   });
 

@@ -5,7 +5,11 @@ import {
   output,
 } from '@angular/core';
 import { OverlayModule, ConnectedPosition } from '@angular/cdk/overlay';
-import { DROPDOWN_POSITIONS } from '../shared/overlay-positions';
+import {
+  claimOverlayDismissal,
+  CONNECTED_OVERLAY_POLICY,
+  DROPDOWN_POSITIONS,
+} from '../shared/overlay-positions';
 
 /**
  * DropdownComponent - CDK Overlay Dropdown Wrapper
@@ -49,13 +53,14 @@ import { DROPDOWN_POSITIONS } from '../shared/overlay-positions';
     </div>
 
     <ng-template
-      cdkConnectedOverlay
+      [cdkConnectedOverlay]="overlayPolicy"
       [cdkConnectedOverlayOrigin]="trigger"
       [cdkConnectedOverlayOpen]="isOpen()"
       [cdkConnectedOverlayPositions]="positions()"
       [cdkConnectedOverlayHasBackdrop]="hasBackdrop()"
       [cdkConnectedOverlayBackdropClass]="backdropClass()"
-      (backdropClick)="handleBackdropClick()"
+      (backdropClick)="handleBackdropClick($event)"
+      (overlayKeydown)="handleKeydown($event)"
       (attach)="opened.emit()"
       (detach)="handleDetach()"
     >
@@ -69,6 +74,7 @@ import { DROPDOWN_POSITIONS } from '../shared/overlay-positions';
   `,
 })
 export class DropdownComponent {
+  protected readonly overlayPolicy = CONNECTED_OVERLAY_POLICY;
   readonly isOpen = input.required<boolean>();
   readonly positions = input<ConnectedPosition[]>(DROPDOWN_POSITIONS);
   readonly hasBackdrop = input(true);
@@ -79,11 +85,10 @@ export class DropdownComponent {
   readonly backdropClicked = output<void>();
 
   /**
-   * Tracks whether the current close is being driven by a backdrop click,
-   * so `handleDetach()` knows a `closed` event has already been emitted
-   * and can suppress the duplicate.
+   * A user dismissal emits `closed` before the caller updates visibility.
+   * Suppress the duplicate when that update detaches the panel.
    */
-  private closingViaBackdrop = false;
+  private closeRequested = false;
 
   /**
    * Handles backdrop click events.
@@ -92,24 +97,32 @@ export class DropdownComponent {
    * setting its `isOpen` signal to `false`). We set an internal flag so
    * the ensuing `cdkConnectedOverlay` detach does not re-emit `closed`.
    */
-  handleBackdropClick(): void {
+  handleBackdropClick(event: MouseEvent): void {
+    if (!claimOverlayDismissal(event)) return;
     this.backdropClicked.emit();
     if (this.closeOnBackdropClick()) {
-      this.closingViaBackdrop = true;
-      this.closed.emit();
+      this.requestClose();
     }
+  }
+
+  protected handleKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    event.preventDefault();
+    this.requestClose();
+  }
+
+  private requestClose(): void {
+    this.closeRequested = true;
+    this.closed.emit();
   }
 
   /**
    * Handles overlay detach event.
-   * Emits `closed` when the overlay programmatically closes. If the
-   * detach was caused by a backdrop click (which already emitted
-   * `closed` via `handleBackdropClick`), the flag suppresses the
-   * duplicate event.
+   * Emits `closed` for a programmatic close.
    */
   protected handleDetach(): void {
-    if (this.closingViaBackdrop) {
-      this.closingViaBackdrop = false;
+    if (this.closeRequested) {
+      this.closeRequested = false;
       return;
     }
     this.closed.emit();

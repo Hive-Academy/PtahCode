@@ -1,4 +1,4 @@
-import { choosePtahSelect } from '../../choose-ptah-select';
+import { choosePtahSelect, ptahSelectListbox } from '../../choose-ptah-select';
 /**
  * The Gate G reachability table (TASK_2026_555 Batch 16, Task 16.1 — D14,
  * plan Component 14, implementation-plan.md:797-820).
@@ -497,8 +497,8 @@ const providersAuth: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       const popover = await openMainAgentPopover(page);
       const saveTo = popover.locator('[data-testid="main-agent-save-to"]');
-      await saveTo.getByRole('combobox').click();
-      await expect(saveTo.getByRole('option')).toHaveCount(3);
+      const saveToList = await ptahSelectListbox(saveTo);
+      await expect(saveToList.getByRole('option')).toHaveCount(3);
       await page.keyboard.press('Escape');
       await choosePtahSelect(
         popover.locator('[data-testid="main-agent-save-to"]'),
@@ -1396,15 +1396,15 @@ const regressedUx: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       const popover = await openMainAgentPopover(page);
       const target = popover.locator('[data-testid="main-agent-save-to"]');
-      await target.getByRole('combobox').click();
+      const targetList = await ptahSelectListbox(target);
       const label = await expectHostAppScope(
         page,
         popover,
-        target
+        targetList
           .getByRole('option')
           .filter({ hasText: /^(VS Code|Desktop app)$/ }),
       );
-      await expect(target.getByRole('option')).toHaveText([
+      await expect(targetList.getByRole('option')).toHaveText([
         'Global · all apps',
         label,
         'This workspace',

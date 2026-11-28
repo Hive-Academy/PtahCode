@@ -196,7 +196,7 @@ async function expectSettingsBanner(page: Page, state: string): Promise<void> {
 /** Waits for the drawer's own entry keyframes, as `settings-visual.e2e.spec.ts` does. */
 async function waitForDrawerOpened(page: Page): Promise<void> {
   await expect(page.locator(DRAWER)).toBeVisible();
-  await page.locator('[data-testid="native-drawer-root"]').evaluate((element) =>
+  await page.locator('[data-testid="native-drawer-panel"]').evaluate((element) =>
     Promise.all(
       element
         .getAnimations({ subtree: true })
