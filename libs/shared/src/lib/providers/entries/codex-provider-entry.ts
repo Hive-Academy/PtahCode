@@ -17,6 +17,15 @@ export const CODEX_DEFAULT_TIERS = {
   haiku: 'gpt-6-luna',
 } as const;
 
+export function resolveCodexModel(model: string): string {
+  const requested = model.trim();
+  const tier = requested.toLowerCase();
+  if (tier === 'opus' || tier === 'sonnet' || tier === 'haiku') {
+    return CODEX_DEFAULT_TIERS[tier];
+  }
+  return !requested || tier === 'default' ? CODEX_DEFAULT_TIERS.opus : requested;
+}
+
 /**
  * OpenAI Codex provider entry for the Anthropic-compatible provider registry.
  *

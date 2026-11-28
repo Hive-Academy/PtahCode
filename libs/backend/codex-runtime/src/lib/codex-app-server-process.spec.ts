@@ -1162,6 +1162,21 @@ describe('CodexAppServerProcess', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it('detaches a timed-out skill request and keeps the process open for later requests', async () => {
+    await start();
+    const skills = expect(runtime.request('skills/list', { cwds: ['/workspace'] }, 3_000))
+      .rejects.toThrow('Codex skill catalog timed out');
+    await jest.advanceTimersByTimeAsync(3_000);
+    await skills;
+
+    await jest.advanceTimersByTimeAsync(30_000);
+    child.send({ id: -1, result: { data: [] } });
+    expect(child.stdin.writableEnded).toBe(false);
+    const next = runtime.request('skills/list', { cwds: ['/workspace'] }, 3_000);
+    child.send({ id: -2, result: { data: [] } });
+    await expect(next).resolves.toEqual({ data: [] });
+  });
+
   it('times out ordinary requests at thirty seconds and rejects every pending request', async () => {
     await start();
     const first = expect(

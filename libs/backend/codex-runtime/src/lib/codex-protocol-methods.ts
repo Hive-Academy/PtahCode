@@ -237,6 +237,19 @@ export const codexRequestSchemas = {
     }),
     result: modelListResult,
   },
+  'skills/list': {
+    params: z.strictObject({ cwds: z.array(string) }),
+    result: z.object({
+      data: z.array(z.object({
+        skills: z.array(z.object({
+          name: string.min(1),
+          path: string.min(1),
+          enabled: z.boolean(),
+          pluginId: string.nullish(),
+        })),
+      })),
+    }),
+  },
   'account/rateLimits/read': {
     params: empty.nullish(),
     result: z.object({

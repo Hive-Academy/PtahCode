@@ -1002,6 +1002,11 @@ export class ChatSessionService {
         `Codex chat does not support the "${optionError.key}" option.`,
         'CODEX_UNSUPPORTED_OPTION',
       );
+    } else if (adapterError?.code === 'unsupported-command') {
+      failure = new RpcUserError(
+        `Codex app-server does not support /${adapterError.command} in Ptah chat.`,
+        'CODEX_UNSUPPORTED_OPTION',
+      );
     } else if (adapterError?.code === 'busy') {
       failure = new RpcUserError(
         'Codex chat is busy. Try again when the current operation finishes.',
@@ -3706,6 +3711,10 @@ export class ChatSessionService {
     tabId: string,
   ): Promise<void> {
     if (!this.sdkAdapter.isSessionActive(sessionId)) return;
+    if (this.hasLiveSessionStream(sessionId, tabId)) return;
+    const metadata = await this.sessionMetadataStore.get(sessionId);
+    // Codex opens a stream per turn. Between turns the thread stays live.
+    if (metadata?.codexExecution?.runtime === 'codex-app-server') return;
     if (this.hasLiveSessionStream(sessionId, tabId)) return;
 
     this.logger.warn(

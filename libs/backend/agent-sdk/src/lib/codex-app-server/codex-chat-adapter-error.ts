@@ -1,9 +1,11 @@
 export class CodexChatAdapterError extends Error {
   readonly webviewReported?: true;
+  readonly command?: string;
 
   constructor(
     readonly code:
       | 'unsupported'
+      | 'unsupported-command'
       | 'unavailable'
       | 'busy'
       | 'runtime-failed'
@@ -11,10 +13,11 @@ export class CodexChatAdapterError extends Error {
       | 'cancelled'
       | 'identity-mismatch',
     readonly operation: string,
-    options?: ErrorOptions & { webviewReported?: true },
+    options?: ErrorOptions & { webviewReported?: true; command?: string },
   ) {
     super(`Codex chat ${operation}: ${code}`, options);
     this.name = 'CodexChatAdapterError';
+    this.command = options?.command;
     this.webviewReported = options?.webviewReported;
   }
 }

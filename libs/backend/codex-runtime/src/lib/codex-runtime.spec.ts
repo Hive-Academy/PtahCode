@@ -229,6 +229,12 @@ class FakeChild extends EventEmitter implements SpawnedProcessHandle {
     }
     let result: unknown;
     switch (method) {
+      case 'skills/list':
+        result = { data: [{ skills: [
+          { name: 'orchestration', path: '/skills/orchestration/SKILL.md', enabled: true, pluginId: 'ptah-core@local' },
+          { name: 'disabled', path: '/skills/disabled/SKILL.md', enabled: false },
+        ] }] };
+        break;
       case 'model/list':
         result = this.modelPages.shift();
         break;
@@ -372,6 +378,32 @@ describe('CodexRuntime', () => {
       expect(child.stdout.listenerCount('data')).toBe(0);
       expect(child.stdin.listenerCount('finish')).toBe(0);
     }
+  });
+
+  it('sends a native skill input only for an enabled skill advertised for the thread cwd', async () => {
+    const context = await runtime.open(profile);
+    await expect(context.listSkillCommands?.()).resolves.toEqual([
+      'orchestration', 'ptah-core@local:orchestration', 'ptah-core:orchestration',
+    ]);
+    await expect(context.resolveSkillCommand?.('plain message')).resolves.toBeUndefined();
+    await expect(context.resolveSkillCommand?.('/DISABLED')).resolves.toBeUndefined();
+    await expect(context.resolveSkillCommand?.('/unknown')).resolves.toBeUndefined();
+    const text = '/PTAH-CORE:ORCHESTRATION summarize';
+    const skill = await context.resolveSkillCommand?.(text);
+    await context.startTurn({ text, skill });
+    expect(children[0].frames).toContainEqual(expect.objectContaining({
+      method: 'skills/list',
+      params: { cwds: [profile.cwd] },
+    }));
+    expect(children[0].frames).toContainEqual(expect.objectContaining({
+      method: 'turn/start',
+      params: expect.objectContaining({
+        input: [
+          { type: 'text', text },
+          { type: 'skill', name: 'orchestration', path: '/skills/orchestration/SKILL.md' },
+        ],
+      }),
+    }));
   });
 
   it('switches to the bundled executable once for a missing required catalog method', async () => {
@@ -2829,6 +2861,49 @@ describe('CodexRuntime', () => {
       await resumedRuntime.close();
     }
   });
+
+  it.each(['missing', 'throws'] as const)(
+    'preserves thread settings when resumed skill lookup %s',
+    async (lookup) => {
+      const original = await runtime.open(profile);
+      const identity = original.identity;
+      await original.close();
+      const resumedRuntime = new CodexRuntime({ ...options, spawner: {
+        spawnProcess: () => {
+          const child = new FakeChild(identity.threadId);
+          if (lookup === 'throws') child.failMethod = 'skills/list';
+          children.push(child);
+          return child;
+        },
+      } });
+      try {
+        const context = await resumedRuntime.open(
+          { ...profile, model: undefined, effort: undefined },
+          identity,
+          undefined,
+          undefined,
+          { preserveTurnSettings: true },
+        );
+        const skill = context.resolveSkillCommand?.('/missing');
+        if (lookup === 'throws') {
+          await expect(skill).rejects.toBeDefined();
+        } else {
+          await expect(skill).resolves.toBeUndefined();
+        }
+        const resumeParams = children[1].frames.find((frame) => frame['method'] === 'thread/resume')?.['params'];
+        expect(resumeParams).toMatchObject({ threadId: identity.threadId });
+        expect(resumeParams).not.toHaveProperty('model');
+        expect(resumeParams).not.toHaveProperty('effort');
+        await context.startTurn({ text: 'next message' });
+        const turnParams = children[1].frames.find((frame) => frame['method'] === 'turn/start')?.['params'];
+        expect(turnParams).toMatchObject({ threadId: identity.threadId });
+        expect(turnParams).not.toHaveProperty('model');
+        expect(turnParams).not.toHaveProperty('effort');
+      } finally {
+        await resumedRuntime.close();
+      }
+    },
+  );
 
   it.each(['chat', 'gateway'] as const)('keeps %s start and resume frames unchanged', async (consumer) => {
     const baseline: CodexExecutionProfile = { ...profile, consumer, mcpServers: [ptahServer] };

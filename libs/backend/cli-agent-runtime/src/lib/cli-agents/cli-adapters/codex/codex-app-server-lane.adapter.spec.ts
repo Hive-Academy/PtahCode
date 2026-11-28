@@ -93,6 +93,9 @@ class FakeContext implements CodexContext {
   readonly identity: CodexThreadIdentity;
   readonly inputs: CodexTurnInput[] = [];
   readonly close = jest.fn(async () => undefined);
+  readonly resolveSkillCommand = jest.fn<Promise<CodexTurnInput['skill']>, [string]>()
+    .mockResolvedValue(undefined);
+  readonly listSkillCommands = jest.fn<Promise<readonly string[]>, [cwd?: string, timeoutMs?: number]>().mockResolvedValue([]);
   readonly reportedSettings = jest.fn((): { model: string | null; effort: string | null } => ({
     model: null,
     effort: null,
@@ -688,6 +691,58 @@ describe('CodexAppServerLaneAdapter', () => {
     expect(h.resumeArg?.threadId).toBe('thread-1');
     await terminal(h.context);
     expect(await resumed.done).toBe(0);
+    resumed.abort.abort();
+  });
+
+  it.each(['/home/project inspect logs', 'C:/project inspect logs'])(
+    'starts a fresh lane without skill discovery for %s',
+    async (task) => {
+      const h = harness();
+      const handle = await h.adapter.runSdk(options({ task }));
+      expect(h.context.resolveSkillCommand).not.toHaveBeenCalled();
+      expect(h.context.listSkillCommands).not.toHaveBeenCalled();
+      expect(h.context.inputs[0]?.text).toContain(task);
+      await terminal(h.context);
+      await expect(handle.done).resolves.toBe(0);
+      handle.abort.abort();
+    },
+  );
+
+  it('refuses a stale raw skill before starting the resumed turn', async () => {
+    const h = harness();
+    const first = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await first.done;
+    await expect(h.createAdapter().runSdk(
+      options({ resumeSessionId: 'thread-1', task: '/session-handoff' }),
+    )).rejects.toMatchObject({ name: 'LaneTurnInputRefusal' });
+    expect(h.context.inputs).toHaveLength(0);
+    expect(h.context.close).toHaveBeenCalled();
+  });
+
+  it('keeps messaging guidance pending until the first prompt after resumed compaction', async () => {
+    const h = harness();
+    const first = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await first.done;
+
+    const resumed = await h.createAdapter().runSdk(
+      options({ resumeSessionId: 'thread-1', task: '/compact' }),
+    );
+    await expect(resumed.done).resolves.toBe(0);
+    expect(h.context.inputs).toHaveLength(0);
+    expect(resumed.supportsContinuation?.()).toBe(true);
+
+    const next = await resumed.continue?.('first prompt after compact');
+    expect(h.context.inputs[0]?.text).toContain('ptah_agent_message_status');
+    await terminal(h.context);
+    await expect(next?.done).resolves.toBe(0);
+
+    const following = await resumed.continue?.('second prompt after compact');
+    expect(h.context.inputs[1]?.text).toContain('second prompt after compact');
+    expect(h.context.inputs[1]?.text).not.toContain('ptah_agent_message_status');
+    await terminal(h.context, 'turn-2');
+    await expect(following?.done).resolves.toBe(0);
     resumed.abort.abort();
   });
 
@@ -1788,6 +1843,7 @@ describe('CodexAppServerLaneAdapter', () => {
       ],
       efforts: ['low', 'high', 'xhigh', 'bogus'],
       unsendableEfforts: ['bogus'],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(opened + 1);
   });
@@ -1802,10 +1858,68 @@ describe('CodexAppServerLaneAdapter', () => {
     await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
       models: [{ id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)', isDefault: true }],
       efforts: [],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     jest.mocked(h.runtime.openCatalog).mockRejectedValueOnce(new Error('catalog failed'));
     await expect(h.adapter.stoppedLaneCatalog()).rejects.toThrow('catalog failed');
     expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('catalog failed'), expect.any(Object));
+  });
+
+  it.each(['rejects', 'times out'])('keeps models and efforts when live or stopped skill discovery %s', async (failure) => {
+    const skillTimeouts: (number | undefined)[] = [];
+    const h = harness((context) => {
+      context.models = [{
+        id: 'catalog-id', model: 'gpt-6-sol', displayName: 'GPT-6-Sol', isDefault: true,
+        supportedEfforts: ['low', 'high'],
+      }];
+      if (failure === 'times out') {
+        context.listSkillCommands.mockImplementation((_cwd, timeoutMs) => new Promise((_, reject) => {
+          skillTimeouts.push(timeoutMs);
+          setTimeout(() => reject(new Error('Codex skill catalog timed out')), timeoutMs);
+        }));
+      } else {
+        context.listSkillCommands.mockRejectedValue(new Error('skills/list failed'));
+      }
+    });
+    const handle = await h.adapter.runSdk(options());
+    const expected = {
+      models: [expect.objectContaining({ id: 'gpt-6-sol' })],
+      efforts: ['low', 'high'],
+      commands: [expect.objectContaining({ name: 'compact' })],
+      commandsUnavailable: true,
+      unavailableReason: 'Codex skills are unavailable.',
+    };
+    async function expectCatalog(read: () => Promise<unknown> | undefined) {
+      jest.useFakeTimers();
+      try {
+        const assertion = expect(read()).resolves.toMatchObject(expected);
+        await jest.advanceTimersByTimeAsync(4_000);
+        await assertion;
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+    await expectCatalog(() => handle.listTurnOptions?.());
+    await terminal(h.context);
+    await handle.done;
+    await expectCatalog(() => h.adapter.stoppedLaneCatalog('/workspace'));
+    if (failure === 'times out') expect(skillTimeouts).toEqual([3_000, 3_000]);
+    handle.abort.abort();
+  });
+
+  it('advertises skills from the stopped lane workspace', async () => {
+    const h = harness((context) => {
+      context.listSkillCommands.mockImplementation(async (cwd) =>
+        cwd === '/workspace' ? ['session-handoff'] : [],
+      );
+    });
+    const handle = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await handle.done;
+    await expect(h.adapter.stoppedLaneCatalog('/workspace')).resolves.toMatchObject({
+      commands: expect.arrayContaining([{ name: 'session-handoff', group: 'skill' }]),
+    });
+    handle.abort.abort();
   });
 });
 
@@ -1827,8 +1941,8 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
       effort: { state: 'supported', appliesAt: 'next-turn' },
       images: { state: 'supported', onSteer: true },
       files: { state: 'supported', delivery: 'reference' },
-      commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
-      skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
+      commands: { state: 'supported' },
+      skills: { state: 'supported' },
     });
     expect(manifest.usage).toEqual({ timing: 'live' });
     expect(manifest.prompts?.approvals.state).toBe('unsupported');
@@ -1858,11 +1972,78 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     handle.abort.abort();
   });
 
+  it('compacts an idle thread without sending a turn and keeps it available for follow-ups', async () => {
+    const h = harness();
+    const handle = await started(h);
+    const compact = jest.spyOn(h.context, 'compact');
+    await expect(handle.continue?.('/compact')).rejects.toThrow(
+      'Codex lane turn is already active',
+    );
+    expect(compact).not.toHaveBeenCalled();
+    await terminal(h.context);
+    await handle.done;
+
+    compact.mockRejectedValueOnce(new Error('Compaction unavailable'));
+    const failed = await handle.continue?.('/compact');
+    await expect(failed?.done).rejects.toThrow('Compaction unavailable');
+    const completed = await handle.continue?.(' /COMPACT');
+    await expect(completed?.done).resolves.toBe(0);
+    expect(compact).toHaveBeenCalledTimes(2);
+    expect(h.context.inputs).toHaveLength(1);
+    expect(h.context.close).not.toHaveBeenCalled();
+
+    const next = await handle.continue?.('after compact');
+    expect(h.context.inputs.at(-1)?.text).toContain('after compact');
+    await terminal(h.context, 'turn-2');
+    await expect(next?.done).resolves.toBe(0);
+    handle.abort.abort();
+  });
+
   it('keeps an interrupted terminal the host did not request as a failure', async () => {
     const h = harness();
     const handle = await started(h);
     h.context.event('turn-1', 100, { type: 'terminal', status: 'interrupted' });
     expect(await handle.done).toBe(1);
+  });
+
+  it('refuses a stale advertised skill before starting a turn and keeps the lane usable', async () => {
+    const h = harness();
+    const handle = await started(h);
+    await terminal(h.context);
+    await handle.done;
+    h.context.listSkillCommands.mockResolvedValueOnce(['session-handoff']);
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
+      commands: expect.arrayContaining([{ name: 'session-handoff', group: 'skill' }]),
+    });
+    await expect(handle.continue?.('/SESSION-HANDOFF')).rejects.toMatchObject({
+      name: 'LaneTurnInputRefusal',
+      message: 'This Codex skill is no longer available or enabled.',
+    });
+    expect(h.context.inputs).toHaveLength(1);
+    expect(h.context.close).not.toHaveBeenCalled();
+    const next = await handle.continue?.('next message');
+    await terminal(h.context, 'turn-2');
+    await expect(next?.done).resolves.toBe(0);
+    handle.abort.abort();
+  });
+
+  it('sends an advertised slash skill on the next lane turn', async () => {
+    const h = harness();
+    const handle = await started(h);
+    await terminal(h.context);
+    await handle.done;
+    const skill = { type: 'skill', name: 'session-handoff', path: '/skills/session-handoff/SKILL.md' } as const;
+    h.context.listSkillCommands.mockResolvedValueOnce([skill.name]);
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
+      commands: expect.arrayContaining([{ name: skill.name, group: 'skill' }]),
+    });
+    h.context.resolveSkillCommand.mockResolvedValueOnce(skill);
+    const next = await handle.continue?.('/session-handoff summarize');
+    expect(h.context.resolveSkillCommand).toHaveBeenLastCalledWith('/session-handoff summarize');
+    expect(h.context.inputs.at(-1)).toMatchObject({ skill, text: expect.stringContaining('summarize') });
+    await terminal(h.context, 'turn-2');
+    await expect(next?.done).resolves.toBe(0);
+    handle.abort.abort();
   });
 
   it('rejects when Codex refuses the interrupt of a still-active turn', async () => {
@@ -1925,7 +2106,7 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
       models: [{ id: 'gpt-x', name: 'GPT X (Codex default)' }],
       efforts: ['low', 'high', 'none'],
       unsendableEfforts: ['none'],
-      commands: [],
+      commands: [{ name: 'compact', group: 'command', description: 'Compact the conversation' }],
     });
     h.context.models = [{ id: 'k2', model: 'gpt-y', displayName: 'GPT Y', isDefault: false }];
     await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
@@ -1936,7 +2117,7 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     handle.abort.abort();
   });
 
-  it('reports native settings and the reported model’s efforts without opening the composer', async () => {
+  it('reports native settings and the reported modelâ€™s efforts without opening the composer', async () => {
     const h = harness();
     const handle = await started(h);
     expect(handle.reportedSession?.()).toEqual({

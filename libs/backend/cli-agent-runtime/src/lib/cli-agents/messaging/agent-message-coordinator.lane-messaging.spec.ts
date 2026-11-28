@@ -10,7 +10,7 @@ import { LaneMessagePolicy, type VerifiedLaneSender } from './lane-message.polic
 import { harness, idOf, manifest } from './__fixtures__/agent-message-harness';
 import { AgentMessageAttachmentCapacityError, AgentMessageAttachmentStore } from './agent-message-attachment.store';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
-import type { SdkHandle } from '../cli-adapters/cli-adapter.interface';
+import type { CliAdapter, LaneTurnOptionsCatalog, SdkHandle } from '../cli-adapters/cli-adapter.interface';
 
 const WS = 'ws-key-1';
 
@@ -415,6 +415,33 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     });
   });
 
+  it.each([
+    { name: 'compact', group: 'command' },
+    { name: 'session-handoff', group: 'skill' },
+  ] as const)('sends /$name raw on a cold Codex resume without a cached catalog', async (command) => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'codex', displayName: 'Codex', status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn<ReturnType<NonNullable<CliAdapter['stoppedLaneCatalog']>>, [string?]>(async () => ({
+      models: [],
+      efforts: [],
+      commands: [command],
+    }));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog });
+
+    const message = `/${command.name}`;
+    await coordinator.send({ agentId: h.agentId, message }, user);
+
+    expect(stoppedLaneCatalog).toHaveBeenCalledWith(h.tracked.info.workingDirectory);
+    expect(h.resume.resume).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: h.agentId }),
+      message,
+      expect.objectContaining({ rawBody: message }),
+      undefined,
+    );
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+  });
+
   it('reports an error, not an empty catalog, when a stopped Codex catalog read fails (S1)', async () => {
     const { h, coordinator } = setupTurn();
     h.tracked.sdkHandle = undefined;
@@ -449,6 +476,90 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
       efforts: ['low', 'high'], unavailableReason: 'Commands and skills appear when the lane is running.',
     });
+  });
+
+  it('retries a first skill send after the live catalog recovers', async () => {
+    const { h, coordinator } = setupTurn();
+    const commands = [{ name: 'session-handoff', group: 'skill' as const }];
+    const listTurnOptions = jest.fn()
+      .mockResolvedValueOnce({ models: [], efforts: [], commands: [], commandsUnavailable: true })
+      .mockResolvedValueOnce({ models: [], efforts: [], commands });
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+
+    const first = await coordinator.send({ agentId: h.agentId, message: '/session-handoff' }, user);
+    expect(first).toMatchObject({ receipt: { state: 'blocked-retryable' } });
+    expect(h.sendToAgent).not.toHaveBeenCalled();
+
+    await coordinator.retry(h.agentId, idOf(first), user);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/session-handoff', expect.anything(),
+      expect.any(String), false, expect.objectContaining({ noSteer: true }));
+  });
+
+  it('refreshes a stopped Codex catalog after skills change', async () => {
+    const { h, coordinator } = setupTurn();
+    const previous = { name: 'old-skill', group: 'skill' as const };
+    const current = { name: 'new-skill', group: 'skill' as const };
+    h.tracked.sdkHandle = {
+      ...handleOf(h), listTurnOptions: async () => ({ models: [], efforts: [], commands: [previous] }),
+    };
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({ commands: [previous] });
+
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ cli: 'codex', displayName: 'Codex', status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => ({ models: [], efforts: [], commands: [current] }));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog });
+
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({ commands: [current] });
+    await coordinator.send({ agentId: h.agentId, message: '/new-skill' }, user);
+    expect(h.resume.resume).toHaveBeenCalledWith(expect.anything(), '/new-skill',
+      expect.objectContaining({ rawBody: '/new-skill' }), undefined);
+    expect(stoppedLaneCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends a built-in command when model discovery fails', async () => {
+    const { h, coordinator } = setupTurn();
+    h.setInfo({ cli: 'codex', displayName: 'Codex' });
+    const builtinLaneCommands = [{ name: 'compact', group: 'command' as const }];
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ builtinLaneCommands });
+    const listTurnOptions = jest.fn().mockRejectedValue(new Error('model/list failed'));
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      commands: builtinLaneCommands, error: 'Lane options could not be read.',
+    });
+    await coordinator.send({ agentId: h.agentId, message: '/compact' }, user);
+    expect(listTurnOptions).toHaveBeenCalledTimes(1);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/compact', expect.anything(), expect.any(String),
+      false, expect.objectContaining({ noSteer: true }));
+  });
+
+  it.each(['live', 'stopped'])('holds a raw skill during partial discovery and refuses it after removal (%s lane)', async (lane) => {
+    const { h, coordinator } = setupTurn();
+    const commands = [{ name: 'session-handoff', group: 'skill' as const }];
+    const listTurnOptions = jest.fn(async (): Promise<LaneTurnOptionsCatalog & { models: [] }> => ({ models: [], efforts: [], commands }))
+      .mockResolvedValueOnce({ models: [], efforts: [], commands })
+      .mockResolvedValueOnce({ models: [], efforts: [], commands: [], commandsUnavailable: true, unavailableReason: 'Codex skills are unavailable.' })
+      .mockResolvedValueOnce({ models: [], efforts: [], commands: [] });
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+    h.sendToAgent.mockResolvedValueOnce({ mode: 'unsupported', reasonCode: 'turn-input-unsupported' });
+    const first = await coordinator.send({ agentId: h.agentId, message: '/SESSION-HANDOFF' }, user);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/SESSION-HANDOFF', expect.anything(),
+      expect.any(String), false, expect.objectContaining({ noSteer: true }));
+    if (lane === 'stopped') {
+      h.tracked.sdkHandle = undefined;
+      h.setInfo({ status: 'stopped' });
+      (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog: listTurnOptions });
+    }
+    await expect(coordinator.retry(h.agentId, idOf(first), user)).resolves.toMatchObject({
+      mode: 'unsupported', detail: 'The lane command catalog is unavailable.',
+      receipt: { state: 'blocked-retryable' },
+    });
+    await expect(coordinator.retry(h.agentId, idOf(first), user)).resolves.toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-input-unsupported',
+      detail: 'This lane command is no longer advertised.',
+    });
+    expect(listTurnOptions).toHaveBeenCalledTimes(3);
+    expect(h.sendToAgent).toHaveBeenCalledTimes(1);
   });
 
   it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {

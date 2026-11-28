@@ -96,8 +96,9 @@ export const AgentMessageEnvelopeSchema = z.object({
   turn: AgentMessageEnvelopeTurnSchema.optional(),
   /**
    * Delivered as a raw provider `/command` (no Ptah header, no ack line). The
-   * decision is recorded once, so a retry or a scheduler re-offer delivers it
-   * the same way. Named apart from `delivery` (`queue` | `now`), which this
+   * marker records the delivery form for receipt and acknowledgement handling.
+   * Retries and re-offers must revalidate it against the current catalog.
+   * Named apart from `delivery` (`queue` | `now`), which this
    * schema already uses.
    */
   rawDelivery: z.object({ raw: z.literal(true) }).strict().optional(),

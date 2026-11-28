@@ -44,6 +44,7 @@ import type {
 import {
   MESSAGE_TYPES,
   PROVIDER_ACCOUNT_RESULT_CODES,
+  isChatBuiltinCommand,
   isSafeProviderAccountSummary,
 } from '@ptah-extension/shared';
 import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
@@ -54,6 +55,7 @@ import {
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
 } from './chat-runtime-profile.service';
+import { applyLiveTurnSettings } from './live-turn-settings';
 import { providerSessionFailure } from './provider-session-failure';
 import { CHAT_TOKENS } from '../tokens';
 import type { ChatSdkContextService } from './chat-sdk-context.service';
@@ -208,7 +210,7 @@ export class ChatSlashCommandRouterService {
    * (native or SDK new-query), or `null` to indicate the caller should
    * proceed with normal LLM streaming.
    *
-   * Extracted from `ChatSessionService.handleFollowUpSlashCommand` — every
+   * Extracted from `ChatSessionService.handleFollowUpSlashCommand` â€” every
    * log message and MESSAGE_TYPES.CHAT_COMPLETE payload is byte-identical.
    */
   async routeFollowUpSlashCommand(
@@ -400,23 +402,54 @@ export class ChatSlashCommandRouterService {
           }
         }
         if (execution.runtime === 'codex-app-server') {
-          if (interceptResult.commandName === 'compact') {
-            if (!this.runtimeControls) {
-              throw new Error(
-                'Native session runtime controls are unavailable.',
+          if (interceptResult.commandName !== 'compact') {
+            if (
+              this.nativeAdapter &&
+              !isChatBuiltinCommand(interceptResult.commandName)
+            ) {
+              const active = this.sdkAdapter.isSessionActive(sessionId);
+              if (!active) {
+                await this.nativeAdapter.resumeSessionForSkillLookup(
+                  sessionId,
+                  config,
+                );
+              }
+              const invoked = await this.nativeAdapter.invokeSkillCommand(
+                sessionId,
+                command,
+                {
+                  clientMessageId: params.clientMessageId,
+                  files: params.files,
+                  images: params.images,
+                },
+                () => applyLiveTurnSettings(this.sdkAdapter, this.logger, sessionId, {
+                  model: active ? params.model : execution.seed.model,
+                  effort: params.effort,
+                }),
               );
+              if (invoked) {
+                return { success: true, sessionId };
+              }
             }
-            if (!this.sdkAdapter.isSessionActive(sessionId)) {
-              // A failed Stop closes the context. Reopen the stored thread
-              // without starting an assistant turn before native compaction.
-              await this.sdkAdapter.resumeSession(sessionId, {
-                ...config,
-                prompt: '',
-              });
-            }
-            await this.runtimeControls.compact(sessionId);
-            return { success: true, sessionId, settled: true };
+            return {
+              success: false,
+              sessionId,
+              errorCode: 'CODEX_UNSUPPORTED_OPTION',
+              error: `Codex app-server does not support /${interceptResult.commandName} in Ptah chat.`,
+            };
           }
+          if (!this.runtimeControls) {
+            throw new Error('Native session runtime controls are unavailable.');
+          }
+          if (!this.sdkAdapter.isSessionActive(sessionId)) {
+            // Reopen a closed thread without starting an assistant turn.
+            await this.sdkAdapter.resumeSession(sessionId, {
+              ...config,
+              prompt: '',
+            });
+          }
+          await this.runtimeControls.compact(sessionId);
+          return { success: true, sessionId, settled: true };
         }
         const stream = await this.sdkAdapter.executeSlashCommand(
           sessionId,
@@ -457,16 +490,6 @@ export class ChatSlashCommandRouterService {
               : {}),
           },
         );
-        if (execution.runtime === 'codex-app-server') {
-          try {
-            await this.runtimeProfile?.publishRuntimeNotices(execution, {
-              tabId,
-              sessionId,
-            });
-          } catch {
-            this.logger.warn('[RPC] Model substitution notice failed; continuing session stream');
-          }
-        }
         this.streamBroadcaster.streamEventsToWebview(sessionId, stream, tabId);
 
         return { success: true, sessionId };

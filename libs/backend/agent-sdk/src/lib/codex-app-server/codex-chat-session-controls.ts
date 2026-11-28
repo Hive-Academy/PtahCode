@@ -3,6 +3,7 @@ import {
   type CodexExecutionProfile,
 } from '@ptah-extension/codex-runtime';
 import {
+  resolveCodexModel,
   type IAgentAdapter,
   type SessionId,
   type SessionEndCause,
@@ -240,9 +241,10 @@ export class CodexChatSessionControls {
     session.settings = { ...session.settings, permissionLevel: level };
   }
   async setSessionModel(
-    ...[id, model]: Parameters<IAgentAdapter['setSessionModel']>
+    ...[id, requestedModel]: Parameters<IAgentAdapter['setSessionModel']>
   ): Promise<void> {
     const session = this.deps.session(id);
+    const model = resolveCodexModel(requestedModel);
     await this.deps.safe('model', () =>
       session.context.updateNextTurn({ model }),
     );
