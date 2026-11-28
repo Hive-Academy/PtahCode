@@ -1,6 +1,6 @@
 ---
 name: agent-lanes
-description: "Ptah CLI agent-lane contract. Use when spawning, resuming, checking, messaging, recovering, or verifying background lanes."
+description: "Use if a task spawns or resumes a lane, even if it never names a tool. ptah_agent_spawn is the mechanic orchestration and tribunal load for lane work, not a substitute for the engineering workflow or multi-vendor panel."
 ---
 
 # Agent Lanes

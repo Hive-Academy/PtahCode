@@ -1,6 +1,6 @@
 ---
 name: resilient-nestjs-patterns
-description: "NestJS service decomposition and resilience. Use for retries, fallbacks, events, SSE, or forRoot/forTesting design."
+description: "Use for NestJS retries or fallbacks and dynamic modules. For overlapping work with nestjs-backend-patterns or webhook-architecture, may load both skills."
 ---
 
 # Resilient NestJS Patterns

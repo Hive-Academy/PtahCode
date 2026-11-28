@@ -1,8 +1,8 @@
 {
   "$schema": "https://ptah.live/schemas/content-manifest.json",
   "version": "1.0.0",
-  "contentHash": "sha256:a0b3d8e4fb406c0c56b0b173594ee085f733e0ecfe3bcd6859417df671ecef62",
-  "generatedAt": "2026-11-28T15:25:22.072Z",
+  "contentHash": "sha256:6049db6b3c338ce6714bdcddd3d243f4123a16329c7416d8e17720c581377f11",
+  "generatedAt": "2026-11-28T15:56:52.466Z",
   "baseUrl": "https://raw.githubusercontent.com/Hive-Academy/PtahCode/main",
   "plugins": {
     "basePath": "plugins",

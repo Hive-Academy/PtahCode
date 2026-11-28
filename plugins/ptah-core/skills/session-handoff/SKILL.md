@@ -1,6 +1,6 @@
 ---
 name: session-handoff
-description: "Hands off work to a fresh session. Use when the user, session-budget banner, or child runtime cap requests /session-handoff."
+description: "Hands off work to a fresh session. Use only when the user, session-budget banner, or child runtime cap requests /session-handoff."
 ---
 
 # Session Handoff

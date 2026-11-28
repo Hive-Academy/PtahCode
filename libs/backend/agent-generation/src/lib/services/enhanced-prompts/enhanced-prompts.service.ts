@@ -826,7 +826,12 @@ export class EnhancedPromptsService {
     const previous = this.stateWrites.get(workspacePath);
     const write = (async () => {
       // A failed write leaves the last committed value available for retry.
-      await previous?.catch(() => undefined);
+      await previous?.catch((error: unknown) => {
+        this.logger.warn('EnhancedPromptsService: Previous state write failed', {
+          workspacePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
       const state = update(await this.stateStore.load(workspacePath));
       await this.stateStore.save(workspacePath, state);
       return state;

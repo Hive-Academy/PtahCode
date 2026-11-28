@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2335_648a
-status: backlog
+status: in_review
 type: REFACTORING
 title: Trim the first-request prompt of Ptah sessions
 depends_on: []

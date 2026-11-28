@@ -1,6 +1,6 @@
 ---
 name: angular-gsap-animation-crafter
-description: "Designs Angular GSAP motion. Use for scroll, parallax, timelines, pinned sections, or reference animation."
+description: "Angular scroll, parallax and timeline. angular-3d-scene-crafter may load when the task has both. Component structure may load angular-frontend-patterns. Non-Angular animation is outside this skill."
 ---
 
 # Angular GSAP Animation Crafter

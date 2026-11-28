@@ -19,7 +19,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, parseDocument } from 'yaml';
 import type { HarnessAgentSource } from './agent-transformer.port';
 import { OpencodeAgentTransformer } from './opencode-agent-transformer';
 
@@ -50,7 +50,7 @@ function agentSource(id: string, body = 'Agent body'): HarnessAgentSource {
 
 /** The leading `---`…`---` block of a rendered agent. */
 function frontmatterOf(rendered: string): string {
-  const match = /^---\n([\s\S]*?)\n---/.exec(rendered);
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(rendered);
   expect(match).not.toBeNull();
   return (match as RegExpExecArray)[1];
 }
@@ -147,18 +147,20 @@ describe('OpencodeAgentTransformer', () => {
   // ------------------------------------------------------------- round-trip
 
   it("round-trips the repo's real backend-developer agent into a loadable file", () => {
-    const rendered = transformer.transform(realBackendDeveloperSource());
+    const source = realBackendDeveloperSource();
+    const rendered = transformer.transform(source);
     const frontmatter = frontmatterOf(rendered);
 
     expect(frontmatter).toContain('mode: subagent');
     expect(frontmatter).toContain('source: ptah');
     // The real source's `model: opus` must not survive into the output.
     expect(frontmatter).not.toMatch(/^model:/m);
-    // The real description is a long sentence with em dashes and semicolons;
-    // it has to arrive intact and quoted.
-    expect(frontmatter).toMatch(
-      /^description: "Writes and changes server-side code in this repository/m,
+    expect(frontmatter).toMatch(/^description: "/m);
+    const sourceDescription = parseDocument(frontmatterOf(source.content)).get(
+      'description',
     );
+    expect(sourceDescription).toEqual(expect.stringMatching(/\S/));
+    expect(parseDocument(frontmatter).get('description')).toBe(sourceDescription);
     // Body survived.
     expect(rendered).toContain('# Backend Developer');
     expect(transformer.isPtahOutput(rendered)).toBe(true);

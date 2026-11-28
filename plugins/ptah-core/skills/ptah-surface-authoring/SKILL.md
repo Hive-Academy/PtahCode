@@ -1,6 +1,6 @@
 ---
 name: ptah-surface-authoring
-description: "Authors ptah-ui blocks and HTML artifacts from verified data. Use for reports, dashboards, summaries, charts, or plans."
+description: "Authors ptah-ui blocks. Use for turn summary, stats, file changes, test results, a chart, usage or plan limits. technical-content-writer and ui-ux-designer may still apply."
 ---
 
 ## Reports and visual views
