@@ -52,6 +52,10 @@ describe('classifyToolCall', () => {
     ['rg needle file 2>&1', 'text-search'],
     ['cd x && rg needle', 'text-search'],
     ['FLAG=1 rg needle file', 'text-search'],
+    ['rg TODO src # inspect; curl example.invalid', 'text-search'],
+    ['rg a#b file', 'text-search'],
+    ['rg TODO src # keep > out.txt', 'text-search'],
+    ['rg "#x; y" file', 'text-search'],
     ['Select-String needle file', 'text-search'],
     ['findstr needle file', 'text-search'],
     ['Get-Content file', 'file-read'],
@@ -103,6 +107,9 @@ describe('classifyToolCall', () => {
     'rg needle src | sort -o sorted.txt',
     'rg needle src || echo missing',
     'cd dir && ls && rm tmp.txt',
+    'ls a#b; rm tmp.txt',
+    'rg TODO src # note\nrm tmp.txt',
+    'rg "#x" src; rm tmp.txt',
   ])('excludes mutating shell command from read categories: %s', (cmd) => {
     const classification = classifyToolCall({ name: 'Bash', input: { command: cmd } });
     expect(classification.operation).toBe('native-other');

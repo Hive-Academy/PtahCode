@@ -196,6 +196,37 @@ interface CommandStage {
   readonly separator: '|' | 'chain' | null;
 }
 
+/**
+ * Remove unquoted shell comments. An unquoted `#` at the start of a word starts a
+ * comment that runs to the end of its line; a `#` inside a word or quotes is literal.
+ * The line break is kept, so a later line still reaches the stage splitter.
+ */
+function stripShellComments(command: string): string {
+  let out = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i] ?? '';
+    if (quote !== null) {
+      out += ch;
+      if (ch === '\\' && quote === '"' && i + 1 < command.length) {
+        out += command[i + 1] ?? '';
+        i++;
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === '#' && (i === 0 || /\s/.test(command[i - 1] ?? ''))) {
+      while (i + 1 < command.length && command[i + 1] !== '\n' && command[i + 1] !== '\r') i++;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function splitCommandStages(command: string): CommandStage[] | null {
   const stages: CommandStage[] = [];
   let start = 0;
@@ -303,7 +334,7 @@ function nativeClass(call: ToolCallInput): NativeClass | null {
   if (/^(glob|ls|dir|list|get-childitem)\b/.test(name)) return 'path-listing';
   if (/^git\s+(status|diff|log|show|branch)\b/.test(name)) return 'git-read';
   if (!/^(shell|bash|powershell|terminal|exec-command|shell-command)$/.test(name)) return null;
-  const command = shellCommand(call.input)
+  const command = stripShellComments(shellCommand(call.input))
     .replace(/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=[^\s]+\s+)*cd\s+[^;&|]+&&\s*/i, '')
     .replace(/^\s*(?:["'])(.*?)(?:["'])/, '$1');
   if (hasOutputRedirection(stripQuotedStrings(command))) return null;
