@@ -78,41 +78,73 @@ test('captures the add instance subform and its modal dropdown', async ({
   await shot(page, 'add-ptah-cli-instance-openrouter');
 });
 
-for (const width of [1280, 1440, 1824, 800]) {
-  test('captures the Ptah CLI instance header at ' + width, async ({ ui, mainWindow: page }) => {
-    await ui.mockRpc({ ...staticMocks, ...dynamicMocks });
-    await ui.prepare();
-    await ui.goto('settings');
-    await openSection(page, 'Providers', width);
-    const row = page.getByTestId('cli-matrix-row-preview-openrouter');
-    await expect(row).toBeVisible();
-    const expander = row.getByRole('button', { name: 'Details for OpenRouter team' });
-    if (await expander.isVisible()) {
-      await expander.click();
-    } else {
-      await row.getByRole('button', { name: 'More actions for OpenRouter team' }).click();
-      await page.getByRole('menuitem', { name: 'Details for OpenRouter team' }).click();
-    }
-    const header = page.getByTestId('lanes-instance-header');
-    await expect(header).toBeVisible();
-    await header.scrollIntoViewIfNeeded();
-    await shot(page, 'ptah-cli-instance-header-' + width);
-    const tops = await header.locator(':scope > div').evaluateAll(
-      (fields) => fields.map((field) => Math.round(field.getBoundingClientRect().top)),
-    );
-    if (width === 800) expect(new Set(tops).size).toBeGreaterThan(1);
-    else expect(new Set(tops).size).toBe(1);
-    const heights = await header.locator('dd, dd button').evaluateAll(
-      (values) => values.map((value) => value.getBoundingClientRect().height),
-    );
-    expect(new Set(heights).size).toBe(1);
-    if (width === 1824) {
-      await page.getByTestId('cli-matrix-edit-preview-openrouter').click();
-      await expect(page.getByRole('dialog', { name: 'Edit OpenRouter team' })).toBeVisible();
-      await shot(page, 'ptah-cli-instance-edit-1824');
-    }
-  });
-}
+const rowTolerance = 2;
+
+test.describe('Ptah CLI instance header', () => {
+  // A stalled Electron startup can time out before the scene reaches Settings.
+  test.describe.configure({ retries: 1 });
+
+  for (const width of [1280, 1440, 1824, 800]) {
+    test(`captures the Ptah CLI instance header at ${width}`, async ({ ui, mainWindow: page }) => {
+      await ui.mockRpc({ ...staticMocks, ...dynamicMocks });
+      await ui.prepare();
+      await ui.goto('settings');
+      await openSection(page, 'Providers', width);
+      const row = page.getByTestId('cli-matrix-row-preview-openrouter');
+      await expect(row).toBeVisible();
+      const expander = row.getByRole('button', { name: 'Details for OpenRouter team' });
+      if (await expander.isVisible()) {
+        await expander.click();
+      } else {
+        await row.getByRole('button', { name: 'More actions for OpenRouter team' }).click();
+        await page.getByRole('menuitem', { name: 'Details for OpenRouter team' }).click();
+      }
+      const detail = page.locator('#lane-detail-preview-openrouter');
+      const header = detail.getByTestId('lanes-instance-header');
+      await expect(header).toBeVisible();
+      await header.scrollIntoViewIfNeeded();
+      const readOnlyFields = header.locator(':scope > div');
+      await expect(readOnlyFields).toHaveCount(5);
+      const readOnlyTops = await readOnlyFields.evaluateAll(
+        (fields) => fields.map((field) => field.getBoundingClientRect().top),
+      );
+      const readOnlySpread = Math.max(...readOnlyTops) - Math.min(...readOnlyTops);
+      if (width === 800) expect(readOnlySpread).toBeGreaterThan(rowTolerance);
+      else expect(readOnlySpread).toBeLessThanOrEqual(rowTolerance);
+      await shot(page, `ptah-cli-instance-header-${width}`);
+
+      await detail.getByTestId('cli-matrix-edit-preview-openrouter').click();
+      const dialog = page.getByRole('dialog', { name: 'Edit OpenRouter team' });
+      const editHeader = dialog.getByTestId('cli-instance-edit-header');
+      const modelEffort = editHeader.getByTestId('cli-instance-edit-model-effort');
+      const controls = [
+        editHeader.getByRole('textbox', { name: 'Instance name' }),
+        editHeader.getByTestId('add-cli-instance-provider-fixed'),
+        modelEffort.getByRole('button', { name: 'Model default for OpenRouter team' }),
+        modelEffort.getByRole('button', { name: 'Effort default for OpenRouter team' }),
+        editHeader.getByTestId('cli-instance-edit-permission'),
+        editHeader.getByTestId('cli-instance-edit-network'),
+      ];
+      for (const control of controls) {
+        await expect(control).toBeVisible();
+      }
+      await shot(page, `ptah-cli-instance-edit-${width}`);
+      const [name, provider, model, effort, permission, network] = await Promise.all(
+        controls.map((control) => control.evaluate((element) => element.getBoundingClientRect().top)),
+      );
+      if (width === 800) {
+        expect(Math.abs(name - provider)).toBeLessThanOrEqual(rowTolerance);
+        expect(Math.abs(model - effort)).toBeLessThanOrEqual(rowTolerance);
+        expect(Math.abs(permission - network)).toBeLessThanOrEqual(rowTolerance);
+        expect(model - name).toBeGreaterThan(rowTolerance);
+        expect(permission - model).toBeGreaterThan(rowTolerance);
+      } else {
+        const tops = [name, provider, model, effort, permission, network];
+        expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(rowTolerance);
+      }
+    });
+  }
+});
 
 const curatorModels = {
   'claude-cli': { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },

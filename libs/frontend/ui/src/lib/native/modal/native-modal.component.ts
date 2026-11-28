@@ -23,7 +23,7 @@ import {
 import { claimOverlayDismissal, detachConnectedChildren } from '../../overlays/shared/overlay-positions';
 
 /** Modal width preset, mapped to a `modal-box` max-width class. */
-export type NativeModalSize = 'sm' | 'md' | 'lg';
+export type NativeModalSize = 'sm' | 'md' | 'lg' | 'xl';
 
 /** Controls the Tab wrap moves between (inside the panel). */
 const FOCUSABLE =
@@ -36,6 +36,7 @@ const SIZE_CLASSES: Record<NativeModalSize, string> = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
 };
 
 /**
@@ -46,6 +47,7 @@ const SHELL_SIZE_WIDTHS: Record<NativeModalSize, string> = {
   sm: '24rem',
   md: '32rem',
   lg: '42rem',
+  xl: '56rem',
 };
 
 /** Box and slot-wrapper classes of each layout. `plain` keeps today's box: every wrapper is `display: contents`. */

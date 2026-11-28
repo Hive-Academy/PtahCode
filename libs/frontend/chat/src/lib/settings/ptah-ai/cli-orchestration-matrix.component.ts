@@ -15,6 +15,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, Terminal } from 'lucide-angular';
 import { ProvidersSettingsStateService } from '@ptah-extension/core';
+import { PTAH_CLI_PERMISSION_CAPABILITIES, resolveCliLaneDefaultPair } from '@ptah-extension/shared';
 import type { CliLaneDefaults, SystemCliType } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import {
@@ -37,6 +38,8 @@ import {
 import { AgentOrchestrationConfigComponent } from './agent-orchestration-config.component';
 import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 import { CliProviderGridComponent } from './cli-provider-grid.component';
+import { LaneModelEffortCellComponent } from './lane-model-effort-cell.component';
+import { LANE_NETWORK_LABELS, LANE_PERMISSION_LABELS } from './lane-option-labels';
 import type { LaneTableRow } from './lanes-table.component';
 import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
 import {
@@ -129,6 +132,7 @@ const SAVE_SCOPE = 'global';
     LanesAddMoreStripComponent,
     LanesSectionHeaderComponent,
     LanesMaxConcurrentComponent,
+    LaneModelEffortCellComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -219,7 +223,45 @@ const SAVE_SCOPE = 'global';
       [editing]="editTarget()"
       (created)="onCreated($event)"
       (closed)="closeAdd()"
-    />
+    >
+      <ng-container instanceEditFields>
+        @if (editRow(); as row) {
+          <div class="col-span-2 flex min-w-0 flex-col gap-1 lg:col-span-1">
+            <span class="block font-semibold">Model / Effort</span>
+            <ptah-lane-model-effort-cell
+              class="h-[var(--ptah-control-h-sm)] max-w-full"
+              data-testid="cli-instance-edit-model-effort"
+              [row]="row"
+              place="edit"
+              [openField]="editModelField()"
+              [interactive]="row.interactive"
+              [canWrite]="canWrite()"
+              [busy]="busy()"
+              (toggled)="toggleEditModelField($event)"
+              (closed)="editModelField.set(null)"
+            />
+          </div>
+          <div class="flex min-w-0 flex-col gap-1">
+            <span id="cli-instance-edit-permission-label" class="block font-semibold">Permission</span>
+            <output
+              class="flex h-[var(--ptah-control-h-sm)] items-center"
+              aria-labelledby="cli-instance-edit-permission-label"
+              title="From Ptah CLI defaults"
+              data-testid="cli-instance-edit-permission"
+            >{{ inheritedEditDefaults().permission }}</output>
+          </div>
+          <div class="flex min-w-0 flex-col gap-1">
+            <span id="cli-instance-edit-network-label" class="block font-semibold">Network</span>
+            <output
+              class="flex h-[var(--ptah-control-h-sm)] items-center"
+              aria-labelledby="cli-instance-edit-network-label"
+              title="From Ptah CLI defaults"
+              data-testid="cli-instance-edit-network"
+            >{{ inheritedEditDefaults().network }}</output>
+          </div>
+        }
+      </ng-container>
+    </ptah-add-cli-instance-modal>
     <ptah-cli-tier-mapping-modal
       [open]="tierTarget() !== null"
       [target]="tierTarget()"
@@ -491,6 +533,25 @@ export class CliOrchestrationMatrixComponent {
   /** Batch 32 modals: the add/edit form (with the instance it edits, or `null` to create) and the tier mapping. */
   protected readonly addOpen = signal(false);
   protected readonly editTarget = signal<CliInstanceEditTarget | null>(null);
+  protected readonly editRow = computed(() =>
+    this.instances().find((row) => row.id === this.editTarget()?.id),
+  );
+  protected readonly editModelField = signal<'model' | 'effort' | null>(null);
+  protected readonly inheritedEditDefaults = computed(() => {
+    const defaults = this.ptahDefaults();
+    const pair = resolveCliLaneDefaultPair(
+      defaults?.manifest ?? PTAH_CLI_PERMISSION_CAPABILITIES,
+      defaults?.saved ?? this.state.orchestration().data?.cliLaneDefaults?.['ptah-cli'] ?? {},
+    );
+    return {
+      permission: 'unsupported' in pair || !pair.permission
+        ? 'Default'
+        : LANE_PERMISSION_LABELS[pair.permission],
+      network: 'unsupported' in pair || !pair.network
+        ? 'Default'
+        : LANE_NETWORK_LABELS[pair.network],
+    };
+  });
   protected readonly tierTarget = signal<CliTierMappingTarget | null>(null);
   private tiersOpener: HTMLElement | null = null;
   /** Which Add button opened the form: the empty-state one disappears once an instance exists (Minor 2). */
@@ -512,7 +573,13 @@ export class CliOrchestrationMatrixComponent {
     this.addOpen.set(true);
   }
 
+  protected toggleEditModelField(field: 'model' | 'effort'): void {
+    if (this.busy()) return;
+    this.editModelField.update((open) => open === field ? null : field);
+  }
+
   protected closeAdd(): void {
+    this.editModelField.set(null);
     this.addOpen.set(false);
     this.editTarget.set(null);
   }

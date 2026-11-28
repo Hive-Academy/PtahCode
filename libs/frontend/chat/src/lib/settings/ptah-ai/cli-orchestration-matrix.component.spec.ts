@@ -553,6 +553,27 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(modalIsOpen('add-cli-instance-modal')).toBe(true);
   });
 
+  it('shows the instance model controls and inherited defaults in the edit dialog', async () => {
+    openDetail('glm-1');
+    const edit = q<HTMLButtonElement>('[data-testid="cli-matrix-edit-glm-1"]');
+    expect(edit?.disabled).toBe(false);
+    edit?.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const header = portaled('[data-testid="cli-instance-edit-header"]');
+    expect(header).not.toBeNull();
+    expect(header?.querySelectorAll('[data-testid="add-cli-instance-name"]')).toHaveLength(1);
+    expect(header?.querySelector('[data-testid="add-cli-instance-provider-fixed"]')).not.toBeNull();
+    const modelEffort = header?.querySelector('[data-testid="cli-instance-edit-model-effort"]');
+    expect(modelEffort?.querySelector('[data-popover-kind="model"]')).not.toBeNull();
+    expect(modelEffort?.querySelector('[data-popover-kind="effort"]')).not.toBeNull();
+    for (const field of ['permission', 'network']) {
+      expect(header?.querySelector(`[data-testid="cli-instance-edit-${field}"]`)?.getAttribute('title'))
+        .toBe('From Ptah CLI defaults');
+    }
+  });
+
   it('uses fixed error text and retries without exposing a failed read message', async () => {
     state.orchestration.set({
       status: 'error',
