@@ -75,13 +75,18 @@ import type {
   WizardPreviewSkillsForConsentResponse,
   WizardInstallSkillsWithConsentParams,
   WizardInstallSkillsWithConsentResponse,
+  WizardCancelSkillInstallParams,
+  WizardCancelSkillInstallResponse,
 } from '@ptah-extension/shared';
 import type {
   MultiPhaseAnalysisService,
   MultiPhaseManifest,
 } from '@ptah-extension/agent-generation';
 import type { RpcMethodName } from '@ptah-extension/shared';
-import { isAuthorizedWorkspace } from '../utils/workspace-authorization';
+import {
+  findOpenWorkspaceRoot,
+  isAuthorizedWorkspace,
+} from '../utils/workspace-authorization';
 import { toResumableGenerationRun } from './wizard-generation-checkpoint.service';
 import {
   WizardDeepAnalyzeParamsSchema,
@@ -96,6 +101,7 @@ import {
   WizardGetProjectGuidanceParamsSchema,
   WizardPreviewSkillsForConsentParamsSchema,
   WizardInstallSkillsWithConsentParamsSchema,
+  WizardCancelSkillInstallParamsSchema,
 } from './setup-rpc.schema';
 import { SkillsShApiClient } from '@ptah-extension/cli-agent-runtime';
 import { SkillsShRpcHandlers } from './skills-sh-rpc.handlers';
@@ -270,10 +276,13 @@ export class SetupRpcHandlers {
     'wizard:get-project-guidance',
     'wizard:preview-skills-for-consent',
     'wizard:install-skills-with-consent',
+    'wizard:cancel-skill-install',
     'wizard:cancel-analysis',
     'wizard:list-analyses',
     'wizard:load-analysis',
   ] as const satisfies readonly RpcMethodName[];
+
+  private readonly skillInstallRuns = new Map<string, AbortController>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -374,6 +383,7 @@ export class SetupRpcHandlers {
     this.registerGetProjectGuidance();
     this.registerPreviewSkillsForConsent();
     this.registerInstallSkillsWithConsent();
+    this.registerCancelSkillInstall();
     this.registerCancelAnalysis();
     this.registerListAnalyses();
     this.registerLoadAnalysis();
@@ -1421,91 +1431,150 @@ export class SetupRpcHandlers {
         WizardInstallSkillsWithConsentParamsSchema,
         rawParams,
       );
-      if (params.skills.length === 0) return { success: true, installed: [] };
-      const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-      if (!workspaceRoot)
+      const { workspacePath, installRunId } = params;
+      const workspaceRoot = workspacePath
+        ? findOpenWorkspaceRoot(workspacePath, this.workspaceProvider)
+        : this.workspaceProvider.getWorkspaceRoot();
+      if (workspacePath && !workspaceRoot) {
+        throw new RpcUserError(
+          'Access denied: workspace path is not an open folder.',
+          'UNAUTHORIZED_WORKSPACE',
+        );
+      }
+      if (params.skills.length === 0) {
+        return {
+          success: true,
+          installed: [],
+          workspacePath: workspaceRoot || undefined,
+          cancelled: false,
+        };
+      }
+      if (!workspaceRoot) {
         throw new RpcUserError(
           'No workspace folder open.',
           'WORKSPACE_NOT_OPEN',
         );
-      const consent = this.resolveService<SkillConsentPort>(
-        SKILL_CONSENT_SERVICE,
-        'SkillConsentService',
-      );
-      const installed: string[] = [];
-      let failure: { failedSkill: string; reason: string } | undefined;
-      const installer = this.container.resolve(SkillsShRpcHandlers);
-      for (const skillName of [...new Set(params.skills)]) {
-        const parts = skillName.split('/');
-        if (
-          parts.length !== 3 ||
-          parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
-        ) {
-          failure = {
-            failedSkill: skillName,
-            reason: 'Invalid skill name. Expected owner/repo/skill.',
-          };
-          break;
-        }
-        try {
-          const [owner, repo, skillId] = parts;
-          let verifiedHash: string | undefined;
-          let hasScripts = false;
-          const result = await installer.install(
-            { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
-            (staged) => {
-              if (staged.length !== 1 || staged[0].slug !== skillId) {
-                throw new RpcUserError(
-                  'Unexpected skill in install.',
-                  'INVALID_PARAMS',
-                );
-              }
-              const dir = staged[0].dir;
-              const expectedHash = consent.computeContentHash(dir);
-              verifiedHash = expectedHash;
-              const record = params.consentRecords.find(
-                (entry) => entry.skillName === skillName,
-              );
-              if (record && record.contentHash.toLowerCase() !== expectedHash) {
-                throw new RpcUserError(
-                  'Skill content changed since preview. Preview it again.',
-                  'INVALID_PARAMS',
-                );
-              }
-              hasScripts = consent.hasScripts(dir);
-              if (hasScripts) {
-                const approved = !!record;
-                if (!approved && !consent.canInstall(skillName, expectedHash)) {
-                  throw new RpcUserError(
-                    'This skill contains scripts and requires consent for its current content.',
-                    'INVALID_PARAMS',
-                  );
-                }
-              }
-            },
-          );
-          if (!result.success || !verifiedHash)
-            throw new Error('Skill install failed.');
-          if (hasScripts) consent.recordConsent(skillName, verifiedHash);
-          installed.push(skillName);
-          this.skillsShApi.invalidateInstallCaches();
-        } catch (error) {
-          this.logger.error(
-            `Failed to install skill ${skillName}`,
-            error instanceof Error ? error : new Error(String(error)),
-          );
-          failure = {
-            failedSkill: skillName,
-            reason:
-              error instanceof RpcUserError
-                ? error.message
-                : 'Skill install failed.',
-          };
-          break;
-        }
       }
-      if (installed.length === 0)
-        return { success: false, installed, ...failure };
+      if (installRunId && this.skillInstallRuns.has(installRunId)) {
+        throw new RpcUserError(
+          'A skill install with this run ID is already running.',
+          'INVALID_PARAMS',
+        );
+      }
+
+      const controller = new AbortController();
+      if (installRunId) this.skillInstallRuns.set(installRunId, controller);
+      try {
+        return await this.installConsentSkills(
+          params,
+          workspaceRoot,
+          controller.signal,
+        );
+      } finally {
+        if (installRunId) this.skillInstallRuns.delete(installRunId);
+      }
+    });
+  }
+
+  private registerCancelSkillInstall(): void {
+    this.rpcHandler.registerMethod<
+      WizardCancelSkillInstallParams,
+      WizardCancelSkillInstallResponse
+    >('wizard:cancel-skill-install', async (rawParams) => {
+      const { installRunId } = this.parse(
+        WizardCancelSkillInstallParamsSchema,
+        rawParams,
+      );
+      const controller = this.skillInstallRuns.get(installRunId);
+      controller?.abort();
+      return { cancelled: controller !== undefined };
+    });
+  }
+
+  private async installConsentSkills(
+    params: WizardInstallSkillsWithConsentParams,
+    workspaceRoot: string,
+    signal: AbortSignal,
+  ): Promise<WizardInstallSkillsWithConsentResponse> {
+    const consent = this.resolveService<SkillConsentPort>(
+      SKILL_CONSENT_SERVICE,
+      'SkillConsentService',
+    );
+    const installed: string[] = [];
+    let failure: { failedSkill: string; reason: string } | undefined;
+    const installer = this.container.resolve(SkillsShRpcHandlers);
+    for (const skillName of [...new Set(params.skills)]) {
+      if (signal.aborted) break;
+      const parts = skillName.split('/');
+      if (
+        parts.length !== 3 ||
+        parts.some((part) => !/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(part))
+      ) {
+        failure = {
+          failedSkill: skillName,
+          reason: 'Invalid skill name. Expected owner/repo/skill.',
+        };
+        break;
+      }
+      try {
+        const [owner, repo, skillId] = parts;
+        let verifiedHash: string | undefined;
+        let hasScripts = false;
+        const result = await installer.install(
+          { source: `${owner}/${repo}`, skillId, scope: 'workspace' },
+          (staged) => {
+            if (staged.length !== 1 || staged[0].slug !== skillId) {
+              throw new RpcUserError(
+                'Unexpected skill in install.',
+                'INVALID_PARAMS',
+              );
+            }
+            const dir = staged[0].dir;
+            const expectedHash = consent.computeContentHash(dir);
+            verifiedHash = expectedHash;
+            const record = params.consentRecords.find(
+              (entry) => entry.skillName === skillName,
+            );
+            if (record && record.contentHash.toLowerCase() !== expectedHash) {
+              throw new RpcUserError(
+                'Skill content changed since preview. Preview it again.',
+                'INVALID_PARAMS',
+              );
+            }
+            hasScripts = consent.hasScripts(dir);
+            if (hasScripts) {
+              const approved = !!record;
+              if (!approved && !consent.canInstall(skillName, expectedHash)) {
+                throw new RpcUserError(
+                  'This skill contains scripts and requires consent for its current content.',
+                  'INVALID_PARAMS',
+                );
+              }
+            }
+          },
+          workspaceRoot,
+        );
+        if (!result.success || !verifiedHash)
+          throw new Error('Skill install failed.');
+        installed.push(skillName);
+        if (hasScripts) consent.recordConsent(skillName, verifiedHash);
+        this.skillsShApi.invalidateInstallCaches();
+      } catch (error) {
+        this.logger.error(
+          `Failed to install skill ${skillName}`,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        failure = {
+          failedSkill: skillName,
+          reason:
+            error instanceof RpcUserError
+              ? error.message
+              : 'Skill install failed.',
+        };
+        break;
+      }
+    }
+    if (installed.length > 0) {
       const gate = this.resolveService<SkillSyncGate>(
         HARNESS_SYNC_TOKENS.SKILL_SYNC_GATE,
         'SkillSyncGate',
@@ -1528,8 +1597,14 @@ export class SetupRpcHandlers {
         workspaceRoot,
         'wizard:install-skills-with-consent',
       );
-      return { success: !failure, installed, ...failure };
-    });
+    }
+    return {
+      success: !signal.aborted && !failure,
+      workspacePath: workspaceRoot,
+      installed,
+      cancelled: signal.aborted,
+      ...failure,
+    };
   }
 
   /**

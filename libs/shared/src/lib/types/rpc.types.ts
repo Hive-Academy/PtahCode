@@ -110,12 +110,24 @@ export interface WizardPreviewSkillsForConsentResponse {
 export interface WizardInstallSkillsWithConsentParams {
   skills: string[];
   consentRecords: SkillConsentRecord[];
+  workspacePath?: string;
+  installRunId?: string;
 }
 export interface WizardInstallSkillsWithConsentResponse {
   success: boolean;
+  /** Confirmed installed skill names in workspacePath, including partial progress. */
   installed: string[];
+  workspacePath?: string;
+  cancelled?: boolean;
   failedSkill?: string;
   reason?: string;
+}
+export interface WizardCancelSkillInstallParams {
+  installRunId: string;
+}
+export interface WizardCancelSkillInstallResponse {
+  /** Whether the cancellation request matched an in-flight install. */
+  cancelled: boolean;
 }
 import type { CliLaneDefaults } from './cli-lane-defaults.types';
 import type { CodexSandboxMode } from './advanced-settings.types';
@@ -1636,6 +1648,10 @@ export interface RpcMethodRegistry
   'wizard:install-skills-with-consent': {
     params: WizardInstallSkillsWithConsentParams;
     result: WizardInstallSkillsWithConsentResponse;
+  };
+  'wizard:cancel-skill-install': {
+    params: WizardCancelSkillInstallParams;
+    result: WizardCancelSkillInstallResponse;
   };
   'wizard:cancel-analysis': {
     params: WizardCancelAnalysisParams;
@@ -3905,6 +3921,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'wizard:get-project-guidance': true,
   'wizard:preview-skills-for-consent': true,
   'wizard:install-skills-with-consent': true,
+  'wizard:cancel-skill-install': true,
   'wizard:cancel-analysis': true,
   'wizard:submit-selection': true,
   'wizard:cancel': true,

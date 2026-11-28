@@ -138,7 +138,12 @@ describe('setup wizard skill RPC services', () => {
     ).resolves.toEqual({ facts: [], ownerDecisionPrompt: 'Review facts' });
     await expect(
       methods.get(names[4])?.({ skills: [], consentRecords: [] }),
-    ).resolves.toEqual({ success: true, installed: [] });
+    ).resolves.toEqual({
+      success: true,
+      installed: [],
+      workspacePath: process.cwd(),
+      cancelled: false,
+    });
     await expect(methods.get(names[1])?.({ query: '' })).rejects.toThrow();
   });
 

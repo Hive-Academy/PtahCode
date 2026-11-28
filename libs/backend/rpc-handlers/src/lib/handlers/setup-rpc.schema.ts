@@ -44,8 +44,12 @@ export const WizardGetProjectGuidanceParamsSchema = z.object({
 export const WizardPreviewSkillsForConsentParamsSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(255)).min(1).max(200),
 });
+const installRunId = z.string().trim().min(1).max(200);
+
 export const WizardInstallSkillsWithConsentParamsSchema = z.object({
   skills: z.array(z.string().trim().min(1).max(255)).max(200),
+  workspacePath,
+  installRunId: installRunId.optional(),
   consentRecords: z
     .array(
       z.object({
@@ -55,6 +59,10 @@ export const WizardInstallSkillsWithConsentParamsSchema = z.object({
       }),
     )
     .max(200),
+});
+
+export const WizardCancelSkillInstallParamsSchema = z.strictObject({
+  installRunId,
 });
 
 export const WizardListAnalysesParamsSchema = z.object({ workspacePath });

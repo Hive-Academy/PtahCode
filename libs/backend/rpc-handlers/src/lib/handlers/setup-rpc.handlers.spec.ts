@@ -417,6 +417,7 @@ describe('SetupRpcHandlers', () => {
         [
           'setup-status:get-status',
           'wizard:cancel-analysis',
+          'wizard:cancel-skill-install',
           'wizard:deep-analyze',
           'wizard:get-setup-model',
           'wizard:set-setup-model',
@@ -440,6 +441,7 @@ describe('SetupRpcHandlers', () => {
       expect(SetupRpcHandlers.METHODS).toContain('wizard:get-resumable-run');
       expect(SetupRpcHandlers.METHODS).toContain('wizard:analysis-status');
       expect(SetupRpcHandlers.METHODS).toContain('wizard:get-skill-review');
+      expect(SetupRpcHandlers.METHODS).toContain('wizard:cancel-skill-install');
     });
   });
 

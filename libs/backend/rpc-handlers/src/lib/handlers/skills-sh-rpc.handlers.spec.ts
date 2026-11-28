@@ -485,6 +485,37 @@ describe('SkillsShRpcHandlers — install lands in the source root and propagate
     expect(h.api.invalidateInstallCaches).toHaveBeenCalled();
     expect(h.propagation.propagateWithReport).toHaveBeenCalled();
   });
+
+  it('uses the pinned root for adoption, install, propagation and kept items', async () => {
+    const h = makeHarness({ workspaceRoot: '/active' });
+    const pinnedRoot = '/pinned';
+    const verifyStaged = jest.fn();
+    await h.handlers.install(
+      {
+        source: 'anthropics/skills',
+        skillId: 'frontend-design',
+        scope: 'workspace',
+      },
+      verifyStaged,
+      pinnedRoot,
+    );
+
+    expect(h.sourceRoots.adoptLegacyInstalls).toHaveBeenCalledWith(pinnedRoot);
+    expect(h.sourceRoots.install).toHaveBeenCalledWith(
+      { source: 'anthropics/skills', skillId: 'frontend-design' },
+      { scope: 'workspace', workspaceRoot: pinnedRoot },
+      { verifyStaged },
+    );
+    const harnessRoot = resolveHarnessWorkspaceRoot(pinnedRoot);
+    expect(h.propagation.propagateWithReport).toHaveBeenCalledWith(
+      harnessRoot,
+      'skillsSh:install',
+    );
+    expect(h.localItems.keptReport).toHaveBeenCalledWith(
+      expect.objectContaining({ harnessRoot }),
+    );
+  });
+
   it('installs through the source-root service, never the CLI directly', async () => {
     const h = makeHarness({ workspaceRoot: '/repo' });
 
