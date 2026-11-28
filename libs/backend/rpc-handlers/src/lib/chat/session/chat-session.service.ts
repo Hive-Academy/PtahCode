@@ -238,6 +238,7 @@ interface AgentSessionPathLabels {
 interface SdkSessionLaunch {
   readonly expectedRuntime?: AgentSessionStartConfig['runtime'];
   readonly admissionTiming?: ChatAdmissionTiming;
+  readonly mainChat?: true;
   readonly phase?: PhaseDispatchV1;
   /** Label in the launch log lines (`chat:start` keeps its existing text). */
   readonly logLabel: string;
@@ -1245,6 +1246,9 @@ export class ChatSessionService {
 
       await this.launchSdkSession({
         logLabel: 'chat:start',
+        ...(params.surfaceMode || params.mcpToolProfile === 'apps'
+          ? {}
+          : { mainChat: true }),
         tabId,
         workspaceId: workspacePath,
         projectPath: workspacePath,
@@ -1855,6 +1859,9 @@ export class ChatSessionService {
           ? {
               model: execution.model,
               providerProfile: execution.providerProfile,
+              ...(input.mainChat && config.enhancedPromptsContent?.trim()
+                ? { preset: 'enhanced' as const }
+                : {}),
               // Named only; the ambient launch config keeps its existing fields.
               ...(input.accountSelection
                 ? {
@@ -3457,7 +3464,7 @@ export class ChatSessionService {
       // over from the original start: the provider or the style may have
       // changed since, and Req 5.6 forbids caching the decision across sessions.
       // Named resumes bound this preparation by the handler-entry deadline (D76).
-      const { config, execution } = await this.withinNamedAdmissionDeadline(
+      const { config, execution, knownSessionChild } = await this.withinNamedAdmissionDeadline(
         named,
         params.admissionDeadline,
         async () => {
@@ -3465,10 +3472,13 @@ export class ChatSessionService {
             await this.outputStyleActivation.resolveSessionFields({
               workspaceRoot: workspacePath,
             });
+          const metadata = await this.sessionMetadataStore.get(sessionId);
+          const knownSessionChild =
+            !!this.sessionChildren?.get(sessionId) || metadata?.isChildSession === true;
           const identity = this.runtimeProfile
             ? storedChatRuntimeIdentity(
                 sessionId,
-                await this.sessionMetadataStore.get(sessionId),
+                metadata,
                 workspacePath,
               )
             : undefined;
@@ -3508,18 +3518,21 @@ export class ChatSessionService {
                 currentModel,
                 modelIsStored,
               );
-          return { config, execution };
+          return { config, execution, knownSessionChild };
         },
       );
+      const mainChat = !knownSessionChild && !params.surfaceMode &&
+        params.mcpToolProfile !== 'apps';
       const resumeConfig: AgentSessionResumeConfig = {
         ...config,
-        ...(this.sessionChildren?.get(sessionId as string)
-          ? { knownSessionChild: true }
-          : {}),
+        ...(knownSessionChild ? { knownSessionChild: true } : {}),
         ...(execution.runtime === 'claude-sdk'
           ? {
               model: execution.model,
               providerProfile: execution.providerProfile,
+              ...(mainChat && enhancedPromptsContent?.trim()
+                ? { preset: 'enhanced' as const }
+                : {}),
               // Named only: the resume reuses the stored binding (no second lease).
               ...(accountSelection
                 ? {

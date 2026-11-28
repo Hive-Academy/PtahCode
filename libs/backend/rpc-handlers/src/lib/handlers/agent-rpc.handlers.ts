@@ -46,6 +46,8 @@ import {
   MAX_CONCURRENT_AGENTS,
 } from '@ptah-extension/cli-agent-runtime';
 import {
+  CLAUDE_BUNDLED_SKILL_IDS,
+  CLAUDE_BUNDLED_SKILLS,
   CLAUDE_BUILTIN_TERMINAL_SKILLS,
   CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
   CLAUDE_BUILTIN_TOOLS,
@@ -585,7 +587,7 @@ export class AgentRpcHandlers {
           approxTokens: row.approxTokens,
           skillsNeedingIt: [...row.skillsNeedingIt],
         })),
-        terminalSkills: CLAUDE_BUILTIN_TERMINAL_SKILLS.map((row) => ({
+        terminalSkills: [...CLAUDE_BUILTIN_TERMINAL_SKILLS, ...CLAUDE_BUNDLED_SKILLS].map((row) => ({
           id: row.id,
           description: row.description,
           approxTokens: row.approxTokens,
@@ -721,6 +723,7 @@ export class AgentRpcHandlers {
         CLAUDE_BUILTIN_TOOL_IDS,
       ),
       enabledClaudeBuiltinSkills: normalizeClaudeBuiltinIds(skills, [
+        ...CLAUDE_BUNDLED_SKILL_IDS,
         ...CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
         ...skills.filter(isSyncedClaudeSkillId),
       ]),
@@ -756,6 +759,7 @@ export class AgentRpcHandlers {
   /** Skill ids a write may store: the terminal catalog plus the synced skills found now. */
   private async knownClaudeSkillIds(): Promise<string[]> {
     return [
+      ...CLAUDE_BUNDLED_SKILL_IDS,
       ...CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
       ...(await this.readSyncedSkills()).map((skill) => skill.id),
     ];

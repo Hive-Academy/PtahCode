@@ -1,6 +1,6 @@
 ---
 name: team-leader
-description: "Stress-tests an implementation plan, decomposes it into file-disjoint batches in batches.md with a recommended executor per batch, then verifies and commits each batch once its scoped checks pass, and gates each phase behind one code review. Runs in three modes and is re-invoked once per transition: decomposition when batches.md does not exist, verify-and-commit when an executor or a reviewer returns, completion when every batch is done. It recommends an executor per batch and may run that executor as a CLI lane itself. Use it between the architect and the developers, and again after each batch. Do not use it to write production code or to design architecture."
+description: "Stress-tests plans, assigns file-disjoint batches, and coordinates execution. Use to write batches.md or manage a task fleet. Not for architecture design or coding."
 model: opus
 disallowedTools: mcp__firecrawl, mcp__ptah__ptah_web_search, mcp__ptah__ptah_browser_navigate, mcp__ptah__ptah_browser_screenshot, mcp__ptah__ptah_browser_evaluate, mcp__ptah__ptah_browser_click, mcp__ptah__ptah_browser_type, mcp__ptah__ptah_browser_content, mcp__ptah__ptah_browser_network, mcp__ptah__ptah_browser_close, mcp__ptah__ptah_browser_status, mcp__ptah__ptah_browser_record_start, mcp__ptah__ptah_browser_record_stop
 ---

@@ -1,5 +1,5 @@
 import { signal } from '@angular/core';
-import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { DeferBlockBehavior, DeferBlockState, TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
   ClaudeRpcService,
   EffortStateService,
@@ -24,6 +24,7 @@ describe('AgentBehaviourSectionComponent', () => {
   let feedback: SettingsSaveFeedbackService;
   let handlers: Record<string, Handler>;
   let call: jest.Mock;
+  let workspace: ReturnType<typeof signal<string | undefined>>;
   let effort: ReturnType<typeof signal<EffortLevel | undefined>>;
   let setEffort: jest.Mock;
   let ultracodeEnabled: ReturnType<typeof signal<boolean>>;
@@ -79,6 +80,7 @@ describe('AgentBehaviourSectionComponent', () => {
       async (method: string, params: unknown) =>
         handlers[method]?.(params) ?? rpcSuccess(undefined),
     );
+    workspace = signal<string | undefined>(undefined);
     effort = signal<EffortLevel | undefined>('medium');
     setEffort = jest.fn();
     effortWrites(true);
@@ -90,8 +92,10 @@ describe('AgentBehaviourSectionComponent', () => {
 
     TestBed.configureTestingModule({
       imports: [AgentBehaviourSectionComponent],
+      deferBlockBehavior: DeferBlockBehavior.Manual,
       providers: [
         { provide: ClaudeRpcService, useValue: { call } },
+        { provide: WorkspaceScopeService, useValue: { activeWorkspacePath: workspace, generation: signal(0) } },
         {
           provide: EffortStateService,
           useValue: { currentEffort: effort, setEffort },
@@ -204,16 +208,175 @@ describe('AgentBehaviourSectionComponent', () => {
   });
 
   describe('System prompt mode (A10/A11)', () => {
-    it('keeps the harness aria-label and disables the toggle until a prompt exists', async () => {
+    it('keeps the harness aria-label, links the hint via aria-describedby, and disables the toggle when no project prompt exists', async () => {
       handlers['enhancedPrompts:getStatus'] = () =>
         rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
       await render();
-      expect(isDisabledControl(checkbox('Toggle Enhanced System Prompt'))).toBe(
-        true,
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+      expect(toggle.getAttribute('aria-disabled')).toBe('true');
+      expect(toggle.getAttribute('role')).toBe('switch');
+      expect(toggle.getAttribute('aria-describedby')).toBe(
+        'agent-behaviour-prompt-note',
       );
       expect(
-        element.querySelector('#agent-behaviour-prompt-note')?.textContent,
-      ).toContain('Run Setup');
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe('Uses the Claude Code preset. Run Setup to generate the project prompt first.');
+
+      call.mockClear();
+      await click('Toggle Enhanced System Prompt');
+      expect(call).not.toHaveBeenCalledWith(
+        'enhancedPrompts:setEnabled',
+        expect.anything(),
+      );
+    });
+
+    it('cancels Space while leaving the disabled switch in the tab order', async () => {
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
+      await render();
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.tabIndex).toBe(0);
+      toggle.focus();
+      expect(document.activeElement).toBe(toggle);
+      const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+      expect(toggle.dispatchEvent(tab)).toBe(true);
+      const space = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
+      expect(toggle.dispatchEvent(space)).toBe(false);
+      expect(space.defaultPrevented).toBe(true);
+      expect(toggle.checked).toBe(false);
+      expect(call).not.toHaveBeenCalledWith('enhancedPrompts:setEnabled', expect.anything());
+    });
+
+    it('invalidates A immediately when switching to B and drops a late read for A', async () => {
+      workspace.set('/a');
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
+      await render();
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(true);
+
+      let finishA: (status: unknown) => void = () => { throw new Error('A read never started'); };
+      const lateA = new Promise((resolve) => { finishA = resolve; });
+      handlers['enhancedPrompts:getStatus'] = (params) =>
+        (params as { workspacePath: string }).workspacePath === '/a'
+          ? lateA
+          : rpcSuccess({ enabled: false, hasGeneratedPrompt: false });
+      toggle.click(); // The acknowledged write starts a read-back for A.
+      await settle();
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', { workspacePath: '/a', enabled: false });
+      workspace.set('/b');
+      expect(component.promptToggleDisabled()).toBe(true);
+      expect(component.promptEnabled()).toBe(false);
+      fixture.detectChanges();
+      await settle();
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+
+      finishA(rpcSuccess({ enabled: true, hasGeneratedPrompt: true }));
+      await settle();
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+      call.mockClear();
+      await feedback.undo();
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', { workspacePath: '/a', enabled: true });
+      expect(call).not.toHaveBeenCalledWith('enhancedPrompts:getStatus', expect.anything());
+      expect(toggle.checked).toBe(false);
+    });
+
+    it('keeps the toggle off and disabled when hasGeneratedPrompt is false even if enabled is true', async () => {
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: false });
+      await render();
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+      expect(toggle.getAttribute('aria-disabled')).toBe('true');
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe('Uses the Claude Code preset. Run Setup to generate the project prompt first.');
+    });
+
+    it('shows loading hint and keeps toggle off and disabled while initial status is loading', async () => {
+      let resolveStatus!: (value: unknown) => void;
+      handlers['enhancedPrompts:getStatus'] = () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        });
+
+      fixture = TestBed.createComponent(AgentBehaviourSectionComponent);
+      component = fixture.componentInstance;
+      element = fixture.nativeElement as HTMLElement;
+      fixture.detectChanges();
+
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+      expect(toggle.getAttribute('aria-disabled')).toBe('true');
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe('Loading system prompt status…');
+
+      toggle.click();
+      fixture.detectChanges();
+      expect(call).not.toHaveBeenCalledWith(
+        'enhancedPrompts:setEnabled',
+        expect.anything(),
+      );
+
+      resolveStatus(rpcSuccess({ enabled: true, hasGeneratedPrompt: true }));
+      await settle();
+
+      expect(toggle.checked).toBe(true);
+      expect(isDisabledControl(toggle)).toBe(false);
+      expect(toggle.getAttribute('aria-disabled')).toBeNull();
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe(
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+      );
+    });
+
+    it('shows the on description when the project prompt exists and is enabled, and updates to the off description when turned off', async () => {
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
+      await render();
+
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(true);
+      expect(isDisabledControl(toggle)).toBe(false);
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe(
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+      );
+
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcSuccess({ enabled: false, hasGeneratedPrompt: true });
+      await click('Toggle Enhanced System Prompt');
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', {
+        workspacePath: '.',
+        enabled: false,
+      });
+      expect(toggle.checked).toBe(false);
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe(
+        "Off: Claude Code preset with Ptah additions. Turn on to replace the preset with Ptah's prompt. Applies to new sessions.",
+      );
+    });
+
+    it('shows the off description when the project prompt exists and is disabled', async () => {
+      await render();
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(false);
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe(
+        "Off: Claude Code preset with Ptah additions. Turn on to replace the preset with Ptah's prompt. Applies to new sessions.",
+      );
     });
 
     it('saves on selection, re-reads the status and toasts with Undo', async () => {
@@ -226,6 +389,11 @@ describe('AgentBehaviourSectionComponent', () => {
         enabled: true,
       });
       expect(checkbox('Toggle Enhanced System Prompt').checked).toBe(true);
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe(
+        "On: Ptah's own system prompt replaces the Claude Code preset. Applies to new sessions.",
+      );
       expect(
         element.querySelector('[data-testid="agent-behaviour-prompt-status"]')
           ?.textContent,
@@ -249,8 +417,8 @@ describe('AgentBehaviourSectionComponent', () => {
     });
 
     it('writes the mode for the active workspace root, not ".", when the host tracks one', async () => {
+      workspace.set('/ws/project-a');
       await render();
-      TestBed.inject(WorkspaceScopeService).switchTo('/ws/project-a');
       await click('Toggle Enhanced System Prompt');
       expect(call).toHaveBeenCalledWith('enhancedPrompts:setEnabled', {
         workspacePath: '/ws/project-a',
@@ -313,6 +481,16 @@ describe('AgentBehaviourSectionComponent', () => {
       handlers['enhancedPrompts:getStatus'] = () =>
         rpcError('host detail: status unavailable');
       await render();
+      const toggle = checkbox('Toggle Enhanced System Prompt');
+      expect(toggle.checked).toBe(false);
+      expect(isDisabledControl(toggle)).toBe(true);
+      expect(toggle.getAttribute('aria-disabled')).toBe('true');
+      expect(toggle.getAttribute('aria-describedby')).toBe(
+        'agent-behaviour-prompt-note',
+      );
+      expect(
+        element.querySelector('#agent-behaviour-prompt-note')?.textContent?.trim(),
+      ).toBe('The system prompt status is not loaded yet.');
       const alert = element.querySelector(
         '[data-testid="agent-behaviour-load-error"]',
       );
@@ -398,14 +576,14 @@ describe('AgentBehaviourSectionComponent', () => {
       ).toContain('Could not load the system prompt status.');
     });
 
-    it('D2: "Active for all sessions" uses the muted token without extra opacity', async () => {
+    it('D2: "Applies to new sessions" uses the muted token without extra opacity', async () => {
       handlers['enhancedPrompts:getStatus'] = () =>
         rpcSuccess({ enabled: true, hasGeneratedPrompt: true });
       await render();
       const status = element.querySelector(
         '[data-testid="agent-behaviour-prompt-status"]',
       );
-      expect(status?.textContent).toContain('Active for all sessions');
+      expect(status?.textContent).toContain('Applies to new sessions');
       expect(status?.closest('[class*="opacity-"]')).toBeNull();
     });
   });
@@ -740,17 +918,56 @@ describe('AgentBehaviourSectionComponent', () => {
       expect(component.drawerOpen()).toBe(true);
     });
 
-    it('reloads prompt status when drawer emits changed', async () => {
-      await render();
-      call.mockClear();
+    async function openDrawer(): Promise<void> {
+      element.querySelector<HTMLButtonElement>('[aria-label="System prompt details"]')?.click();
+      fixture.detectChanges();
+      const [block] = await fixture.getDeferBlocks();
+      await block.render(DeferBlockState.Complete);
+      await settle();
+    }
 
-      // Trigger the protected loadPromptStatus directly or simulate change
-      await (
-        component as unknown as { loadPromptStatus: () => Promise<void> }
-      ).loadPromptStatus();
-      expect(call).toHaveBeenCalledWith('enhancedPrompts:getStatus', {
-        workspacePath: '.',
-      });
-    });
+    it.each(['generation completion', 'drawer reopen'])(
+      'refreshes the mounted row on %s',
+      async (trigger) => {
+        workspace.set('/project');
+        let generated = false;
+        handlers['enhancedPrompts:getStatus'] = () =>
+          rpcSuccess({
+            enabled: generated,
+            hasGeneratedPrompt: generated,
+            generatedAt: generated ? '2026-10-02T09:00:00.000Z' : null,
+            regenerationStartedAt: !generated && trigger === 'generation completion'
+              ? '2026-10-02T08:59:00.000Z'
+              : null,
+          });
+        await render();
+        const toggle = checkbox('Toggle Enhanced System Prompt');
+        await openDrawer();
+        expect(isDisabledControl(toggle)).toBe(true);
+        expect(toggle.checked).toBe(false);
+        call.mockClear();
+
+        if (trigger === 'generation completion') {
+          // NativeDrawer renders the dialog in the CDK overlay outside the fixture root.
+          const checkAgain = document.querySelector<HTMLButtonElement>(
+            '[role="dialog"][aria-label="System prompt details"] [data-testid="regenerate-check-again"]',
+          );
+          expect(checkAgain).not.toBeNull();
+          expect(checkAgain?.disabled).toBe(false);
+          generated = true;
+          checkAgain?.click();
+          await settle();
+        } else {
+          component.drawerOpen.set(false);
+          fixture.detectChanges();
+          generated = true;
+          await openDrawer();
+        }
+
+        expect(call).toHaveBeenCalledWith('enhancedPrompts:getStatus', { workspacePath: '/project' });
+        expect(isDisabledControl(toggle)).toBe(false);
+        expect(toggle.checked).toBe(true);
+      },
+    );
   });
 });

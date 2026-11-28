@@ -1,6 +1,6 @@
 ---
 name: nx-dotnet-workspace
-description: Decides whether a .NET workspace should use Nx and sets up @nx/dotnet. Use when adding Nx to a .NET repo, choosing Nx during .NET initialization, or debugging an Nx target on a .NET project. Not for JavaScript library layout — use nx-workspace-architect.
+description: "Configures Nx for .NET. Use when adding @nx/dotnet, choosing Nx for .NET initialization, or debugging .NET Nx targets."
 ---
 
 # Nx + .NET Workspace

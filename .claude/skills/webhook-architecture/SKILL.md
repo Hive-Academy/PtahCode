@@ -1,6 +1,6 @@
 ---
 name: webhook-architecture
-description: 'Three-layer NestJS design for inbound webhooks. Use when adding a webhook endpoint, verifying signatures, routing external events, idempotent processing or failed-delivery recovery. Not for billing or subscription logic — use saas-platform-patterns.'
+description: "Three-layer NestJS inbound webhooks. Use for endpoints, signature checks, event routing, idempotency, or delivery recovery."
 ---
 
 # 3-Layer Webhook Architecture

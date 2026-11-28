@@ -1,6 +1,6 @@
 ---
 name: visual-reviewer
-description: "Drives a real browser against a running build to find responsive breakage, contrast and focus failures, broken interaction states and layout shift, then writes an evidence-backed visual-review.md with a verdict. Use after UI work lands and before it merges, when a layout is suspected to break at a breakpoint, when accessibility of a screen is in question, or when a change needs screenshot evidence across viewports. Reviews rendered behaviour, not taste, and never edits the code it reviews."
+description: "Checks rendered UI for layout, accessibility, and interaction defects. Use after a UI build is available to inspect. Not for design specification or source-only review."
 model: sonnet
 ---
 # Visual Reviewer

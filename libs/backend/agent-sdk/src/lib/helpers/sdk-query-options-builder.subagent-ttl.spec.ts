@@ -230,7 +230,7 @@ describe('buildFlagSettings — TTL key absence rule', () => {
     expect(ttl).toMatchObject({ sdkValue: undefined, source: 'sdk-default' });
     expect(
       buildFlagSettings(undefined, undefined, undefined, ttl.sdkValue),
-    ).toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
+    ).toEqual({ ...PTAH_DISABLE_SDK_AUTO_MEMORY, skillListingMaxDescChars: 200 });
   });
 
   it('internal-query caller shape (SdkQueryRunner) → no TTL key', () => {
@@ -255,7 +255,11 @@ describe('buildFlagSettings — TTL key absence rule', () => {
     const snapshot = { ...PTAH_DISABLE_SDK_AUTO_MEMORY };
     const settings = buildFlagSettings(undefined, undefined, undefined, '5m');
     expect(settings).not.toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
-    expect(settings).toEqual({ ...snapshot, subagentPromptCacheTtl: '5m' });
+    expect(settings).toEqual({
+      ...snapshot,
+      subagentPromptCacheTtl: '5m',
+      skillListingMaxDescChars: 200,
+    });
     expect(PTAH_DISABLE_SDK_AUTO_MEMORY).toEqual(snapshot);
   });
 });

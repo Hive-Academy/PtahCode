@@ -185,6 +185,9 @@ describe('Claude native lane options', () => {
         logger,
         input.assembly.autoCompact,
         input.assembly.capabilityFlags,
+        undefined,
+        undefined,
+        true,
       ),
     );
     expect(options.env).toEqual(buildSafeEnv(input.authEnv));

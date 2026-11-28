@@ -243,6 +243,7 @@ export class EnhancedPromptsService {
    * Workspace-keyed state persistence (in-memory + globalState).
    */
   private readonly stateStore: EnhancedPromptsStateStore;
+  private readonly stateWrites = new Map<string, Promise<EnhancedPromptsState>>();
 
   /**
    * Generation lock with timeout-based auto-release
@@ -459,10 +460,11 @@ export class EnhancedPromptsService {
    */
   async getStatus(workspacePath: string): Promise<EnhancedPromptsStatus> {
     const state = await this.stateStore.load(workspacePath);
+    const hasGeneratedPrompt = !!state.generatedPrompt?.trim();
     let cacheValid = false;
     let invalidationReason: string | undefined;
 
-    if (state.enabled && state.generatedPrompt) {
+    if (state.enabled && hasGeneratedPrompt) {
       const baseDependencyHash =
         await this.cacheService.computeDependencyHash(workspacePath);
       const dependencyHash = baseDependencyHash
@@ -477,7 +479,7 @@ export class EnhancedPromptsService {
 
     return {
       enabled: state.enabled,
-      hasGeneratedPrompt: !!state.generatedPrompt,
+      hasGeneratedPrompt,
       generatedAt: state.generatedAt,
       detectedStack: state.detectedStack,
       cacheValid,
@@ -690,20 +692,13 @@ export class EnhancedPromptsService {
       const configHash = baseHash
         ? `${baseHash}:pt${PTAH_CORE_SYSTEM_PROMPT_TOKENS}`
         : null;
-      const newState: EnhancedPromptsState = {
-        enabled: true,
-        generatedAt: new Date().toISOString(),
-        generatedPrompt,
-        detectedStack,
-        configHash,
-        workspacePath,
-      };
+      const generatedAt = new Date().toISOString();
 
       // The on-disk trace is the audit trail; global state is the runtime
       // cache. Write the trace FIRST — a failed trace means no success, no
       // state update and no cache entry.
       const traceMetadata: EnhancedPromptTraceMetadata = {
-        generatedAt: newState.generatedAt as string,
+        generatedAt,
         configHash: configHash ?? '',
         detectedStack,
         analysisDirectory: enrichment.analysisDirectory
@@ -743,7 +738,23 @@ export class EnhancedPromptsService {
         };
       }
       if (!generationCommitting) ensureActive();
-      await this.stateStore.save(workspacePath, newState);
+      const newState = await this.updateState(workspacePath, (state) => {
+        if (!bound) ensureActive();
+        // A legacy generated prompt was enabled automatically, so false with
+        // an existing prompt records an earlier explicit opt-out.
+        const enabledPreference =
+          state.enabledPreference ??
+          (state.generatedPrompt?.trim() && !state.enabled ? false : undefined);
+        return {
+          enabled: enabledPreference ?? true,
+          enabledPreference,
+          generatedAt,
+          generatedPrompt,
+          detectedStack,
+          configHash,
+          workspacePath,
+        };
+      });
       if (!generationCommitting) ensureActive();
       if (configHash) {
         await this.cacheService.set(workspacePath, configHash, output);
@@ -797,14 +808,43 @@ export class EnhancedPromptsService {
    * @param enabled - New enabled state
    */
   async setEnabled(workspacePath: string, enabled: boolean): Promise<void> {
-    const state = await this.stateStore.load(workspacePath);
-    state.enabled = enabled;
-    await this.stateStore.save(workspacePath, state);
+    await this.updateState(workspacePath, (state) => ({
+      ...state,
+      enabled,
+      enabledPreference: enabled,
+    }));
 
     this.logger.info('EnhancedPromptsService: Toggled enabled state', {
       workspacePath,
       enabled,
     });
+  }
+
+  private async updateState(
+    workspacePath: string,
+    update: (state: EnhancedPromptsState) => EnhancedPromptsState,
+  ): Promise<EnhancedPromptsState> {
+    const previous = this.stateWrites.get(workspacePath);
+    const write = (async () => {
+      // A failed write leaves the last committed value available for retry.
+      await previous?.catch((error: unknown) => {
+        this.logger.warn('EnhancedPromptsService: Previous state write failed', {
+          workspacePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      const state = update(await this.stateStore.load(workspacePath));
+      await this.stateStore.save(workspacePath, state);
+      return state;
+    })();
+    this.stateWrites.set(workspacePath, write);
+    try {
+      return await write;
+    } finally {
+      if (this.stateWrites.get(workspacePath) === write) {
+        this.stateWrites.delete(workspacePath);
+      }
+    }
   }
 
   /**
@@ -879,7 +919,7 @@ export class EnhancedPromptsService {
     if (!state.enabled) {
       return null;
     }
-    if (state.generatedPrompt) {
+    if (state.generatedPrompt?.trim()) {
       return state.generatedPrompt;
     }
     this.logger.info(

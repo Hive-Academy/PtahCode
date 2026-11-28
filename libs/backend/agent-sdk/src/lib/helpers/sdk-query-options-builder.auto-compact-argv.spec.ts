@@ -374,6 +374,8 @@ describe('interactive path — compaction settings on the real SDK argv', () => 
   const ALWAYS = {
     autoMemoryEnabled: false,
     autoDreamEnabled: false,
+    disableBundledSkills: true,
+    skillListingMaxDescChars: 200,
     crossSessionInbound: 'accept',
     subagentPromptCacheTtl: '1h',
   } as const;

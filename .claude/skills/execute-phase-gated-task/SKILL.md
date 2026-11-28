@@ -1,6 +1,6 @@
 ---
 name: execute-phase-gated-task
-description: Execute a complex, multi-phase project from a detailed specification with checkpoint validation, strategic commit boundaries, and status tracking. Use when a task requires sequential batches with acceptance criteria (build/lint/visual gates), specifications cite exact file paths, and work spans multiple phases that must not be mixed in commits.
+description: "Executes multi-phase work from a specification. Use for sequential batches with acceptance criteria and build, lint, or visual gates."
 ---
 
 ## Steps

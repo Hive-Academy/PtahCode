@@ -14,6 +14,9 @@ import { OutputStyleActivationResolver } from './output-style-activation.resolve
 import { OUTPUT_STYLE_SELECTED_NAME_DEF } from '@ptah-extension/settings-core';
 import type { OutputStyleEntry } from '@ptah-extension/shared';
 
+import type { ClaudeAccountNamedResolvedResourceContext, ClaudeAccountNamedRoute } from '@ptah-extension/auth-providers-tokens';
+
+import { OutputStyleAccountResourceError } from './output-style-discovery.service';
 import { OutputStyleSessionActivationService } from './output-style-session-activation.service';
 
 const SELECTED_KEY = OUTPUT_STYLE_SELECTED_NAME_DEF.key;
@@ -75,6 +78,77 @@ function makeService(options: {
 }
 
 describe('OutputStyleSessionActivationService.resolveSessionFields', () => {
+  const named: ClaudeAccountNamedResolvedResourceContext = {
+    kind: 'named',
+    route: {
+      kind: 'named',
+      provider: 'claude',
+      profileId: 'test-profile',
+      canonicalConfigDir: '/named',
+      routeFingerprint: 'a'.repeat(64),
+      routeRevision: 0,
+      authEpoch: 0,
+      runId: 'test-run',
+    } as ClaudeAccountNamedRoute,
+    accountDataDir: '/metadata',
+    filesystemIdentity: { volumeId: 'volume', fileId: 'file' },
+  };
+
+  it.each(['default', '  default  ', '', '  '])(
+    'treats explicit %j as no style even when a style is stored',
+    async (selectedStyleName) => {
+      const { service, discover } = makeService({ selected: 'Terse' });
+      await expect(service.resolveSessionFields({
+        selectedStyleName, injectIntoSystemPrompt: true,
+      }, named)).resolves.toEqual({});
+      expect(discover).not.toHaveBeenCalled();
+    },
+  );
+
+  it('trims the explicit name and resolves it within the named account', async () => {
+    const { service, discover } = makeService({ styles: [entry()] });
+    await expect(service.resolveSessionFields({
+      selectedStyleName: '  Terse  ', injectIntoSystemPrompt: true,
+    }, named)).resolves.toEqual({ outputStyleBody: 'Answer tersely.' });
+    expect(discover).toHaveBeenCalledWith(expect.objectContaining({ activeName: 'Terse' }), named);
+  });
+
+  it('marks a missing named-account style unavailable', async () => {
+    const { service } = makeService({ selected: 'Terse' });
+    await expect(service.resolveSessionFields({ injectIntoSystemPrompt: true }, named))
+      .resolves.toEqual({ outputStyleUnavailable: true });
+  });
+
+  it('surfaces a named-account discovery failure', async () => {
+    const { service } = makeService({ selected: 'Terse', discoveryThrows: true });
+    await expect(service.resolveSessionFields({ injectIntoSystemPrompt: true }, named))
+      .rejects.toThrow(OutputStyleAccountResourceError);
+  });
+
+  it.each(['Explanatory', 'Learning', 'Proactive'])(
+    'injects the %s builtin guidance via the prompt only',
+    async (name) => {
+      const { service } = makeService({ styles: [entry({ name, tier: 'builtin', body: undefined })] });
+      await expect(service.resolveSessionFields({
+        selectedStyleName: name, injectIntoSystemPrompt: true,
+      })).resolves.toEqual({ outputStyleBody: `Follow the ${name} output style. Short answers.` });
+    },
+  );
+
+  it('returns the winning file body with no flag for a custom prompt', async () => {
+    const { service } = makeService({
+      selected: 'Terse',
+      styles: [
+        entry({ shadowed: true }),
+        entry({ tier: 'project', body: 'Use the project style.' }),
+      ],
+    });
+    await expect(service.resolveSessionFields({
+      workspaceRoot: '/repo',
+      injectIntoSystemPrompt: true,
+    })).resolves.toEqual({ outputStyleBody: 'Use the project style.' });
+  });
+
   describe('no style', () => {
     it('returns no fields when nothing is selected', async () => {
       const { service, discover } = makeService({ selected: '' });

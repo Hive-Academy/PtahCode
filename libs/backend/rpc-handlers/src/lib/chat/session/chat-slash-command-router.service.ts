@@ -34,7 +34,6 @@ import {
 import type {
   IAgentAdapter,
   SessionId,
-  AISessionConfig,
   AgentSessionResumeConfig,
   SessionRuntimeControls,
   ChatContinueParams,
@@ -49,6 +48,10 @@ import {
 } from '@ptah-extension/shared';
 import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
+import {
+  OUTPUT_STYLE_TOKENS,
+  type OutputStyleSessionActivationService,
+} from '@ptah-extension/output-styles';
 
 import {
   resolveClaudeExecution,
@@ -201,6 +204,8 @@ export class ChatSlashCommandRouterService {
     private readonly providerSessionAdapter: ClosableNativeChatAdapter | null = null,
     @inject(SessionChildRegistry, { isOptional: true })
     private readonly sessionChildren: SessionChildRegistry | undefined = undefined,
+    @inject(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { isOptional: true })
+    private readonly outputStyleActivation?: OutputStyleSessionActivationService,
   ) {}
 
   /**
@@ -327,10 +332,11 @@ export class ChatSlashCommandRouterService {
       const command = interceptResult.rawCommand ?? prompt;
       let reservationId: string | undefined;
       try {
+        const metadata = await this.metadata?.get(sessionId);
         const identity = this.runtimeProfile
           ? storedChatRuntimeIdentity(
               sessionId,
-              await this.metadata?.get(sessionId),
+              metadata,
               workspacePath ?? '',
             )
           : undefined;
@@ -451,6 +457,15 @@ export class ChatSlashCommandRouterService {
           await this.runtimeControls.compact(sessionId);
           return { success: true, sessionId, settled: true };
         }
+        const knownSessionChild =
+          !!this.sessionChildren?.get(sessionId) || metadata?.isChildSession === true;
+        const mainChat = !knownSessionChild && !params.surfaceMode &&
+          params.mcpToolProfile !== 'apps';
+        const useEnhancedPreset =
+          execution.runtime === 'claude-sdk' && mainChat && !!enhancedPromptsContent?.trim();
+        const outputStyle = useEnhancedPreset
+          ? await this.outputStyleActivation?.resolveSessionFields({ workspaceRoot: workspacePath })
+          : undefined;
         const stream = await this.sdkAdapter.executeSlashCommand(
           sessionId,
           command,
@@ -462,6 +477,9 @@ export class ChatSlashCommandRouterService {
                   ? execution.model
                   : execution.seed.model,
               projectPath: workspacePath,
+              ...(useEnhancedPreset
+                ? { preset: 'enhanced' as const, ...outputStyle }
+                : {}),
               ...(params.pluginConfigAncestorRoots !== undefined
                 ? { pluginConfigAncestorRoots: params.pluginConfigAncestorRoots }
                 : {}),
@@ -474,13 +492,11 @@ export class ChatSlashCommandRouterService {
               ...(params.systemPrompt
                 ? { systemPrompt: params.systemPrompt }
                 : {}),
-            } as AISessionConfig,
+            },
             mcpServerRunning,
             enhancedPromptsContent,
             tabId,
-            ...(this.sessionChildren?.get(sessionId as string)
-              ? { knownSessionChild: true }
-              : {}),
+            ...(knownSessionChild ? { knownSessionChild: true } : {}),
             ...(execution.runtime === 'claude-sdk'
               ? {
                   providerProfile: execution.providerProfile,

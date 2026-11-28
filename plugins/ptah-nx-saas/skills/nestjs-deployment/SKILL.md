@@ -1,6 +1,6 @@
 ---
 name: nestjs-deployment
-description: 'Productionizes NestJS apps for containers. Use for multi-stage Docker builds of NestJS or Nx apps, webpack externals, migrations at deploy time, health checks, CORS and rate limiting, production logging, or deploying to a cloud platform.'
+description: "Productionizes NestJS apps for containers. Use for Docker builds, migrations, health checks, CORS, rate limits, or deployment."
 ---
 
 # NestJS Deployment Patterns

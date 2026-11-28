@@ -1,6 +1,6 @@
 ---
 name: saas-platform-patterns
-description: 'SaaS monetization patterns for NestJS. Use when designing free, trial and paid tiers, license keys, subscription state machines, checkout and customer portal flows, or pricing configuration. Not for webhook plumbing — use webhook-architecture.'
+description: "SaaS monetization for NestJS. Use for tiers, trials, license keys, subscriptions, checkout, portals, or pricing."
 ---
 
 # SaaS Platform Patterns

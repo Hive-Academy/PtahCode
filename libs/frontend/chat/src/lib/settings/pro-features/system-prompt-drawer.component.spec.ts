@@ -229,6 +229,59 @@ describe('SystemPromptDrawerComponent', () => {
       expect(toggleBtn?.textContent).toContain('View Generated Prompt');
     });
 
+    it('clears cached previews and discards pending reads across workspace switches', async () => {
+      await render();
+      const scope = TestBed.inject(WorkspaceScopeService);
+      const preview = () =>
+        element.querySelector('[data-testid="system-prompt-markdown-preview"]');
+      const toggle = () =>
+        element.querySelector<HTMLButtonElement>('[data-testid="system-prompt-preview-toggle"]');
+      const refresh = async () => {
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+      };
+      const switchTo = async (path: string) => {
+        scope.switchTo(path);
+        await refresh();
+      };
+      const staleContent = rpcSuccess({ content: 'Workspace B prompt' });
+      let finishRead: (result: typeof staleContent) => void = () => undefined;
+      const pendingRead = new Promise<typeof staleContent>((resolve) => {
+        finishRead = resolve;
+      });
+      call.mockImplementation(async (method: string, params: { workspacePath: string }) => {
+        if (method === 'enhancedPrompts:getStatus') return rpcSuccess(defaultStatus);
+        if (params.workspacePath === '/ws/b') return pendingRead;
+        return rpcSuccess({ content: `Prompt for ${params.workspacePath}` });
+      });
+
+      await switchTo('/ws/a');
+      toggle()?.click();
+      await refresh();
+      expect(preview()?.textContent).toContain('Prompt for /ws/a');
+
+      await switchTo('/ws/b');
+      expect(preview()).toBeNull();
+      expect(toggle()?.textContent).toContain('View Generated Prompt');
+      toggle()?.click();
+      expect(call).toHaveBeenCalledWith('enhancedPrompts:getPromptContent', { workspacePath: '/ws/b' });
+
+      await switchTo('/ws/c');
+      finishRead(staleContent);
+      await refresh();
+      expect(preview()).toBeNull();
+      expect(toggle()?.textContent).toContain('View Generated Prompt');
+      toggle()?.click();
+      await refresh();
+      expect(preview()?.textContent).toContain('Prompt for /ws/c');
+
+      scope.switchTo('/ws/d');
+      await switchTo('/ws/c');
+      expect(preview()).toBeNull();
+      expect(toggle()?.textContent).toContain('View Generated Prompt');
+    });
+
     it('shows fixed error alert when preview loading fails (F1)', async () => {
       await render();
 

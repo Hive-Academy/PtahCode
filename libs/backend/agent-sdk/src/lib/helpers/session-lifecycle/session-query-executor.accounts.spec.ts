@@ -221,7 +221,7 @@ function fixture(settings: { fail?: string; cancel?: string; unproved?: string; 
   'tab-a', metadata);
   const run = async (resume?: string) => { await bootstrap(resume); return launch(); };
   return { flow, events, reads, options, registry, persistence, admission, controller, log, bootstrap, launch, run,
-    paused, entered, terminations, runner, iterators, preInitTools, yielded: () => yielded, saved: () => saved,
+    paused, entered, terminations, runner, queryFn, certifiedResources, iterators, preInitTools, yielded: () => yielded, saved: () => saved,
     epoch: () => epochListener };
 }
 
@@ -1087,6 +1087,46 @@ describe('named admission failure logs only fixed text', () => {
       f.log.error.mock.calls, refusal]);
     for (const value of adversarial) expect(logged).not.toContain(value);
   });
+});
+
+it('builds with the certified named resources and passes the builder prompt to launch', async () => {
+  const f = fixture();
+  const rawPrompt = (async function* () { yield message; })();
+  const wrappedPrompt: AsyncIterable<SDKUserMessage> = {
+    [Symbol.asyncIterator]: () => rawPrompt[Symbol.asyncIterator](),
+  };
+  const build = jest.fn().mockResolvedValue({ prompt: wrappedPrompt, options: {} });
+  const launch = jest.spyOn(NamedAccountQueryAdmission.prototype, 'launch')
+    .mockRejectedValue(new Error('stop before starting the final query'));
+  const Ctor = SessionQueryExecutor as unknown as new (...args: unknown[]) => SessionQueryExecutor;
+  const executor = new Ctor(
+    f.log,
+    { ...f.registry, register: () => ({ token: 'named-run' }), remove: jest.fn() },
+    { createUserMessageStream: jest.fn().mockReturnValue(rawPrompt) },
+    { getPermissionLevel: () => 'ask' },
+    { getQueryFunction: async () => f.queryFn },
+    { build },
+    {},
+    {},
+    { ...f.runner, accountAdmission: f.admission, accountPersistence: f.persistence },
+  );
+  try {
+    await expect(executor.executeQuery({
+      sessionId: 'tab-a',
+      sessionConfig: {
+        model: 'claude-sonnet-4-5',
+        projectPath: launchContext.cwd,
+        accountSelection: { kind: 'named', profileId: route.profileId },
+      },
+    } as unknown as Parameters<SessionQueryExecutor['executeQuery']>[0])).rejects.toBeDefined();
+    expect(build).toHaveBeenCalledTimes(1);
+    expect(build.mock.calls[0][0].accountResources).toBe(f.certifiedResources);
+    expect(build.mock.calls[0][0].userMessageStream).toBe(rawPrompt);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch.mock.calls[0]?.[1]).toBe(wrappedPrompt);
+  } finally {
+    launch.mockRestore();
+  }
 });
 
 // P3 finding 7: a host without admission or persistence refuses `unavailable-storage`.

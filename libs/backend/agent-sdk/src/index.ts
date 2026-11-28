@@ -470,6 +470,8 @@ export { gatewayServesPtah } from './lib/helpers/gateway-session-wiring';
 // Claude built-ins Ptah turns off by default (TASK_2026_853, A-1), shared with
 // the Claude lanes and the settings RPC so all three apply ONE catalog.
 export {
+  CLAUDE_BUNDLED_SKILL_IDS,
+  CLAUDE_BUNDLED_SKILLS,
   CLAUDE_BUILTIN_TOOLS,
   CLAUDE_BUILTIN_TERMINAL_SKILLS,
   CLAUDE_BUILTIN_TOOL_IDS,

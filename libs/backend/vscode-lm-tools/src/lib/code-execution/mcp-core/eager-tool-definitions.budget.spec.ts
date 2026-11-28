@@ -19,7 +19,7 @@ import {
  * a measured reason in the same change.
  */
 const EAGER_TOOL_COUNT = 19;
-const EAGER_TOOL_CHAR_BUDGET = 26_463;
+const EAGER_TOOL_CHAR_BUDGET = 21_225;
 
 const deps: ProtocolHandlerDependencies = {
   ptahAPI: {} as PtahAPI,

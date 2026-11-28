@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Creates or updates agent skills — instructions, references, scripts and assets. Use when the user wants to write a new skill, improve an existing skill, or package domain knowledge, a workflow or a tool integration as a skill.
+description: "Creates and updates agent skills. Use to write a skill, improve one, or package domain knowledge, workflows, or tools."
 license: Complete terms in LICENSE.txt
 ---
 

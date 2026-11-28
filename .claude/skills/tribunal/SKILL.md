@@ -1,6 +1,6 @@
 ---
 name: tribunal
-description: 'Multi-vendor peer panel (Council, Forge, Race, Crucible) across installed CLI vendors. Use for second opinions, cross-vendor review, model debates, competing implementations, judged attempts, or a named Tribunal mode (Council, Forge, Race, Crucible, Relay) in main chat. Not the default build workflow — use orchestration.'
+description: "Runs multi-vendor peer reviews. Use for second opinions, model debates, competing implementations, judged attempts, or Tribunal modes."
 ---
 
 # Tribunal

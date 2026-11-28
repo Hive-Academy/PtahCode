@@ -61,21 +61,28 @@ describe('clamped tool limits', () => {
 });
 
 describe('external completion wording', () => {
-  it('names the wait tool for each transport and explains the completion block', () => {
+  it('names the wait tool for each transport and directs readers to lane output', () => {
     const http = buildAgentSpawnTool({ transport: 'http' }).description;
     const stdio = buildAgentSpawnTool({ transport: 'stdio' }).description;
-    expect(http).toContain('call ptah_agent_wait to block');
-    expect(stdio).toContain('call agent_wait to block');
-    expect(http).toContain('Exclusive external owners receive queued Completion ID blocks on later tool results');
-    expect(stdio).not.toContain('turn is pushed into this session');
+    expect(http).toContain('ptah_agent_wait');
+    expect(stdio).toContain('agent_wait');
+    expect(http).toContain('ptah_agent_read');
+    expect(stdio).toContain('agent_read');
     expect(buildAgentWaitTool({ transport: 'http' }).description).toContain('Full output: ptah_agent_read.');
     expect(buildAgentWaitTool({ transport: 'stdio' }).description).toContain('Full output: agent_read.');
   });
 });
 
 describe('agent lane descriptions', () => {
-  it('explains starting and the delayed CLI session', () => {
-    expect(buildAgentSpawnTool().description).toContain('reply "starting"');
+  it('keeps the call-time lane contract concise and actionable', () => {
+    const description = buildAgentSpawnTool().description;
+    expect(description).toContain('ptah_agent_list first');
+    expect(description).toContain('deliverables');
+    expect(description).toContain('completion signal');
+    expect(description).toContain('resume_session_id');
+    expect(description).toContain('modelTier');
+    expect(description).toContain('agent-lanes skill');
+    expect(description.length).toBeLessThan(700);
     expect(buildAgentStatusTool().description).toContain('starting/running/completed');
     expect(buildAgentReadTool().description).toContain('starting or running');
   });
@@ -357,8 +364,7 @@ describe('buildAgentSpawnTool — role', () => {
     >;
     const description = properties['role']?.description ?? '';
     expect(description).toContain('ptah_agent_list');
-    expect(description).toContain('delivered');
-    expect(description).toMatch(/Do not paste a role template into task/);
+    expect(description).toContain('Generated workspace role name');
   });
 
   it('names no CLI vendor in the role description', () => {
@@ -389,7 +395,7 @@ describe('agent limit tool guidance', () => {
     >;
     expect(properties['force']).toMatchObject({ type: 'boolean' });
     expect(properties['force']?.description).toContain(
-      'Use only when the limit is known to be wrong',
+      'only when known to be wrong',
     );
     expect(tool.inputSchema.required).not.toContain('force');
   });
@@ -409,13 +415,12 @@ describe('buildAgentSpawnTool — effort', () => {
     expect(buildAgentSpawnTool().inputSchema.required).toEqual(['task']);
   });
 
-  it('lists the effort levels and says it wins over the setting', () => {
+  it('lists the effort levels and says it overrides the CLI setting', () => {
     const description = effortProperty().description ?? '';
     for (const level of ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']) {
       expect(description).toMatch(new RegExp(`\\b${level}\\b`));
     }
-    expect(description).toMatch(/Wins over the per-CLI setting/);
-    expect(description).toMatch(/ignored/);
+    expect(description).toContain('overrides CLI setting');
   });
 
   it('keeps the effort description short and names no CLI vendor', () => {

@@ -471,6 +471,8 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
     expect(argvSettings('enabled-unset')).toEqual({
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
+      disableBundledSkills: true,
+      skillListingMaxDescChars: 200,
       // TASK_2026_402: the spawn path now asks the CLI to ACCEPT a turn
       // injected by a peer session instead of holding it until it expires.
       crossSessionInbound: 'accept',
@@ -481,6 +483,8 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
     expect(argvSettings('disabled')).toEqual({
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
+      disableBundledSkills: true,
+      skillListingMaxDescChars: 200,
       autoCompactEnabled: false,
       crossSessionInbound: 'accept',
     });
@@ -502,6 +506,8 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
       expect(argvSettings(name)).toEqual({
         autoMemoryEnabled: false,
         autoDreamEnabled: false,
+        disableBundledSkills: true,
+        skillListingMaxDescChars: 200,
         crossSessionInbound: 'accept',
       });
       expect(results.get(name)?.logger.warn).toHaveBeenCalledWith(
@@ -515,6 +521,8 @@ describe('ptah-cli spawn path — compaction settings on the real SDK argv', () 
     expect(argvSettings('style-and-window')).toEqual({
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
+      disableBundledSkills: true,
+      skillListingMaxDescChars: 200,
       outputStyle: 'Terse',
       autoCompactWindow: 400_000,
       crossSessionInbound: 'accept',

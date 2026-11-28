@@ -7,6 +7,14 @@ How to run any lane (discovery, addressing, prompts, resume, review, revise cap)
 
 ---
 
+## Executor selection
+
+| Executor      | Use when                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task subagent | Work needs deep reasoning, a repo specialist role, or close coordination with this session. Brief it with the context it needs.                 |
+| CLI lane      | A fresh agent can complete a written brief: independent review, tests, docs, research, second-vendor opinion, or parallel file-disjoint implementation. |
+| Neither       | Q&A or a trivial or single-file edit.                                                                                                         |
+
 ## Who spawns
 
 | Actor               | May spawn                                                                                                                                                     |

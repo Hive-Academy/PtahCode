@@ -1,6 +1,6 @@
 ---
 name: angular-3d-scene-crafter
-description: 'Designs Angular 3D scenes with @hive-academy/angular-3d, including in-scene motion and animation tuning. Use for 3D hero sections, particle effects, lighting and materials, or a scene from a reference. Also load angular-gsap-animation-crafter for scroll-timeline page motion when the task has both, and angular-frontend-patterns for component structure. Non-Angular 3D work is outside this skill.'
+description: "Designs Angular 3D scenes with animation tuning. Use angular-gsap-animation-crafter for scroll-timeline page motion when the task has both and angular-frontend-patterns for component structure as needed. Non-Angular 3D work is outside this skill."
 ---
 
 # Angular 3D Scene Crafter

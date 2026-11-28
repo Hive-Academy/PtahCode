@@ -58,6 +58,8 @@ export type FileOutputStyleTier = (typeof FILE_OUTPUT_STYLE_TIERS)[number];
 export interface DiscoverOutputStylesOptions {
   /** Overrides the workspace provider. Absent → the provider's primary root. */
   readonly workspaceRoot?: string;
+  /** Claude child config directory for the ambient user tier. */
+  readonly ambientConfigDir?: string;
   /**
    * Ptah's persisted selection, so discovery can resolve which tier won it and
    * whether it still resolves at all (E5). Supplied by the caller because the
@@ -260,7 +262,10 @@ export class OutputStyleDiscoveryService {
     const invalid: InvalidOutputStyle[] = [];
 
     for (const tier of FILE_OUTPUT_STYLE_TIERS) {
-      const directory = outputStyleDirectoryFor(tier, workspaceRoot, context);
+      const directory =
+        tier === 'user' && context?.kind !== 'named' && options.ambientConfigDir
+          ? path.join(options.ambientConfigDir, 'output-styles')
+          : outputStyleDirectoryFor(tier, workspaceRoot, context);
       if (directory === undefined) continue;
       const bounded = await boundOutputStyleDirectory(directory, tier, context);
       const scanned = await this.scanTier(tier, bounded, context);

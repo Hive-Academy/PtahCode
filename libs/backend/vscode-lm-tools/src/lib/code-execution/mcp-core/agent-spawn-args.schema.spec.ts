@@ -402,24 +402,21 @@ describe('spawn descriptions stay truthful about the claude lane', () => {
     { description?: string }
   >;
 
-  it('advertises accountSelection for claude only, with no id, email or path', () => {
+  it('describes accountSelection concisely, with no id, email or path', () => {
     const text = properties['accountSelection'].description ?? '';
-    expect(text).toContain('only with cli "claude"');
-    expect(text).toContain('"kind":"named"');
-    expect(text).not.toMatch(/profile-\d|@|[/\\]/);
+    expect(text).toContain('Claude CLI only');
+    expect(text).toContain('named profile');
+    expect(text).not.toMatch(/profile-\d|@|\\/);
     expect(text).not.toMatch(/release/i);
   });
 
-  it('says modelTier also controls cli claude and names the SDK lane', () => {
+  it('describes the model tier and CLI-specific model ID', () => {
+    expect(properties['modelTier'].description).toContain('Capability tier');
     expect(properties['modelTier'].description).toContain(
-      'Also applies to system cli "claude"',
-    );
-    expect(properties['modelTier'].description).toContain(
-      'Other system CLIs ignore it',
+      'other system CLIs ignore it',
     );
     const cli = properties['cli'].description ?? '';
-    expect(cli).toContain('Claude Agent SDK session');
-    expect(cli).toContain('over MCP');
+    expect(cli).toContain('Installed system CLI');
   });
 
   it('documents the derived roster and the account field for ptah.agent', () => {
@@ -454,7 +451,7 @@ describe('spawn descriptions stay truthful about the claude lane', () => {
       minLength: 1,
       maxLength: MAX_ROUTE_PHASE_ID_LENGTH,
     });
-    expect(routeProp?.description).toContain('route: { routeId, phaseId }');
+    expect(routeProp?.description).toContain('Route identity');
     expect(routeProp?.description).toContain('ptah_route_decide');
     expect(properties['routeFacts']).toBeUndefined();
 

@@ -26,15 +26,30 @@ import {
 const fsModule: typeof import('node:fs') = require('node:fs');
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  OutputStyleDiscoveryService,
+  type OutputStyleSessionActivationService,
+} from '@ptah-extension/output-styles';
+import {
+  createMockFileSystemProvider,
+  createMockWorkspaceProvider,
+} from '@ptah-extension/platform-core/testing';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 import {
   SdkQueryOptionsBuilder,
   withPhaseDelivery,
   getActiveProviderId,
   namedActualLaunch,
+  type QueryOptionsInput,
   type SdkQueryOptions,
 } from './sdk-query-options-builder';
 import { SkillPathRefusalError } from './skill-path-refusal.error';
+import { PTAH_CORE_SYSTEM_PROMPT, PTAH_UI_HINT } from '../prompt-harness';
+import {
+  buildPtahFullPrompt,
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+} from '../prompt-harness/ptah-full-prompt';
 
 /** A complete, typed phase dispatch; no cast to `PhaseDispatchV1`. */
 function phaseFixture(
@@ -939,6 +954,8 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
     expect(JSON.parse(opts.settings as string)).toEqual({
       autoMemoryEnabled: false,
       autoDreamEnabled: false,
+      disableBundledSkills: true,
+      skillListingMaxDescChars: 200,
       crossSessionInbound: 'accept',
       subagentPromptCacheTtl: '1h',
     });
@@ -1213,6 +1230,8 @@ describe('SdkQueryOptionsBuilder.build — auto-compact control', () => {
   const ALWAYS = {
     autoMemoryEnabled: false,
     autoDreamEnabled: false,
+    disableBundledSkills: true,
+    skillListingMaxDescChars: 200,
     crossSessionInbound: 'accept',
     subagentPromptCacheTtl: '1h',
   } as const;
@@ -1453,6 +1472,11 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
 
   function makeBuilderForPrepend(
     injector: InjectorStub,
+    authEnv: AuthEnv = {},
+    styleActivation: { resolveSessionFields: jest.Mock } | null = {
+      resolveSessionFields: jest.fn().mockResolvedValue({ outputStyleBody: 'STYLE' }),
+    },
+  symbolInjector = { buildBlock: jest.fn(async (query: string) => `SYMBOLS for ${query}`) },
   ): SdkQueryOptionsBuilder {
     const logger = {
       info: jest.fn(),
@@ -1478,11 +1502,12 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
     const worktreeHookHandler = {
       createHooks: jest.fn().mockReturnValue({}),
     };
-    const authEnv: AuthEnv = {} as AuthEnv;
     const modelService = {
       resolveModelId: jest
         .fn()
         .mockImplementation((m: string) => m || 'claude-sonnet-4'),
+      hasCachedModels: jest.fn().mockReturnValue(false),
+      getSupportedModels: jest.fn(),
     };
     const ctor = SdkQueryOptionsBuilder as unknown as new (
       ...args: unknown[]
@@ -1507,17 +1532,164 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
       { createHooks: jest.fn().mockReturnValue({}) },
       { createHooks: jest.fn().mockReturnValue({}) },
       { createHooks: jest.fn().mockReturnValue({}) },
+      symbolInjector,
       undefined,
       undefined,
       undefined,
-      undefined,
-      undefined,
+      'electron',
       {
         issue: jest.fn().mockReturnValue('test-token'),
         revokeSubject: jest.fn(),
       },
+      undefined,
+      styleActivation ?? undefined,
     );
   }
+
+  const fullPromptInput = (): QueryOptionsInput => ({
+    userMessageStream: (async function* () { /* empty */ })(),
+    abortController: new AbortController(),
+    sessionConfig: {
+      tabId: 'tab-fixture',
+      model: 'claude-sonnet-4',
+      projectPath: tmpdir(),
+      preset: 'enhanced',
+    },
+    enhancedPromptsContent: 'GUIDANCE',
+  });
+  const emptyInjector = (): InjectorStub => ({
+    buildSessionStartBlock: jest.fn().mockResolvedValue(''),
+    buildCorpusBlock: jest.fn().mockResolvedValue(''),
+    buildBlock: jest.fn().mockResolvedValue(''),
+  });
+
+  it('keeps the style flag when full-prompt activation is not installed', async () => {
+    const input = fullPromptInput();
+    const { options } = await makeBuilderForPrepend(emptyInjector(), {}, null).build({
+      ...input,
+      sessionConfig: { ...input.sessionConfig, outputStyleName: 'Example' },
+    });
+    expect(Array.isArray(options.systemPrompt)).toBe(true);
+    expect(options.settings).toContain('"outputStyle":"Example"');
+  });
+
+  it('rejects dual activation on the full-prompt route', async () => {
+    const input = fullPromptInput();
+    await expect(makeBuilderForPrepend(emptyInjector()).build({
+      ...input,
+      sessionConfig: {
+        ...input.sessionConfig, outputStyleName: 'Example', outputStyleBody: 'STYLE',
+      },
+    })).rejects.toThrow('Output style activation is ambiguous');
+  });
+
+  it('retains a pre-resolved global style on the localhost preset route', async () => {
+    const input = fullPromptInput();
+    const builder = makeBuilderForPrepend(emptyInjector(), {
+      ANTHROPIC_BASE_URL: 'http://127.0.0.1:3456',
+    });
+    const { options } = await builder.build({
+      ...input,
+      sessionConfig: { ...input.sessionConfig, outputStyleBody: 'GLOBAL STYLE' },
+    });
+    expect(options.systemPrompt).toMatchObject({
+      type: 'preset',
+      preset: 'claude_code',
+      append: expect.stringContaining('GLOBAL STYLE'),
+    });
+    expect(options.settings).not.toContain('outputStyle');
+  });
+
+  it('includes a pre-resolved workspace style exactly once', async () => {
+    const input = fullPromptInput();
+    const { options } = await makeBuilderForPrepend(emptyInjector()).build({
+      ...input,
+      sessionConfig: { ...input.sessionConfig, outputStyleBody: 'WORKSPACE STYLE' },
+    });
+    expect(options.systemPrompt).toContain('WORKSPACE STYLE');
+    expect(options.settings).not.toContain('outputStyle');
+  });
+
+  it.each([
+    { phase: phaseFixture() },
+    { skills: [{ name: 'checks', text: 'Verify output' }] },
+  ])('preserves the preset route when phase delivery is requested (%#)', async (delivery) => {
+    const { options } = await makeBuilderForPrepend(emptyInjector()).build({
+      ...fullPromptInput(),
+      ...delivery,
+    });
+    expect(options.systemPrompt).toMatchObject({ type: 'preset', preset: 'claude_code' });
+  });
+
+  it('keeps the static prefix and uses only the date as Ptah environment context', async () => {
+    const injector: InjectorStub = {
+      buildSessionStartBlock: jest.fn().mockResolvedValue('SNAPSHOT'),
+      buildCorpusBlock: jest.fn().mockResolvedValue('CORPUS'),
+      buildBlock: jest.fn().mockResolvedValue('RECALL'),
+    };
+    const { options } = await makeBuilderForPrepend(injector).build({
+      userMessageStream: (async function* () { /* empty */ })(),
+      abortController: new AbortController(),
+      sessionConfig: {
+        model: 'claude-sonnet-4',
+        projectPath: tmpdir(),
+        tabId: 'tab-fixture',
+        corpusName: 'corpus-A',
+        ptahUiFence: true,
+        preset: 'enhanced',
+        systemPrompt: 'USER',
+        outputStyleName: 'Example',
+      },
+      initialUserQuery: 'query',
+      enhancedPromptsContent: 'GUIDANCE',
+    });
+    expect(options.systemPrompt).toEqual([
+      buildPtahFullPrompt(), PTAH_UI_HINT, 'USER', 'STYLE', 'GUIDANCE',
+      SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+      expect.stringMatching(/^Today's date: \d{4}-\d{2}-\d{2}$/),
+      'SNAPSHOT', 'CORPUS',
+    ]);
+    expect(options.settings).not.toContain('outputStyle');
+  });
+
+  it.each<{ preset?: AISessionConfig['preset']; content?: string; authEnv?: AuthEnv }>([
+    {},
+    { preset: 'enhanced', content: '  ' },
+    { content: 'GUIDANCE' },
+    { preset: 'enhanced', content: 'GUIDANCE', authEnv: { ANTHROPIC_BASE_URL: 'https://proxy.example.test' } },
+  ])('keeps the preset append byte-for-byte for fallback case %#', async ({ preset, content, authEnv }) => {
+    const injector: InjectorStub = {
+      buildSessionStartBlock: jest.fn().mockResolvedValue('SNAPSHOT'),
+      buildCorpusBlock: jest.fn().mockResolvedValue('CORPUS'),
+      buildBlock: jest.fn().mockResolvedValue('RECALL'),
+    };
+    const input: QueryOptionsInput = {
+      userMessageStream: (async function* () { /* empty */ })(),
+      abortController: new AbortController(),
+      sessionConfig: {
+        model: 'claude-sonnet-4',
+        projectPath: tmpdir(),
+        tabId: 'tab-fixture',
+        corpusName: 'corpus-A',
+        ptahUiFence: true,
+        preset,
+        systemPrompt: 'USER',
+        outputStyleBody: 'STYLE',
+      },
+      initialUserQuery: 'query',
+      enhancedPromptsContent: content,
+    };
+    const { options } = await makeBuilderForPrepend(injector, authEnv).build(input);
+    expect(options.systemPrompt).toEqual({
+      type: 'preset',
+      preset: 'claude_code',
+      append: [
+        PTAH_CORE_SYSTEM_PROMPT, PTAH_UI_HINT, 'USER', 'STYLE',
+        ...(content?.trim() ? [content] : []),
+        'SNAPSHOT', 'CORPUS',
+      ].join('\n\n'),
+    });
+  });
 
   async function buildSystemPromptWith(
     injector: InjectorStub,
@@ -1543,29 +1715,96 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
     return cfg.options.systemPrompt;
   }
 
-  it('places sessionStart before corpusPrime before memoryRecall before preset content', async () => {
-    const injector: InjectorStub = {
-      buildSessionStartBlock: jest
-        .fn()
-        .mockResolvedValue('SESSION_START_TOKEN'),
-      buildCorpusBlock: jest.fn().mockResolvedValue('CORPUS_PRIME_TOKEN'),
-      buildBlock: jest.fn().mockResolvedValue('MEMORY_RECALL_TOKEN'),
+  it.each(['full', 'preset'] as const)(
+    'keeps the %s system prompt identical across queries and enriches only the first user message',
+    async (mode) => {
+      const injector = emptyInjector();
+      injector.buildBlock.mockImplementation(async (query) => `RECALL for ${query}`);
+      const builder = makeBuilderForPrepend(injector);
+
+      async function buildFor(query: string) {
+        const input = fullPromptInput();
+        const initial = {
+          type: 'user' as const,
+          session_id: '',
+          parent_tool_use_id: null,
+          message: {
+            role: 'user' as const,
+            content: [
+              { type: 'text' as const, text: query },
+              {
+                type: 'image' as const,
+                source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'aW1hZ2U=' },
+              },
+            ],
+          },
+        };
+        const followUp = { ...initial, message: { role: 'user' as const, content: 'Follow up' } };
+        const synthetic = { ...followUp, isSynthetic: true, shouldQuery: false };
+        const subagent = { ...followUp, parent_tool_use_id: 'tool-use-id' };
+        const { options, prompt } = await builder.build({
+          ...input,
+          enhancedPromptsContent: mode === 'full' ? input.enhancedPromptsContent : undefined,
+          initialUserQuery: query,
+          userMessageStream: (async function* () {
+            yield synthetic;
+            yield subagent;
+            yield initial;
+            yield followUp;
+          })(),
+        });
+        const turns = [];
+        for await (const turn of prompt) turns.push(turn);
+        expect(turns).toEqual([
+          synthetic,
+          subagent,
+          {
+            ...initial,
+            message: {
+              ...initial.message,
+              content: [
+                {
+                  type: 'text',
+                  text: `<system-reminder>\nRECALL for ${query}\n\nSYMBOLS for ${query}\n</system-reminder>`,
+                },
+                ...initial.message.content,
+              ],
+            },
+          },
+          followUp,
+        ]);
+        return options.systemPrompt;
+      }
+
+      const first = await buildFor('first question');
+      const second = await buildFor('second question');
+      expect(Array.isArray(first)).toBe(mode === 'full');
+      expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+      expect(JSON.stringify(first)).not.toMatch(/RECALL for|SYMBOLS for/);
+    },
+  );
+
+  it.each(['/compact', '  /compact'])('passes %j through without searching for context', async (content) => {
+    const injector = emptyInjector();
+    const symbols = { buildBlock: jest.fn(async (query: string) => `SYMBOLS for ${query}`) };
+    const command = {
+      type: 'user' as const,
+      session_id: '',
+      parent_tool_use_id: null,
+      message: { role: 'user' as const, content },
     };
-    const sp = await buildSystemPromptWith(
-      injector,
-      'a long enough query string',
-      {
-        corpusName: 'corpus-A',
-      },
-    );
-    expect(sp).toBeDefined();
-    const append = (sp as { append?: string }).append ?? '';
-    const startIdx = append.indexOf('SESSION_START_TOKEN');
-    const corpusIdx = append.indexOf('CORPUS_PRIME_TOKEN');
-    const recallIdx = append.indexOf('MEMORY_RECALL_TOKEN');
-    expect(startIdx).toBeGreaterThanOrEqual(0);
-    expect(corpusIdx).toBeGreaterThan(startIdx);
-    expect(recallIdx).toBeGreaterThan(corpusIdx);
+    const userMessageStream = (async function* () { yield command; })();
+    const { prompt } = await makeBuilderForPrepend(injector, {}, undefined, symbols).build({
+      ...fullPromptInput(),
+      initialUserQuery: command.message.content,
+      userMessageStream,
+    });
+    const turns = [];
+    for await (const turn of prompt) turns.push(turn);
+    expect(injector.buildBlock).not.toHaveBeenCalled();
+    expect(symbols.buildBlock).not.toHaveBeenCalled();
+    expect(prompt).toBe(userMessageStream);
+    expect(turns).toEqual([command]);
   });
 
   it('leaves the corpus slot empty when sessionConfig.corpusName is not set', async () => {
@@ -1596,7 +1835,7 @@ describe('SdkQueryOptionsBuilder.buildSystemPrompt — prepend order', () => {
       'a long enough query string',
     );
     const append = (sp as { append?: string }).append ?? '';
-    expect(append).toContain('MEMORY_RECALL_TOKEN');
+    expect(append).toBe(PTAH_CORE_SYSTEM_PROMPT);
   });
 
   it('passes cwd as workspaceRoot to buildSessionStartBlock', async () => {
@@ -2954,7 +3193,87 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
           launch: ClaudeCertifiedLaunchContext;
         };
     projectPath?: string;
+    fullPromptStyleResources?: 'matching' | 'missing' | 'mismatched' | 'ambient';
+    styleDiscovery?: OutputStyleSessionActivationService['resolveSessionFields'];
   }
+
+  it.each(['matching', 'missing', 'mismatched'] as const)(
+    'injects only through matching admitted resources (%s)',
+    async (fullPromptStyleResources) => {
+      const { options, settings, resolveSessionFields, warn } = await buildWith({
+        named: true,
+        fullPromptStyleResources,
+      });
+      expect(Array.isArray(options.systemPrompt)).toBe(true);
+      if (fullPromptStyleResources === 'matching') {
+        expect(resolveSessionFields).toHaveBeenCalledWith(
+          expect.objectContaining({ selectedStyleName: 'Example', injectIntoSystemPrompt: true }),
+          expect.objectContaining({ route: NAMED_ROUTE }),
+        );
+        expect(options.systemPrompt).toContain('NAMED STYLE');
+        expect(settings).not.toHaveProperty('outputStyle');
+      } else {
+        expect(resolveSessionFields).not.toHaveBeenCalled();
+        expect(settings).not.toHaveProperty('outputStyle');
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Skipping named-account output style'));
+      }
+    },
+  );
+
+  it('passes the Claude child config directory to ambient enhanced style discovery', async () => {
+    const configDir = join(fixtureRoot, 'override');
+    process.env['CLAUDE_CONFIG_DIR'] = configDir;
+    const { options, settings, resolveSessionFields } = await buildWith({
+      fullPromptStyleResources: 'ambient',
+    });
+    expect(options.env?.['CLAUDE_CONFIG_DIR']).toBe(configDir);
+    expect(resolveSessionFields).toHaveBeenCalledWith(
+      expect.objectContaining({ ambientConfigDir: configDir }),
+      undefined,
+    );
+    expect(options.systemPrompt).toContain('NAMED STYLE');
+    expect(settings).not.toHaveProperty('outputStyle');
+  });
+
+  it('starts an enhanced named session without a style when the account style junction dangles', async () => {
+    const account = join(fixtureRoot, 'account');
+    const target = join(account, 'styles');
+    mkdirSync(target, { recursive: true });
+    symlinkSync(target, join(account, 'output-styles'), 'junction');
+    rmSync(target, { recursive: true });
+    const env = {
+      ...NAMED_ENV,
+      CLAUDE_CONFIG_DIR: account,
+      CLAUDE_SECURESTORAGE_CONFIG_DIR: account,
+    };
+    const files = createMockFileSystemProvider();
+    const discovery = new OutputStyleDiscoveryService(
+      files,
+      createMockWorkspaceProvider(),
+      { debug: jest.fn(), warn: jest.fn() } as Pick<Logger, 'debug' | 'warn'> as Logger,
+    );
+    const { options, settings, warn, resolveSessionFields } = await buildWith({
+      named: {
+        route: { ...NAMED_ROUTE, canonicalConfigDir: account },
+        launch: { ...NAMED_LAUNCH, env, envDigest: certifiedEnvDigest(env) },
+      },
+      fullPromptStyleResources: 'matching',
+      styleDiscovery: async (_options, context) => {
+        await discovery.discover({}, context);
+        return { outputStyleBody: 'NAMED STYLE' };
+      },
+    });
+    expect(resolveSessionFields).toHaveBeenCalledTimes(1);
+    expect(files.readDirectory).not.toHaveBeenCalled();
+    expect(Array.isArray(options.systemPrompt)).toBe(true);
+    expect(options.systemPrompt).not.toContain('NAMED STYLE');
+    expect(settings).not.toHaveProperty('outputStyle');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Named-account output style discovery failed'),
+      expect.objectContaining({ reason: 'account output style unavailable' }),
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(account);
+  });
 
   // The same-name skill guard (R1) reads the account config dir; point it at
   // an empty fixture so the developer's own `~/.claude` never leaks in.
@@ -2978,14 +3297,32 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
     toolProfileApplied?: true;
     settings: Record<string, unknown>;
     credentialBinding: McpCallerBinding;
+    resolveSessionFields: jest.Mock;
+    warn: jest.Mock;
   }> {
     const issuedBindings: McpCallerBinding[] = [];
+    const warn = jest.fn();
+    const resolveSessionFields = jest.fn().mockResolvedValue({ outputStyleBody: 'NAMED STYLE' });
+    if (input.styleDiscovery) resolveSessionFields.mockImplementationOnce(input.styleDiscovery);
+    const styleResources = input.fullPromptStyleResources;
+    const named = typeof input.named === 'object'
+      ? input.named
+      : { route: NAMED_ROUTE, launch: NAMED_LAUNCH };
+    const accountResources = styleResources === 'matching' || styleResources === 'mismatched'
+      ? {
+          kind: 'named' as const,
+          route: styleResources === 'matching' ? named.route : { ...named.route, authEpoch: 1 },
+          accountDataDir: '/metadata',
+          filesystemIdentity: { volumeId: 'v', fileId: 'f' },
+          launch: named.launch,
+        }
+      : undefined;
     const noopHooks = { createHooks: jest.fn().mockReturnValue({}) };
     const ctor = SdkQueryOptionsBuilder as unknown as new (
       ...args: unknown[]
     ) => SdkQueryOptionsBuilder;
     const builder = new ctor(
-      { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+      { info: jest.fn(), warn, error: jest.fn(), debug: jest.fn() },
       {
         createCallback: jest
           .fn()
@@ -3034,9 +3371,12 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
           }),
         revokeSubject: jest.fn(),
       },
+      undefined, // mcpGateway
+      { resolveSessionFields },
     );
     const cfg = await builder.build({
       phase: input.phase,
+      ...(styleResources ? { enhancedPromptsContent: 'GUIDANCE', accountResources } : {}),
       userMessageStream: (async function* () {
         // Intentionally empty — build() attaches the stream, it does not iterate.
       })(),
@@ -3045,6 +3385,7 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
         model: 'claude-sonnet-4-5',
         projectPath: input.projectPath ?? PROJECT,
         tabId: 'tab-fixture',
+        ...(styleResources ? { preset: 'enhanced', outputStyleName: 'Example' } : {}),
       } as AISessionConfig,
       authEnvOverride: input.authEnv ?? {},
       capabilityPolicy: input.capabilityPolicy ?? verifiedPolicy(),
@@ -3063,6 +3404,8 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
         ? { toolProfileApplied: cfg.toolProfileApplied }
         : {}),
       credentialBinding: issuedBindings[0],
+      resolveSessionFields,
+      warn,
       settings: JSON.parse(cfg.options.settings as string) as Record<
         string,
         unknown
@@ -3073,9 +3416,34 @@ describe('SdkQueryOptionsBuilder.build — Claude built-in policy (TASK_2026_853
   it('denies the six tools and hides the seven terminal skills by default', async () => {
     const built = await buildWith();
     expect(built.options.disallowedTools).toEqual(DEFAULT_TOOLS);
+    expect(built.options).not.toHaveProperty('disableBundledSkills');
+    expect(built.settings['disableBundledSkills']).toBe(true);
     expect(built.settings['skillOverrides']).toEqual(
       Object.fromEntries(DEFAULT_SKILLS.map((name) => [name, 'off'])),
     );
+    expect(built.settings['skillListingMaxDescChars']).toBe(200);
+  });
+
+  it('keeps an opted-in bundled skill and overrides the other bundled skills', async () => {
+    const built = await buildWith({
+      settings: {
+        'agentOrchestration.enabledClaudeBuiltinSkills': ['dataviz'],
+      },
+    });
+    expect(built.options).not.toHaveProperty('disableBundledSkills');
+    expect(built.settings['disableBundledSkills']).toBeUndefined();
+    expect(built.settings['skillOverrides']).toEqual(
+      expect.objectContaining({
+        'claude-api': 'off',
+        'claude-approvals': 'off',
+        schedule: 'off',
+        loop: 'off',
+        run: 'off',
+        simplify: 'off',
+        'security-review': 'off',
+      }),
+    );
+    expect(built.settings['skillOverrides']).not.toHaveProperty('dataviz');
   });
 
   it('merges phase denials with Claude preset denials without duplicates', async () => {

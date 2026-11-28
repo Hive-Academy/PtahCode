@@ -2,6 +2,7 @@ import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import {
   CLAUDE_BUILTIN_SETTING_KEYS,
   CLAUDE_BUILTIN_TERMINAL_SKILLS,
+  CLAUDE_BUNDLED_SKILL_IDS,
   CLAUDE_BUILTIN_TOOLS,
   PROTECTED_CLAUDE_TOOLS,
   SYNCED_CLAUDE_SKILL_PREFIX,
@@ -338,6 +339,18 @@ describe('withoutCollidingBuiltinSkillDenials (TASK_2026_853 R1)', () => {
     const result = withoutCollidingBuiltinSkillDenials(denied, new Map());
     expect(result.deniedSkillNames).toEqual(denied);
     expect(result.keptVisible).toEqual([]);
+  });
+
+  it('preserves user or project skills sharing a denied SDK bundled skill name', () => {
+    const result = withoutCollidingBuiltinSkillDenials(
+      ['dataviz'],
+      new Map([['dataviz', ['workspace']]]),
+      CLAUDE_BUNDLED_SKILL_IDS,
+    );
+    expect(result.deniedSkillNames).toEqual([]);
+    expect(result.keptVisible).toEqual([
+      { name: 'dataviz', reason: 'same-name-skill', sources: ['workspace'] },
+    ]);
   });
 
   it('unknown discovery drops every catalog denial and keeps the rest', () => {

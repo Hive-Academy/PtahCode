@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { SessionChildRegistry } from '@ptah-extension/cli-agent-runtime';
 // The CLI runtime barrel reaches the ESM TreeSitter bundle during this CJS Jest run.
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ProjectType: {}, Framework: {}, MonorepoType: {}, FileType: {},
@@ -167,13 +168,16 @@ describe('gateMainSessionAccount precedence on a bound run', () => {
 });
 
 describe('ChatSlashCommandRouterService account forwarding', () => {
-  function router(f: Fakes) {
+  function router(f: Fakes, guidance?: string) {
     const stream = (async function* () {
       /* no inference */
     })();
     const sdk = {
       executeSlashCommand: jest.fn().mockResolvedValue(stream),
       interruptSession: jest.fn().mockResolvedValue(undefined),
+    };
+    const outputStyleActivation = {
+      resolveSessionFields: jest.fn().mockResolvedValue({ outputStyleName: 'Concise' }),
     };
     type Args = ConstructorParameters<typeof ChatSlashCommandRouterService>;
     const service = new ChatSlashCommandRouterService(
@@ -190,7 +194,7 @@ describe('ChatSlashCommandRouterService account forwarding', () => {
       } as unknown as Args[4],
       {
         isMcpServerRunning: jest.fn().mockReturnValue(false),
-        resolveEnhancedPromptsContent: jest.fn().mockResolvedValue(undefined),
+        resolveEnhancedPromptsContent: jest.fn().mockResolvedValue(guidance),
       } as unknown as Args[5],
       { streamEventsToWebview: jest.fn() } as unknown as Args[6],
       {
@@ -202,9 +206,56 @@ describe('ChatSlashCommandRouterService account forwarding', () => {
       f.accounts as unknown as Args[9],
       f.activeProvider as unknown as Args[10],
       f.metadata as unknown as Args[11],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new SessionChildRegistry(),
+      outputStyleActivation as unknown as Args[17],
     );
-    return { service, sdk };
+    return { service, sdk, outputStyleActivation };
   }
+
+  it.each([
+    { guidance: 'Project guidance', preset: 'enhanced' },
+    { guidance: '  ', preset: undefined },
+    { guidance: undefined, preset: undefined },
+    { guidance: 'Project guidance', preset: undefined, mcpToolProfile: 'apps' as const },
+    { guidance: 'Project guidance', preset: undefined, surfaceMode: true },
+  ])('restores the main-chat prompt mode on slash relaunch (%j)', async ({
+    guidance, preset, mcpToolProfile, surfaceMode,
+  }) => {
+    const { service, sdk } = router(fakes({ bound: true }), guidance);
+    await expect(service.routeFollowUpSlashCommand('/review', SESSION, TAB, ROOT, {
+      sessionId: SESSION, tabId: TAB, prompt: '/review', mcpToolProfile, surfaceMode,
+    })).resolves.toEqual({ success: true, sessionId: SESSION });
+    expect(sdk.executeSlashCommand.mock.calls[0][2].sessionConfig.preset).toBe(preset);
+  });
+
+  it('forwards the resolved workspace output style on an enhanced ambient relaunch', async () => {
+    const { service, sdk, outputStyleActivation } = router(fakes(), 'Project guidance');
+    await expect(service.routeFollowUpSlashCommand('/review', SESSION, TAB, ROOT, {
+      sessionId: SESSION, tabId: TAB, prompt: '/review',
+    })).resolves.toEqual({ success: true, sessionId: SESSION });
+    expect(outputStyleActivation.resolveSessionFields).toHaveBeenCalledWith({ workspaceRoot: ROOT });
+    expect(sdk.executeSlashCommand.mock.calls[0][2].sessionConfig).toMatchObject({
+      preset: 'enhanced',
+      outputStyleName: 'Concise',
+    });
+  });
+
+  it('keeps a persisted child relaunch on the preset route with an empty registry', async () => {
+    const f = fakes();
+    f.metadata.get.mockResolvedValue({ isChildSession: true });
+    const { service, sdk, outputStyleActivation } = router(f, 'Project guidance');
+    await expect(service.routeFollowUpSlashCommand('/review', SESSION, TAB, ROOT, {
+      sessionId: SESSION, tabId: TAB, prompt: '/review',
+    })).resolves.toEqual({ success: true, sessionId: SESSION });
+    const resume = sdk.executeSlashCommand.mock.calls[0][2];
+    expect(resume.knownSessionChild).toBe(true);
+    expect(resume.sessionConfig).not.toHaveProperty('preset');
+    expect(outputStyleActivation.resolveSessionFields).not.toHaveBeenCalled();
+  });
 
   it('a bound session relaunch carries the stored named selection', async () => {
     const f = fakes({ bound: true });
