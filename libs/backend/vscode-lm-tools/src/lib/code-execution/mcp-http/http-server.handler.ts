@@ -385,6 +385,26 @@ function extractCallerWorkspaceRoot(
   return match?.[1] ? decodeURIComponent(match[1]) : undefined;
 }
 
+/**
+ * Read the caller's CLI/provider identity off an optional `cli` query
+ * parameter on the MCP URL, e.g. `...?cli=antigravity`. This sits outside
+ * the closed path grammar above (CLOSED comment) — it is a query parameter,
+ * which every existing path extractor already tolerates and ignores
+ * (`(?:\?.*)?$`), so adding it does not touch that grammar.
+ *
+ * Written only by `AntigravityAcpProfile.buildMcpServers`
+ * (`acp-runtime/src/lib/profiles/antigravity-acp-profile.ts`), which tags
+ * Ptah's own HTTP MCP attachment's URL so `handleToolsList`
+ * (`mcp-core/protocol-dispatcher.ts`, TASK_2026_2331) can shorten only
+ * Antigravity's oversized tool descriptions — agy silently drops any Ptah
+ * MCP tool declaration over roughly 2.1 KB. Absent for every other caller.
+ */
+function extractCallerCli(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const match = url.match(/[?&]cli=([^&]+)/);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+}
+
 /** Read the terminal profile within the closed grammar above (not caller identity). */
 function extractCallerToolProfile(url: string | undefined): string | undefined {
   if (!url) return undefined;
@@ -561,6 +581,7 @@ async function handleHttpRequest(
         _callerToolProfile: _ignoredBodyProfile,
         _callerCapability: _ignoredBodyCapability,
         _callerBinding: _ignoredBodyBinding,
+        _callerCli: _ignoredBodyCli,
         _externalOwner: _ignoredBodyOwner,
         _abortSignal: _ignoredBodySignal,
         ...envelope
@@ -574,6 +595,7 @@ async function handleHttpRequest(
         _callerToolProfile: extractCallerToolProfile(identityUrl),
         _callerCapability: accepted.binding.capability,
         _callerBinding: accepted.binding,
+        _callerCli: extractCallerCli(identityUrl),
         _externalOwner: externalOwner,
         _abortSignal: abortOnEarlyClose(res),
       };

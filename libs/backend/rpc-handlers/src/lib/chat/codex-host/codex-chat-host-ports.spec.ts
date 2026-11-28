@@ -927,13 +927,18 @@ describe('Codex chat host ports', () => {
       (call) => call[0] === MESSAGE_TYPES.PERMISSION_AUTO_RESOLVED,
     );
   }
+  // 'absent' (no native deadline) by default: a routable card with no
+  // expiresAt now has no timer at all (the "No timeout" card), so a test
+  // that never resolves or dismisses its prompt leaves nothing dangling.
+  // Real timers are a problem here because these tests do not use fake ones.
   function request(
-    expiresAt: number | 'absent' = 1_900_000_000_000,
+    expiresAt: number | 'absent' = 'absent',
+    sid: SessionId = id,
   ): CodexApprovalRequest {
     return {
       contextId: 'context',
       processGeneration: 2,
-      threadId: id,
+      threadId: sid,
       turnId: 'turn',
       requestId: 5,
       toolId: 'native-item-5',
@@ -967,10 +972,10 @@ describe('Codex chat host ports', () => {
         toolName: 'Bash',
         toolInput: { command: 'pwd' },
         toolUseId: approval.toolId,
-        timeoutAt: Math.min(
-          approval.expiresAt ?? Infinity,
-          payload.timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS,
-        ),
+        // A routable card with no native deadline has no timeout at all
+        // (the "No timeout" card, matching Claude's parity) — not capped at
+        // 60s the way an unroutable fallback card is.
+        timeoutAt: 0,
         description: expect.stringContaining('pwd'),
       });
       expect(payload).not.toHaveProperty('allowedDecisions');
@@ -1407,6 +1412,16 @@ describe('Codex chat host ports', () => {
 
   describe('unroutable prompts', () => {
     const gatewayTab = 'gw-conversation';
+    // A real webview-backed chat session always carries a valid SessionId, so
+    // after the routability fix (TASK_2026_2331_e5e2, codex-chat-approval-
+    // presentation.ts) a non-UUID tabId alone no longer makes a card
+    // unroutable — the valid `id` session id makes it routable instead. The
+    // truly-unroutable branch (neither tabId nor sessionId parses as a UUID)
+    // is therefore unreachable from a real chat session today. This id is
+    // forced purely to keep exercising that fallback branch's mechanics
+    // (timeout, dismiss, cancel, reentrant publish); it is not a reachable
+    // production scenario.
+    const unroutableSessionId = 'legacy-non-uuid-session' as unknown as SessionId;
     const now = 1_700_000_000_000;
     const choices = [
       'deny',
@@ -1430,8 +1445,8 @@ describe('Codex chat host ports', () => {
       jest.useFakeTimers({ now });
       const h = harness();
       h.deps.tabId = () => gatewayTab;
-      const approval = request(expiresAt ?? 'absent');
-      h.ports.presentation.present(id, approval, [...choices]);
+      const approval = request(expiresAt ?? 'absent', unroutableSessionId);
+      h.ports.presentation.present(unroutableSessionId, approval, [...choices]);
       const payload: {
         id: string;
         timeoutAt: number;
@@ -1441,24 +1456,23 @@ describe('Codex chat host ports', () => {
       return { h, approval, payload };
     }
 
-    it('bounds a UUID tab card and declines at its deadline', () => {
+    it('routes a UUID tab card inline at its own native deadline, with no 60s cap', () => {
       jest.useFakeTimers({ now });
       const h = harness();
-      const approval = request();
+      const approval = request(now + 1_900_000_000_000);
       h.ports.presentation.present(id, approval, [...choices]);
       const payload = h.broadcastMessage.mock.calls[0][1];
+      // A routable card (both tabId and sessionId are valid UUIDs here)
+      // honors Codex's own native expiresAt as-is, with no 60s cap — the
+      // "No timeout" card parity with Claude. It does not decline at the
+      // unroutable safety-net deadline, only `approval`'s own far-future one.
       expect(payload).toMatchObject({
         sessionId: id,
         tabId: chatTab,
-        timeoutAt: now + UNROUTABLE_PERMISSION_TIMEOUT_MS,
+        timeoutAt: approval.expiresAt,
       });
       jest.advanceTimersByTime(UNROUTABLE_PERMISSION_TIMEOUT_MS);
-      expect(h.respond).toHaveBeenCalledWith(
-        { sessionId: id, threadId: id, requestId: '5' },
-        expect.objectContaining({
-          response: expect.objectContaining({ decision: 'decline' }),
-        }),
-      );
+      expect(h.respond).not.toHaveBeenCalled();
       expect(h.publish).not.toHaveBeenCalled();
     });
 
@@ -1498,7 +1512,7 @@ describe('Codex chat host ports', () => {
         jest.advanceTimersByTime(1);
         expect(h.respond).toHaveBeenCalledTimes(1);
         expect(h.respond).toHaveBeenCalledWith(
-          { sessionId: id, threadId: id, requestId: '5' },
+          { sessionId: unroutableSessionId, threadId: unroutableSessionId, requestId: '5' },
           expect.objectContaining({
             kind: 'codex',
             response: expect.objectContaining({
@@ -1577,7 +1591,7 @@ describe('Codex chat host ports', () => {
         ).toBe(true);
         expect(h.broadcastMessage).toHaveBeenCalledWith(
           MESSAGE_TYPES.PERMISSION_AUTO_RESOLVED,
-          expect.objectContaining({ id: payload.id, sessionId: id }),
+          expect.objectContaining({ id: payload.id, sessionId: unroutableSessionId }),
         );
         expect(
           h.broadcastMessage.mock.calls.filter(
@@ -1600,7 +1614,7 @@ describe('Codex chat host ports', () => {
     it('clears the deny window when the turn ends first', () => {
       const { h, payload } = presentGateway();
       h.ports.presentation.cancelPrompt({
-        sessionId: id,
+        sessionId: unroutableSessionId,
         requestId: '5',
         reason: 'turn-ended',
       });
@@ -1618,8 +1632,8 @@ describe('Codex chat host ports', () => {
 
     it('clears the deny window when the prompt is dismissed without an answer', () => {
       const { h, approval, payload } = presentGateway();
-      h.ports.presentation.dismiss(id, approval);
-      h.ports.presentation.dismiss(id, approval);
+      h.ports.presentation.dismiss(unroutableSessionId, approval);
+      h.ports.presentation.dismiss(unroutableSessionId, approval);
       jest.advanceTimersByTime(60_000);
       expect(h.respond).not.toHaveBeenCalled();
       expect(h.publish).toHaveBeenCalledTimes(2);
@@ -1638,7 +1652,11 @@ describe('Codex chat host ports', () => {
       const h = harness();
       h.deps.tabId = () => gatewayTab;
       h.broadcastMessage.mockRejectedValueOnce(new Error('window closed'));
-      h.ports.presentation.present(id, request('absent'), [...choices]);
+      h.ports.presentation.present(
+        unroutableSessionId,
+        request('absent', unroutableSessionId),
+        [...choices],
+      );
       const delivered: { id: string } = h.broadcastMessage.mock.calls[0][1];
       await Promise.resolve();
       await Promise.resolve();
@@ -1658,7 +1676,11 @@ describe('Codex chat host ports', () => {
 
     it('drops the previous deny window when the same approval is presented again', () => {
       const { h } = presentGateway();
-      h.ports.presentation.present(id, request('absent'), [...choices]);
+      h.ports.presentation.present(
+        unroutableSessionId,
+        request('absent', unroutableSessionId),
+        [...choices],
+      );
       jest.advanceTimersByTime(60_000);
       expect(h.respond).toHaveBeenCalledTimes(1);
       expect(h.publish).toHaveBeenNthCalledWith(
@@ -1683,7 +1705,11 @@ describe('Codex chat host ports', () => {
         sequence.push(event.phase);
         throw new Error('publisher failed');
       });
-      h.ports.presentation.present(id, request('absent'), [...choices]);
+      h.ports.presentation.present(
+        unroutableSessionId,
+        request('absent', unroutableSessionId),
+        [...choices],
+      );
       expect(h.broadcastMessage).toHaveBeenCalledWith(
         MESSAGE_TYPES.PERMISSION_REQUEST,
         expect.objectContaining({
@@ -1696,7 +1722,7 @@ describe('Codex chat host ports', () => {
       expect(sequence).toEqual(['requested', 'native', 'resolved']);
       expect(h.respond).toHaveBeenCalledTimes(1);
       expect(h.respond).toHaveBeenCalledWith(
-        { sessionId: id, threadId: id, requestId: '5' },
+        { sessionId: unroutableSessionId, threadId: unroutableSessionId, requestId: '5' },
         expect.objectContaining({
           kind: 'codex',
           response: expect.objectContaining({
@@ -1724,7 +1750,11 @@ describe('Codex chat host ports', () => {
           decision: 'allow',
         });
       });
-      h.ports.presentation.present(id, request('absent'), [...choices]);
+      h.ports.presentation.present(
+        unroutableSessionId,
+        request('absent', unroutableSessionId),
+        [...choices],
+      );
       expect(h.respond).toHaveBeenCalledTimes(1);
       expect(h.respond.mock.calls[0][1].response.decision).toBe('accept');
       const resolved = h.publish.mock.calls.filter(
@@ -1764,11 +1794,11 @@ describe('Codex chat host ports', () => {
       const { h, approval } = presentGateway();
       expect(h.publish).toHaveBeenCalledTimes(1);
       h.ports.presentation.cancelPrompt({
-        sessionId: id,
+        sessionId: unroutableSessionId,
         requestId: '5',
         reason: 'disposed',
       });
-      h.ports.presentation.dismiss(id, approval);
+      h.ports.presentation.dismiss(unroutableSessionId, approval);
       expect(h.respond).not.toHaveBeenCalled();
       expect(h.publish).toHaveBeenCalledTimes(2);
       expect(h.publish).toHaveBeenLastCalledWith(
@@ -1787,10 +1817,14 @@ describe('Codex chat host ports', () => {
         promptLifecycle: undefined,
         tabId: () => gatewayTab,
       });
-      ports.presentation.present(id, request('absent'), [...choices]);
+      ports.presentation.present(
+        unroutableSessionId,
+        request('absent', unroutableSessionId),
+        [...choices],
+      );
       jest.advanceTimersByTime(60_000);
       expect(h.respond).toHaveBeenCalledWith(
-        { sessionId: id, threadId: id, requestId: '5' },
+        { sessionId: unroutableSessionId, threadId: unroutableSessionId, requestId: '5' },
         expect.objectContaining({
           kind: 'codex',
           response: expect.objectContaining({

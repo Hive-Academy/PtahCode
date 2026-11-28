@@ -10,11 +10,11 @@ import {
 import type { CodexApprovalRequest } from '@ptah-extension/codex-runtime';
 import {
   MESSAGE_TYPES,
+  SessionId,
   TabId,
   attentionRequestKey,
   type PermissionRequest,
   type PermissionResponse,
-  type SessionId,
 } from '@ptah-extension/shared';
 
 export interface CodexApprovalPresentationPorts {
@@ -29,6 +29,9 @@ export interface CodexApprovalPresentationPorts {
   setTimer(callback: () => void, delay: number): ReturnType<typeof setTimeout>;
   clearTimer(timer: ReturnType<typeof setTimeout>): void;
 }
+
+/** node:timers clamps a delay past this to a near-immediate fire (32-bit signed int). */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type PromptOutcome = 'allowed' | 'denied' | 'timed-out' | 'aborted';
 interface PendingPrompt {
@@ -136,16 +139,29 @@ export function createCodexChatApprovalPresentation(
         const id = randomUUID();
         const timestamp = Date.now();
         const tabId = ports.tabId(sessionId);
-        const routable = TabId.safeParse(tabId) !== null;
+        const routable =
+          TabId.safeParse(tabId) !== null || SessionId.safeParse(sessionId) !== null;
         const presented = presentCodexApproval(request);
-        const windowEnd = timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS;
-        const boundedAt = request.expiresAt === undefined
-          ? windowEnd : Math.min(request.expiresAt, windowEnd);
-        const timeoutMs = Math.max(0, boundedAt - timestamp);
+        // A routable (webview-owned) card waits for an answer or turn end,
+        // matching Claude's "No timeout" card (sdk-permission-handler.ts
+        // classifyPermissionRoute: `denyWindowMs` is undefined for an owned
+        // chat route) — bounded only by a native `expiresAt` Codex itself
+        // supplied. An unroutable request keeps its 60s safety-net deadline
+        // so it cannot hang forever with no UI able to answer it.
+        const windowEnd = routable
+          ? undefined : timestamp + UNROUTABLE_PERMISSION_TIMEOUT_MS;
+        const boundedAt = routable
+          ? request.expiresAt
+          : request.expiresAt === undefined
+            ? windowEnd : Math.min(request.expiresAt, windowEnd as number);
+        const timeoutMs = boundedAt === undefined
+          ? undefined
+          : Math.min(Math.max(0, boundedAt - timestamp), MAX_TIMER_DELAY_MS);
         const entry: PendingPrompt = {
           sessionId, request, timestamp, correlationKey,
           ...(routable ? {} : { unroutable: {
-            routingHint: tabId, toolName: presented.toolName, timeoutMs,
+            routingHint: tabId, toolName: presented.toolName,
+            timeoutMs: timeoutMs as number,
           } }),
         };
         pending.set(id, entry);
@@ -154,32 +170,34 @@ export function createCodexChatApprovalPresentation(
           ? {
               id, sessionId, ...(tabId === sessionId ? {} : { tabId }),
               ...presented, toolUseId: request.toolId, timestamp,
-              timeoutAt: boundedAt,
+              timeoutAt: boundedAt ?? 0,
             }
           : {
               id, ...presented, toolUseId: request.toolId,
-              timestamp, timeoutAt: boundedAt,
+              timestamp, timeoutAt: boundedAt as number,
             };
         if (!routable) {
           publishLifecycle({
             phase: 'requested', requestId: id, routingHint: tabId,
             toolName: presented.toolName, description: presented.description,
-            routable: false, timeoutMs,
+            routable: false, timeoutMs: timeoutMs as number,
           });
           if (!pending.has(id)) return;
         }
-        entry.promptTimer = ports.setTimer(() => {
-          const current = takePrompt(id);
-          if (!current) return;
-          const reason = current.unroutable
-            ? buildSystemAbortPermissionMessage(
-                presented.toolName,
-                `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
-              )
-            : `Permission request timed out after ${timeoutMs}ms without an answer from the UI. This was a timeout, not a user denial.`;
-          declineApproval(current, reason);
-          publishResolved(id, current, 'timed-out');
-        }, timeoutMs);
+        if (timeoutMs !== undefined) {
+          entry.promptTimer = ports.setTimer(() => {
+            const current = takePrompt(id);
+            if (!current) return;
+            const reason = current.unroutable
+              ? buildSystemAbortPermissionMessage(
+                  presented.toolName,
+                  `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
+                )
+              : `Permission request timed out after ${timeoutMs}ms without an answer from the UI. This was a timeout, not a user denial.`;
+            declineApproval(current, reason);
+            publishResolved(id, current, 'timed-out');
+          }, timeoutMs);
+        }
         // The manager's attention observer raises the host notice.
         void ports.webviewManager
           .broadcastMessage(MESSAGE_TYPES.PERMISSION_REQUEST, payload)
