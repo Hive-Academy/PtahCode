@@ -14,6 +14,35 @@ export interface ChartPoint {
   readonly barHeight: number;
 }
 
+/** One y-axis gridline: its value, compact label and SVG y. */
+export interface ChartTick {
+  readonly value: number;
+  readonly label: string;
+  readonly y: number;
+}
+
+/** One x-axis category: the full label, the label shortened to fit its slot, and the slot centre. */
+export interface ChartCategory {
+  readonly label: string;
+  readonly shortLabel: string;
+  readonly x: number;
+}
+
+/** SVG user units per label character at the chart's 15-unit label size (about 0.6 em). */
+const LABEL_CHAR_WIDTH = 9;
+const TICK_COUNT = 4;
+
+/** Compact, locale-stable number text ("1.2K", "-3", "0.5"). */
+export function compactNumber(value: number): string {
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
+/** Shortens a label to `max` characters with a trailing ellipsis. */
+function fitLabel(label: string, max: number): string {
+  if (label.length <= max) return label;
+  return max <= 1 ? '…' : `${label.slice(0, max - 1)}…`;
+}
+
 /** Fixed SVG coordinates; attributes only, with no DOM or style dependencies. */
 export function chartGeometry(series: readonly DashboardSeries[], kind: 'line-chart' | 'bar-chart') {
   const points = series.flatMap(item => item.points);
@@ -51,7 +80,21 @@ export function chartGeometry(series: readonly DashboardSeries[], kind: 'line-ch
       polyline: mapped.map(point => `${point.px},${point.py}`).join(' '),
       dash: seriesIndex === 0 ? 'none' : `${seriesIndex * 3 + 2} 3` };
   });
-  return { series: geometry, rows, baseline, minY, maxY,
+  const ticks: ChartTick[] = minY === maxY
+    ? [{ value: minY, label: compactNumber(minY), y: y(minY) }]
+    : Array.from({ length: TICK_COUNT }, (_, index) => {
+      // Weighted sum, not `minY + (maxY - minY) * t`, so extreme finite bounds cannot overflow.
+      const t = index / (TICK_COUNT - 1);
+      const raw = minY * (1 - t) + maxY * t;
+      // Snap rounding noise to zero so a tick never reads "-0".
+      const value = Math.abs(raw) < Math.max(Math.abs(minY), Math.abs(maxY)) * 1e-12 ? 0 : raw;
+      return { value, label: compactNumber(value), y: y(value) };
+    });
+  const maxChars = Math.max(1, Math.floor(slot / LABEL_CHAR_WIDTH));
+  const labelledCategories: ChartCategory[] = categories.map((value, index) => ({
+    label: String(value), shortLabel: fitLabel(String(value), maxChars), x: 60 + (index + 0.5) * slot,
+  }));
+  return { series: geometry, rows, baseline, minY, maxY, ticks, categories: labelledCategories,
     firstX: numeric && points.length ? minX : categories[0] ?? '',
     lastX: numeric && points.length ? maxX : categories.at(-1) ?? '' };
 }

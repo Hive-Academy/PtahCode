@@ -15,6 +15,8 @@ describe('DashboardListComponent and pager', () => {
     const button = (control: string) => element.querySelector<HTMLButtonElement>(`[data-apps-focus-key="surface:list:${control}"]`)!;
     return { fixture, element, button };
   }
+  const filler = (count: number) => Array.from({ length: count }, (_, index) => ({ text: { text: `Row ${index}` } }));
+  const longList: ListNode = { ...node, items: [...(node.items ?? []), ...filler(11)] };
   it('honours ordered lists, secondary detail and literal URL/text without links or styles', () => {
     const { fixture, element } = setup();
     expect(element.querySelector('ol li')).not.toBeNull();
@@ -54,8 +56,44 @@ describe('DashboardListComponent and pager', () => {
     }
     expect(Array.from(element.querySelectorAll('button, input')).every(control => control.getAttribute('data-apps-focus-key')?.startsWith('surface:list:'))).toBe(true);
   });
+  it('keeps an active filter available when the list shrinks', () => {
+    const value = { ...longList, title: { text: '   ' } };
+    const { fixture, element } = setup(value);
+    const filter = element.querySelector<HTMLInputElement>('input[type="search"]');
+    if (!filter) throw new Error('Expected a filter input');
+    expect(filter.getAttribute('aria-label')).toBe('Filter List');
+    expect(element.querySelector('h3')).toBeNull();
+    filter.value = 'Row 1';
+    filter.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+
+    fixture.componentRef.setInput('node', { ...value, items: filler(10) });
+    fixture.detectChanges();
+    expect(element.querySelector('input[type="search"]')).toBe(filter);
+    expect(filter.value).toBe('Row 1');
+    expect(element.querySelectorAll('ol li')).toHaveLength(1);
+    expect(element.querySelector('button[aria-expanded]')).toBeNull();
+
+    filter.value = '';
+    filter.dispatchEvent(new Event('input'));
+    fixture.detectChanges();
+    expect(element.querySelector('input[type="search"]')).toBeNull();
+    expect(element.querySelectorAll('ol li')).toHaveLength(10);
+  });
+
+  it('keeps a short list free of filter, expand, result count and pager', () => {
+    const { element } = setup({ ...node, items: [...(node.items ?? []), ...filler(9)] });
+    expect(element.querySelectorAll('li')).toHaveLength(10);
+    expect(element.querySelector('input, ptah-dashboard-pager, [role="status"]')).toBeNull();
+    expect(element.querySelector('[data-apps-focus-key="surface:list:expand"]')).toBeNull();
+    expect(element.textContent).not.toContain('results');
+  });
   it('filters visible title/detail/URL text and resets the page with a result count', () => {
-    const { fixture, element } = setup({ ...node, items: [...(node.items ?? []), { text: { text: 'Second' } }] });
+    const { fixture, element } = setup(longList);
+    const search = element.querySelector<HTMLInputElement>('input[type="search"]')!;
+    expect(search.placeholder).toBe('Filter items');
+    expect(element.querySelector('label')).toBeNull();
+    expect(element.textContent).not.toContain('results');
     const filter = element.querySelector('input')!;
     for (const query of ['YESTERDAY', 'example.test', 'incident']) {
       fixture.componentRef.setInput('viewState', { page: 99 }); fixture.detectChanges();
@@ -67,7 +105,7 @@ describe('DashboardListComponent and pager', () => {
     filter.value = 'absent'; filter.dispatchEvent(new Event('input')); fixture.detectChanges();
     expect(element.querySelectorAll('li')).toHaveLength(0);
     expect(element.textContent).toContain('0 results');
-    expect(element.textContent).toContain('Page 1 of 1');
+    expect(element.querySelector('ptah-dashboard-pager')).toBeNull();
   });
   it('guards selection and emits original item indices after paging and filtering', () => {
     const { fixture, element, button } = setup({ ...node,
@@ -88,7 +126,7 @@ describe('DashboardListComponent and pager', () => {
     fixture.componentInstance.selectItem(999); expect(emitted).toHaveBeenCalledTimes(2);
   });
   it('expands through controlled state and Escape returns focus to the icon button', () => {
-    const { fixture, element, button } = setup(); document.body.appendChild(element);
+    const { fixture, element, button } = setup(longList); document.body.appendChild(element);
     try {
       const expand = button('expand');
       const content = element.querySelector<HTMLElement>(`#${expand.getAttribute('aria-controls')}`)!;
@@ -109,11 +147,11 @@ describe('DashboardListComponent and pager', () => {
     } finally { element.remove(); }
   });
   it('uses unique content and filter ids for instances with the same node id', () => {
-    const first = setup(); const second = setup();
+    const first = setup(longList); const second = setup(longList);
     expect(first.button('expand').getAttribute('aria-controls')).not.toBe(second.button('expand').getAttribute('aria-controls'));
     for (const { element, button } of [first, second]) {
       expect(element.querySelector(`#${button('expand').getAttribute('aria-controls')}`)).not.toBeNull();
-      expect(element.querySelector('label')?.htmlFor).toBe(element.querySelector('input')?.id);
+      expect(element.querySelector('input')?.getAttribute('aria-label')).toBe(`Filter ${node.title?.text}`);
     }
     expect(first.element.querySelector('input')?.id).not.toBe(second.element.querySelector('input')?.id);
   });
@@ -122,7 +160,8 @@ describe('DashboardListComponent and pager', () => {
       { text: { text: 'Valid' }, detail: { text: 12 }, url: {} },
       { text: { text: {} }, detail: { text: 'Detail only' }, url: 'plain-url' }] } as unknown as ListNode;
     const { fixture, element, button } = setup(malformed);
-    expect(element.querySelector('h3')?.textContent).toBe('List');
+    expect(element.querySelector('h3')).toBeNull();
+    expect(element.querySelector('section')?.getAttribute('aria-label')).toBe('List');
     expect(element.querySelectorAll('li')).toHaveLength(2);
     expect(element.textContent).not.toContain('[object Object]');
     expect(element.textContent).toContain('Detail only');

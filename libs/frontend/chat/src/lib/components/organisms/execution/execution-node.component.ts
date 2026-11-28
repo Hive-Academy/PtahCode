@@ -189,10 +189,9 @@ function scheduleFrame(cb: () => void): FrameHandle {
                No fade class: this branch is entered mid-stream when the
                opener arrives, and a replayed fade would flash the text. The
                placeholder and a chunk-load error render today's markdown. -->
-          <div
-            class="prose prose-sm prose-invert max-w-none my-2 exec-text-branch"
-            dir="auto"
-          >
+          <!-- No prose on this wrapper: ptah-ui-message-text puts prose on its
+               markdown parts only, so prose rules never reach ptah-ui blocks. -->
+          <div class="max-w-none my-2 exec-text-branch" dir="auto">
             @defer (on immediate) {
               <ptah-ui-message-text
                 [text]="bodyText()"
@@ -206,11 +205,13 @@ function scheduleFrame(cb: () => void): FrameHandle {
               />
             } @placeholder {
               <markdown
+                class="prose prose-sm prose-invert max-w-none block"
                 dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />
             } @error {
               <markdown
+                class="prose prose-sm prose-invert max-w-none block"
                 dir="auto"
                 [data]="bodyText() | surfaceMarkdown: surfaceActive()"
               />

@@ -16,6 +16,7 @@ import {
   SessionId,
   isAgentTaskType,
 } from '@ptah-extension/shared';
+import { formatLocalCommandOutput } from '@ptah-extension/shared/mcp-apps-contracts';
 
 import type {
   SDKMessage,
@@ -173,7 +174,7 @@ export class SystemMessageTransformer {
       '[SdkMessageTransformer] Local command output received',
       { contentLength: sdkMessage.content.length },
     );
-    const messageId = `cmd_${generateEventId()}`;
+    const messageId = `cmd_${sdkMessage.uuid ?? generateEventId()}`;
     // `||` not `??`: an empty `session_id` on the payload is not an id, and the
     // trailing `undefined` keeps it from becoming one. Local command output is
     // still worth emitting unattributed — it is the user's own `/command`
@@ -195,7 +196,9 @@ export class SystemMessageTransformer {
         timestamp: Date.now(),
         sessionId: resolvedSessionId,
         messageId,
-        delta: sdkMessage.content,
+        // `/usage` and `/context` stdout becomes one ptah-ui dashboard block;
+        // any other command's output passes through unchanged.
+        delta: formatLocalCommandOutput(sdkMessage.content),
         blockIndex: 0,
       } as TextDeltaEvent,
       {

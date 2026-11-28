@@ -1426,3 +1426,37 @@ describe('surface validator — dashboard-catalog/4 (D1, D2, R4.1-R4.2)', () => 
     ).toBe(true);
   });
 });
+
+describe('catalog/4 leaderboard and meter schemas', () => {
+  const entry = { label: 'A', share: 100 };
+  const group = { title: 'Tools', icon: 'tool', entries: [entry] };
+  const leaderboard = { id: 'lb', kind: 'leaderboard', groups: [group] };
+  const segment = { label: 'Free', amount: 0, muted: true };
+  const meter = { id: 'm', kind: 'meter', segments: [segment] };
+  const v4Document = (component: unknown) => ({
+    ...makeSurfaceEnvelope(),
+    catalogVersion: SURFACE_CATALOG_VERSION_4,
+    components: [component],
+  });
+
+  it.each([leaderboard, meter])('gates $kind to /4', (component) => {
+    const envelope = v4Document(component);
+    expect(documentOf(envelope).ok).toBe(true);
+    expect(documentOf({ ...envelope, catalogVersion: SURFACE_CATALOG_VERSION }).ok).toBe(false);
+  });
+
+  it.each([
+    { ...leaderboard, groups: [] },
+    { ...leaderboard, groups: [{ ...group, icon: 'arbitrary' }] },
+    { ...leaderboard, groups: [{ ...group, entries: [{ ...entry, share: 101 }] }] },
+    { ...leaderboard, groups: [{ ...group, entries: Array(50).fill(entry) }, group] },
+    { ...leaderboard, groups: Array(9).fill(group) },
+    { ...meter, segments: [] },
+    { ...meter, segments: Array(13).fill(segment) },
+    { ...meter, segments: [{ ...segment, amount: -1 }] },
+    { ...meter, segments: [{ ...segment, amount: Infinity }] },
+    { ...meter, segments: [{ ...segment, muted: 'yes' }] },
+  ])('rejects out-of-contract $kind', (component) => {
+    expect(documentOf(v4Document(component)).ok).toBe(false);
+  });
+});

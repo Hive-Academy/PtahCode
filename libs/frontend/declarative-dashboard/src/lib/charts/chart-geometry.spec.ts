@@ -42,6 +42,34 @@ describe('chartGeometry', () => {
     expect(geometry.firstX).toBe(2);
     expect(geometry.lastX).toBe(8);
   });
+  it('places evenly spaced compact ticks from the lower to the upper bound', () => {
+    const geometry = chartGeometry([{ name: 'A', points: [{ x: 'a', y: -1500 }, { x: 'b', y: 3000 }] }], 'bar-chart');
+    const expected = [[-1500, 220], [0, 160], [1500, 100], [3000, 40]];
+    expect(geometry.ticks).toHaveLength(4);
+    geometry.ticks.forEach((tick, index) => {
+      expect(tick.value).toBeCloseTo(expected[index][0]);
+      expect(tick.y).toBeCloseTo(expected[index][1]);
+    });
+    expect(geometry.ticks.map(tick => tick.label)).toEqual(['-1.5K', '0', '1.5K', '3K']);
+    expect(geometry.ticks[1].y).toBeCloseTo(geometry.baseline);
+  });
+  it('uses one tick for a flat range and keeps extreme ticks finite', () => {
+    expect(chartGeometry([{ name: 'A', points: [{ x: 'a', y: 0 }] }], 'bar-chart').ticks)
+      .toEqual([{ value: 0, label: '0', y: 130 }]);
+    const extreme = chartGeometry([{ name: 'A', points: [{ x: 1, y: Number.MAX_VALUE }, { x: 2, y: -Number.MAX_VALUE }] }], 'line-chart');
+    expect(extreme.ticks).toHaveLength(4);
+    expect(extreme.ticks.every(tick => Number.isFinite(tick.value) && Number.isFinite(tick.y))).toBe(true);
+  });
+  it('centres one label per category and truncates labels that overflow their slot', () => {
+    const long = 'a-very-long-category-name';
+    const geometry = chartGeometry([{ name: 'A', points: [{ x: 'Mon', y: 1 }, { x: long, y: 2 }, { x: 'Wed', y: 3 }] }], 'bar-chart');
+    expect(geometry.categories.map(category => category.x)).toEqual([140, 300, 460]);
+    expect(geometry.categories.map(category => category.label)).toEqual(['Mon', long, 'Wed']);
+    // 160-unit slots hold 17 characters at 9 units each.
+    expect(geometry.categories[0].shortLabel).toBe('Mon');
+    expect(geometry.categories[1].shortLabel).toBe(`${long.slice(0, 16)}…`);
+    expect(geometry.categories[1].shortLabel).toHaveLength(17);
+  });
   it('keeps every one of 5000 points and its original index', () => {
     const points = Array.from({ length: 5000 }, (_, x) => ({ x, y: x }));
     const geometry = chartGeometry([{ name: 'A', points }], 'line-chart');

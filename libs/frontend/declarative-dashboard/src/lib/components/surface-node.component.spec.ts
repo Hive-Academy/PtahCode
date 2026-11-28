@@ -33,7 +33,7 @@ function v1Nodes(components: readonly DashboardComponent[]): readonly SurfaceNod
 }
 
 const series = [{ name: 'Cost', points: [{ x: 'Mon', y: 1 }, { x: 'Tue', y: 2 }] }];
-/** One component of each rendered kind (the 19 `/3` kinds plus `/4` accordion and avatar), and the element each must render. */
+/** One component and DOM selector for each rendered kind. */
 const EVERY_KIND: readonly (readonly [SurfaceComponent, string])[] = [
   [{ id: 'k-section', kind: 'section', title: { text: 'S' }, children: [] }, 'ptah-surface-layout section'],
   [{ id: 'k-stack', kind: 'stack', children: [] }, 'ptah-surface-layout'],
@@ -56,6 +56,9 @@ const EVERY_KIND: readonly (readonly [SurfaceComponent, string])[] = [
   [{ id: 'k-radial', kind: 'radial-progress', value: 70, tone: 'info', label: { text: 'L' } }, 'ptah-dashboard-radial-progress'],
   [{ id: 'k-divider', kind: 'divider', direction: 'horizontal' }, 'ptah-dashboard-divider'],
   [{ id: 'k-text-block', kind: 'text-block', role: 'heading', text: { text: 'H' } }, 'ptah-dashboard-text-block h3'],
+  [{ id: 'k-leaderboard', kind: 'leaderboard', groups: [{ entries: [{ label: 'Leader', share: 50 }] }] },
+    'ptah-dashboard-leaderboard li'],
+  [{ id: 'k-meter', kind: 'meter', segments: [{ label: 'Used', amount: 1 }] }, 'ptah-dashboard-meter [role="img"]'],
   [{ id: 'k-avatar', kind: 'avatar', name: 'code-explorer', subtitle: 'lane' }, 'ptah-dashboard-avatar [data-testid="avatar-initials"]'],
 ];
 
@@ -95,8 +98,8 @@ describe('SurfaceNodeComponent', () => {
     return { fixture, host: fixture.componentInstance, element, rerender: () => fixture.detectChanges() };
   }
 
-  it('switches over the 19 /3 kinds and the /4 accordion and avatar, each to its own component', () => {
-    expect(SURFACE_NODE_KINDS.size).toBe(21);
+  it('switches over all /3 and /4 kinds, each to its own component', () => {
+    expect(SURFACE_NODE_KINDS.size).toBe(23);
     expect(new Set(EVERY_KIND.map(([component]) => component.kind))).toEqual(SURFACE_NODE_KINDS);
     for (const [component, selector] of EVERY_KIND) {
       const { element, host } = setup(v2Nodes([component], {}, SURFACE_CATALOG_VERSION_4)[0]);
@@ -183,12 +186,40 @@ describe('SurfaceNodeComponent', () => {
     expect(titles(setup(chart).element, 'ptah-dashboard-chart ~ div ptah-dashboard-stat h3')).toEqual(['under-chart']);
   });
 
+  it('propagates equal-height flex-1 on non-inline hosts and vertical dividers, keeping inline kinds intrinsic', () => {
+    const [card, stat, chart, badge, vDivider, hDivider] = v2Nodes([
+      { id: 'c', kind: 'card', children: [] },
+      { id: 's', kind: 'stat', value: 1 },
+      { id: 'b', kind: 'bar-chart', series },
+      { id: 'tag', kind: 'badge', tone: 'neutral', text: { text: 'Ok' } },
+      { id: 'dv', kind: 'divider', direction: 'vertical' },
+      { id: 'dh', kind: 'divider', direction: 'horizontal' },
+    ]);
+    for (const [node, childSelector] of [[card, 'ptah-surface-layout'], [stat, 'ptah-dashboard-stat'],
+      [chart, 'ptah-dashboard-chart']] as const) {
+      const { element } = setup(node);
+      const hostClasses = Array.from(element.querySelector('ptah-surface-node')!.classList);
+      expect(hostClasses).toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col', 'min-w-0']));
+      expect(hostClasses).not.toContain('items-start');
+      expect(Array.from(element.querySelector(childSelector)!.classList))
+        .toEqual(expect.arrayContaining(['flex', 'flex-1', 'flex-col', 'min-w-0']));
+    }
+    const badgeHost = Array.from(setup(badge).element.querySelector('ptah-surface-node')!.classList);
+    expect(badgeHost).toContain('items-start');
+    expect(badgeHost).not.toContain('flex-1');
+
+    const verticalView = setup(vDivider).element;
+    expect(verticalView.querySelector('ptah-surface-node')!.classList.contains('flex-1')).toBe(true);
+    expect(verticalView.querySelector('ptah-dashboard-divider')!.classList.contains('flex-1')).toBe(true);
+    expect(setup(hDivider).element.querySelector('ptah-dashboard-divider')!.classList.contains('flex-1')).toBe(false);
+  });
+
   it('forwards every child output unchanged, with the component id on presentation writes', () => {
     const [card] = v2Nodes([{ id: 'form', kind: 'card', actions: [{ id: 'send', action: 'surface.submit', label: { text: 'Send' } }],
       children: [
         { id: 'reason', kind: 'text', label: 'Reason', path: 'form.reason' },
         { id: 'notify', kind: 'checkbox', label: 'Notify', path: 'form.notify' },
-        { id: 'tile', kind: 'stat', value: 3, actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] },
+        { id: 'tile', kind: 'stat', value: 3, description: { text: 'Detail' }, actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] },
       ] }]);
     const { element, host } = setup(card);
     const input = element.querySelector<HTMLInputElement>('input[type=text]')!;

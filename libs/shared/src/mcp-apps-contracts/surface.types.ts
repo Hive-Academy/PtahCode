@@ -2,6 +2,7 @@
 import type {
   SurfaceActionId,
   SurfaceCatalogVersion,
+  SurfaceIconToken,
   SurfaceGap,
   SurfaceStackDirection,
   SurfaceTrendDirection,
@@ -173,6 +174,39 @@ export interface SurfaceAvatarComponent {
   readonly name: string;
   readonly subtitle?: string;
 }
+export interface SurfaceLeaderboardEntry {
+  readonly label: string;
+  readonly share: number;
+  readonly value?: string;
+  readonly detail?: string;
+}
+export interface SurfaceLeaderboardGroup {
+  readonly title?: string;
+  readonly icon?: SurfaceIconToken;
+  readonly entries: readonly SurfaceLeaderboardEntry[];
+}
+export interface SurfaceLeaderboardProps {
+  readonly title?: string;
+  readonly groups: readonly SurfaceLeaderboardGroup[];
+}
+export interface SurfaceLeaderboardComponent extends SurfaceLeaderboardProps {
+  readonly id: string;
+  readonly kind: 'leaderboard';
+}
+export interface SurfaceMeterSegment {
+  readonly label: string;
+  readonly amount: number;
+  readonly value?: string;
+  readonly muted?: boolean;
+}
+export interface SurfaceMeterProps {
+  readonly title?: string;
+  readonly segments: readonly SurfaceMeterSegment[];
+}
+export interface SurfaceMeterComponent extends SurfaceMeterProps {
+  readonly id: string;
+  readonly kind: 'meter';
+}
 export type SurfaceComponent =
   | SurfaceSectionComponent
   | SurfaceStackComponent
@@ -191,7 +225,9 @@ export type SurfaceComponent =
   | SurfaceRadialProgressComponent
   | SurfaceDividerComponent
   | SurfaceTextBlockComponent
-  | SurfaceAvatarComponent;
+  | SurfaceAvatarComponent
+  | SurfaceLeaderboardComponent
+  | SurfaceMeterComponent;
 
 /** JSON only. The schema enforces finite numbers and bounded nesting/width. */
 export type SurfaceDataValue =

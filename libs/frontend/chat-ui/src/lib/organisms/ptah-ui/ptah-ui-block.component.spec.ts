@@ -323,6 +323,10 @@ describe('PtahUiBlockComponent', () => {
           .querySelector('[data-testid="ptah-ui-block"]')
           ?.getAttribute('data-ptah-ui-mode'),
       ).toBe('live');
+      // A rendered block opts out of prose: no prose class on or above it.
+      const block = native().querySelector('[data-testid="ptah-ui-block"]');
+      expect(block?.classList.contains('not-prose')).toBe(true);
+      expect(block?.closest('.prose')).toBeNull();
     });
 
     it('binds only the void renderFailed output on the renderer (template)', () => {
@@ -420,6 +424,8 @@ describe('PtahUiBlockComponent', () => {
       expect(blockMarkdown?.textContent).not.toContain('Not rendered');
       expect(reason?.id).toBeTruthy();
       expect(blockMarkdown?.getAttribute('aria-describedby')).toBe(reason?.id);
+      // The fallback is ordinary markdown, so it keeps prose styling.
+      expect(blockMarkdown?.classList.contains('prose')).toBe(true);
       expect(
         fixture.debugElement.query(By.directive(SurfaceRendererComponent)),
       ).toBeNull();

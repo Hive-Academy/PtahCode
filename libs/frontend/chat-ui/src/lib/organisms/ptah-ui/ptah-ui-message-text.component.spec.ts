@@ -88,6 +88,11 @@ describe('PtahUiMessageTextComponent', () => {
     expect(native().querySelector('markdown')?.textContent).toContain(
       'Intro paragraph.',
     );
+    // Prose styles the markdown part only; the block sits outside every prose scope.
+    expect(native().querySelector('markdown')?.classList.contains('prose')).toBe(
+      true,
+    );
+    expect(native().querySelector('ptah-ui-block')?.closest('.prose')).toBeNull();
   });
 
   it('leaves a fence unclosed at turn end as code, with no reason line', async () => {

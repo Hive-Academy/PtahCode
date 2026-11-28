@@ -27,6 +27,37 @@ function view(envelope: SurfaceEnvelope): SurfaceStateView {
 }
 
 describe('surface text fallback', () => {
+  it('renders leaderboard details and restarts ranks for each group', () => {
+    const text = renderSurfaceText(view(makeSurfaceEnvelope({
+      catalogVersion: SURFACE_CATALOG_VERSION_4,
+      components: [{
+        kind: 'leaderboard', id: 'leaders', title: 'Leaders',
+        groups: [
+          { title: 'Tools', entries: [
+            { label: 'Build', share: 60, value: '6 runs', detail: 'Project A' },
+            { label: 'Test', share: 40 },
+          ] },
+          { title: 'Servers', entries: [{ label: 'Local', share: 100 }] },
+        ],
+      }],
+    })));
+    expect(text).toContain('Leaders\nTools\n1. Build: 6 runs (Project A)\n2. Test: 40%\nServers\n1. Local: 100%');
+  });
+
+  it('renders meter display values and falls back to the raw amount', () => {
+    const text = renderSurfaceText(view(makeSurfaceEnvelope({
+      catalogVersion: SURFACE_CATALOG_VERSION_4,
+      components: [{
+        kind: 'meter', id: 'usage', title: 'Usage',
+        segments: [
+          { label: 'Used', amount: 20000, value: '20k' },
+          { label: 'Free', amount: 0, muted: true },
+        ],
+      }],
+    })));
+    expect(text).toContain('Usage\nUsed: 20k\nFree: 0');
+  });
+
   it('renders Unicode separators in plain input values as visible escapes', () => {
     const text = renderSurfaceText(
       view(

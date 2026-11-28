@@ -215,10 +215,10 @@ describe('budget confirmation — v1 provisional limits render without renderFai
         () => validateDashboardSpec(spec, dashboardJsonBytes),
         () => v1Renderable(spec),
         // Every one of the 200 tree-wide nodes is its own `DashboardStatComponent`
-        // with a distinct-id expand button; a builder that silently dropped nodes
-        // would still pass `renderFailed === false` but fail this count.
+        // rendering a `[data-testid="stat-value"]`; a builder that silently dropped
+        // nodes would still pass `renderFailed === false` but fail this count.
         (element) =>
-          expect(element.querySelectorAll('[data-apps-focus-key$=":expand"]')).toHaveLength(
+          expect(element.querySelectorAll('ptah-dashboard-stat [data-testid="stat-value"]')).toHaveLength(
             DASHBOARD_LIMITS.maxComponents,
           ),
       );
@@ -376,7 +376,7 @@ describe('budget confirmation — v2 provisional limits render without renderFai
         () => validateSurfaceDocument(surface, dashboardJsonBytes),
         () => v2Renderable(surface),
         (element) =>
-          expect(element.querySelectorAll('[data-apps-focus-key$=":expand"]')).toHaveLength(
+          expect(element.querySelectorAll('ptah-dashboard-stat [data-testid="stat-value"]')).toHaveLength(
             L.maxChildrenPerNode,
           ),
       );
@@ -395,7 +395,7 @@ describe('budget confirmation — v2 provisional limits render without renderFai
         () => validateSurfaceDocument(surface, dashboardJsonBytes),
         () => v2Renderable(surface),
         (element) =>
-          expect(element.querySelectorAll('[data-apps-focus-key$=":expand"]')).toHaveLength(
+          expect(element.querySelectorAll('ptah-dashboard-stat [data-testid="stat-value"]')).toHaveLength(
             L.maxGridColumns,
           ),
       );

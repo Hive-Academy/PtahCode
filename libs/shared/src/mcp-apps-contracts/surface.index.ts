@@ -32,6 +32,10 @@ export {
   SURFACE_TREND_DIRECTIONS,
   SURFACE_TREND_POLARITIES,
   SURFACE_SPARK_MIN_POINTS,
+  SURFACE_LEADERBOARD_MAX_ENTRIES,
+  SURFACE_LEADERBOARD_MAX_GROUPS,
+  SURFACE_METER_MAX_SEGMENTS,
+  SURFACE_ICON_TOKENS,
   SURFACE_ACTIONS,
   SURFACE_HOST_SUPPORTED_ACTIONS,
   SURFACE_INPUT_EMPTY_VALUES,
@@ -51,6 +55,7 @@ export type {
   SurfaceTrendPolarity,
   SurfaceStackDirection,
   SurfaceGap,
+  SurfaceIconToken,
 } from './surface-catalog';
 
 // Boundary schemas

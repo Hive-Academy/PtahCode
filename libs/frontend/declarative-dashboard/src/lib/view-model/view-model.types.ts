@@ -7,6 +7,8 @@ import type {
   SurfaceAction,
   SurfaceAlertComponent,
   SurfaceAvatarComponent,
+  SurfaceLeaderboardComponent,
+  SurfaceMeterComponent,
   SurfaceBadgeComponent,
   SurfaceComponent,
   SurfaceDataValue,
@@ -64,12 +66,16 @@ export type StatusNode =
   | StatusNodeOf<SurfaceTextBlockComponent>;
 /** `dashboard-catalog/4`: plain name and subtitle only, never an image or URL. */
 export type AvatarNode = SurfaceAvatarComponent & { readonly selectable: boolean };
+export type LeaderboardNode = SurfaceLeaderboardComponent & { readonly selectable: boolean };
+export type MeterNode = SurfaceMeterComponent & { readonly selectable: boolean };
 export type SurfaceNode =
   | LayoutNode
   | InputNode
   | DisplayNode
   | StatusNode
-  | AvatarNode;
+  | AvatarNode
+  | LeaderboardNode
+  | MeterNode;
 
 export interface DashboardViewModel {
   readonly title: DashboardRichText;

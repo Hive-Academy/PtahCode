@@ -1,0 +1,39 @@
+﻿Verdict: NEEDS_REVISION
+Review family: codex (implementer: claude)
+
+## Findings
+
+1. **Serious — Replay promotes records that the transcript previously hid.** `libs/backend/agent-sdk/src/lib/helpers/history/session-replay.service.ts:208`, `:292`, `:343`. The early card branch checks the user record's meta and synthetic flags but bypasses the subsequent `sourceToolUseID` and skill/command metadata filters. A string user record with `sourceToolUseID: 'tool-1'` and the same wrapped usage fixture as the parity test now emits an assistant card. A wrapped report with a `<command-name>` line inside the stdout can likewise bypass the text-based filter. The system branch accepts even explicitly meta or synthetic records. Apply the hidden-record and provenance checks before promoting a report, then test each previously hidden record shape with valid stdout.
+
+2. **Serious — A size-valid usage card can exceed the 50-child limit.** `libs/shared/src/lib/local-command/usage-output.render.ts:74`, `libs/shared/src/lib/local-command/format-local-command-output.ts:25`, `libs/shared/src/mcp-apps-contracts/ptah-ui-parser.ts:199`. Repeat `Current week: 4% used` 51 times. The renderer produces one grid with 51 cards and one progress line per card. Its 104 lines and roughly 3 KB pass the writer check, but the authoritative parser rejects the grid. Validate the finished body with the authoritative parser before fencing it, or bound the grid and test both sides of the child limit.
+
+3. **Serious — Content-only detection still rewrites unrelated stdout and can surface it on replay.** `libs/shared/src/lib/local-command/usage-output.parser.ts:16`, `:114`, `libs/backend/agent-sdk/src/lib/helpers/history/session-replay.service.ts:223`. An unrelated command printing `Current capacity: 20% used` alone satisfies the usage limit pattern and becomes a Claude usage card. The corresponding system/local_command record used to be dropped. The revision fixes the earlier bare `Last updated` example, but a generic utilization line still qualifies. Gate formatting on verified command identity where available and tighten the fallback signature for historical records without identity. Test both live passthrough and replay suppression of an unrelated utilization report.
+
+4. **Serious — Command card IDs differ between live and replay.** `libs/backend/agent-sdk/src/lib/message-transform/system-message.transformer.ts:177`, `libs/backend/agent-sdk/src/lib/helpers/history/session-replay.service.ts:309`, `libs/backend/agent-sdk/src/lib/message-transform/artifact-parity.spec.ts:388`. The installed SDK declares a UUID on local command output. Live ignores it and generates an ID, while replay uses the record UUID. Even when both sides receive the same UUID, keyed consumers see different messages. Use the SDK UUID when present and verify the correspondence against paired live and persisted records. Assert the message ID alongside the text in the parity spec.
+
+5. **Serious — A neighbor timestamp can put a card's events out of sequence.** `libs/backend/agent-sdk/src/lib/helpers/history/session-replay.service.ts:286`, `:294`, `:310`. After an assistant record at time T, an untimed card starts at T even though the replay just emitted that assistant's completion at T plus its sequence offset. A timestamp-ordered consumer can interleave the two messages. If no effective record has a valid timestamp, the fallback still inherits the replay clock. Live also stamps each event with a separate wall-clock read (`system-message.transformer.ts:188`). Use a stable fallback and an ordering rule that respects adjacent event ranges. Capture a common timestamp anchor where the provider record supplies one and verify ordering with conversational neighbors, consecutive cards, and repeated replay of all-untimed records.
+
+6. **Minor — Extreme finite values generate invalid numeric grammar.** `libs/shared/src/lib/local-command/ptah-ui-writer.ts:28`, `libs/shared/src/mcp-apps-contracts/ptah-ui-parser.ts:479`. A recognized usage window with an indented contributor at `1000000000000000000000%` parses a finite number, but `toFixed` returns `1e+21`, which the chart grammar rejects. The byte and line test still accepts the fence. Reject unsupported magnitudes or validate the body before fencing it.
+
+## Five logic questions
+
+1. **How does it fail silently?** An overfull grid is emitted as an assistant dashboard fence even though the renderer's parser rejects it. See finding 2.
+2. **What user action produces unexpected behavior?** Resuming a conversation containing older tool-sourced stdout can reveal a new assistant card. An untimed card after an assistant turn can also receive an earlier timestamp than that turn's completion. See findings 1 and 5.
+3. **What data produces a wrong answer?** Generic utilization text can be labeled as Claude usage. Very large finite values can produce invalid chart source. See findings 3 and 6.
+4. **What happens when a dependency fails?** The synchronous parser/render calls have no external service or timeout dependency. A thrown exception returns the original live text at `format-local-command-output.ts:26` and suppresses the new replay branch at `session-replay.service.ts:225`. A downstream grammar rejection takes place after the formatter has returned and bypasses that fallback.
+5. **What is missing from the requirements?** The text-history projection used for curation is separate from event replay (`libs/backend/agent-sdk/src/lib/session-history-reader.service.ts:817`, `:1143`). I treated the requested parity as chat event replay and left curation behavior outside the verdict.
+
+## Prior findings and remaining checks
+
+- The prior bare-window false positive is addressed by requiring a request or session count in the header (`usage-output.parser.ts:22`). Finding 3 covers the separate limit-line path.
+- The prior horizontal layout issue has a source-level fix. Inline kinds use the compact wrapper in `libs/frontend/declarative-dashboard/src/lib/components/surface-layout.component.ts:201` and align to the start in `surface-node.component.ts:115`. Visual verification is outside this backend/shared review.
+- The prior untimed card issue is addressed when a usable neighboring record exists. Finding 5 identifies remaining fallback and event ordering cases.
+- The writer escapes pipe, backslash and dollar at `ptah-ui-writer.ts:19`. The parser accepts these escapes. The writer checks UTF-8 bytes and lines at `:78`. Each generated component consumes at least one non-title line, including each expanded stat, so the line cap also bounds the component count. Children have a separate limit.
+- The standard Context Usage memory-file table deliberately excludes the path column (`context-output.parser.ts:104`, `context-output.render.ts:131`). Unchanged raw fallback can still contain paths if a context report cannot be rendered, including when it exceeds the writer budget. That live behavior predates the PR and remains observable under the specified raw fallback contract.
+- Unrecognized output follows the prior replay path. Production formatter imports are sibling TypeScript modules and the backend uses the shared public entry point. Node filesystem imports are confined to tests.
+
+## Verification
+
+- Focused shared Jest suite passed, 35 tests. Focused backend replay, system transformer and artifact parity suites passed, 142 tests. Jest emitted TS configuration module-loading warnings before both runs completed.
+- Counterexamples above were traced against source and parser contracts. The existing parity tests compare visible usage text and do not assert IDs, full event ordering or timestamp parity.
+- Ptah's read tool returned a transport error during the review. Subsequent source checks used native reads. No source edits, state-changing Git commands or workspace-wide checks were made.

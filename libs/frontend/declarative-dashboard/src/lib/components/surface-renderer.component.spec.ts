@@ -122,7 +122,7 @@ describe('SurfaceRendererComponent', () => {
   it('renders a v1 spec with its specId in focus keys', () => {
     const { element, host } = setup({ contract: 'dashboard-spec/1', spec: { schemaVersion: 'dashboard-spec/1',
       catalogVersion: 'dashboard-catalog/1', specId: 'spec-1', revision: 1, generatedAt: '2026-09-25T00:00:00Z',
-      title: { text: 'Costs' }, components: [{ id: 'tile', kind: 'stat', value: 3 }] } });
+      title: { text: 'Costs' }, components: [{ id: 'tile', kind: 'stat', value: 3, description: { text: 'Spend' } }] } });
     expect(element.querySelector('h2')?.textContent).toBe('Costs');
     expect(element.querySelector('[data-apps-focus-key="spec-1:tile:expand"]')).not.toBeNull();
     expect(host.failures).toBe(0);
@@ -207,6 +207,12 @@ describe('SurfaceRendererComponent', () => {
       ['an avatar with a rich-text name', avatar({ name: { text: 'Agent' } })],
       ['an avatar with a rich-text subtitle', avatar({ subtitle: { text: 'x' } })],
       ['an avatar with a blank name', avatar({ name: '   ' })],
+      ['a leaderboard with an unknown icon', { id: 'l', kind: 'leaderboard', selectable: false,
+        groups: [{ icon: 'constructor', entries: [{ label: 'Leader', share: 25 }] }] }],
+      ['a leaderboard with an out-of-range share', { id: 'l', kind: 'leaderboard', selectable: false,
+        groups: [{ entries: [{ label: 'Leader', share: 101 }] }] }],
+      ['a meter with an infinite amount', { id: 'm', kind: 'meter', selectable: false,
+        segments: [{ label: 'Used', amount: Infinity }] }],
       ['a stat trend with direction "sideways"', trend({ direction: 'sideways' })],
       ['a stat trend with polarity "danger"', trend({ polarity: 'danger' })],
       ['a stat trend with a NaN amount', trend({ amount: Number.NaN })],
@@ -512,7 +518,7 @@ describe('SurfaceRendererComponent', () => {
   });
 
   it('writes presentation state per component and toggles a selection off when selected again', () => {
-    const { host, element, rerender, renderer } = setup(surface([{ id: 'tile', kind: 'stat', value: 1,
+    const { host, element, rerender, renderer } = setup(surface([{ id: 'tile', kind: 'stat', value: 1, description: { text: 'Detail' },
       actions: [{ id: 'pick', action: 'dashboard.select', label: { text: 'Pick' } }] }]));
     const expand = () => element.querySelector<HTMLButtonElement>('[data-apps-focus-key="surface:tile:expand"]')!;
     expand().click(); rerender();

@@ -229,18 +229,18 @@ describe('AppsSurfacePanelComponent', () => {
     try {
       tabs()[0].click();
       render();
-      const search = element.querySelector<HTMLInputElement>(
-        'ptah-dashboard-table input[type="search"]',
+      const sortButton = element.querySelector<HTMLButtonElement>(
+        'ptah-dashboard-table th button',
       );
-      expect(search).not.toBeNull();
-      search?.focus();
-      expect(document.activeElement).toBe(search);
+      expect(sortButton).not.toBeNull();
+      sortButton?.focus();
+      expect(document.activeElement).toBe(sortButton);
 
       push(snapshot('b', 2, v2('b', 'Second, rebuilt')));
       render();
-      // Same renderer subtree: the focused input was not destroyed.
-      expect(element.contains(search)).toBe(true);
-      expect(document.activeElement).toBe(search);
+      // Same renderer subtree: the focused button was not destroyed.
+      expect(element.contains(sortButton)).toBe(true);
+      expect(document.activeElement).toBe(sortButton);
     } finally {
       element.remove();
     }

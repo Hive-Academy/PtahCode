@@ -47,7 +47,7 @@ ckw        = "row"
            | "section" SPS text
            | "accordion" SPS text ;                 (* collapsed by default *)
 element(d) = stats(d) | table(d) | list(d) | chart(d) | note(d)
-           | progress(d) | badge(d) | avatar(d) ;
+           | progress(d) | badge(d) | avatar(d) | leaderboard(d) | meter(d) ;
 
 stats(d)   = IND(d) "stats" NL statline(d+1) { statline(d+1) } ;     (* 1..8 statlines *)
 statline(e)= IND(e) cell BAR value [ BAR trend [ BAR spark ] ] NL ;  (* 2, 3 or 4 cells; label and value non-empty *)
@@ -72,6 +72,13 @@ progress(d) = IND(d) "progress" SPS cell BAR pct [ BAR tone ] NL ;   (* label no
 pct         = udecimal ;
 badge(d)    = IND(d) "badge" SPS tone SPS text NL ;
 avatar(d)   = IND(d) "avatar" SPS cell [ BAR cell ] NL ;             (* name non-empty, optional subtitle *)
+leaderboard(d) = IND(d) "leaderboard" [ SPS text ] NL lbline(d+1) { lbline(d+1) } ;
+lbline(e)      = IND(e) "group" SPS icon SPS text NL
+               | IND(e) "- " cell BAR udecimal [ BAR cell [ BAR cell ] ] NL ;
+meter(d)       = IND(d) "meter" [ SPS text ] NL segline(d+1) { segline(d+1) } ;
+segline(e)     = IND(e) cell BAR udecimal [ BAR cell [ BAR "muted" ] ] NL ;
+icon           = "skill" | "agent" | "server" | "tool" | "file" | "memory" | "chart" | "clock"
+               | "bolt" | "info" | "terminal" | "folder" | "cpu" | "gauge" | "user" | "sparkles" ;
 tone        = "neutral" | ntone ;
 
 rowsource  = "$" name [ SPS "session" ] ;           (* "session" only after "$agents" *)
@@ -99,13 +106,13 @@ The flat grammar is the depth-0 case: a `stats`, `table`, `list` or `chart` at c
 
 | Item                                     | Rule                                                                                                                                                                                                                                                                  |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keywords and tokens                      | `title stats table list chart cols line bar row col grid card section accordion note progress badge avatar display session good bad neutral info ok warn error` are lowercase and exact. An unknown header word at any depth makes the block invalid.                |
+| Keywords and tokens                      | `title stats table list chart cols line bar row col grid card section accordion note progress badge avatar leaderboard meter group muted display session good bad neutral info ok warn error` are lowercase and exact. An unknown header word at any depth makes the block invalid.                |
 | Indentation                              | A line's depth is its leading spaces divided by 2. An odd count, a tab, or a depth greater than the parent's depth + 1 is invalid. A line at depth `d` or lower ends the container at depth `d`.                                                                       |
 | Element bodies                           | The body lines of `stats`, `table`, `list` and `chart` sit exactly one level deeper than their header: at depth 0 that is two spaces, inside a container at depth 1 it is four spaces.                                                                                |
 | `title`                                  | At most one, at depth 0 only, and the first element. A `title` inside a container is invalid.                                                                                                                                                                         |
 | Containers                               | `row` and `col` take no text. `grid` takes a column count from 1 to 4. `card` text is optional; `section` and `accordion` text is required. A container with no child item is invalid.                                                                                 |
 | Tab, other control characters            | Invalid anywhere in the body (excluded from `char`).                                                                                                                                                                                                                  |
-| Escaped pipe (backslash, pipe)           | Decodes to a literal pipe inside a cell or text. An unescaped pipe is a cell separator in cell lines (`statline`, `tablerow`, `colsline`, `point`, `progress`, `avatar`). In `text` positions (title, chart title, card, section and accordion text, note, badge, list item) an unescaped pipe is a literal character. |
+| Escaped pipe (backslash, pipe)           | Decodes to a literal pipe inside a cell or text. An unescaped pipe is a cell separator in cell lines (`statline`, `tablerow`, `colsline`, `point`, `progress`, `avatar`, leaderboard entries, meter segments). In `text` positions (title, chart title, card, section and accordion text, note, badge, list item) an unescaped pipe is a literal character. |
 | Escaped backslash (backslash, backslash) | Decodes to a literal backslash, in cells and in text.                                                                                                                                                                                                                 |
 | Escaped dollar (backslash, dollar)       | Decodes to a literal `$`. It is needed only where a `$` would otherwise start a source reference: the start of a `value` cell, or a `table`/`list` argument. A `$` anywhere else is literal and needs no escape.                                                       |
 | Any other `\` sequence                   | Invalid, including a trailing lone `\`.                                                                                                                                                                                                                               |
@@ -357,6 +364,29 @@ section Checks
     table $diff
       cols path | additions | deletions
 note warn Renderer review is still open
+```
+
+### Leaderboards and meters
+
+Both elements require dashboard-catalog/4 and each counts as one component. Their titles are optional.
+
+A leaderboard takes 1 to 50 entries total and up to eight groups. Entries before the first group header form an untitled group. Each group needs at least one entry and ranks restart at 1. The cells hold the label, bar share from 0 to 100, optional display value and optional detail. An omitted or empty value displays the share followed by a percent sign. Group headers accept the icon tokens in the grammar above. Unknown tokens are invalid.
+
+```ptah-ui
+leaderboard Top contributors
+  group skill Skills
+  - session-handoff | 21
+  group server MCP servers
+  - build\|tools | 14 | 320 requests | Workspace
+```
+
+A meter takes 1 to 12 segments. The cells hold the label, nonnegative decimal amount, optional display value and optional `muted` flag. Use an empty value cell to keep the amount as the display value and set the flag. Each segment's width is its amount divided by the total amount. With a zero total, all widths are zero.
+
+```ptah-ui
+meter Estimated usage by category
+  System prompt | 11800 | 11.8k
+  Free space | 921500 | 921.5k | muted
+  Autocompact buffer | 33000 | | muted
 ```
 
 ## Common mistakes

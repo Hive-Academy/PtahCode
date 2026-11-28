@@ -204,7 +204,7 @@ function isSettled(snapshot: TurnSourceSnapshot | null): boolean {
   template: `
     @if (renderable(); as content) {
       <div
-        class="my-2"
+        class="not-prose my-2 text-base-content"
         data-testid="ptah-ui-block"
         [attr.data-ptah-ui-mode]="snapshotMode() ? 'snapshot' : 'live'"
         [attr.inert]="snapshotMode() ? '' : null"
@@ -226,6 +226,7 @@ function isSettled(snapshot: TurnSourceSnapshot | null): boolean {
       }
     } @else {
       <markdown
+        class="prose prose-sm prose-invert max-w-none block"
         [data]="raw() | surfaceMarkdown: active()"
         [attr.aria-describedby]="reasonId"
       />

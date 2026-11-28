@@ -120,3 +120,5 @@ export {
   SURFACE_SUPPORTED_CATALOG_VERSIONS,
   DASHBOARD_CONTRACT_VERSION_PAIRS,
 } from './surface-catalog';
+
+export * from '../lib/local-command';

@@ -34,6 +34,7 @@ import {
   laneEnvelopePeerLabel,
   parseLaneEnvelope,
 } from '@ptah-extension/shared';
+import { formatLocalCommandOutput } from '@ptah-extension/shared/mcp-apps-contracts';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { inject, injectable } from 'tsyringe';
 import { SDK_TOKENS } from '../../di/tokens';
@@ -51,10 +52,12 @@ import type {
 import {
   isInterruptSentinelText,
   isSyntheticNoResponsePlaceholder,
+  SDK_SYNTHETIC_MODEL,
 } from '../../types/sdk-types/claude-sdk.types';
 import {
   isHiddenTranscriptRecord,
   isSkillOrMetaContent,
+  isSkillOrMetaText,
 } from '../../message-transform/message-transform-helpers';
 import {
   buildHistoricalBackgroundStartedEvent,
@@ -85,22 +88,34 @@ function parseTaskNotification(text: string): TaskNotification | null {
   const bodyStart = root.length;
   const bodyEnd = head.indexOf(endRoot, bodyStart);
   const body = head.slice(bodyStart, bodyEnd < 0 ? undefined : bodyEnd);
-  const field = (tag: string, limit: number, allowTruncated = false): string | null => {
+  const field = (
+    tag: string,
+    limit: number,
+    allowTruncated = false,
+  ): string | null => {
     const startTag = `<${tag}>`;
     const endTag = `</${tag}>`;
     const start = body.indexOf(startTag);
     if (start < 0) return null;
     const valueStart = start + startTag.length;
     const end = body.indexOf(endTag, valueStart);
-    if ((end < 0 && !allowTruncated) || (!allowTruncated && end - valueStart > limit)) return null;
-    return body.slice(valueStart, Math.min(end < 0 ? body.length : end, valueStart + limit)).trim();
+    if (
+      (end < 0 && !allowTruncated) ||
+      (!allowTruncated && end - valueStart > limit)
+    )
+      return null;
+    return body
+      .slice(
+        valueStart,
+        Math.min(end < 0 ? body.length : end, valueStart + limit),
+      )
+      .trim();
   };
   const taskId = field('task-id', 128);
   const toolUseId = field('tool-use-id', 128);
   const statusText = field('status', 32);
   if (!taskId || !/^[A-Za-z0-9_-]+$/.test(taskId)) return null;
-  if (toolUseId !== null && !/^[A-Za-z0-9_-]+$/.test(toolUseId))
-    return null;
+  if (toolUseId !== null && !/^[A-Za-z0-9_-]+$/.test(toolUseId)) return null;
   const status =
     statusText === 'completed'
       ? 'completed'
@@ -156,6 +171,34 @@ export class SessionReplayService {
     @inject(AUTH_PROVIDERS_TOKENS.SDK_MODEL_RESOLVER)
     private readonly modelResolver: IModelResolver,
   ) {}
+
+  private localCommandText(msg: SessionHistoryMessage): string | undefined {
+    const content: unknown =
+      msg.type === 'system' && msg.subtype === 'local_command'
+        ? (msg as { readonly content?: unknown }).content
+        : msg.type === 'user'
+          ? msg.message?.content
+          : undefined;
+    return typeof content === 'string' ? content : undefined;
+  }
+
+  private isToolSourced(msg: SessionHistoryMessage): boolean {
+    return 'sourceToolUseID' in msg && msg.sourceToolUseID !== undefined;
+  }
+
+  private localCommandName(
+    msg: SessionHistoryMessage | undefined,
+  ): 'usage' | 'context' | undefined {
+    if (!msg || isHiddenTranscriptRecord(msg) || this.isToolSourced(msg))
+      return undefined;
+    const text = this.localCommandText(msg);
+    if (!text || text.includes('<local-command-stdout>')) return undefined;
+    const command =
+      /(?:^|\n)\s*<command-name>\/(usage|context)<\/command-name>/.exec(
+        text,
+      )?.[1];
+    return command === 'usage' || command === 'context' ? command : undefined;
+  }
 
   /**
    * Main replay function - converts JSONL messages to FlatStreamEventUnion events.
@@ -215,24 +258,103 @@ export class SessionReplayService {
     const allToolResults =
       this.correlationService.extractAllToolResults(effectiveMessages);
     let currentMessageId: string | null = null;
-    let currentMessageTimestamp: number = Date.now();
+    let currentMessageTimestamp = 0;
+    const recordTimestamps = effectiveMessages.map((msg) =>
+      Date.parse(msg.timestamp ?? ''),
+    );
+    let precedingTimestamp = recordTimestamps.find(Number.isFinite);
+    let latestEmittedTimestamp = -Infinity;
+    let checkedEventCount = 0;
     let blockIndex = 0;
     let messageSequence = 0;
     let currentMessageUsage: MessageUsageData | undefined;
 
-    for (const msg of effectiveMessages) {
+    for (const [msgIndex, msg] of effectiveMessages.entries()) {
+      const recordTimestamp = recordTimestamps[msgIndex];
+      if (Number.isFinite(recordTimestamp))
+        precedingTimestamp = recordTimestamp;
+
+      const stdout = this.localCommandText(msg)?.match(
+        /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/,
+      )?.[1];
+      if (stdout !== undefined) {
+        if (
+          isHiddenTranscriptRecord(msg) ||
+          this.isToolSourced(msg) ||
+          isSkillOrMetaText(stdout.trimStart())
+        )
+          continue;
+        const command = this.localCommandName(effectiveMessages[msgIndex - 1]);
+        if (!command) continue;
+        const commandCard = formatLocalCommandOutput(stdout, command);
+        if (commandCard === stdout) continue;
+        if (currentMessageId) {
+          events.push(
+            this.eventFactory.createMessageComplete(
+              sessionId,
+              currentMessageId,
+              eventIndex++,
+              currentMessageTimestamp + messageSequence * 0.001,
+              currentMessageUsage,
+            ),
+          );
+          currentMessageId = null;
+          blockIndex = 0;
+          messageSequence = 0;
+          currentMessageUsage = undefined;
+        }
+        const cardMessageId = `cmd_${msg.uuid ?? this.eventFactory.generateId()}`;
+        let cardTimestamp = recordTimestamp;
+        if (!Number.isFinite(cardTimestamp)) {
+          // The preceding record's events can extend past its record timestamp.
+          for (; checkedEventCount < events.length; checkedEventCount++) {
+            const timestamp = events[checkedEventCount].timestamp;
+            if (Number.isFinite(timestamp)) {
+              latestEmittedTimestamp = Math.max(
+                latestEmittedTimestamp,
+                timestamp,
+              );
+            }
+          }
+          const afterEvents = latestEmittedTimestamp + 0.001;
+          cardTimestamp = Math.max(
+            precedingTimestamp ?? afterEvents,
+            afterEvents,
+          );
+          if (!Number.isFinite(cardTimestamp)) cardTimestamp = 0;
+        }
+        events.push(
+          this.eventFactory.createMessageStart(
+            sessionId,
+            cardMessageId,
+            'assistant',
+            eventIndex++,
+            cardTimestamp,
+          ),
+          this.eventFactory.createTextDelta(
+            sessionId,
+            cardMessageId,
+            commandCard,
+            0,
+            eventIndex++,
+            cardTimestamp + 0.001,
+          ),
+          this.eventFactory.createMessageComplete(
+            sessionId,
+            cardMessageId,
+            eventIndex++,
+            cardTimestamp + 0.002,
+          ),
+        );
+        continue;
+      }
       if (!msg.type || !['user', 'assistant'].includes(msg.type)) {
         continue;
       }
 
       if (msg.type === 'user' && msg.message?.content) {
         if (isHiddenTranscriptRecord(msg)) continue;
-        if (
-          (msg as unknown as Record<string, unknown>)['sourceToolUseID'] !==
-          undefined
-        ) {
-          continue;
-        }
+        if (this.isToolSourced(msg)) continue;
         const contentRaw = msg.message.content;
         if (
           isSkillOrMetaContent(
@@ -249,7 +371,10 @@ export class SessionReplayService {
           continue;
         }
         const rawText = this.eventFactory.extractTextContent(contentRaw);
-        if (rawText && rawText.slice(0, 1024).trimStart().startsWith('<task-notification>')) {
+        if (
+          rawText &&
+          rawText.slice(0, 1024).trimStart().startsWith('<task-notification>')
+        ) {
           // A typed user message may contain an XML-looking example.
           if (msg.origin?.kind === 'human' || msg.turnOrigin === 'human')
             continue;
@@ -266,12 +391,13 @@ export class SessionReplayService {
             const started = toolUseId
               ? emittedAgentStarts.get(toolUseId)
               : undefined;
-            if (toolUseId && started && !completedTaskIds.has(notification.taskId)) {
+            if (
+              toolUseId &&
+              started &&
+              !completedTaskIds.has(notification.taskId)
+            ) {
               completedTaskIds.add(notification.taskId);
-              const parsedTimestamp = Date.parse(msg.timestamp ?? '');
-              const notificationTimestamp = Number.isFinite(parsedTimestamp)
-                ? parsedTimestamp
-                : Date.now();
+              const notificationTimestamp = precedingTimestamp ?? 0;
               const event: AgentCompletedEvent = {
                 id: `history-task-${msg.uuid ?? `${notification.taskId}-${eventIndex}`}`,
                 eventType: 'agent_completed',
@@ -294,7 +420,10 @@ export class SessionReplayService {
               // Task result may have settled it earlier; a launch placeholder
               // alone never does.
               const backgroundStarted = backgroundSpawns.get(toolUseId);
-              if (backgroundStarted && !completedBackgroundToolIds.has(toolUseId)) {
+              if (
+                backgroundStarted &&
+                !completedBackgroundToolIds.has(toolUseId)
+              ) {
                 completedBackgroundToolIds.add(toolUseId);
                 events.push(
                   buildHistoricalBackgroundTerminalEvent({
@@ -334,9 +463,7 @@ export class SessionReplayService {
         const content = this.eventFactory.extractTextContent(
           msg.message.content,
         );
-        const timestamp = msg.timestamp
-          ? new Date(msg.timestamp).getTime()
-          : Date.now();
+        const timestamp = precedingTimestamp ?? 0;
         let userSeq = 0;
         const imageCount = Array.isArray(msg.message.content)
           ? (msg.message.content as ContentBlock[]).filter(
@@ -399,9 +526,7 @@ export class SessionReplayService {
         ) {
           continue;
         }
-        const msgTimestamp = msg.timestamp
-          ? new Date(msg.timestamp).getTime()
-          : Date.now();
+        const msgTimestamp = precedingTimestamp ?? 0;
         if (!currentMessageId) {
           currentMessageId = msg.uuid || this.eventFactory.generateId();
           currentMessageTimestamp = msgTimestamp;
@@ -477,7 +602,11 @@ export class SessionReplayService {
                 this.eventFactory.createTextDelta(
                   sessionId,
                   currentMessageId,
-                  block.text,
+                  // Claude Code persists local command stdout (/usage,
+                  // /context) as synthetic assistant text; match live.
+                  msgModel === SDK_SYNTHETIC_MODEL
+                    ? formatLocalCommandOutput(block.text)
+                    : block.text,
                   blockIndex++,
                   eventIndex++,
                   currentMessageTimestamp + messageSequence++ * 0.001,
@@ -552,12 +681,12 @@ export class SessionReplayService {
                 );
                 const backgroundStarted = backgroundSpawn
                   ? buildHistoricalBackgroundStartedEvent({
-                    sessionId,
-                    messageId: currentMessageId,
-                    timestamp:
-                      currentMessageTimestamp + messageSequence++ * 0.001,
-                    spawn: backgroundSpawn,
-                  })
+                      sessionId,
+                      messageId: currentMessageId,
+                      timestamp:
+                        currentMessageTimestamp + messageSequence++ * 0.001,
+                      spawn: backgroundSpawn,
+                    })
                   : null;
                 if (backgroundStarted) {
                   backgroundSpawns.set(toolCallId, backgroundStarted);
@@ -593,7 +722,10 @@ export class SessionReplayService {
                   );
                   if (
                     backgroundStarted &&
-                    isFinalBackgroundToolResult(toolResult.content, backgroundStarted)
+                    isFinalBackgroundToolResult(
+                      toolResult.content,
+                      backgroundStarted,
+                    )
                   ) {
                     completedBackgroundToolIds.add(toolCallId);
                     events.push(

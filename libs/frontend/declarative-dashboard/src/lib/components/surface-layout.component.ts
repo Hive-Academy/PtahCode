@@ -91,13 +91,57 @@ const COLLAPSE_STYLES = `
   }
 `;
 
+/**
+ * Flow rules for stack and section children. Consecutive stats share one
+ * auto-fit tile group at any depth; horizontal stack items share the row
+ * width and wrap below 14rem, while inline kinds keep their intrinsic size.
+ * These are layout-owned wrappers, because emulated encapsulation cannot
+ * reach the hosts the child template creates.
+ */
+export const SURFACE_FLOW_STYLES = `
+  .dp-stat-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); gap: 0.5rem; min-width: 0; }
+  .dp-row-item { flex: 1 1 14rem; min-width: min(100%, 14rem); display: flex; flex-direction: column; }
+  .dp-row-item-inline { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; flex-direction: column; align-items: flex-start; }
+  .dp-row-item-divider { flex: 0 0 auto; align-self: stretch; display: flex; flex-direction: column; }
+  .dp-stat-group.dp-row-item { display: grid; }
+`;
+
+/** Kinds that keep their intrinsic size in a row and are never stretched to fill a cell. */
+export const INLINE_SURFACE_KINDS: ReadonlySet<string> = new Set(['badge', 'avatar', 'radial-progress', 'checkbox']);
+
+/** One rendered slot of a flow container: a single child, or a run of consecutive stats. */
+export interface SurfaceLayoutChildEntry {
+  readonly key: string;
+  readonly child: SurfaceNode;
+  readonly index: number;
+}
+export type SurfaceLayoutChildGroup =
+  | { readonly kind: 'single'; readonly key: string; readonly entry: SurfaceLayoutChildEntry }
+  | { readonly kind: 'stats'; readonly key: string; readonly entries: readonly SurfaceLayoutChildEntry[] };
+
+/** Groups runs of consecutive `stat` children; every other child stays its own slot, in order. */
+export function groupLayoutChildren(children: readonly SurfaceNode[]): readonly SurfaceLayoutChildGroup[] {
+  const groups: SurfaceLayoutChildGroup[] = [];
+  let run: SurfaceLayoutChildEntry[] = [];
+  const flush = (): void => {
+    if (run.length > 0) groups.push({ kind: 'stats', key: `stats:${run[0].key}`, entries: run });
+    run = [];
+  };
+  children.forEach((child, index) => {
+    // Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view.
+    const entry = { key: `${index}:${child.id}`, child, index };
+    if (child.kind === 'stat') {
+      run.push(entry);
+      return;
+    }
+    flush();
+    groups.push({ kind: 'single', key: entry.key, entry });
+  });
+  flush();
+  return groups;
+}
+
 let nextLayoutInstance = 0;
-const GAP_CLASSES = { none: 'gap-0', small: 'gap-2', medium: 'gap-4', large: 'gap-6' } as const;
-const CONTAINER_GAP_CLASSES = {
-  none: 'dp-gap-none', small: 'dp-gap-small', medium: 'dp-gap-medium', large: 'dp-gap-large',
-} as const;
-/** Literal class names so the Tailwind scanner emits them. Index = column count. */
-const SM_GRID_COLUMNS = ['sm:grid-cols-1', 'sm:grid-cols-1', 'sm:grid-cols-2', 'sm:grid-cols-3', 'sm:grid-cols-4'] as const;
 const NO_ACTION_STATES: ReadonlyMap<string, SurfaceActionUiState> = new Map();
 
 function plainText(value: unknown): string | undefined {
@@ -131,12 +175,36 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
   standalone: true,
   imports: [NgTemplateOutlet, PtahButtonDirective, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES],
+  host: { class: 'flex min-w-0 flex-1 flex-col' },
+  styles: [SURFACE_CONTAINER_GRID_STYLES, SURFACE_CONTAINER_BODY_STYLES, COLLAPSE_STYLES, SURFACE_FLOW_STYLES],
   template: `
     <ng-template #children>
-      <!-- Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view. -->
-      @for (child of node().children; track $index + ':' + child.id) {
-        <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: child, index: $index }" />
+      @if (node().kind === 'grid') {
+        <!-- Position plus id: duplicate ids stay distinct, and a swapped id gets a fresh view. -->
+        @for (child of node().children; track $index + ':' + child.id) {
+          <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: child, index: $index }" />
+        }
+      } @else {
+        <!-- Consecutive stats become one tile group; horizontal items share the row width. -->
+        @for (group of childGroups(); track group.key) {
+          @if (group.kind === 'stats') {
+            <div class="dp-stat-group" [class.dp-row-item]="horizontal()" data-testid="stat-group">
+              @for (entry of group.entries; track entry.key) {
+                <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: entry.child, index: entry.index }" />
+              }
+            </div>
+          } @else if (horizontal()) {
+            <div
+              [class.dp-row-item-divider]="isVerticalDivider(group.entry.child)"
+              [class.dp-row-item-inline]="isInlineKind(group.entry.child)"
+              [class.dp-row-item]="!isVerticalDivider(group.entry.child) && !isInlineKind(group.entry.child)"
+              data-testid="row-item">
+              <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
+            </div>
+          } @else {
+            <ng-container [ngTemplateOutlet]="childTemplate()" [ngTemplateOutletContext]="{ $implicit: group.entry.child, index: group.entry.index }" />
+          }
+        }
       }
     </ng-template>
     <ng-template #responsiveChildren>
@@ -186,7 +254,7 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
               @if (layoutWidth() === 'container') {
                 <ng-container [ngTemplateOutlet]="responsiveChildren" />
               } @else {
-                <div [class]="containerClass()"><ng-container [ngTemplateOutlet]="children" /></div>
+                <div class="flex flex-col gap-4"><ng-container [ngTemplateOutlet]="children" /></div>
               }
               <ng-container [ngTemplateOutlet]="submit" />
             </div>
@@ -209,8 +277,8 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
         }
       }
       @case ('card') {
-        <div ptahSurface variant="inset" padding="md" class="flex flex-col gap-3 text-base-content">
-          @if (title(); as title) { <h3 class="text-sm font-semibold">{{ title }}</h3> }
+        <div ptahSurface variant="inset" padding="md" class="flex h-full min-w-0 flex-1 flex-col gap-3 text-base-content" data-kind="card">
+          @if (title(); as title) { <h3 class="text-sm font-semibold leading-snug">{{ title }}</h3> }
           @if (description(); as description) { <p class="text-sm text-base-content-muted">{{ description }}</p> }
           @if (layoutWidth() === 'container') {
             <ng-container [ngTemplateOutlet]="responsiveChildren" />
@@ -222,7 +290,32 @@ function submitStatusText(state: SurfaceActionUiState | undefined): string {
       }
       @default {
         <div class="flex flex-col gap-3">
-          <div [class]="containerClass()"><ng-container [ngTemplateOutlet]="children" /></div>
+          <div [class]="{
+            'dp-grid': containerGrid(),
+            'dp-grid--stats': containerGrid() && isStatGrid(),
+            'dp-cols-1': containerGrid() && gridColumns() === 1,
+            'dp-cols-2': containerGrid() && gridColumns() === 2,
+            'dp-cols-3': containerGrid() && gridColumns() === 3,
+            'dp-cols-4': containerGrid() && gridColumns() === 4,
+            'dp-gap-none': containerGrid() && gapKey() === 'none',
+            'dp-gap-small': containerGrid() && gapKey() === 'small',
+            'dp-gap-medium': containerGrid() && gapKey() === 'medium',
+            'dp-gap-large': containerGrid() && gapKey() === 'large',
+            'grid': viewportGrid(),
+            'grid-cols-1': viewportGrid(),
+            'sm:grid-cols-1': viewportGrid() && gridColumns() === 1,
+            'sm:grid-cols-2': viewportGrid() && gridColumns() === 2,
+            'sm:grid-cols-3': viewportGrid() && gridColumns() === 3,
+            'sm:grid-cols-4': viewportGrid() && gridColumns() === 4,
+            'flex': !isGrid(),
+            'flex-row': horizontal(),
+            'flex-wrap': horizontal(),
+            'flex-col': !isGrid() && !horizontal(),
+            'gap-0': !containerGrid() && gapKey() === 'none',
+            'gap-2': !containerGrid() && gapKey() === 'small',
+            'gap-4': !containerGrid() && gapKey() === 'medium',
+            'gap-6': !containerGrid() && gapKey() === 'large'
+          }"><ng-container [ngTemplateOutlet]="children" /></div>
           <ng-container [ngTemplateOutlet]="submit" />
         </div>
       }
@@ -264,24 +357,23 @@ export class SurfaceLayoutComponent {
     const node = this.node();
     return node.kind === 'section' || node.kind === 'card' ? plainText(node.description) : undefined;
   });
-  /**
-   * Stack: flex by direction. Grid, viewport mode: at most maxGridColumns, one
-   * column below `sm`. Grid, container mode: the `dp-grid` rules, with the
-   * stat variant when every child is a stat.
-   */
-  public readonly containerClass = computed(() => {
-    const node = this.node();
-    const gapKey = node.kind === 'stack' || node.kind === 'grid' ? node.gap ?? 'medium' : 'medium';
-    const gap = GAP_CLASSES[gapKey] ?? GAP_CLASSES.medium;
-    if (node.kind === 'grid' && this.layoutWidth() === 'container') {
-      const stats = node.children.length > 0 && node.children.every(child => child.kind === 'stat');
-      const containerGap = CONTAINER_GAP_CLASSES[gapKey] ?? CONTAINER_GAP_CLASSES.medium;
-      return `dp-grid dp-cols-${this.gridColumns()} ${containerGap}${stats ? ' dp-grid--stats' : ''}`;
-    }
-    if (node.kind === 'grid') return `grid grid-cols-1 ${SM_GRID_COLUMNS[this.gridColumns()]} ${gap}`;
-    if (node.kind === 'stack' && node.direction === 'horizontal') return `flex flex-row flex-wrap ${gap}`;
-    return `flex flex-col ${gap}`;
+  public readonly isGrid = computed(() => this.node().kind === 'grid');
+  public readonly containerGrid = computed(() => this.isGrid() && this.layoutWidth() === 'container');
+  public readonly viewportGrid = computed(() => this.isGrid() && this.layoutWidth() !== 'container');
+  public readonly isStatGrid = computed(() => {
+    const children = this.node().children;
+    return children.length > 0 && children.every(child => child.kind === 'stat');
   });
+  public readonly gapKey = computed((): 'none' | 'small' | 'medium' | 'large' => {
+    const node = this.node();
+    const gap = node.kind === 'stack' || node.kind === 'grid' ? node.gap : undefined;
+    return gap === 'none' || gap === 'small' || gap === 'medium' || gap === 'large' ? gap : 'medium';
+  });
+  public readonly horizontal = computed(() => {
+    const node = this.node();
+    return node.kind === 'stack' && node.direction === 'horizontal';
+  });
+  public readonly childGroups = computed(() => groupLayoutChildren(this.node().children));
   public readonly gridColumns = computed(() => {
     const node = this.node();
     const columns = node.kind === 'grid' && Number.isFinite(node.columns) ? Math.floor(node.columns) : 1;
@@ -303,6 +395,10 @@ export class SurfaceLayoutComponent {
     toggle.nativeElement.focus();
   }
   public focusKey(control: string): string { return `${this.surfaceId()}:${this.node().id}:${control}`; }
+  public isInlineKind(child: SurfaceNode): boolean { return INLINE_SURFACE_KINDS.has(child.kind); }
+  public isVerticalDivider(child: SurfaceNode): boolean {
+    return child.kind === 'divider' && child.direction === 'vertical';
+  }
   public statusId(index: number): string { return `${this.instanceId}-status-${index}`; }
   public statusText(action: SurfaceAction): string { return submitStatusText(this.actionStates().get(action.id)); }
   public isSent(action: SurfaceAction): boolean { return this.actionStates().get(action.id)?.status === 'applied'; }

@@ -26,6 +26,8 @@ import type {
 } from '../view-model/view-model.types';
 import { DashboardAlertComponent, type AlertNode } from './dashboard-alert.component';
 import { DashboardAvatarComponent } from './dashboard-avatar.component';
+import { DashboardLeaderboardComponent } from './dashboard-leaderboard.component';
+import { DashboardMeterComponent } from './dashboard-meter.component';
 import { DashboardBadgeComponent, type BadgeNode } from './dashboard-badge.component';
 import { DashboardDividerComponent, type DividerNode } from './dashboard-divider.component';
 import { DashboardProgressComponent, type ProgressNode } from './dashboard-progress.component';
@@ -38,7 +40,7 @@ import { DashboardTableComponent } from './dashboard-table.component';
 import { SurfaceCheckboxInputComponent, type CheckboxInputNode } from './surface-checkbox-input.component';
 import { SurfaceChoiceInputComponent, type ChoiceInputNode } from './surface-choice-input.component';
 import { NO_DRAFTS, type SurfaceDrafts } from './surface-input-messages';
-import { SurfaceLayoutComponent, type SurfaceLayoutWidth } from './surface-layout.component';
+import { INLINE_SURFACE_KINDS, SurfaceLayoutComponent, type SurfaceLayoutWidth } from './surface-layout.component';
 import {
   SurfaceTextInputComponent,
   type SurfaceDraftWrite,
@@ -67,7 +69,7 @@ const NO_INTERACTION: SurfaceInteractionState = {
 
 /**
  * The kinds this node renders: the 19 `/3` kinds plus the `/4` `accordion`
- * and `avatar`; anything else is `@default` and reports `renderFailed`.
+ * and avatar, leaderboard and meter. Other kinds report `renderFailed`.
  */
 export const SURFACE_NODE_KINDS: ReadonlySet<string> = new Set([
   'section', 'stack', 'grid', 'card', 'accordion',
@@ -75,6 +77,8 @@ export const SURFACE_NODE_KINDS: ReadonlySet<string> = new Set([
   'stat', 'table', 'list', 'line-chart', 'bar-chart',
   'alert', 'badge', 'progress', 'radial-progress', 'divider', 'text-block',
   'avatar',
+  'leaderboard',
+  'meter',
 ]);
 
 function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
@@ -108,8 +112,13 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
     DashboardDividerComponent,
     DashboardTextBlockComponent,
     DashboardAvatarComponent,
+    DashboardLeaderboardComponent,
+    DashboardMeterComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // A column flex host with flex-1 lets cards, charts, stats and vertical dividers stretch
+  // to their grid/row height; inline kinds (badge, avatar, ...) stay intrinsic-sized.
+  host: { class: 'flex min-w-0 flex-col', '[class.flex-1]': '!inlineKind()', '[class.items-start]': 'inlineKind()' },
   template: `
     <ng-template #child let-child>
       <ptah-surface-node [node]="child" [surfaceId]="surfaceId()" [layoutWidth]="layoutWidth()" [componentStates]="componentStates()"
@@ -226,7 +235,7 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
       }
       @case ('divider') {
         @if (dividerNode(); as divider) {
-          <ptah-dashboard-divider [node]="divider" />
+          <ptah-dashboard-divider [class.flex-1]="divider.direction === 'vertical'" [node]="divider" />
         }
       }
       @case ('text-block') {
@@ -239,6 +248,16 @@ function ownEntry<T>(record: Readonly<Record<string, T>>, key: string): T | unde
           <ptah-dashboard-avatar [node]="avatar" />
         }
       }
+      @case ('leaderboard') {
+        @if (leaderboardNode(); as leaderboard) {
+          <ptah-dashboard-leaderboard [node]="leaderboard" />
+        }
+      }
+      @case ('meter') {
+        @if (meterNode(); as meter) {
+          <ptah-dashboard-meter [node]="meter" />
+        }
+      }
       @default {}
     }
   `,
@@ -247,6 +266,7 @@ export class SurfaceNodeComponent {
   public readonly node: InputSignal<SurfaceNode> = input.required<SurfaceNode>();
   public readonly surfaceId = input('');
   public readonly layoutWidth = input<SurfaceLayoutWidth>('viewport');
+  protected readonly inlineKind = computed(() => INLINE_SURFACE_KINDS.has(this.node().kind));
   /** `SurfaceViewState.components` of the whole surface. */
   public readonly componentStates = input<ComponentStates>(NO_COMPONENT_STATES);
   /** `SurfaceViewState.drafts` of the whole surface. */
@@ -316,6 +336,16 @@ export class SurfaceNodeComponent {
     const node = this.node();
     return node.kind === 'text-block' ? node : null;
   });
+  protected readonly leaderboardNode = computed(() => {
+    const node = this.node();
+    return node.kind === 'leaderboard' ? node : null;
+  });
+
+  protected readonly meterNode = computed(() => {
+    const node = this.node();
+    return node.kind === 'meter' ? node : null;
+  });
+
   public readonly avatarNode: Signal<AvatarNode | null> = computed((): AvatarNode | null => {
     const node = this.node();
     return node.kind === 'avatar' ? node : null;

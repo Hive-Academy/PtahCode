@@ -409,6 +409,275 @@ describe('SessionReplayService', () => {
     }
   });
 
+  describe('local command stdout (TASK_2026_2336)', () => {
+    const usage = readFileSync(
+      join(
+        __dirname,
+        '../../../../../../shared/src/lib/local-command/__fixtures__/usage.txt',
+      ),
+      'utf8',
+    );
+    const contextStdout = readFileSync(
+      join(
+        __dirname,
+        '../../../../../../shared/src/lib/local-command/__fixtures__/context.txt',
+      ),
+      'utf8',
+    );
+
+    it.each([
+      ['/usage', '<synthetic>', usage, true],
+      ['/context', '<synthetic>', contextStdout, true],
+      ['ordinary synthetic text', '<synthetic>', 'Command completed.', false],
+      ['regular model report', 'claude-haiku-4-5', usage, false],
+    ] as const)('replays persisted assistant output for %s', (_name, model, text, card) => {
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [
+          {
+            type: 'assistant',
+            uuid: 'command-assistant-record',
+            timestamp: '2026-01-01T00:00:01.000Z',
+            message: {
+              id: 'command-assistant',
+              role: 'assistant',
+              model,
+              content: [{ type: 'text', text }],
+            },
+          },
+        ],
+        [],
+      );
+
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[0]).toMatchObject({ role: 'assistant' });
+      expect(events[1]).toMatchObject({
+        delta: card ? expect.stringMatching(/^```ptah-ui\n/) : text,
+      });
+    });
+
+    const command = (name = 'usage', timestamp?: string) => ({
+      ...u({ role: 'user', content: `<command-name>/${name}</command-name>` }),
+      timestamp,
+    });
+    const output = (
+      shape: 'user' | 'system',
+      stdout = usage,
+      uuid = 'cmd-record',
+    ): SessionHistoryMessage => {
+      const content = `<local-command-stdout>${stdout}</local-command-stdout>`;
+      return shape === 'user'
+        ? { type: 'user', message: { role: 'user', content }, uuid }
+        : ({
+            type: 'system',
+            subtype: 'local_command',
+            content,
+            uuid,
+          } as SessionHistoryMessage);
+    };
+
+    it('replays a /usage system/local_command record as an assistant ptah-ui card', () => {
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [
+          command(),
+          {
+            type: 'system',
+            subtype: 'local_command',
+            uuid: 'cmd-1',
+            timestamp: '2026-01-01T00:00:00.000Z',
+            content: `<local-command-stdout>${usage}</local-command-stdout>`,
+          } as unknown as SessionHistoryMessage,
+        ],
+        [],
+      );
+
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[0]).toMatchObject({
+        role: 'assistant',
+        messageId: 'cmd_cmd-1',
+      });
+      expect(
+        (events[1] as { delta: string }).delta.startsWith('```ptah-ui'),
+      ).toBe(true);
+    });
+
+    it('replays context stdout paired with a system command echo', () => {
+      const echo = {
+        type: 'system',
+        subtype: 'local_command',
+        content: '<command-name>/context</command-name>',
+      } as const;
+      const context = '## Context Usage\n\n**Tokens:** 1k / 2k (50%)';
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [echo, output('system', context)],
+        [],
+      );
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[1]).toMatchObject({
+        delta: expect.stringContaining('title Context usage'),
+      });
+    });
+
+    describe.each(['user', 'system'] as const)('%s stdout records', (shape) => {
+      it.each([
+        ['meta', { isMeta: true }],
+        ['synthetic', { isSynthetic: true }],
+        ['tool-sourced', { sourceToolUseID: 'tool-1' }],
+        ['tool provenance without an ID', { sourceToolUseID: '' }],
+      ])(
+        'keeps %s records hidden even with a matching command',
+        (_name, flags) => {
+          expect(
+            service.replayToStreamEvents(
+              'sess-cmd',
+              [command(), { ...output(shape), ...flags }],
+              [],
+            ),
+          ).toEqual([]);
+        },
+      );
+
+      it.each([
+        '<command-name>/usage</command-name>',
+        '<command-message>usage</command-message>',
+        '<skill-format>true</skill-format>',
+      ])('keeps reports containing metadata hidden (%s)', (metadata) => {
+        expect(
+          service.replayToStreamEvents(
+            'sess-cmd',
+            [command(), output(shape, usage + '\n' + metadata)],
+            [],
+          ),
+        ).toEqual([]);
+      });
+
+      it.each([
+        ['no command echo', [], usage],
+        ['an unrelated command', [command('status')], usage],
+        ['a mismatched report', [command('context')], usage],
+        [
+          'an unrelated stdout signature',
+          [command()],
+          'Current capacity: 20% used',
+        ],
+        ['unrecognized stdout', [command()], 'Done.'],
+      ] as const)('keeps stdout hidden with %s', (_name, preceding, stdout) => {
+        expect(
+          service.replayToStreamEvents(
+            'sess-cmd',
+            [...preceding, output(shape, stdout)],
+            [],
+          ),
+        ).toEqual([]);
+      });
+
+      it('consumes the command echo after its stdout record', () => {
+        const events = service.replayToStreamEvents(
+          'sess-cmd',
+          [command(), output(shape, 'Done.'), output(shape)],
+          [],
+        );
+        expect(events).toEqual([]);
+      });
+    });
+
+    it('uses the preceding timed record or the following timed record for the first untimed card', () => {
+      const before = '2026-01-01T00:00:00.000Z';
+      const after = '2026-01-02T00:00:00.000Z';
+      const card = output('system');
+      const following = { ...output('system', 'Done.'), timestamp: after };
+
+      const preceded = service.replayToStreamEvents(
+        'sess-cmd',
+        [command('usage', before), card, following],
+        [],
+      );
+      expect(preceded[0]).toMatchObject({ timestamp: Date.parse(before) });
+      const followed = service.replayToStreamEvents(
+        'sess-cmd',
+        [command(), card, following],
+        [],
+      );
+      expect(followed[0]).toMatchObject({ timestamp: Date.parse(after) });
+    });
+
+    it('sorts consecutive untimed cards after the preceding assistant completion', () => {
+      const assistant = a({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Answer' }],
+      });
+      const events = service.replayToStreamEvents(
+        'sess-cmd',
+        [
+          assistant,
+          command(),
+          output('system'),
+          command(),
+          output('user', usage, 'second'),
+        ],
+        [],
+      );
+      expect(eventTypes(events)).toEqual([
+        'message_start',
+        'text_delta',
+        'message_complete',
+        'message_start',
+        'text_delta',
+        'message_complete',
+        'message_start',
+        'text_delta',
+        'message_complete',
+      ]);
+      expect(events[3].timestamp).toBeGreaterThan(events[2].timestamp);
+      expect(events[6].timestamp).toBeGreaterThan(events[5].timestamp);
+    });
+
+    it('replays an all-untimed transcript with identical event timestamps', () => {
+      const messages = [
+        {
+          ...a({
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Answer' }],
+          }),
+          timestamp: undefined,
+        },
+        command(),
+        output('system'),
+        command(),
+        output('user', usage, 'second'),
+      ];
+      const timestamps = () =>
+        service
+          .replayToStreamEvents('sess-cmd', messages, [])
+          .map((event) => event.timestamp);
+      const clock = jest.spyOn(Date, 'now');
+      try {
+        clock.mockReturnValue(1000);
+        const first = timestamps();
+        clock.mockReturnValue(2000);
+        expect(first).toHaveLength(9);
+        expect(first[0]).toBe(0);
+        expect(timestamps()).toEqual(first);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  });
+
   describe('peer turns recognised by their lane envelope', () => {
     function peerOf(events: FlatStreamEventUnion[]): unknown {
       const start = events.find((e) => e.eventType === 'message_start');
@@ -679,7 +948,12 @@ describe('SessionReplayService', () => {
         a({
           role: 'assistant',
           content: [
-            { type: 'tool_use', id: 't-1', name: 'Read', input: { path: '/x' } },
+            {
+              type: 'tool_use',
+              id: 't-1',
+              name: 'Read',
+              input: { path: '/x' },
+            },
           ],
         }),
         u({
@@ -787,7 +1061,9 @@ describe('SessionReplayService', () => {
 
     it('settles both background tasks after their agent events without rendering notifications as user messages', () => {
       const events = fixtureReplay();
-      const completed = events.filter((event) => event.eventType === 'agent_completed');
+      const completed = events.filter(
+        (event) => event.eventType === 'agent_completed',
+      );
       expect(completed).toEqual([
         expect.objectContaining({
           eventType: 'agent_completed',
@@ -820,30 +1096,54 @@ describe('SessionReplayService', () => {
         expect(childIndex).toBeGreaterThan(startIndex);
         expect(events.indexOf(event)).toBeGreaterThan(childIndex);
       }
-      expect(events.some((event) =>
-        event.eventType === 'agent_completed' &&
-        event.parentToolUseId === 'toolu_fg_1',
-      )).toBe(false);
-      expect(events.filter((event) =>
-        event.eventType === 'message_start' && event.role === 'user',
-      )).toHaveLength(1);
-      expect(events.some((event) =>
-        event.eventType === 'text_delta' && event.delta.includes('<task-notification>'),
-      )).toBe(false);
+      expect(
+        events.some(
+          (event) =>
+            event.eventType === 'agent_completed' &&
+            event.parentToolUseId === 'toolu_fg_1',
+        ),
+      ).toBe(false);
+      expect(
+        events.filter(
+          (event) =>
+            event.eventType === 'message_start' && event.role === 'user',
+        ),
+      ).toHaveLength(1);
+      expect(
+        events.some(
+          (event) =>
+            event.eventType === 'text_delta' &&
+            event.delta.includes('<task-notification>'),
+        ),
+      ).toBe(false);
     });
 
     it('parses a notification with a large summary from a bounded head', () => {
       const parent = jsonlFixture(...fixtureDir, 'parent.jsonl');
       const notification = parent[parent.length - 2];
       const content = notification.message?.content;
-      if (typeof content !== 'string') throw new Error('Expected text notification fixture');
-      const expanded = { ...notification, message: {
-        role: 'user',
-        content: content.replace('Agent "First check" finished', 'x'.repeat(40_000)),
-      } };
-      const events = service.replayToStreamEvents('history-bg', [...parent.slice(0, 3), expanded], []);
-      expect(events.find((event) => event.eventType === 'agent_completed')).toMatchObject({
-        taskId: 'bgone', summary: 'x'.repeat(240),
+      if (typeof content !== 'string')
+        throw new Error('Expected text notification fixture');
+      const expanded = {
+        ...notification,
+        message: {
+          role: 'user',
+          content: content.replace(
+            'Agent "First check" finished',
+            'x'.repeat(40_000),
+          ),
+        },
+      };
+      const events = service.replayToStreamEvents(
+        'history-bg',
+        [...parent.slice(0, 3), expanded],
+        [],
+      );
+      expect(
+        events.find((event) => event.eventType === 'agent_completed'),
+      ).toMatchObject({
+        taskId: 'bgone',
+        summary: 'x'.repeat(240),
       });
     });
 
@@ -852,32 +1152,66 @@ describe('SessionReplayService', () => {
       const notification = parent[parent.length - 2];
       const events = service.replayToStreamEvents(
         'history-bg',
-        [...parent.slice(0, 3), notification, { ...notification, uuid: 'duplicate-task' }],
+        [
+          ...parent.slice(0, 3),
+          notification,
+          { ...notification, uuid: 'duplicate-task' },
+        ],
         [],
       );
-      expect(events.filter((event) => event.eventType === 'agent_completed' && event.taskId === 'bgone')).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) =>
+            event.eventType === 'agent_completed' && event.taskId === 'bgone',
+        ),
+      ).toHaveLength(1);
     });
 
     it('drops unmatched and malformed notifications and ignores a human-typed example', () => {
       const parent = jsonlFixture(...fixtureDir, 'parent.jsonl');
       const notification = parent[parent.length - 2];
       const badRecords: SessionHistoryMessage[] = [
-        { ...notification, uuid: 'unmatched', message: {
-          role: 'user',
-          content: '<task-notification><task-id>other</task-id><tool-use-id>toolu_missing</tool-use-id><status>completed</status></task-notification>',
-        } },
-        { ...notification, uuid: 'malformed', message: {
-          role: 'user',
-          content: '<task-notification><task-id>bgone</task-id><tool-use-id>toolu_bg_1</tool-use-id><status>running</status></task-notification>',
-        } },
-        { ...notification, uuid: 'typed', origin: { kind: 'human' }, message: notification.message },
+        {
+          ...notification,
+          uuid: 'unmatched',
+          message: {
+            role: 'user',
+            content:
+              '<task-notification><task-id>other</task-id><tool-use-id>toolu_missing</tool-use-id><status>completed</status></task-notification>',
+          },
+        },
+        {
+          ...notification,
+          uuid: 'malformed',
+          message: {
+            role: 'user',
+            content:
+              '<task-notification><task-id>bgone</task-id><tool-use-id>toolu_bg_1</tool-use-id><status>running</status></task-notification>',
+          },
+        },
+        {
+          ...notification,
+          uuid: 'typed',
+          origin: { kind: 'human' },
+          message: notification.message,
+        },
       ];
       const taskOnly = parent.slice(0, 3);
-      const events = service.replayToStreamEvents('history-bg', [...taskOnly, ...badRecords], []);
-      expect(events.filter((event) => event.eventType === 'agent_completed')).toHaveLength(0);
-      expect(events.some((event) =>
-        event.eventType === 'text_delta' && event.delta.includes('<task-notification>'),
-      )).toBe(false);
+      const events = service.replayToStreamEvents(
+        'history-bg',
+        [...taskOnly, ...badRecords],
+        [],
+      );
+      expect(
+        events.filter((event) => event.eventType === 'agent_completed'),
+      ).toHaveLength(0);
+      expect(
+        events.some(
+          (event) =>
+            event.eventType === 'text_delta' &&
+            event.delta.includes('<task-notification>'),
+        ),
+      ).toBe(false);
     });
 
     it.each([
@@ -889,13 +1223,17 @@ describe('SessionReplayService', () => {
       const parent = jsonlFixture(...fixtureDir, 'parent.jsonl');
       const notification = parent[parent.length - 2];
       const content = notification.message?.content;
-      if (typeof content !== 'string') throw new Error('Expected text notification fixture');
+      if (typeof content !== 'string')
+        throw new Error('Expected text notification fixture');
       const changed = {
         ...notification,
         message: {
           role: 'user',
           content: content
-            .replace('<status>completed</status>', `<status>${rawStatus}</status>`)
+            .replace(
+              '<status>completed</status>',
+              `<status>${rawStatus}</status>`,
+            )
             .replace('Agent "First check" finished', 'x'.repeat(300)),
         },
       };
@@ -904,7 +1242,9 @@ describe('SessionReplayService', () => {
         [...parent.slice(0, 3), changed],
         [],
       );
-      expect(events.find((event) => event.eventType === 'agent_completed')).toMatchObject({
+      expect(
+        events.find((event) => event.eventType === 'agent_completed'),
+      ).toMatchObject({
         parentToolUseId: 'toolu_bg_1',
         status: expected,
         summary: 'x'.repeat(240),
@@ -967,8 +1307,7 @@ describe('SessionReplayService', () => {
           const startedAt = events.indexOf(spawn);
           const resultAt = events.findIndex(
             (event) =>
-              isToolResultEvent(event) &&
-              event.toolCallId === spawn.toolCallId,
+              isToolResultEvent(event) && event.toolCallId === spawn.toolCallId,
           );
           expect(resultAt).toBeGreaterThan(-1);
           expect(startedAt).toBeLessThan(resultAt);
@@ -1048,12 +1387,14 @@ describe('SessionReplayService', () => {
           ...parent[2],
           message: {
             role: 'user',
-            content: [{
-              type: 'tool_result',
-              tool_use_id: 'toolu_bg_1',
-              content: 'First check finished',
-              is_error: false,
-            }],
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_bg_1',
+                content: 'First check finished',
+                is_error: false,
+              },
+            ],
           },
         } as SessionHistoryMessage;
         const events = service.replayToStreamEvents(
@@ -1109,22 +1450,29 @@ describe('SessionReplayService', () => {
           ...parent[2],
           message: {
             role: 'user',
-            content: [{
-              type: 'tool_result',
-              tool_use_id: 'toolu_bg_1',
-              content: 'Async agent launched successfully.\nagentId: 4f8a2c91d3e6\noutput_file: C:\\Temp\\tasks\\bgone.output\nThe agent is working in the background.',
-              is_error: false,
-            }],
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'toolu_bg_1',
+                content:
+                  'Async agent launched successfully.\nagentId: 4f8a2c91d3e6\noutput_file: C:\\Temp\\tasks\\bgone.output\nThe agent is working in the background.',
+                is_error: false,
+              },
+            ],
           },
         } as SessionHistoryMessage;
         const running = service.replayToStreamEvents(
-          'history-bg', [...parent.slice(0, 2), launch], [],
+          'history-bg',
+          [...parent.slice(0, 2), launch],
+          [],
         );
         expect(running.filter(isBackgroundStarted)).toHaveLength(1);
         expect(running.filter(isBackgroundTerminal)).toHaveLength(0);
 
         const settled = service.replayToStreamEvents(
-          'history-bg', [...parent.slice(0, 2), launch, parent[7]], [],
+          'history-bg',
+          [...parent.slice(0, 2), launch, parent[7]],
+          [],
         );
         expect(settled.filter(isBackgroundTerminal)).toEqual([
           expect.objectContaining({
@@ -1141,7 +1489,10 @@ describe('SessionReplayService', () => {
     it('keeps report and completion before the held prompt with their peer ids', () => {
       const fixturePath = join(
         __dirname,
-        '..', '..', '__fixtures__', 'lane-order',
+        '..',
+        '..',
+        '__fixtures__',
+        'lane-order',
         'cli-transcript-user-lines.json',
       );
       const records = JSON.parse(readFileSync(fixturePath, 'utf8')) as Array<{
@@ -1162,8 +1513,12 @@ describe('SessionReplayService', () => {
       }));
       const events = service.replayToStreamEvents('m9', messages, []);
       const starts = events.filter(
-        (event): event is Extract<FlatStreamEventUnion, { eventType: 'message_start' }> =>
-          event.eventType === 'message_start' && event.role === 'user',
+        (
+          event,
+        ): event is Extract<
+          FlatStreamEventUnion,
+          { eventType: 'message_start' }
+        > => event.eventType === 'message_start' && event.role === 'user',
       );
       expect(starts.map((event) => event.messageId)).toEqual([
         '5f8c5e05-e601-450d-9d13-3fdfb4083465',
@@ -1173,10 +1528,15 @@ describe('SessionReplayService', () => {
       ]);
       // The captured fixture abbreviates content, so identify peer turns by
       // their envelope prefix while preserving the CLI's original UUIDs.
-      expect(events.filter((event) =>
-        event.eventType === 'text_delta' &&
-        /^<agent-(report|lane-completed)\b/.test(event.delta),
-      ).map((event) => event.messageId)).toEqual([
+      expect(
+        events
+          .filter(
+            (event) =>
+              event.eventType === 'text_delta' &&
+              /^<agent-(report|lane-completed)\b/.test(event.delta),
+          )
+          .map((event) => event.messageId),
+      ).toEqual([
         '11d28bff-5729-459c-b8d2-d6f9b40ebeb8',
         '45f1f8cc-81ed-4446-a2d7-d308466e7738',
       ]);

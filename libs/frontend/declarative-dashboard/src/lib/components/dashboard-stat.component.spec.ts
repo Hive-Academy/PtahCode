@@ -33,7 +33,8 @@ describe('DashboardStatComponent', () => {
     const { element } = setup();
     const section = element.querySelector('section')!;
     expect(section.classList).toContain('border');
-    expect(section.classList).toContain('px-2');
+    expect(section.classList).toContain('px-3');
+    expect(section.classList).toContain('rounded-lg');
     expect(section.classList).not.toContain('p-3');
     const header = element.querySelector('h3')!.parentElement!;
     expect(header.querySelector('[data-testid="stat-delta"]')).not.toBeNull();
@@ -41,12 +42,43 @@ describe('DashboardStatComponent', () => {
     expect(element.querySelector('h3')?.classList).toContain('text-[10px]');
     const value = element.querySelector('[data-testid="stat-value"]')!;
     expect(value.textContent).toBe('42 deploys');
-    expect(value.classList).toContain('text-sm');
+    expect(value.classList).toContain('text-lg');
+    expect(value.classList).toContain('tabular-nums');
     // Body text colour, not text-primary: primary on base-200 fails WCAG AA (R10 re-check).
     expect(value.classList).toContain('text-base-content');
     expect(value.classList).not.toContain('text-primary');
     // The delta's symbol is decorative; assistive tech reads "Change +2".
     expect(element.querySelector('[data-testid="stat-delta"] [aria-hidden="true"]')?.textContent).toBe('Δ ');
+  });
+  it('shows the expand chevron only when the stat has a description or children', () => {
+    const { fixture, element } = setup({ ...node, description: undefined });
+    expect(element.querySelector('[aria-expanded]')).toBeNull();
+    expect(element.querySelector<HTMLElement>(`#${fixture.componentInstance.detailsId}`)?.hidden).toBe(true);
+    // Escape with no toggle is a no-op rather than a throw.
+    element.querySelector('section')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.componentRef.setInput('node', { ...node, description: undefined, children: [{ ...node, id: 'child', description: undefined }] });
+    fixture.detectChanges();
+    expect(element.querySelector('[aria-expanded]')).not.toBeNull();
+  });
+  it('does not intercept Escape when hasDetails is false even with stale expanded viewState', () => {
+    const { fixture, element } = setup({ ...node, description: undefined });
+    const emitted = jest.fn();
+    fixture.componentInstance.viewStateChange.subscribe(emitted);
+    fixture.componentRef.setInput('viewState', { expanded: true });
+    fixture.detectChanges();
+    const parent = document.createElement('div');
+    let parentSawEscape = 0;
+    parent.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Escape') parentSawEscape += 1;
+    });
+    parent.appendChild(element);
+    try {
+      element.querySelector('section')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(parentSawEscape).toBe(1);
+      expect(emitted).not.toHaveBeenCalled();
+    } finally {
+      parent.remove();
+    }
   });
   it('offers selection only for selectable stats and emits the contract target', () => {
     const { fixture, element } = setup();

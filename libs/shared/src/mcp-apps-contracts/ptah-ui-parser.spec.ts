@@ -715,3 +715,55 @@ describe('parsePtahUi R3 nesting delta', () => {
       }));
   });
 });
+
+describe('catalog/4 leaderboard and meter grammar', () => {
+  it('decodes titles, group headers and cells and accepts omitted values', () => {
+    expect(parse(String.raw`leaderboard Results \$5
+  - First | 100
+  group skill Build \| test
+  - Test\\case | 0.5 | | owner \$x
+meter
+  Free \| reserved | 2.5 | | muted
+`)).toEqual({
+      ok: true,
+      doc: {
+        elements: [
+          {
+            kind: 'leaderboard',
+            title: 'Results $5',
+            groups: [
+              { entries: [{ label: 'First', share: 100 }] },
+              {
+                title: 'Build | test',
+                icon: 'skill',
+                entries: [{ label: 'Test\\case', share: 0.5, detail: 'owner $x' }],
+              },
+            ],
+          },
+          { kind: 'meter', segments: [{ label: 'Free | reserved', amount: 2.5, muted: true }] },
+        ],
+      },
+    });
+  });
+
+  it('enforces entry, group and segment limits', () => {
+    valid('leaderboard\n' + '  - A | 0\n'.repeat(50));
+    invalid('leaderboard\n' + '  - A | 0\n'.repeat(51));
+    valid('leaderboard\n' + '  group skill A\n  - A | 0\n'.repeat(8));
+    invalid('leaderboard\n  - A | 0\n' + '  group skill A\n  - A | 0\n'.repeat(8));
+    valid('meter\n' + '  A | 0\n'.repeat(12));
+    invalid('meter\n' + '  A | 0\n'.repeat(13));
+  });
+
+  it.each([
+    'leaderboard',
+    'leaderboard\n  group arbitrary Title\n  - A | 20',
+    'leaderboard\n  - A | 101',
+    'leaderboard\n  - A | -1',
+    'leaderboard\n  group tool Empty\n  group agent Agents\n  - A | 0',
+    'meter',
+    'meter\n  A | -1',
+    'meter\n  A | 1 | value | loud',
+    'meter\n  A | ' + '9'.repeat(310),
+  ])('rejects malformed input (%s)', (body) => invalid(body + '\n'));
+});
