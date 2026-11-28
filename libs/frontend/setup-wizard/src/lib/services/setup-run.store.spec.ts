@@ -18,7 +18,9 @@ import { SETUP_RUN_POLL_INTERVAL_MS, SetupRunStore } from './setup-run.store';
 import type { SetupRunRecord } from './setup-run.types';
 import { SetupWizardStateService } from './setup-wizard-state.service';
 import { WizardAnalysisRunner } from './wizard-analysis-runner.service';
-import { WizardRpcService } from './wizard-rpc.service';
+import { WizardRpcError, WizardRpcService } from './wizard-rpc.service';
+import { GenerationWorkflowStore } from './generation-workflow.store';
+import { GuidanceGenerationStore } from './guidance-generation.store';
 
 jest.mock('@ptah-extension/chat-state', () => ({
   ...jest.requireActual('@ptah-extension/chat-state'),
@@ -52,12 +54,12 @@ function runState(
 ): SetupGenerationRunState {
   return {
     status,
-    binding: { runId: 'run-1' },
-    source: { kind: 'none' },
+    binding: { ...binding('setup-g1'), runId: 'run-1' },
+    source: { kind: 'workspace-discovery', reason: 'missing' },
     effectiveProvider: 'p',
     effectiveModel: 'm',
     ...extra,
-  } as unknown as SetupGenerationRunState;
+  };
 }
 
 function binding(
@@ -83,6 +85,13 @@ describe('SetupRunStore', () => {
     const index: Record<string, SetupRunRecord[]> = {};
     for (const r of records) (index[r.workspacePath] ??= []).push(r);
     localStorage.setItem(SETUP_RUNS_STORAGE_KEY, serializeSetupRunIndex(index));
+  }
+
+  function mockBoundStatus(status: SetupGenerationRunLifecycle): void {
+    rpc['getBoundRunState'].mockImplementation(
+      async (tab: SetupGenerationTabBinding, runId = 'run-1') =>
+        runState(status, { binding: { ...tab, runId } }),
+    );
   }
 
   function stored(): Record<string, { id: string }[]> | null {
@@ -396,9 +405,7 @@ describe('SetupRunStore', () => {
 
   describe('adoption', () => {
     it('adopts a running generation checkpoint from get-resumable-run', async () => {
-      rpc['getBoundRunState'].mockResolvedValue(
-        runState('running', { binding: { runId: 'gen-1' } } as never),
-      );
+      mockBoundStatus('running');
       rpc['getResumableRun'].mockResolvedValue({
         analysis: null,
         generation: { runId: 'gen-1', lifecycle: 'running' },
@@ -626,7 +633,7 @@ describe('SetupRunStore', () => {
     }
 
     beforeEach(() => {
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
     });
 
     it('polls every 2.5 s with one timer for all running bound runs', async () => {
@@ -663,9 +670,8 @@ describe('SetupRunStore', () => {
     it('stops polling a run once it is terminal', async () => {
       seed(boundRunning('setup-g1', 'agent-generation'));
       await create();
-      rpc['getBoundRunState']
-        .mockClear()
-        .mockResolvedValue(runState('completed'));
+      rpc['getBoundRunState'].mockClear();
+      mockBoundStatus('completed');
       await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
       expect(rpc['getBoundRunState']).toHaveBeenCalledTimes(1);
       await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS * 3);
@@ -693,7 +699,7 @@ describe('SetupRunStore', () => {
     it('skips a run whose pushes arrive', async () => {
       seed(boundRunning('setup-g1', 'agent-generation'));
       const store = await create();
-      store.report('setup-g1', { step: 'generating' });
+      store.reportStream({ ...binding('setup-g1'), runId: 'run-1' });
       await flush();
       rpc['getBoundRunState'].mockClear();
       await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS * 2);
@@ -752,7 +758,7 @@ describe('SetupRunStore', () => {
   describe('cancel', () => {
     it('waits for the backend confirmation before cancelling a bound run', async () => {
       seed(record({ id: 'setup-g1', backendRunId: 'run-1' }));
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
       let confirm!: (value: boolean) => void;
       rpc['cancelBoundRun'].mockReturnValue(
         new Promise<boolean>((resolve) => (confirm = resolve)),
@@ -772,7 +778,7 @@ describe('SetupRunStore', () => {
 
     it('stays running when the backend refuses and the run is still active', async () => {
       seed(record({ id: 'setup-g1', backendRunId: 'run-1' }));
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
       rpc['cancelBoundRun'].mockResolvedValue(false);
       const store = await create();
       expect(await store.cancel('setup-g1')).toBe(false);
@@ -782,7 +788,7 @@ describe('SetupRunStore', () => {
 
     it('stays running when the cancel request fails', async () => {
       seed(record({ id: 'setup-g1', backendRunId: 'run-1' }));
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
       rpc['cancelBoundRun'].mockRejectedValue(new Error('down'));
       const store = await create();
       expect(await store.cancel('setup-g1')).toBe(false);
@@ -909,7 +915,7 @@ describe('SetupRunStore', () => {
 
     it('does nothing for a run that is not failed or interrupted', async () => {
       seed(record({ id: 'setup-g1', backendRunId: 'run-1' }));
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
       const store = await create();
       expect(await store.retry('setup-g1')).toBeNull();
       expect(rpc['startBoundAgents']).not.toHaveBeenCalled();
@@ -1113,7 +1119,7 @@ describe('SetupRunStore', () => {
           createdAt: 3,
         }),
       );
-      rpc['getBoundRunState'].mockResolvedValue(runState('running'));
+      mockBoundStatus('running');
       const store = await create();
 
       expect(store.dismiss('setup-live')).toBe(false);
@@ -1188,6 +1194,690 @@ describe('SetupRunStore', () => {
     it('returns null when attaching an unknown id', async () => {
       const store = await create();
       expect(store.attach('missing')).toBeNull();
+    });
+  });
+
+  describe('reportRun, whenStarted and bindingFor', () => {
+    function boundRun(
+      status: SetupGenerationRunLifecycle,
+      tabId = 'setup-g1',
+      runId = 'run-1',
+      extra: Partial<SetupGenerationRunState> = {},
+    ): SetupGenerationRunState {
+      return runState(status, {
+        binding: { ...binding(tabId), runId },
+        ...extra,
+      });
+    }
+
+    beforeEach(() => {
+      mockBoundStatus('running');
+    });
+
+    it('maps a verified run state onto the record and records its run id', async () => {
+      seed(record({ id: 'setup-g1', step: 'preview', status: 'needs-input' }));
+      const store = await create();
+      const result = store.reportRun('setup-g1', boundRun('running'));
+      expect(result).toMatchObject({
+        status: 'running',
+        step: 'generating',
+        backendRunId: 'run-1',
+      });
+      store.reportRun('setup-g1', boundRun('completed'));
+      expect(store.get('setup-g1')?.status).toBe('completed');
+      expect(store.get('setup-g1')?.unseen).toBe(true);
+    });
+
+    it('maps failed and interrupted states with fixed copy', async () => {
+      seed(record({ id: 'setup-g1' }), record({ id: 'setup-g2' }));
+      const store = await create();
+      store.reportRun('setup-g1', boundRun('timed-out'));
+      store.reportRun(
+        'setup-g2',
+        boundRun('running', 'setup-g2', 'run-1', { interrupted: true }),
+      );
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'failed',
+        error: 'Agent generation did not finish.',
+      });
+      expect(store.get('setup-g2')?.status).toBe('interrupted');
+    });
+
+    it('ignores a terminal state of a run other than the record run', async () => {
+      seed(record({ id: 'setup-g1', backendRunId: 'run-2' }));
+      const store = await create();
+      store.reportRun('setup-g1', boundRun('failed', 'setup-g1', 'run-1'));
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'running',
+        backendRunId: 'run-2',
+      });
+    });
+
+    it('ignores an unsolicited live state for a settled record', async () => {
+      seed(record({ id: 'setup-g1', status: 'failed', backendRunId: 'run-1' }));
+      const store = await create();
+      const before = store.get('setup-g1');
+      expect(
+        store.reportRun('setup-g1', boundRun('running', 'setup-g1', 'run-2')),
+      ).toBe(before);
+    });
+
+    it('ignores a state that names another binding', async () => {
+      seed(record({ id: 'setup-g1' }), record({ id: 'setup-g2' }));
+      const store = await create();
+      store.reportRun('setup-g1', boundRun('completed', 'setup-g2'));
+      store.reportRun(
+        'setup-g1',
+        runState('completed', {
+          binding: {
+            ...binding('setup-g1', 'setup-project-prompt'),
+            runId: 'run-1',
+          },
+        }),
+      );
+      store.reportRun(
+        'setup-g1',
+        runState('completed', {
+          binding: {
+            ...binding('setup-g1', 'setup-agent-generation', OTHER_WS),
+            runId: 'run-1',
+          },
+        }),
+      );
+      expect(store.get('setup-g1')?.status).toBe('running');
+      expect(store.reportRun('missing', boundRun('completed'))).toBeNull();
+    });
+
+    it('ignores a run state for a record that is not bound', async () => {
+      seed(
+        record({ id: 'setup-r1', workflow: 'skill-review', step: 'reviewing' }),
+      );
+      const store = await create();
+      store.reportRun('setup-r1', boundRun('completed', 'setup-r1'));
+      expect(store.get('setup-r1')?.status).toBe('running');
+    });
+
+    it('completes through the shared poll after the bound view reads and closes without a push', async () => {
+      seed(record({ id: 'setup-g1', backendRunId: 'run-1' }));
+      mockBoundStatus('running');
+      const store = await create();
+      const view = TestBed.inject(GenerationWorkflowStore);
+      store.attach('setup-g1');
+      view.bind(binding('setup-g1'));
+      await flush();
+      expect(view.run()?.status).toBe('running');
+      view.unbind();
+      store.release('setup-g1');
+
+      rpc['getBoundRunState'].mockClear();
+      mockBoundStatus('completed');
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(rpc['getBoundRunState']).toHaveBeenCalledTimes(1);
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'completed',
+        unseen: true,
+      });
+    });
+
+    it.each([
+      ['agents', 'agent-generation', 'startBoundAgents'],
+      ['guidance', 'project-guidance', 'startBoundGuidance'],
+    ] as const)(
+      'keeps an initial %s start running across null polls and records the accepted run',
+      async (kind, workflow, startMethod) => {
+        rpc['getBoundRunState'].mockResolvedValue(null);
+        const store = await create();
+        const record = store.start(workflow, WS, { step: 'generating' });
+        const tabBinding = record && store.bindingFor(record);
+        if (!record || !tabBinding) throw new Error('Expected a bound run');
+        const view = TestBed.inject(GenerationWorkflowStore);
+        view.bindRecord(record);
+        await flush();
+        rpc['getBoundRunState'].mockClear();
+
+        const running = runState('running', {
+          binding: { ...tabBinding, runId: 'accepted-run' },
+        });
+        const accepted = {
+          runId: running.binding.runId,
+          status: 'starting' as const,
+          source: running.source,
+          effectiveProvider: running.effectiveProvider,
+          effectiveModel: running.effectiveModel,
+        };
+        let resolveStart!: (response: { accepted: typeof accepted }) => void;
+        rpc[startMethod].mockReturnValue(
+          new Promise((resolve) => {
+            resolveStart = resolve;
+          }),
+        );
+        const start =
+          kind === 'agents' ? view.startAgents(['agent']) : view.startGuidance();
+
+        for (let poll = 1; poll <= 4; poll++) {
+          await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+          expect(rpc['getBoundRunState']).toHaveBeenCalledTimes(poll);
+          expect(store.get(record.id)).toMatchObject({
+            status: 'running',
+            backendRunId: null,
+          });
+        }
+
+        rpc['getBoundRunState'].mockResolvedValue(running);
+        resolveStart({ accepted });
+        await start;
+        expect(view.state()).toBe('running');
+        expect(store.get(record.id)).toMatchObject({
+          status: 'running',
+          backendRunId: accepted.runId,
+        });
+      },
+    );
+
+    it('interrupts only after a fresh grace when an initial start resolves without run evidence', async () => {
+      rpc['getBoundRunState'].mockResolvedValue(null);
+      const store = await create();
+      const record = store.start('project-guidance', WS);
+      if (!record) throw new Error('Expected a guidance run');
+      const view = TestBed.inject(GenerationWorkflowStore);
+      view.bindRecord(record);
+      await flush();
+
+      let resolveStart!: (response: { success: false }) => void;
+      rpc['startBoundGuidance'].mockReturnValue(
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+      );
+      const start = view.startGuidance();
+      await jest.advanceTimersByTimeAsync(4 * SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(record.id)?.status).toBe('running');
+      resolveStart({ success: false });
+      await start;
+
+      await jest.advanceTimersByTimeAsync(2 * SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(record.id)?.status).toBe('running');
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(record.id)).toMatchObject({
+        status: 'interrupted',
+        backendRunId: null,
+      });
+    });
+
+    it.each(['agents', 'guidance'] as const)(
+      'attaches the same-ID owner after an initial %s start is blocked',
+      async (workflow) => {
+        const isAgent = workflow === 'agents';
+        const owner = binding(
+          'setup-owned',
+          isAgent ? 'setup-agent-generation' : 'setup-project-prompt',
+        );
+        const store = await create();
+        const view = TestBed.inject(GenerationWorkflowStore);
+        rpc['getBoundRunState'].mockResolvedValue(null);
+        view.bind(owner);
+        await flush();
+        const startRpc =
+          rpc[isAgent ? 'startBoundAgents' : 'startBoundGuidance'];
+        startRpc.mockResolvedValue({
+          rejection: { reason: 'blocked', ownerTabId: owner.tabId },
+        });
+        mockBoundStatus('running');
+        rpc['getBoundRunState'].mockClear();
+
+        if (isAgent) await view.startAgents(['agent']);
+        else await view.startGuidance();
+
+        expect(rpc['getBoundRunState']).toHaveBeenCalledTimes(1);
+        expect(rpc['getBoundRunState']).toHaveBeenCalledWith(owner, undefined);
+        expect(view.state()).toBe('running');
+        expect(view.rejection()).toBeNull();
+        expect(store.get(owner.tabId)).toMatchObject({
+          status: 'running',
+          backendRunId: 'run-1',
+        });
+        expect(store.runs()).toHaveLength(1);
+      },
+    );
+
+    it('interrupts an initial same-ID blocked owner after two poll intervals of null lookups', async () => {
+      rpc['getBoundRunState'].mockResolvedValue(null);
+      const store = await create();
+      const owner = binding('setup-owned');
+      const view = TestBed.inject(GenerationWorkflowStore);
+      view.bind(owner);
+      await flush();
+      rpc['startBoundAgents'].mockResolvedValue({
+        rejection: { reason: 'blocked', ownerTabId: owner.tabId },
+      });
+      await view.startAgents(['agent']);
+      expect(view.state()).toBe('idle');
+      view.unbind();
+
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(owner.tabId)?.status).toBe('running');
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(owner.tabId)).toMatchObject({
+        status: 'interrupted',
+        unseen: true,
+      });
+      rpc['getBoundRunState'].mockClear();
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS * 3);
+      expect(rpc['getBoundRunState']).not.toHaveBeenCalled();
+    });
+
+    it('restarts the orphan grace after valid stream evidence and stops polling after interruption', async () => {
+      rpc['getBoundRunState'].mockResolvedValue(null);
+      const store = await create();
+      const owned = { ...binding('setup-owned'), runId: 'run-1' };
+      store.adopt(owned);
+      store.reportStream(owned);
+      await store.refresh();
+      await flush();
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(owned.tabId)?.status).toBe('running');
+      store.reportStream(owned);
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS * 2);
+      expect(store.get(owned.tabId)?.status).toBe('running');
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+      expect(store.get(owned.tabId)).toMatchObject({
+        status: 'interrupted',
+        unseen: true,
+      });
+      rpc['getBoundRunState'].mockClear();
+      await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS * 3);
+      expect(rpc['getBoundRunState']).not.toHaveBeenCalled();
+    });
+
+    it('corrects only a proved finalization failure for the same run in the real record', async () => {
+      seed(record({ id: 'setup-g1', status: 'failed', backendRunId: 'run-1' }));
+      const store = await create();
+      const view = TestBed.inject(GenerationWorkflowStore);
+      const failed = boundRun('failed');
+      const previous: SetupGenerationRunState = {
+        ...failed,
+        result: {
+          ...failed,
+          status: 'failed',
+          success: false,
+          finalizationFailed: true,
+        },
+      };
+      const verified: SetupGenerationRunState = {
+        ...failed,
+        status: 'completed',
+        result: {
+          ...failed,
+          status: 'completed',
+          success: true,
+          counts: {
+            total: 1,
+            written: 1,
+            unchanged: 0,
+            failed: 0,
+            skipped: 0,
+            rejected: 0,
+          },
+          agentOutcomes: [],
+        },
+      };
+      rpc['startBoundAgents'].mockResolvedValue({
+        accepted: { runId: 'run-1' },
+      });
+      rpc['getBoundRunState'].mockResolvedValue(previous);
+      await store.retry('setup-g1');
+      await flush();
+      view.bind(binding('setup-g1'));
+      await flush();
+      expect(view.state()).toBe('failed');
+
+      for (const observation of [
+        boundRun('running'),
+        boundRun('cancelled'),
+        { ...verified, result: undefined },
+        { ...verified, binding: { ...verified.binding, runId: 'other-run' } },
+      ]) {
+        store.reportRun('setup-g1', observation);
+        expect(store.get('setup-g1')?.status).toBe('failed');
+      }
+      rpc['getBoundRunState'].mockResolvedValue(verified);
+      await view.refresh();
+      expect(view.state()).toBe('completed');
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'completed',
+        backendRunId: 'run-1',
+      });
+      expect(store.get('setup-g1')?.error).toBeUndefined();
+    });
+
+    it('ignores an earlier view lookup with finalization proof after retry reuses the checkpoint', async () => {
+      seed(record({ id: 'setup-g1', status: 'failed', backendRunId: 'run-1' }));
+      const store = await create();
+      const view = TestBed.inject(GenerationWorkflowStore);
+      const failed = boundRun('failed');
+      const previous: SetupGenerationRunState = {
+        ...failed,
+        result: {
+          ...failed,
+          status: 'failed',
+          success: false,
+          finalizationFailed: true,
+        },
+      };
+      rpc['startBoundAgents'].mockResolvedValue({
+        accepted: { runId: 'run-1' },
+      });
+      rpc['getBoundRunState'].mockResolvedValue(previous);
+      await store.retry('setup-g1');
+      await flush();
+      view.bind(binding('setup-g1'));
+      await flush();
+
+      let resolveOldLookup!: (run: SetupGenerationRunState) => void;
+      rpc['getBoundRunState'].mockReturnValueOnce(
+        new Promise((resolve) => (resolveOldLookup = resolve)),
+      );
+      const oldLookup = view.refresh();
+      await store.retry('setup-g1');
+      await flush();
+      resolveOldLookup({
+        ...failed,
+        status: 'completed',
+        result: {
+          ...failed,
+          status: 'completed',
+          success: true,
+          counts: {
+            total: 1,
+            written: 1,
+            unchanged: 0,
+            failed: 0,
+            skipped: 0,
+            rejected: 0,
+          },
+          agentOutcomes: [],
+        },
+      });
+      await oldLookup;
+      expect(store.get('setup-g1')).toMatchObject({
+        status: 'failed',
+        backendRunId: 'run-1',
+      });
+    });
+
+    it.each(['view', 'poll', 'terminal push'] as const)(
+      'settles a guidance trace-write failure as failed via %s',
+      async (route) => {
+        const store = await create();
+        const owner = {
+          ...binding('setup-p1', 'setup-project-prompt'),
+          runId: 'run-1',
+        };
+        store.adopt(owner);
+        mockBoundStatus('running');
+        const view = TestBed.inject(GuidanceGenerationStore);
+        if (route === 'view') {
+          view.bind(owner);
+          await flush();
+          expect(view.status()).toBe('running');
+        }
+        rpc['getBoundRunState'].mockResolvedValue(
+          runState('completed', { binding: owner, committedState: 'unknown' }),
+        );
+        if (route === 'view') {
+          await view.refresh();
+          expect(view.status()).toBe('failed');
+        } else if (route === 'terminal push') {
+          await store.verifyTerminal(owner);
+        } else {
+          await flush();
+          await jest.advanceTimersByTimeAsync(SETUP_RUN_POLL_INTERVAL_MS);
+        }
+        expect(store.get(owner.tabId)).toMatchObject({
+          status: 'failed',
+          error: 'Project guidance did not finish.',
+        });
+      },
+    );
+
+    it.each(['invalid-binding', 'workspace-mismatch'] as const)(
+      'uses workspace mismatch copy for retry and rerun rejected with %s',
+      async (reason) => {
+        seed(
+          record({
+            id: 'setup-retry',
+            status: 'failed',
+            workflow: 'project-guidance',
+          }),
+          record({
+            id: 'setup-rerun',
+            status: 'completed',
+            workflow: 'project-guidance',
+          }),
+        );
+        rpc['startBoundGuidance'].mockResolvedValue({ rejection: { reason } });
+        rpc['regenerateBoundGuidance'].mockResolvedValue({
+          rejection: { reason },
+        });
+        const store = await create();
+        const expected = {
+          status: 'failed',
+          error: 'This run belongs to another workspace.',
+        };
+        await expect(store.retry('setup-retry')).resolves.toMatchObject(
+          expected,
+        );
+        const next = store.rerun('setup-rerun');
+        await expect(
+          store.whenStarted(next?.id ?? 'missing'),
+        ).resolves.toMatchObject(expected);
+      },
+    );
+
+    it('uses fixed actionable copy for a coded guidance start error', async () => {
+      seed(
+        record({
+          id: 'setup-p1',
+          status: 'failed',
+          workflow: 'project-guidance',
+        }),
+      );
+      rpc['startBoundGuidance'].mockRejectedValue(
+        new WizardRpcError('/private/backend/message', 'SETUP_MODEL_INVALID'),
+      );
+      const store = await create();
+      await expect(store.retry('setup-p1')).resolves.toMatchObject({
+        status: 'failed',
+        error:
+          'The Setup model could not be resolved. Update Background models and retry.',
+      });
+    });
+
+    it('clears settled delivery and attempt state and drops redirects on cap eviction', async () => {
+      seed(
+        record({ id: 'setup-retry', status: 'failed' }),
+        record({ id: 'setup-blocked', status: 'failed' }),
+      );
+      const store = await create();
+      const owned = { ...binding('setup-retry'), runId: 'run-9' };
+      rpc['getBoundRunState'].mockResolvedValue(
+        runState('running', { binding: owned }),
+      );
+      await store.retry(owned.tabId);
+      store.reportStream(owned);
+      store.reportRun(owned.tabId, runState('completed', { binding: owned }));
+      expect(store['attempts'].get(owned.tabId)).toBeUndefined();
+      expect(store['attempts']['delivery']().has(owned.tabId)).toBe(false);
+
+      rpc['startBoundAgents'].mockResolvedValue({
+        rejection: { reason: 'blocked', ownerTabId: 'setup-owner' },
+      });
+      await store.retry('setup-blocked');
+      await expect(store.whenStarted('setup-blocked')).resolves.toMatchObject({
+        id: 'setup-owner',
+      });
+      store.attach('setup-blocked');
+      store.report(owned.tabId, { status: 'completed' });
+      for (let i = 0; i < MAX_SETUP_RUNS_PER_WORKSPACE; i++) {
+        jest.setSystemTime(Date.now() + 1);
+        const next = store.adopt(binding(`setup-cap-${i}`));
+        if (next) store.report(next.id, { status: 'completed' });
+      }
+      expect(store.get('setup-blocked')).toBeNull();
+      expect(store['attempts'].get('setup-blocked')).toBeUndefined();
+      expect(store['viewing'].has('setup-blocked')).toBe(false);
+      await expect(store.whenStarted('setup-blocked')).resolves.toBeNull();
+    });
+
+    it('resolves the in-flight start of a rerun', async () => {
+      seed(
+        record({
+          id: 'setup-p1',
+          workflow: 'project-guidance',
+          status: 'completed',
+        }),
+      );
+      let accept!: (value: { accepted: { runId: string } }) => void;
+      rpc['regenerateBoundGuidance'].mockReturnValue(
+        new Promise((resolve) => (accept = resolve)),
+      );
+      const store = await create();
+      const next = store.rerun('setup-p1');
+      const started = store.whenStarted(next?.id ?? 'missing');
+      accept({ accepted: { runId: 'run-7' } });
+      await expect(started).resolves.toMatchObject({
+        id: next?.id,
+        backendRunId: 'run-7',
+      });
+    });
+
+    it('redirects a blocked rerun before and after settlement', async () => {
+      seed(
+        record({
+          id: 'setup-p1',
+          workflow: 'project-guidance',
+          status: 'completed',
+        }),
+      );
+      let block!: (value: unknown) => void;
+      rpc['regenerateBoundGuidance'].mockReturnValue(
+        new Promise((resolve) => (block = resolve)),
+      );
+      const store = await create();
+      const attempted = store.rerun('setup-p1');
+      if (!attempted) throw new Error('Expected a rerun record');
+      const waiting = store.whenStarted(attempted.id);
+      block({ rejection: { reason: 'blocked', ownerTabId: 'owner-9' } });
+      await expect(waiting).resolves.toMatchObject({ id: 'owner-9' });
+      store.reportRun(
+        'owner-9',
+        runState('completed', {
+          committedState: 'committed',
+          binding: {
+            ...binding('owner-9', 'setup-project-prompt'),
+            runId: 'owner-run',
+          },
+        }),
+      );
+      await expect(store.whenStarted(attempted.id)).resolves.toMatchObject({
+        id: 'owner-9',
+        status: 'completed',
+      });
+    });
+
+    it.each([
+      { workflow: 'agent-generation' as const, workspacePath: WS },
+      { workflow: 'project-guidance' as const, workspacePath: OTHER_WS },
+    ])(
+      'refuses a blocked owner with a foreign binding (%j)',
+      async (foreign) => {
+        seed(
+          record({
+            id: 'setup-p1',
+            workflow: 'project-guidance',
+            status: 'failed',
+          }),
+          record({ id: 'owner-9', status: 'completed', ...foreign }),
+        );
+        rpc['startBoundGuidance'].mockResolvedValue({
+          rejection: { reason: 'blocked', ownerTabId: 'owner-9' },
+        });
+        const store = await create();
+        await expect(store.retry('setup-p1')).resolves.toMatchObject({
+          id: 'setup-p1',
+          status: 'failed',
+        });
+        await expect(store.whenStarted('setup-p1')).resolves.toMatchObject({
+          id: 'setup-p1',
+        });
+      },
+    );
+
+    it('tracks a same-id blocked owner as the existing run', async () => {
+      seed(
+        record({
+          id: 'setup-p1',
+          workflow: 'project-guidance',
+          status: 'interrupted',
+          backendRunId: 'old-run',
+        }),
+      );
+      rpc['startBoundGuidance'].mockResolvedValue({
+        rejection: { reason: 'blocked', ownerTabId: 'setup-p1' },
+      });
+      const store = await create();
+      let confirmOwner!: (run: SetupGenerationRunState) => void;
+      rpc['getBoundRunState'].mockReturnValueOnce(
+        new Promise((resolve) => (confirmOwner = resolve)),
+      );
+      const retry = store.retry('setup-p1');
+      await flush();
+      const ownerBinding = binding('setup-p1', 'setup-project-prompt');
+      expect(store.reportStream({ ...ownerBinding, runId: 'old-run' })).toBe(
+        false,
+      );
+      confirmOwner(
+        runState('cancelling', {
+          binding: { ...ownerBinding, runId: 'owner-run' },
+        }),
+      );
+      await expect(store.whenStarted('setup-p1')).resolves.toMatchObject({
+        id: 'setup-p1',
+        status: 'running',
+        backendRunId: 'owner-run',
+      });
+      await retry;
+      await flush();
+      await expect(store.whenStarted('setup-p1')).resolves.toMatchObject({
+        id: 'setup-p1',
+        backendRunId: 'owner-run',
+        status: 'running',
+      });
+      expect(store.runs()).toHaveLength(1);
+    });
+
+    it('resolves the current record when no start is in flight', async () => {
+      seed(record({ id: 'setup-g1' }));
+      const store = await create();
+      await expect(store.whenStarted('setup-g1')).resolves.toMatchObject({
+        id: 'setup-g1',
+      });
+      await expect(store.whenStarted('missing')).resolves.toBeNull();
+    });
+
+    it('returns the binding of a bound record only', async () => {
+      const store = await create();
+      expect(
+        store.bindingFor(
+          record({ id: 'setup-p1', workflow: 'project-guidance' }),
+        ),
+      ).toEqual(binding('setup-p1', 'setup-project-prompt'));
+      expect(store.bindingFor(record({ id: 'setup-g1' }))).toEqual(
+        binding('setup-g1'),
+      );
+      expect(
+        store.bindingFor(record({ id: 'setup-a1', workflow: 'analysis' })),
+      ).toBeNull();
     });
   });
 });

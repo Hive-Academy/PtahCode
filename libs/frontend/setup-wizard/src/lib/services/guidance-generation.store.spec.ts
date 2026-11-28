@@ -1,6 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import type { SetupGenerationRunState } from '@ptah-extension/shared';
+import type {
+  SetupGenerationRunState,
+  SetupGenerationTabBinding,
+} from '@ptah-extension/shared';
 import { GuidanceGenerationStore } from './guidance-generation.store';
+import { SetupRunStore } from './setup-run.store';
+import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';
 
 const binding = {
@@ -27,6 +32,24 @@ const run = (
   effectiveModel: 'unknown',
 });
 
+function record(
+  over: Partial<SetupRunRecord> & { id: string },
+): SetupRunRecord {
+  return {
+    workspacePath: '/ws',
+    workflow: 'project-guidance',
+    status: 'running',
+    step: 'generating',
+    backendRunId: 'r1',
+    analysisRunId: null,
+    parentId: null,
+    unseen: false,
+    createdAt: 1000,
+    updatedAt: 1000,
+    ...over,
+  };
+}
+
 describe('GuidanceGenerationStore', () => {
   let rpc: {
     getBoundRunState: jest.Mock;
@@ -38,8 +61,56 @@ describe('GuidanceGenerationStore', () => {
     getEnhancedPromptContent: jest.Mock;
     downloadEnhancedPrompt: jest.Mock;
   };
+  let runs: {
+    get: jest.Mock;
+    adopt: jest.Mock;
+    reportRun: jest.Mock;
+    bindingFor: jest.Mock;
+  };
+  let records: Map<string, SetupRunRecord>;
   let store: GuidanceGenerationStore;
+
   beforeEach(() => {
+    records = new Map([['own', record({ id: 'own' })]]);
+    runs = {
+      get: jest.fn().mockImplementation((id: string) => records.get(id) ?? null),
+      adopt: jest
+        .fn()
+        .mockImplementation((bindingValue: SetupGenerationTabBinding) => {
+          const existing = records.get(bindingValue.tabId);
+          if (existing) return existing;
+          if (bindingValue.workflow !== 'setup-project-prompt') return null;
+          const adopted = record({
+            id: bindingValue.tabId,
+            workspacePath: bindingValue.workspacePath,
+            backendRunId: null,
+          });
+          records.set(adopted.id, adopted);
+          return adopted;
+        }),
+      reportRun: jest
+        .fn()
+        .mockImplementation((id: string, value: SetupGenerationRunState) => {
+          const current = records.get(id);
+          if (!current) return null;
+          const updated = {
+            ...current,
+            backendRunId: value.binding.runId,
+            updatedAt: 2000,
+          };
+          records.set(id, updated);
+          return updated;
+        }),
+      bindingFor: jest.fn().mockImplementation((value: SetupRunRecord) => {
+        return value.workflow === 'project-guidance'
+          ? {
+              tabId: value.id,
+              workspacePath: value.workspacePath,
+              workflow: 'setup-project-prompt',
+            }
+          : null;
+      }),
+    };
     rpc = {
       getBoundRunState: jest.fn().mockResolvedValue(null),
       startBoundGuidance: jest.fn().mockResolvedValue({ accepted }),
@@ -56,6 +127,7 @@ describe('GuidanceGenerationStore', () => {
       providers: [
         GuidanceGenerationStore,
         { provide: WizardRpcService, useValue: rpc },
+        { provide: SetupRunStore, useFactory: () => runs },
       ],
     });
     store = TestBed.inject(GuidanceGenerationStore);
@@ -184,5 +256,33 @@ describe('GuidanceGenerationStore', () => {
     expect(store.content()).toBeNull();
     await store.loadContent();
     expect(store.actionFailed()).toBe(true);
+  });
+
+  it('reports an applied run to its Setup record', () => {
+    const verified = run('running');
+    store.bind(binding);
+    store.adopt(verified);
+    expect(runs.reportRun).toHaveBeenCalledWith('own', verified);
+    expect(runs.get('own')?.backendRunId).toBe('r1');
+  });
+
+  it('binds a project-guidance Setup record', async () => {
+    const value = record({ id: 'record', backendRunId: 'r9' });
+    records.set(value.id, value);
+    const verified = {
+      ...run('running'),
+      binding: {
+        ...binding,
+        tabId: 'record',
+        runId: 'r9',
+      },
+    };
+    rpc.getBoundRunState.mockResolvedValue(verified);
+    expect(store.bindRecord(value)).toBe(true);
+    expect(runs.bindingFor).toHaveBeenCalledWith(value);
+    expect(store.binding()).toEqual({ ...binding, tabId: 'record' });
+    await store.refresh();
+    expect(store.snapshot()?.runId).toBe('r9');
+    expect(runs.reportRun).toHaveBeenCalledWith('record', verified);
   });
 });

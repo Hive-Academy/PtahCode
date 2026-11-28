@@ -41,11 +41,9 @@ import {
   type OnboardingTarget,
 } from '@ptah-extension/core';
 import type {
-  SetupGenerationRejection,
-  SetupGenerationRunLifecycle,
+  SetupGenerationRunBinding,
   SetupGenerationRunState,
   SetupGenerationTabBinding,
-  SetupGenerationWorkflow,
   WizardGetResumableRunResponse,
   WizardRecommendAnalysisSkillsResult,
 } from '@ptah-extension/shared';
@@ -57,6 +55,20 @@ import {
   writeSetupRunIndex,
   type SetupRunIndex,
 } from './setup-run-persistence';
+import {
+  bindingOf,
+  isBound,
+  matchesBinding,
+  readBoundState,
+  reconcileGuidanceOutput,
+  requestBoundStart,
+  SetupRunAttempts,
+  SetupRunPoll,
+  startRefusalCopy,
+  verifiedRunStatus,
+  workflowOfBinding,
+  type SetupRunAttempt,
+} from './setup-run-attempt';
 import { stepTarget } from './setup-run-steps';
 import {
   SETUP_RUN_STEPS,
@@ -101,50 +113,16 @@ const LIVE_STATUSES: ReadonlySet<SetupRunStatus> = new Set([
   'needs-input',
 ]);
 
-const BOUND_WORKFLOW: Readonly<
-  Record<'agent-generation' | 'project-guidance', SetupGenerationWorkflow>
-> = {
-  'agent-generation': 'setup-agent-generation',
-  'project-guidance': 'setup-project-prompt',
-};
-
-const RUN_LIFECYCLE_STATUS: Readonly<
-  Record<SetupGenerationRunLifecycle, SetupRunStatus>
-> = {
-  starting: 'running',
-  running: 'running',
-  cancelling: 'running',
-  completed: 'completed',
-  failed: 'failed',
-  'timed-out': 'failed',
-  cancelled: 'cancelled',
-};
-
 /** Fixed user copy; raw backend text never reaches a record. */
-const FAILURE_COPY: Readonly<Record<SetupRunWorkflow, string>> = {
+const FAILURE_COPY = {
   analysis: 'The analysis did not finish.',
   'skill-review': 'Could not load skill recommendations.',
-  'agent-generation': 'Agent generation did not finish.',
-  'project-guidance': 'Project guidance did not finish.',
-  'team-builder': 'The team builder did not finish.',
 };
 
-const START_REFUSED_COPY = 'The run could not be started.';
-
-type BoundWorkflow = keyof typeof BOUND_WORKFLOW;
+const ORPHAN_GRACE_MS = 2 * SETUP_RUN_POLL_INTERVAL_MS;
 
 function isLive(record: SetupRunRecord): boolean {
   return LIVE_STATUSES.has(record.status);
-}
-
-function isBound(workflow: SetupRunWorkflow): workflow is BoundWorkflow {
-  return workflow === 'agent-generation' || workflow === 'project-guidance';
-}
-
-function workflowOfBinding(workflow: SetupGenerationWorkflow): BoundWorkflow {
-  return workflow === 'setup-agent-generation'
-    ? 'agent-generation'
-    : 'project-guidance';
 }
 
 function newestFirst(a: SetupRunRecord, b: SetupRunRecord): number {
@@ -174,10 +152,9 @@ export class SetupRunStore {
 
   private readonly _index = signal<SetupRunIndex>({});
   private readonly _cancelling = signal<ReadonlySet<string>>(new Set());
-  /** Bound runs a push reported in this session; the poll skips them. */
-  private readonly _pushed = signal<ReadonlySet<string>>(new Set());
+  private readonly attempts = new SetupRunAttempts();
 
-  /** Records whose work was started or adopted live in this session. */
+  /** Records whose work started, was adopted live, or pushed in this session. */
   private readonly liveThisSession = new Set<string>();
   /** Analysis records for which the runner was seen running. */
   private readonly runnerSeen = new Set<string>();
@@ -188,11 +165,8 @@ export class SetupRunStore {
     string,
     Promise<WizardRecommendAnalysisSkillsResult>
   >();
-
   private writeQueued = false;
   private reconcileSequence = 0;
-  private pollTimer: ReturnType<typeof setTimeout> | null = null;
-  private pollToken = 0;
 
   /** The active workspace, normalized. */
   public readonly workspacePath = computed(() =>
@@ -224,15 +198,25 @@ export class SetupRunStore {
   /** Ids whose cancel waits for backend confirmation. */
   public readonly cancellingIds = this._cancelling.asReadonly();
 
-  private readonly pollNeeded = computed(() => {
-    const pushed = this._pushed();
-    return this.runs().some(
-      (record) =>
-        record.status === 'running' &&
-        isBound(record.workflow) &&
-        !pushed.has(record.id),
-    );
-  });
+  private readonly pollNeeded = computed(() =>
+    this.runs().some(
+      (record) => isBound(record.workflow) && this.attempts.shouldPoll(record),
+    ),
+  );
+
+  private readonly poll = new SetupRunPoll(
+    SETUP_RUN_POLL_INTERVAL_MS,
+    () => this.pollNeeded(),
+    () =>
+      Promise.all(
+        this.runs()
+          .filter(
+            (record) =>
+              isBound(record.workflow) && this.attempts.shouldPoll(record),
+          )
+          .map((record) => this.reconcileBound(record)),
+      ),
+  );
 
   public constructor() {
     const read = this.storage
@@ -244,7 +228,8 @@ export class SetupRunStore {
     effect(() => {
       const workspace = this.workspacePath();
       untracked(() => {
-        this.restartPoll();
+        this.poll.stop();
+        if (this.pollNeeded()) this.poll.ensure();
         if (workspace) void this.activate();
       });
     });
@@ -256,9 +241,9 @@ export class SetupRunStore {
     });
     effect(() => {
       const needed = this.pollNeeded();
-      untracked(() => (needed ? this.ensurePoll() : this.stopPoll()));
+      untracked(() => (needed ? this.poll.ensure() : this.poll.stop()));
     });
-    inject(DestroyRef).onDestroy(() => this.stopPoll());
+    inject(DestroyRef).onDestroy(() => this.poll.stop());
   }
 
   // ---------------------------------------------------------------- reads
@@ -345,7 +330,10 @@ export class SetupRunStore {
    */
   public adopt(binding: SetupGenerationTabBinding): SetupRunRecord | null {
     const existing = this.get(binding.tabId);
-    if (existing) return existing;
+    if (existing)
+      return matchesBinding(this.bindingFor(existing), binding)
+        ? existing
+        : null;
     const workspace = normalizeSetupWorkspacePath(binding.workspacePath);
     if (!workspace || !isOnboardingIdentityValue(binding.tabId)) return null;
     const now = Date.now();
@@ -391,11 +379,97 @@ export class SetupRunStore {
   public report(id: string, update: SetupRunReport): SetupRunRecord | null {
     const record = this.get(id);
     if (!record) return null;
-    if (isBound(record.workflow) && !this._pushed().has(id)) {
-      this._pushed.update((set) => new Set(set).add(id));
-    }
     this.apply(id, update);
     return this.get(id);
+  }
+
+  /** Apply the workflow view's verified state to its current record. */
+  public reportRun(
+    id: string,
+    run: SetupGenerationRunState,
+  ): SetupRunRecord | null {
+    this.observeRun(id, run, this.attempts.get(id));
+    return this.get(id);
+  }
+
+  public startInitial<T>(
+    binding: SetupGenerationTabBinding,
+    send: () => Promise<T>,
+  ): Promise<T> {
+    const record = this.get(binding.tabId);
+    if (
+      !record ||
+      !isLive(record) ||
+      !matchesBinding(this.bindingFor(record), binding)
+    )
+      return send();
+    this.liveThisSession.add(record.id);
+    return this.attempts.startInitial(record.id, send);
+  }
+
+  public reporterFor(id: string): (run: SetupGenerationRunState) => void {
+    const attempt = this.attempts.get(id);
+    return (run) => this.observeRun(id, run, attempt);
+  }
+
+  public reportStream(pushed: SetupGenerationRunBinding): boolean {
+    const record = this.get(pushed.tabId);
+    if (
+      !this.attempts.canObserve(
+        record,
+        this.attempts.get(pushed.tabId),
+        pushed.runId,
+      )
+    )
+      return false;
+    if (!matchesBinding(this.bindingFor(record), pushed)) return false;
+    this.liveThisSession.add(record.id);
+    this.attempts.evidence(record.id);
+    this.attempts.pushed(record.id);
+    this.apply(record.id, {
+      status: 'running',
+      step: 'generating',
+      backendRunId: pushed.runId,
+      error: null,
+    });
+    return true;
+  }
+
+  public async verifyTerminal(
+    pushed: SetupGenerationRunBinding,
+  ): Promise<boolean> {
+    const { tabId: id, runId } = pushed;
+    const attempt = this.attempts.get(id);
+    const record = this.get(id);
+    if (
+      !this.attempts.canObserve(record, attempt, runId) &&
+      !this.attempts.hasFinalizationFailure(record, attempt, runId)
+    )
+      return false;
+    const binding = this.bindingFor(record);
+    if (!binding || !matchesBinding(binding, pushed)) return false;
+    this.liveThisSession.add(id);
+    const run = await readBoundState(this.rpc, binding, runId);
+    const observed =
+      run?.binding?.runId === runId && this.observeRun(id, run, attempt);
+    if (this.attempts.canObserve(this.get(id), attempt, runId))
+      this.attempts.fallback(id);
+    return (
+      observed ||
+      (this.attempts.get(id) === attempt &&
+        this.get(id)?.backendRunId === runId)
+    );
+  }
+
+  /** Resolve the record carrying the run, including an owner reported by a settled start. */
+  public whenStarted(id: string): Promise<SetupRunRecord | null> {
+    const attempt = this.attempts.get(id);
+    return attempt?.start ?? Promise.resolve(this.get(attempt?.ownerId ?? id));
+  }
+
+  /** The backend binding of a generation or guidance record; else `null`. */
+  public bindingFor(record: SetupRunRecord): SetupGenerationTabBinding | null {
+    return bindingOf(record);
   }
 
   public setStep(id: string, step: SetupRunStep): void {
@@ -614,7 +688,8 @@ export class SetupRunStore {
     switch (record.workflow) {
       case 'agent-generation':
       case 'project-guidance':
-        return this.reconcileBound(record);
+        await this.reconcileBound(record);
+        return;
       case 'skill-review':
         return this.reconcileReview(record);
       case 'team-builder':
@@ -734,84 +809,55 @@ export class SetupRunStore {
     });
   }
 
-  private bindingOf(
-    record: SetupRunRecord & { workflow: BoundWorkflow },
-  ): SetupGenerationTabBinding {
-    return {
-      tabId: record.id,
-      workflow: BOUND_WORKFLOW[record.workflow],
-      workspacePath: record.workspacePath,
-    };
-  }
-
-  private async reconcileBound(record: SetupRunRecord): Promise<void> {
-    if (!isBound(record.workflow)) return;
-    // A generation waiting at its preview has no backend run yet.
-    if (record.step === 'preview') return;
-    const binding = this.bindingOf({ ...record, workflow: record.workflow });
-    let run: SetupGenerationRunState | null;
-    try {
-      run = await this.rpc.getBoundRunState(
-        binding,
-        record.backendRunId ?? undefined,
-      );
-    } catch {
-      // degradation-audit: optional-capability - an unavailable run state keeps the last known status
-      return;
-    }
-    const current = this.get(record.id);
-    if (!current || !isLive(current)) return;
-    if (run) {
-      this.applyRunState(record.id, run);
-      return;
-    }
-    if (this.liveThisSession.has(record.id)) return;
-    if (record.workflow === 'project-guidance') {
-      await this.reconcileGuidanceOutput(record);
-      return;
-    }
-    this.apply(record.id, { status: 'interrupted' });
-  }
-
-  /** R2: guidance has no run after a restart; its output proves completion. */
-  private async reconcileGuidanceOutput(record: SetupRunRecord): Promise<void> {
-    const status = await this.rpc.getEnhancedPromptsStatus(
-      record.workspacePath,
+  private async reconcileBound(
+    record: SetupRunRecord,
+    ownerAttempt?: SetupRunAttempt,
+  ): Promise<SetupGenerationRunState | null> {
+    const binding = this.bindingFor(record);
+    const attempt = this.attempts.get(record.id);
+    if (
+      !binding ||
+      record.step === 'preview' ||
+      (attempt?.pending && attempt !== ownerAttempt)
+    )
+      return null;
+    const initialStartPending = !!attempt?.pendingInitialStarts;
+    const run = await readBoundState(
+      this.rpc,
+      binding,
+      record.backendRunId ?? undefined,
     );
-    if (status.error) {
-      // degradation-audit: optional-capability - an unavailable guidance status keeps the last known status
-      return;
-    }
-    const generatedAt = status.generatedAt
-      ? Date.parse(status.generatedAt)
-      : NaN;
-    this.apply(record.id, {
-      status:
-        Number.isFinite(generatedAt) && generatedAt > record.createdAt
-          ? 'completed'
-          : 'interrupted',
-    });
+    if (ownerAttempt) ownerAttempt.pending = false;
+    if (run) return this.observeRun(record.id, run, attempt) ? run : null;
+    const stillMissing = (): boolean =>
+      !initialStartPending &&
+      !attempt?.pendingInitialStarts &&
+      this.get(record.id) === record &&
+      this.attempts.canObserve(record, attempt);
+    if (run !== null || !stillMissing()) return null;
+    const live = this.liveThisSession.has(record.id);
+    if (live && !this.attempts.orphaned(record.id, ORPHAN_GRACE_MS))
+      return null;
+    const status =
+      !live && record.workflow === 'project-guidance'
+        ? await reconcileGuidanceOutput(this.rpc, record)
+        : 'interrupted';
+    if (status && stillMissing()) this.apply(record.id, { status });
+    return null;
   }
 
-  private applyRunState(id: string, run: SetupGenerationRunState): void {
-    const status = run.interrupted
-      ? 'interrupted'
-      : RUN_LIFECYCLE_STATUS[run.status];
-    const record = this.get(id);
-    this.apply(id, {
-      status,
-      ...(isOnboardingIdentityValue(run.binding.runId)
-        ? { backendRunId: run.binding.runId }
-        : {}),
-      ...(run.source.kind === 'verified-analysis' &&
-      record?.analysisRunId === null &&
-      isOnboardingIdentityValue(run.source.analysisRunId)
-        ? { analysisRunId: run.source.analysisRunId }
-        : {}),
-      ...(status === 'failed' && record
-        ? { error: FAILURE_COPY[record.workflow] }
-        : {}),
-    });
+  private observeRun(
+    id: string,
+    run: SetupGenerationRunState,
+    attempt: SetupRunAttempt | undefined,
+  ): boolean {
+    const observation = this.attempts.observation(this.get(id), attempt, run);
+    if (!observation) return false;
+    this.attempts.evidence(id);
+    this.liveThisSession.add(id);
+    const { update, correction, finalizationRunId } = observation;
+    this.apply(id, update, correction, finalizationRunId);
+    return true;
   }
 
   private async reconcileReview(record: SetupRunRecord): Promise<void> {
@@ -924,140 +970,143 @@ export class SetupRunStore {
   }
 
   private async cancelBound(record: SetupRunRecord): Promise<boolean> {
-    if (!isBound(record.workflow)) return false;
-    const binding = this.bindingOf({ ...record, workflow: record.workflow });
+    const binding = this.bindingFor(record);
+    const attempt = this.attempts.get(record.id);
+    if (!binding || attempt?.pending) return false;
     let runId = record.backendRunId;
-    let cancelled: boolean;
     try {
       if (!runId) {
-        const run = await this.rpc.getBoundRunState(binding);
+        const run = await readBoundState(this.rpc, binding);
         if (
-          !run ||
-          isTerminalSetupRunStatus(RUN_LIFECYCLE_STATUS[run.status])
-        ) {
-          if (run) this.applyRunState(record.id, run);
-          else this.apply(record.id, { status: 'cancelled' });
+          !this.attempts.canObserve(
+            this.get(record.id),
+            attempt,
+            run?.binding?.runId,
+          )
+        )
+          return false;
+        if (run === null && this.get(record.id)?.backendRunId === null) {
+          this.apply(record.id, { status: 'cancelled' });
+          return true;
+        }
+        const status = verifiedRunStatus(run ?? null, binding);
+        if (!status || !run) return false;
+        if (isTerminalSetupRunStatus(status)) {
+          this.observeRun(record.id, run, attempt);
           return this.get(record.id)?.status === 'cancelled';
         }
         runId = run.binding.runId;
       }
-      cancelled = await this.rpc.cancelBoundRun({ ...binding, runId });
+      if (await this.rpc.cancelBoundRun({ ...binding, runId })) {
+        if (this.attempts.canObserve(this.get(record.id), attempt, runId)) {
+          this.apply(record.id, { status: 'cancelled' });
+        }
+        return this.get(record.id)?.status === 'cancelled';
+      }
     } catch {
       // degradation-audit: optional-capability - an unconfirmed stop keeps the run's last known status
       return false;
     }
-    if (cancelled) {
-      this.apply(record.id, { status: 'cancelled' });
-      return true;
+    if (this.attempts.canObserve(this.get(record.id), attempt, runId)) {
+      await this.reconcileBound(this.get(record.id) ?? record);
     }
-    // Refused or already finished: reconcile shows what the run became.
-    await this.reconcileBound(record);
     return this.get(record.id)?.status === 'cancelled';
   }
 
-  private async startBound(
+  private startBound(
     record: SetupRunRecord,
     mode: 'retry' | 'regenerate',
   ): Promise<SetupRunRecord | null> {
-    if (!isBound(record.workflow)) return null;
-    const binding = this.bindingOf({ ...record, workflow: record.workflow });
-    const previous = { status: record.status, error: record.error ?? null };
+    return this.attempts.start(record.id, (attempt) =>
+      this.sendBoundStart(record, mode, attempt),
+    );
+  }
+
+  private async sendBoundStart(
+    record: SetupRunRecord,
+    mode: 'retry' | 'regenerate',
+    attempt: SetupRunAttempt,
+  ): Promise<SetupRunRecord | null> {
+    const binding = this.bindingFor(record);
+    if (!binding) return null;
     this.liveThisSession.add(record.id);
     this.apply(record.id, {
       status: 'running',
       step: 'generating',
       error: null,
     });
-    let accepted: { runId: string } | undefined;
-    let rejection: SetupGenerationRejection | undefined;
-    try {
-      if (record.workflow === 'agent-generation') {
-        // Resume from the checkpoint: settled items are not regenerated.
-        const response = await this.rpc.startBoundAgents(binding, [], true);
-        accepted = response.accepted;
-        rejection = response.rejection;
-      } else {
-        const response =
-          mode === 'retry'
-            ? await this.rpc.startBoundGuidance(binding)
-            : await this.rpc.regenerateBoundGuidance(binding);
-        accepted = response.accepted;
-        rejection = response.rejection;
-      }
-    } catch {
-      // degradation-audit: optional-capability - an unconfirmed start restores the previous status with fixed copy
+    const response = await requestBoundStart(this.rpc, binding, mode);
+    attempt.pending = false;
+    if (this.attempts.get(record.id) !== attempt) return null;
+    if (!response || 'refusalCode' in response) {
       this.apply(record.id, {
-        status: mode === 'retry' ? previous.status : 'failed',
-        error: START_REFUSED_COPY,
+        status: mode === 'retry' ? record.status : 'failed',
+        error: startRefusalCopy(response?.refusalCode),
       });
       return this.get(record.id);
     }
+    const { accepted, rejection } = response;
     if (accepted && isOnboardingIdentityValue(accepted.runId)) {
       this.apply(record.id, { backendRunId: accepted.runId });
-      return this.get(record.id);
+      // The backend can finish before its acceptance reaches us. Read after
+      // acceptance, especially when retry reused the previous checkpoint id.
+      const current = this.get(record.id);
+      if (current) void this.reconcileBound(current);
+      return current;
     }
     if (rejection?.reason === 'blocked' && rejection.ownerTabId) {
-      // Another run owns the workflow: attach to it (rule 1, R1).
-      this.apply(record.id, {
-        status: previous.status === 'running' ? 'failed' : previous.status,
-        error: previous.error,
-      });
-      return this.adopt({ ...binding, tabId: rejection.ownerTabId });
+      const { owner } = await this.resolveBlockedStart(
+        binding,
+        rejection.ownerTabId,
+      );
+      if (this.attempts.get(record.id) !== attempt) return this.get(record.id);
+      if (owner?.id === record.id) return owner;
+      if (owner) {
+        attempt.ownerId = owner.id;
+        this.apply(record.id, {
+          status: record.status === 'running' ? 'failed' : record.status,
+          error: record.error ?? null,
+        });
+        return owner;
+      }
     }
     this.apply(record.id, {
       status: 'failed',
-      error: START_REFUSED_COPY,
+      error: startRefusalCopy(rejection?.reason),
     });
     return this.get(record.id);
   }
 
-  // ------------------------------------------------------------- poll
-
-  private ensurePoll(): void {
-    if (this.pollTimer !== null) return;
-    this.schedulePoll(this.pollToken);
-  }
-
-  /** Workspace switch: drop the old workspace's tick and start over. */
-  private restartPoll(): void {
-    this.stopPoll();
-    if (this.pollNeeded()) this.ensurePoll();
-  }
-
-  private stopPoll(): void {
-    this.pollToken++;
-    if (this.pollTimer !== null) clearTimeout(this.pollTimer);
-    this.pollTimer = null;
-  }
-
-  private schedulePoll(token: number): void {
-    this.pollTimer = setTimeout(() => {
-      void this.pollTick(token);
-    }, SETUP_RUN_POLL_INTERVAL_MS);
-  }
-
-  private async pollTick(token: number): Promise<void> {
-    if (token !== this.pollToken) return;
-    const workspace = this.workspacePath();
-    const pushed = this._pushed();
-    await Promise.all(
-      this.runsFor(workspace)
-        .filter(
-          (record) =>
-            record.status === 'running' &&
-            isBound(record.workflow) &&
-            !pushed.has(record.id),
-        )
-        .map((record) => this.reconcileBound(record)),
-    );
-    if (token !== this.pollToken) return;
-    this.pollTimer = null;
-    if (this.pollNeeded()) this.schedulePoll(token);
+  /** Resolve both initial starts and repeats against the backend's owner. */
+  public async resolveBlockedStart(
+    binding: SetupGenerationTabBinding,
+    ownerTabId: string,
+  ) {
+    const owner = this.adopt({ ...binding, tabId: ownerTabId });
+    if (owner?.id !== binding.tabId) return { owner, run: null };
+    const attempt = this.attempts.hold(owner.id);
+    this.liveThisSession.add(owner.id);
+    this.attempts.fallback(owner.id);
+    this.patch(owner.id, (record) => ({
+      ...record,
+      backendRunId: null,
+      step: 'generating',
+      status: 'running',
+      unseen: false,
+    }));
+    const current = this.get(owner.id);
+    const run = current && (await this.reconcileBound(current, attempt));
+    return { owner: this.get(owner.id), run };
   }
 
   // ------------------------------------------------------ index writes
 
-  private apply(id: string, update: SetupRunReport): void {
+  private apply(
+    id: string,
+    update: SetupRunReport,
+    correction = false,
+    finalizationRunId?: string,
+  ): void {
     this.patch(id, (record) => {
       const next: SetupRunRecord = { ...record };
       if (update.status !== undefined) next.status = update.status;
@@ -1092,7 +1141,8 @@ export class SetupRunStore {
       const becameTerminal =
         isTerminalSetupRunStatus(next.status) &&
         !isTerminalSetupRunStatus(record.status);
-      if (becameTerminal) {
+      if (becameTerminal || correction) {
+        this.attempts.settle(id, finalizationRunId);
         next.unseen = !this.viewing.has(id);
         this.liveThisSession.delete(id);
         this.setCancelling(id, false);
@@ -1122,21 +1172,27 @@ export class SetupRunStore {
   }
 
   private insert(record: SetupRunRecord): void {
-    this._index.update((index) => ({
-      ...index,
-      [record.workspacePath]: capWorkspaceRuns([
-        ...(index[record.workspacePath] ?? []),
-        record,
-      ]),
-    }));
+    this._index.update((index) => {
+      const previous = index[record.workspacePath] ?? [];
+      const kept = capWorkspaceRuns([...previous, record]);
+      for (const item of previous)
+        if (!kept.includes(item)) this.forget(item.id);
+      return { ...index, [record.workspacePath]: kept };
+    });
     this.scheduleWrite();
+  }
+
+  private forget(id: string): void {
+    this.viewing.delete(id);
+    this.attempts.forget(id);
+    this.liveThisSession.delete(id);
+    this.setCancelling(id, false);
   }
 
   private remove(id: string): void {
     const record = this.get(id);
     if (!record) return;
-    this.viewing.delete(id);
-    this.liveThisSession.delete(id);
+    this.forget(id);
     this._index.update((index) => {
       const rest = (index[record.workspacePath] ?? []).filter(
         (item) => item.id !== id,

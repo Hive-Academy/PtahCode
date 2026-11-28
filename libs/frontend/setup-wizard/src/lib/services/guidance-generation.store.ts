@@ -4,6 +4,9 @@ import type {
   SetupGenerationRunState,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
+import { hasCommittedGuidance } from './setup-run-attempt';
+import { SetupRunStore } from './setup-run.store';
+import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';
 
 export type GuidanceRunStatus =
@@ -38,9 +41,15 @@ function sourceLabel(source: GenerationContextSource): string {
     : `Workspace discovery (${source.reason})`;
 }
 
+/**
+ * The committed guidance and its run, bound to a project-guidance Setup run
+ * record (`binding.tabId` is the record id). Verified run states are
+ * reported to `SetupRunStore`.
+ */
 @Injectable({ providedIn: 'root' })
 export class GuidanceGenerationStore {
   private readonly rpc = inject(WizardRpcService);
+  private readonly runs = inject(SetupRunStore);
   private readonly bindingValue = signal<SetupGenerationTabBinding | null>(
     null,
   );
@@ -74,6 +83,14 @@ export class GuidanceGenerationStore {
     this.statusValue.set('idle');
     this.content.set(null);
     void this.refresh();
+  }
+
+  /** Show a project-guidance Setup run record. */
+  bindRecord(record: SetupRunRecord): boolean {
+    const binding = this.runs.bindingFor(record);
+    if (binding?.workflow !== 'setup-project-prompt') return false;
+    this.bind(binding);
+    return true;
   }
 
   unbind(): void {
@@ -129,6 +146,7 @@ export class GuidanceGenerationStore {
     try {
       run = await this.rpc.getBoundRunState(binding, requestedRunId);
     } catch {
+      // degradation-audit: reported - an unreadable run state shows the `unknown` status.
       if (this.sameBinding(binding)) this.statusValue.set('unknown');
     }
     if (!this.sameBinding(binding)) return;
@@ -151,20 +169,28 @@ export class GuidanceGenerationStore {
 
   private applyRun(run: SetupGenerationRunState): void {
     this.runValue.set(run);
+    this.report(run);
     const terminal = ['completed', 'cancelled', 'failed', 'timed-out'].includes(
       run.status,
     );
-    const committed = run.committedState ?? run.result?.committedState;
     this.statusValue.set(
       this.restoring && terminal && run.status !== 'cancelled'
         ? 'idle'
-        : run.status === 'completed' &&
-            committed !== 'committed' &&
-            committed !== 'unchanged'
+        : run.status === 'completed' && !hasCommittedGuidance(run)
           ? 'failed'
           : run.status,
     );
     if (!terminal) this.restoring = false;
+  }
+
+  /** Sync a verified run onto its record; adopt only a live run. */
+  private report(run: SetupGenerationRunState): void {
+    const binding = this.bindingValue();
+    if (!binding) return;
+    const record =
+      this.runs.get(binding.tabId) ??
+      (this.isTerminal(run.status) ? null : this.runs.adopt(binding));
+    if (record) this.runs.reportRun(record.id, run);
   }
 
   private isTerminal(status: SetupGenerationRunState['status']): boolean {
@@ -195,6 +221,7 @@ export class GuidanceGenerationStore {
         );
       }
     } catch {
+      // degradation-audit: reported - an unreadable guidance status sets actionFailed.
       if (this.sameBinding(binding)) this.actionFailed.set(true);
     }
   }
@@ -207,6 +234,7 @@ export class GuidanceGenerationStore {
       await this.rpc.toggleEnhancedPrompts(binding.workspacePath, enabled);
       await this.refreshCommitted(binding);
     } catch {
+      // degradation-audit: reported - a failed toggle sets actionFailed and rereads the committed state.
       if (this.sameBinding(binding)) {
         this.actionFailed.set(true);
         await this.refreshCommitted(binding);
@@ -227,6 +255,7 @@ export class GuidanceGenerationStore {
         if (content === null) this.actionFailed.set(true);
       }
     } catch {
+      // degradation-audit: reported - unreadable guidance content sets actionFailed.
       if (this.sameBinding(binding)) this.actionFailed.set(true);
     }
   }
@@ -241,6 +270,7 @@ export class GuidanceGenerationStore {
       );
       if (this.sameBinding(binding)) this.actionFailed.set(!result.success);
     } catch {
+      // degradation-audit: reported - a failed download sets actionFailed.
       if (this.sameBinding(binding)) this.actionFailed.set(true);
     }
   }

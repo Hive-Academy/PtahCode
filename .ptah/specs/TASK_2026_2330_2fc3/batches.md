@@ -281,7 +281,19 @@ Edge cases:
   - Store deviations (no navigation, `adopt`/`report`/`attach`/`release`/`reviewSkills`, backend
     `retry`/`rerun`) must be reconciled with `GenerationWorkflowStore` in Batch 6.
 
-## Batch 6: Tab-free generation event adapter and workflow stores — PENDING
+## Batch 6: Tab-free generation event adapter and workflow stores — IMPLEMENTED
+
+- Result: implemented by a Claude subagent (6.1, 6.2 sources), Kimi Code (6.2 specs) and Codex
+  (review fixes, rounds 1-2 plus one bounded correction). Reviews: Codex (4/10 REVISE), Kimi
+  Code (5/10, 7/10 REVISE), Ollama Code on the bounded fix (8/10 APPROVED). Reports are the
+  `*-batch6-*.md` files in this folder.
+- Notes for the phase B review:
+  - `setup-run.store.ts` is 1,2xx lines, over max-lines 700; attempt logic moved to
+    `setup-run-attempt.ts`. A split needs its own step.
+  - Minor: a poll reply that straddles a start click can shorten the fresh orphan grace.
+  - Minor: no test holds a bound-state lookup pending across an initial start's settlement.
+  - Open requirement: should a finalization correction survive a renderer reload?
+  - The adapter does not route to `SetupWizardStateService`; that service is its own handler.
 
 - Shape: logic
 - Estimated weight (tokens): ~40k
