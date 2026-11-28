@@ -55,6 +55,14 @@ export interface ClaudeRequest {
   readonly output: number;
 }
 
+export interface ClaudeToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly input?: unknown;
+  readonly outcome: 'success' | 'error' | 'unknown';
+  readonly atMs: number | null;
+}
+
 export interface ClaudeTranscriptSummary {
   readonly file: string;
   readonly id: string;
@@ -76,6 +84,7 @@ export interface ClaudeTranscriptSummary {
   readonly largestToolOutput: ToolOutputSize | null;
   readonly hasLaneMarker: boolean;
   readonly badLines: number;
+  readonly toolCalls?: readonly ClaudeToolCall[];
 }
 
 /** `<CLAUDE_CONFIG_DIR or ~/.claude>/projects`. */
@@ -148,6 +157,8 @@ export function readClaudeTranscript(file: string): ClaudeTranscriptSummary {
   const firstAtById = new Map<string, number | null>();
   let firstRequestSeen = false;
   const toolNames: Record<string, string> = {};
+  const toolCalls: ClaudeToolCall[] = [];
+  const toolIndexes = new Map<string, number>();
   const firstRequestUserTexts: string[] = [];
   const requestInputs: number[] = [];
   let cwd = '';
@@ -190,6 +201,11 @@ export function readClaudeTranscript(file: string): ClaudeTranscriptSummary {
           const part = asObject(block);
           if (part['type'] !== 'tool_result') continue;
           const useId = asString(part['tool_use_id']);
+          const position = useId === null ? undefined : toolIndexes.get(useId);
+          if (position !== undefined) {
+            const call = toolCalls[position];
+            if (call) toolCalls[position] = { ...call, outcome: part['is_error'] === true ? 'error' : 'success' };
+          }
           largestToolOutput = largerToolOutput(largestToolOutput, {
             tool: (useId !== null ? toolNames[useId] : undefined) ?? '?',
             chars: outputChars(part['content']),
@@ -206,7 +222,34 @@ export function readClaudeTranscript(file: string): ClaudeTranscriptSummary {
         const part = asObject(block);
         const id = asString(part['id']);
         if (part['type'] === 'tool_use' && id !== null) {
-          toolNames[id] = asString(part['name']) ?? '?';
+          const name = asString(part['name']);
+          const existingPosition = toolIndexes.get(id);
+          if (existingPosition !== undefined) {
+            const existing = toolCalls[existingPosition];
+            if (existing) {
+              const mergedName = name ?? existing.name;
+              toolNames[id] = mergedName;
+              toolCalls[existingPosition] = {
+                ...existing,
+                name: mergedName,
+                ...(part['input'] !== undefined ? { input: part['input'] } : {}),
+                ...(existing.atMs === null && Number.isFinite(stampMs)
+                  ? { atMs: stampMs }
+                  : {}),
+              };
+            }
+          } else {
+            const resolvedName = name ?? '?';
+            toolNames[id] = resolvedName;
+            toolIndexes.set(id, toolCalls.length);
+            toolCalls.push({
+              id,
+              name: resolvedName,
+              ...(part['input'] !== undefined ? { input: part['input'] } : {}),
+              outcome: 'unknown',
+              atMs: Number.isFinite(stampMs) ? stampMs : null,
+            });
+          }
         }
       }
     }
@@ -269,6 +312,7 @@ export function readClaudeTranscript(file: string): ClaudeTranscriptSummary {
     largestToolOutput,
     hasLaneMarker: hasLaneContractMarker(firstRequestUserTexts),
     badLines,
+    toolCalls,
   };
 }
 

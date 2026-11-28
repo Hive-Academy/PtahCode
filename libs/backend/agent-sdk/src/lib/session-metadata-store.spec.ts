@@ -47,6 +47,7 @@ import {
   type StateStorageSequenceReadOptions,
 } from '@ptah-extension/platform-core';
 import {
+  createMockSessionBlobStore,
   createMockSessionRecordRepository,
   createMockStateStorage,
 } from '@ptah-extension/platform-core/testing';
@@ -1431,6 +1432,176 @@ describe('SessionMetadataStore', () => {
       ).toEqual([
         { tag: 'segment', value: { type: 'text', content: 'raw only' } },
       ]);
+    });
+
+    it('stores and pages optional blob header metadata while still loading legacy blobs without it', async () => {
+      const summary = {
+        totalCalls: 3,
+        ptahCalls: 2,
+        nativeCalls: 1,
+        otherMcpCalls: 0,
+        discoveryCalls: 0,
+        ptahErrors: 0,
+        nativeErrors: 0,
+        unknownOutcomes: 0,
+        callsBeforeFirstPtahSuccess: 1,
+        substitutableNative: {
+          textSearch: 0,
+          fileRead: 1,
+          pathListing: 0,
+          gitRead: 0,
+        },
+        byTool: {
+          Read: { calls: 1, errors: 0 },
+          ptah_grep: { calls: 2, errors: 0 },
+        },
+        byToolOverflow: 0,
+      };
+      await store.saveAgentOutput(FAT_AGENT, {
+        segments: segments(2),
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T00:00:00.000Z',
+        segmentsTruncated: true,
+        toolCallSummary: summary,
+      });
+
+      const stored = storage.__state.entries.get(
+        `ptah.agentOutput:${FAT_AGENT}`,
+      ) as PersistedAgentOutput;
+      expect(stored.cli).toBe('codex');
+      expect(stored.model).toBe('gpt-5-codex');
+      expect(stored.startedAt).toBe('2026-11-27T00:00:00.000Z');
+      expect(stored.segmentsTruncated).toBe(true);
+      expect(stored.toolCallSummary).toEqual(summary);
+
+      const paged = await store.getAgentOutputPage(FAT_AGENT, undefined, 4096);
+      expect(paged.done).toBe(true);
+      expect(paged.items).toHaveLength(2);
+
+      // Legacy blob shape without optional header fields still pages cleanly.
+      await storage.update(`ptah.agentOutput:${FAT_AGENT}`, {
+        agentId: FAT_AGENT,
+        savedAt: 1700000000000,
+        segments: segments(1),
+      });
+      const legacyPage = await store.getAgentOutputPage(
+        FAT_AGENT,
+        undefined,
+        4096,
+      );
+      expect(legacyPage.done).toBe(true);
+      expect(legacyPage.items).toHaveLength(1);
+    });
+
+    it('persists and reads header metadata across sync, async-sequence, and session-blob branches for structured and summary-only outputs', async () => {
+      const summary = {
+        totalCalls: 4,
+        ptahCalls: 3,
+        nativeCalls: 1,
+        otherMcpCalls: 0,
+        discoveryCalls: 1,
+        ptahErrors: 0,
+        nativeErrors: 0,
+        unknownOutcomes: 0,
+        callsBeforeFirstPtahSuccess: 1,
+        substitutableNative: {
+          textSearch: 0,
+          fileRead: 0,
+          pathListing: 0,
+          gitRead: 0,
+        },
+        byTool: {
+          ToolSearch: { calls: 1, errors: 0 },
+          ptah_grep: { calls: 3, errors: 0 },
+        },
+        byToolOverflow: 0,
+      };
+      const meta = {
+        cli: 'codex' as const,
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:00:00.000Z',
+        segmentsTruncated: true,
+        toolCallSummary: summary,
+      };
+
+      // 1. Sync IStateStorage branch: structured output and summary-only save
+      await store.saveAgentOutput(FAT_AGENT, { segments: segments(1), ...meta });
+      expect(await store.getAgentOutputHeader(FAT_AGENT)).toMatchObject({
+        agentId: FAT_AGENT,
+        ...meta,
+      });
+      await store.saveAgentOutput('agent-sync-summary', { ...meta });
+      expect(
+        await store.getAgentOutputHeader('agent-sync-summary'),
+      ).toMatchObject({ agentId: 'agent-sync-summary', ...meta });
+      expect(
+        await store.getAgentOutputPage('agent-sync-summary', undefined, 4096),
+      ).toEqual({ items: [], nextCursor: null, done: true });
+
+      // 2. Async sequence IAsyncStateStorage branch: structured output, summary-only, and delete
+      const { asyncStore } = createAsyncFake();
+      await asyncStore.saveAgentOutput('agent-async-full', {
+        segments: segments(2),
+        ...meta,
+      });
+      expect(
+        await asyncStore.getAgentOutputHeader('agent-async-full'),
+      ).toMatchObject({ agentId: 'agent-async-full', ...meta });
+      expect(
+        (await asyncStore.getAgentOutputPage('agent-async-full', undefined, 4096))
+          .items,
+      ).toHaveLength(2);
+
+      await asyncStore.saveAgentOutput('agent-async-summary', { ...meta });
+      expect(
+        await asyncStore.getAgentOutputHeader('agent-async-summary'),
+      ).toMatchObject({ agentId: 'agent-async-summary', ...meta });
+      expect(
+        await asyncStore.getAgentOutputPage(
+          'agent-async-summary',
+          undefined,
+          4096,
+        ),
+      ).toEqual({ items: [], nextCursor: null, done: true });
+      await asyncStore.deleteAgentOutput('agent-async-summary');
+      expect(
+        await asyncStore.getAgentOutputHeader('agent-async-summary'),
+      ).toBeUndefined();
+
+      // 3. Session blob store branch: structured output and summary-only save
+      const records = createMockSessionRecordRepository();
+      const blobs = createMockSessionBlobStore();
+      const blobStore = new SessionMetadataStore(
+        createMockStateStorage(),
+        asLogger(logger),
+        records,
+        blobs,
+      );
+      await blobStore.saveAgentOutput(
+        'agent-blob-full',
+        { segments: segments(1), ...meta },
+        'sess-blob',
+      );
+      expect(
+        await blobStore.getAgentOutputHeader('agent-blob-full', 'sess-blob'),
+      ).toMatchObject({ agentId: 'agent-blob-full', ...meta });
+      await blobStore.saveAgentOutput(
+        'agent-blob-summary',
+        { ...meta },
+        'sess-blob',
+      );
+      expect(
+        await blobStore.getAgentOutputHeader('agent-blob-summary', 'sess-blob'),
+      ).toMatchObject({ agentId: 'agent-blob-summary', ...meta });
+      expect(
+        await blobStore.getAgentOutputPage(
+          'agent-blob-summary',
+          undefined,
+          4096,
+          'sess-blob',
+        ),
+      ).toEqual({ items: [], nextCursor: null, done: true });
     });
 
     it('writes nothing when there is no output to store', async () => {

@@ -923,7 +923,78 @@ describe('persistCliSessionReference — bulk output stays out of the blob', () 
     expect(
       Object.prototype.hasOwnProperty.call(passedPayload, 'streamEvents'),
     ).toBe(false);
-    expect(Object.keys(passedPayload)).toEqual(['stdout']);
+    expect(Object.prototype.hasOwnProperty.call(passedPayload, 'model')).toBe(
+      false,
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(passedPayload, 'segmentsTruncated'),
+    ).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(passedPayload, 'toolCallSummary'),
+    ).toBe(false);
+    expect(Object.keys(passedPayload).sort()).toEqual([
+      'cli',
+      'startedAt',
+      'stdout',
+    ]);
+  });
+
+  it('forwards cli, model, startedAt, segmentsTruncated, and toolCallSummary to saveAgentOutput', async () => {
+    const toolCallSummary = {
+      totalCalls: 1,
+      ptahCalls: 1,
+      nativeCalls: 0,
+      otherMcpCalls: 0,
+      discoveryCalls: 0,
+      ptahErrors: 0,
+      nativeErrors: 0,
+      unknownOutcomes: 0,
+      callsBeforeFirstPtahSuccess: 0,
+      substitutableNative: {
+        textSearch: 0,
+        fileRead: 0,
+        pathListing: 0,
+        gitRead: 0,
+      },
+      byTool: { ptah_grep: { calls: 1, errors: 0 } },
+      byToolOverflow: 0,
+    };
+    const readOutput = jest.fn().mockReturnValue({
+      ...buildOutput(),
+      segmentsTruncated: true,
+      toolCallSummary,
+    });
+    const { container, saveAgentOutput } = harness(readOutput);
+
+    persistCliSessionReference(
+      container,
+      createMockLogger() as unknown as Logger,
+      '[test]',
+      buildInfo({
+        agentId: AGENT_ID,
+        parentSessionId: PARENT_SESSION,
+        cliSessionId: 'cli-sess-1',
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:02:03.000Z',
+        status: 'completed',
+      }),
+      undefined,
+    );
+
+    await Promise.resolve();
+
+    expect(saveAgentOutput).toHaveBeenCalledWith(
+      AGENT_ID,
+      expect.objectContaining({
+        cli: 'codex',
+        model: 'gpt-5-codex',
+        startedAt: '2026-11-27T01:02:03.000Z',
+        segmentsTruncated: true,
+        toolCallSummary,
+      }),
+      PARENT_SESSION,
+    );
   });
 
   it('still persists the reference when the store predates saveAgentOutput', () => {

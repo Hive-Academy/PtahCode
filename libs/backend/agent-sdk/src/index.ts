@@ -67,6 +67,7 @@ export {
 export type {
   SessionMetadata,
   PersistedAgentOutput,
+  PersistedAgentOutputHeader,
   TaggedAgentOutputItem,
   ProviderSessionThreadRecord,
   ProviderSessionThreadRecordUpdater,

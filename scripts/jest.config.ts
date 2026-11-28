@@ -31,6 +31,15 @@ const config: Config = {
   // Relative, not `<rootDir>/...`: on Windows the expanded `<rootDir>` comes
   // back with mixed `/` and `\` separators and the glob then matches nothing.
   testMatch: ['**/*.spec.ts'],
+  moduleNameMapper: {
+    '^@ptah-extension/shared$': '<rootDir>/../libs/shared/src/index.ts',
+  },
+  // Single ts-jest transform using scripts/tsconfig.json (which resolves
+  // @ptah-extension/shared via paths). Multiple ts-jest transform entries with
+  // different tsconfigs in one maxWorkers: 1 project share
+  // TsJestTransformer._cachedConfigSets keyed only by Jest config, so the first
+  // spec's tsconfig would overwrite later entries (any path regex would also
+  // need [/\\] for Windows and Linux).
   transform: {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
   },

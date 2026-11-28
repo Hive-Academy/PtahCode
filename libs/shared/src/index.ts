@@ -121,3 +121,5 @@ export type { AgentLaneSpendResult } from './lib/types/rpc/rpc-lane-plan-limits.
 
 export * from './lib/tool-guidance/tool-substitutions';
 export * from './lib/tool-guidance/tool-guidance.render';
+export * from './lib/tool-guidance/tool-call-classify';
+export * from './lib/tool-guidance/tool-call-summary';

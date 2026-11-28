@@ -158,6 +158,7 @@ import {
   clearLaneAdmission,
   type TrackedAgent,
 } from './tracked-agent';
+import { pendingToolCallCount } from './tool-call-summary';
 import type {
   AgentActionNotice,
   AgentOutputDelta,
@@ -6942,6 +6943,108 @@ describe('AgentProcessManager - SDK Execution Path', () => {
           }
         },
       );
+    });
+  });
+
+  describe('tool-call summary lifecycle release', () => {
+    function makeSegmentHandle(): {
+      controls: MockSdkHandleControls;
+      handle: SdkHandle;
+      emitSegment: (segment: CliOutputSegment) => void;
+    } {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      controls.abortController.signal.addEventListener('abort', () => {
+        controls.resolve(1);
+      });
+      let onSeg: ((segment: CliOutputSegment) => void) | undefined;
+      const handle: SdkHandle = {
+        ...controls.handle,
+        onSegment: (cb) => {
+          onSeg = cb;
+        },
+      };
+      return {
+        controls,
+        handle,
+        emitSegment: (segment) => onSeg?.(segment),
+      };
+    }
+
+    it.each(['completed', 'failed', 'stopped'] as const)(
+      'releases pending tool-call pairing state on %s while preserving summary counters',
+      async (ending) => {
+        const { controls, handle, emitSegment } = makeSegmentHandle();
+        (sdkAdapter.runSdk as jest.Mock).mockResolvedValueOnce(handle);
+
+        const spawned = await manager.spawn({
+          task: 'Tool summary lifecycle',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+
+        emitSegment({
+          type: 'tool-call',
+          content: '',
+          toolCallId: 'pending-1',
+          toolName: 'Read',
+        });
+        const tracked = manager['agents'].get(spawned.agentId);
+        expect(tracked?.toolCallSummary).toBeDefined();
+        if (!tracked?.toolCallSummary) return;
+        expect(pendingToolCallCount(tracked.toolCallSummary)).toBe(1);
+
+        if (ending === 'completed') {
+          controls.resolve(0);
+          await jest.advanceTimersByTimeAsync(1);
+        } else if (ending === 'failed') {
+          controls.resolve(1);
+          await jest.advanceTimersByTimeAsync(1);
+        } else {
+          await manager.stop(spawned.agentId);
+        }
+
+        expect(pendingToolCallCount(tracked.toolCallSummary)).toBe(0);
+        const persisted = manager.readOutputForPersistence(spawned.agentId);
+        expect(persisted?.toolCallSummary?.totalCalls).toBe(1);
+        expect(persisted?.toolCallSummary?.unknownOutcomes).toBe(1);
+      },
+    );
+
+    it('releases prior lane pending tool-call state when resumed with a new agentId', async () => {
+      const first = makeSegmentHandle();
+      const second = makeSegmentHandle();
+      (sdkAdapter.runSdk as jest.Mock)
+        .mockResolvedValueOnce(first.handle)
+        .mockResolvedValueOnce(second.handle);
+
+      const firstSpawn = await manager.spawn({
+        task: 'Initial run',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+      });
+      first.emitSegment({
+        type: 'tool-call',
+        content: '',
+        toolCallId: 'open-1',
+        toolName: 'Read',
+      });
+      first.controls.resolve(0);
+      await jest.advanceTimersByTimeAsync(1);
+
+      const trackedFirst = manager['agents'].get(firstSpawn.agentId);
+      expect(trackedFirst?.toolCallSummary).toBeDefined();
+      if (!trackedFirst?.toolCallSummary) return;
+
+      const resumed = await manager.spawn({
+        task: 'Resume run',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        resumedFromAgentId: firstSpawn.agentId,
+        resumeSessionId: 'cli-sess-resume-1',
+      });
+
+      expect(resumed.agentId).not.toBe(firstSpawn.agentId);
+      expect(pendingToolCallCount(trackedFirst.toolCallSummary)).toBe(0);
     });
   });
 });

@@ -85,10 +85,12 @@ import {
 import type {
   CliOutputSegment,
   CliSessionReference,
+  CliType,
   FlatStreamEventUnion,
   SessionMetadataChangedNotification,
   SessionMetadataChangeKind,
   SubagentRecord,
+  ToolCallSummary,
 } from '@ptah-extension/shared';
 import {
   EFFECTIVE_LANE_POLICY_SCHEMA,
@@ -687,11 +689,36 @@ export interface PersistedAgentOutput {
   readonly agentId: string;
   /** When the snapshot was taken (ms epoch). */
   readonly savedAt: number;
+  /** CLI adapter that ran this lane (`codex`, `claude`, `ptah-cli`, etc.). */
+  readonly cli?: CliType;
+  /** Model selected or observed for this lane, when known. */
+  readonly model?: string;
+  /** ISO timestamp when the lane started. */
+  readonly startedAt?: string;
+  /** True when structured segments exceeded the persistence cap and were dropped. */
+  readonly segmentsTruncated?: boolean;
+  /** Metadata-only tool-call summary across the run, including past the cap. */
+  readonly toolCallSummary?: ToolCallSummary;
   /** Full structured segments (already capped upstream at 500). */
   readonly segments?: readonly CliOutputSegment[];
   /** Rich stream events for the execution-tree renderer (Ptah CLI only). */
   readonly streamEvents?: readonly FlatStreamEventUnion[];
 }
+
+/**
+ * Metadata-only header persisted alongside (or inside) an agent output record.
+ * Excludes bulk `segments` and `streamEvents`.
+ */
+export type PersistedAgentOutputHeader = Pick<
+  PersistedAgentOutput,
+  | 'agentId'
+  | 'savedAt'
+  | 'cli'
+  | 'model'
+  | 'startedAt'
+  | 'segmentsTruncated'
+  | 'toolCallSummary'
+>;
 
 /**
  * Storage key for session metadata
@@ -725,6 +752,9 @@ const SESSION_DETAIL_KEY_PREFIX = 'ptah.session:';
 
 /** Key prefix for per-agent bulk output. One key per agent, written once. */
 const AGENT_OUTPUT_KEY_PREFIX = 'ptah.agentOutput:';
+
+/** Key prefix for per-agent output header metadata on async sequence storage. */
+const AGENT_OUTPUT_HEADER_KEY_PREFIX = 'ptah.agentOutputHeader:';
 
 const SESSION_INDEX_SCHEMA_VERSION = 1;
 
@@ -790,6 +820,7 @@ export const SESSION_METADATA_MIGRATION: StateStorageArraySplitPlan = {
 export const SESSION_METADATA_WORKER_CACHE_EXCLUSIONS = [
   SESSION_DETAIL_KEY_PREFIX,
   AGENT_OUTPUT_KEY_PREFIX,
+  AGENT_OUTPUT_HEADER_KEY_PREFIX,
 ] as const;
 
 function sessionDetailKey(sessionId: string): string {
@@ -823,6 +854,29 @@ function agentOutputKey(agentId: string): string {
   return `${AGENT_OUTPUT_KEY_PREFIX}${agentId}`;
 }
 
+function agentOutputHeaderKey(agentId: string): string {
+  return `${AGENT_OUTPUT_HEADER_KEY_PREFIX}${agentId}`;
+}
+
+function extractAgentOutputHeader(
+  record: PersistedAgentOutput | PersistedAgentOutputHeader | undefined,
+): PersistedAgentOutputHeader | undefined {
+  if (!record || typeof record.agentId !== 'string') return undefined;
+  return {
+    agentId: record.agentId,
+    savedAt: record.savedAt,
+    ...(record.cli !== undefined ? { cli: record.cli } : {}),
+    ...(record.model !== undefined ? { model: record.model } : {}),
+    ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
+    ...(record.segmentsTruncated !== undefined
+      ? { segmentsTruncated: record.segmentsTruncated }
+      : {}),
+    ...(record.toolCallSummary !== undefined
+      ? { toolCallSummary: record.toolCallSummary }
+      : {}),
+  };
+}
+
 /** Blob name of an agent's output inside its session's folder (PTAH-35). */
 export function agentOutputBlobName(agentId: string): string {
   return `agent-output.${agentId}`;
@@ -833,6 +887,7 @@ export const LEGACY_SESSION_STORAGE_KEYS = {
   index: STORAGE_KEY,
   detailPrefix: SESSION_DETAIL_KEY_PREFIX,
   agentOutputPrefix: AGENT_OUTPUT_KEY_PREFIX,
+  agentOutputHeaderPrefix: AGENT_OUTPUT_HEADER_KEY_PREFIX,
 } as const;
 
 /** Lean listing entry: the record without its CLI references. */
@@ -2514,6 +2569,11 @@ export class SessionMetadataStore {
       stdout?: string;
       segments?: readonly CliOutputSegment[];
       streamEvents?: readonly FlatStreamEventUnion[];
+      cli?: CliType;
+      model?: string;
+      startedAt?: string;
+      segmentsTruncated?: boolean;
+      toolCallSummary?: ToolCallSummary;
     },
     sessionId?: string,
   ): Promise<void> {
@@ -2528,12 +2588,34 @@ export class SessionMetadataStore {
     const segments: readonly CliOutputSegment[] = stdoutFallback
       ? [{ type: 'text', content: stdout }]
       : (output.segments ?? []);
-    if (segments.length === 0 && streamEvents.length === 0) return;
+    if (
+      segments.length === 0 &&
+      streamEvents.length === 0 &&
+      output.toolCallSummary === undefined
+    )
+      return;
 
+    const headerMeta: Pick<
+      PersistedAgentOutput,
+      'cli' | 'model' | 'startedAt' | 'segmentsTruncated' | 'toolCallSummary'
+    > = {
+      ...(output.cli !== undefined ? { cli: output.cli } : {}),
+      ...(output.model !== undefined ? { model: output.model } : {}),
+      ...(output.startedAt !== undefined ? { startedAt: output.startedAt } : {}),
+      ...(output.segmentsTruncated !== undefined
+        ? { segmentsTruncated: output.segmentsTruncated }
+        : {}),
+      ...(output.toolCallSummary !== undefined
+        ? { toolCallSummary: output.toolCallSummary }
+        : {}),
+    };
+
+    const savedAt = Date.now();
     if (target) {
       const record: PersistedAgentOutput = {
         agentId,
-        savedAt: Date.now(),
+        savedAt,
+        ...headerMeta,
         ...(segments.length > 0 ? { segments } : {}),
         ...(streamEvents.length > 0 ? { streamEvents } : {}),
       };
@@ -2556,10 +2638,17 @@ export class SessionMetadataStore {
           }
         })(),
       );
+      const header: PersistedAgentOutputHeader = {
+        agentId,
+        savedAt,
+        ...headerMeta,
+      };
+      await this.storage.update(agentOutputHeaderKey(agentId), header);
     } else {
       const record: PersistedAgentOutput = {
         agentId,
-        savedAt: Date.now(),
+        savedAt,
+        ...headerMeta,
         ...(segments.length > 0 ? { segments } : {}),
         ...(streamEvents.length > 0 ? { streamEvents } : {}),
       };
@@ -2732,6 +2821,35 @@ export class SessionMetadataStore {
     };
   }
 
+  /**
+   * Read the metadata-only header for one agent's saved output across all
+   * storage backends (session blob store, async sequence storage, or sync storage).
+   */
+  async getAgentOutputHeader(
+    agentId: string,
+    sessionId?: string,
+  ): Promise<PersistedAgentOutputHeader | undefined> {
+    if (blankToUndefined(agentId) === undefined) return undefined;
+    const target = this.sessionBlobs(sessionId);
+    if (target) {
+      const record = await target.blobs.read<PersistedAgentOutput>(
+        target.sessionId,
+        agentOutputBlobName(agentId),
+      );
+      return extractAgentOutputHeader(record);
+    }
+    if (isAsyncStateStorage(this.storage)) {
+      const header = await this.storage.getAsync<PersistedAgentOutputHeader>(
+        agentOutputHeaderKey(agentId),
+      );
+      return extractAgentOutputHeader(header);
+    }
+    const record = await this.readStorage<PersistedAgentOutput>(
+      agentOutputKey(agentId),
+    );
+    return extractAgentOutputHeader(record);
+  }
+
   /** Drop one agent's bulk output. Silent when there is nothing stored. */
   async deleteAgentOutput(agentId: string, sessionId?: string): Promise<void> {
     if (blankToUndefined(agentId) === undefined) return;
@@ -2741,6 +2859,9 @@ export class SessionMetadataStore {
       return;
     }
     await this.storage.update(agentOutputKey(agentId), undefined);
+    if (isAsyncStateStorage(this.storage)) {
+      await this.storage.update(agentOutputHeaderKey(agentId), undefined);
+    }
   }
 
   private async readHostRunLiveness(
