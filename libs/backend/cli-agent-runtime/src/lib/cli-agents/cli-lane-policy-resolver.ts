@@ -59,46 +59,12 @@ function validateResolvedPolicy(
   }
 }
 
-export function resolveCliLanePolicy(input: {
-  cli: CliType;
-  manifest: CliAdapterManifest;
-  request: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
-  saved: unknown;
-  legacyCodexMode?: string;
-  parentLevel?: string;
-  resumePolicy?: EffectiveLanePolicy;
-}): EffectiveLanePolicy {
-  if (input.resumePolicy) {
-    const snapshot = input.resumePolicy;
-    if (input.parentLevel !== 'plan' && !snapshot.permission && !snapshot.network) {
-      throw new LaneSpawnPolicyError({
-        code: 'UNSUPPORTED_LANE_POLICY',
-        field: 'permission',
-        cli: input.cli,
-        requested: snapshot,
-        reason: `Resumed policy is empty: both permission and network are undefined.`,
-      });
-    }
-    return validateResolvedPolicy(input.cli, input.manifest, input.parentLevel === 'plan'
-      ? { ...snapshot, permission: 'plan', permissionSource: 'parent-plan',
-          ...(input.cli === 'codex' ? { network: 'deny' as const, networkSource: 'parent-plan' as const } : {}) }
-      : snapshot);
-  }
-  const saved = CLI_LANE_DEFAULTS_SCHEMA.parse(input.saved ?? {});
-  const configured = saved[input.cli] ?? (input.cli === 'codex' && input.legacyCodexMode
-    ? codexLegacyPolicy(input.legacyCodexMode) : undefined);
-  const selectedPermission = input.request.permission ?? configured?.permission;
-  const selectedNetwork = input.request.network ?? configured?.network;
-  const pair = resolveCliLaneDefaultPair(input.manifest, {
-    permission: selectedPermission, network: selectedNetwork,
-  });
-  const permission = 'unsupported' in pair ? selectedPermission : pair.permission;
-  const network = 'unsupported' in pair ? selectedNetwork : pair.network;
-  const permissionSource = input.request.permission !== undefined ? 'spawn'
-    : configured?.permission !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.permissionSource;
-  const networkSource = input.request.network !== undefined ? 'spawn'
-    : configured?.network !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.networkSource;
-  const requested: EffectiveLanePolicy = { permission, network, permissionSource, networkSource };
+function resolveParentCeiling(
+  input: { cli: CliType; manifest: CliAdapterManifest; parentLevel?: string },
+  policy: EffectiveLanePolicy,
+  selectedNetwork: EffectiveLanePolicy['network'],
+): EffectiveLanePolicy | undefined {
+  const { permission, networkSource } = policy;
   if (input.parentLevel !== undefined) {
     const order = CLI_LANE_BUILT_IN_PERMISSION_ORDER;
     const ceiling = order.findIndex((mode) => mode === input.parentLevel);
@@ -122,6 +88,55 @@ export function resolveCliLanePolicy(input: {
       });
     }
   }
+  return undefined;
+}
+
+export function resolveCliLanePolicy(input: {
+  cli: CliType;
+  manifest: CliAdapterManifest;
+  request: Pick<EffectiveLanePolicy, 'permission' | 'network'>;
+  saved: unknown;
+  legacyCodexMode?: string;
+  parentLevel?: string;
+  resumePolicy?: EffectiveLanePolicy;
+}): EffectiveLanePolicy {
+  if (input.resumePolicy) {
+    const snapshot = input.resumePolicy;
+    if (input.parentLevel !== 'plan' && !snapshot.permission && !snapshot.network) {
+      throw new LaneSpawnPolicyError({
+        code: 'UNSUPPORTED_LANE_POLICY',
+        field: 'permission',
+        cli: input.cli,
+        requested: snapshot,
+        reason: `Resumed policy is empty: both permission and network are undefined.`,
+      });
+    }
+    if (input.parentLevel === 'plan') {
+      return validateResolvedPolicy(input.cli, input.manifest, {
+        ...snapshot, permission: 'plan', permissionSource: 'parent-plan',
+        ...(input.cli === 'codex' ? { network: 'deny' as const, networkSource: 'parent-plan' as const } : {}),
+      });
+    }
+    return resolveParentCeiling(input, snapshot, snapshot.network)
+      ?? validateResolvedPolicy(input.cli, input.manifest, snapshot);
+  }
+  const saved = CLI_LANE_DEFAULTS_SCHEMA.parse(input.saved ?? {});
+  const configured = saved[input.cli] ?? (input.cli === 'codex' && input.legacyCodexMode
+    ? codexLegacyPolicy(input.legacyCodexMode) : undefined);
+  const selectedPermission = input.request.permission ?? configured?.permission;
+  const selectedNetwork = input.request.network ?? configured?.network;
+  const pair = resolveCliLaneDefaultPair(input.manifest, {
+    permission: selectedPermission, network: selectedNetwork,
+  });
+  const permission = 'unsupported' in pair ? selectedPermission : pair.permission;
+  const network = 'unsupported' in pair ? selectedNetwork : pair.network;
+  const permissionSource = input.request.permission !== undefined ? 'spawn'
+    : configured?.permission !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.permissionSource;
+  const networkSource = input.request.network !== undefined ? 'spawn'
+    : configured?.network !== undefined ? 'saved' : 'unsupported' in pair ? undefined : pair.networkSource;
+  const requested: EffectiveLanePolicy = { permission, network, permissionSource, networkSource };
+  const capped = resolveParentCeiling(input, requested, selectedNetwork);
+  if (capped) return capped;
   if ('unsupported' in pair && selectedPermission === undefined) {
     throw new LaneSpawnPolicyError({
       code: 'UNSUPPORTED_LANE_POLICY',

@@ -77,6 +77,21 @@ describe('SessionRegistry', () => {
     expect(registry.findMatches('shared-sdk')).toEqual([first]);
   });
 
+  it('excludes aborted registrations from both session and tab matches', () => {
+    const { registry } = makeRegistry();
+    const controller = new AbortController();
+    const retired = registry.register('retired', makeConfig(), controller, 'shared-sdk');
+    const live = registry.register('live', makeConfig(), new AbortController());
+    registry.bindRealSessionId('live', 'shared-sdk');
+
+    expect(registry.findMatches('shared-sdk')).toEqual([retired, live]);
+    controller.abort();
+
+    expect(registry.find('retired')).toBe(retired);
+    expect(registry.findMatches('retired')).toEqual([]);
+    expect(registry.findMatches('shared-sdk')).toEqual([live]);
+  });
+
   it('preserves a permission hold across the transition to an open provider turn', () => {
     jest.useFakeTimers();
     try {

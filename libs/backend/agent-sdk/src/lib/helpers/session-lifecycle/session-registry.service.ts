@@ -491,9 +491,10 @@ export class SessionRegistry {
    */
   findMatches(idOrTabId: string): SessionRecord[] {
     const byTab = this.byTabId.get(idOrTabId);
-    const matches = byTab ? [byTab] : [];
+    const matches = byTab && !byTab.abortController.signal.aborted ? [byTab] : [];
     for (const record of this.byTabId.values()) {
-      if (record !== byTab && record.realSessionId === idOrTabId) {
+      if (record !== byTab && !record.abortController.signal.aborted &&
+          record.realSessionId === idOrTabId) {
         matches.push(record);
       }
     }

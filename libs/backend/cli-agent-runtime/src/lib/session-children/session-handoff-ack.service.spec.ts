@@ -204,6 +204,61 @@ describe('SessionHandoffService acknowledgement recovery', () => {
     expect(completed?.runtimeClosePending).toBeUndefined();
   });
 
+  it('retires a predecessor after its successful runtime close could not be persisted', async () => {
+    const h = harness();
+    const store = h.makeStore();
+    await record(store);
+    let live = true;
+    const closeSession = jest.fn(async () => {
+      live = false;
+    });
+    const resolver: LiveChatSessionResolver = {
+      resolve: () => live
+        ? {
+            kind: 'resolved',
+            session: { runtime: 'codex-app-server', sessionId: predecessorSessionId },
+          }
+        : { kind: 'unresolved' },
+    };
+    const compareAndSet = store.compareAndSet.bind(store);
+    let failSuccessWrite = true;
+    jest.spyOn(store, 'compareAndSet').mockImplementation(async (...args) => {
+      if (args[2].runtimeCloseSucceeded && failSuccessWrite) {
+        failSuccessWrite = false;
+        throw new Error('Could not persist runtime close');
+      }
+      return compareAndSet(...args);
+    });
+    const service = h.makeService(store, null, { resolver, closeSession });
+
+    await armAndFlush(service, h.request);
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeClosePending: 'codex-app-server',
+    });
+    expect(h.closer.close).not.toHaveBeenCalled();
+
+    await armAndFlush(service, h.request);
+    h.closer.close.mockResolvedValueOnce({ kind: 'timeout' });
+    expect(await service.acknowledge(h.request)).toMatchObject({ status: 'retryable-failure' });
+    expect(await store.findByPredecessor(predecessorSessionId)).toMatchObject({
+      state: 'closePending',
+      runtimeCloseSucceeded: true,
+    });
+
+    const restartedStore = h.makeStore();
+    const restarted = h.makeService(restartedStore, null, { resolver, closeSession });
+    await armAndFlush(restarted, h.request);
+    expect(await restarted.acknowledge(h.request)).toMatchObject({ status: 'closed' });
+    expect(closeSession).toHaveBeenCalledTimes(1);
+    expect(h.closer.close).toHaveBeenCalledTimes(2);
+    const completed = await restartedStore.findByPredecessor(predecessorSessionId);
+    expect(completed?.state).toBe('closeCompleted');
+    expect(completed?.runtimeClosePending).toBeUndefined();
+    expect(completed?.runtimeCloseSucceeded).toBeUndefined();
+  });
+
   it('retries when a record found for acknowledgement disappears during transition', async () => {
     const h = harness();
     const store = h.makeStore();

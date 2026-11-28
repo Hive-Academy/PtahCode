@@ -31,6 +31,8 @@ const RecordSchema = z
     runtimeClosePending: z
       .enum(['codex-app-server', 'provider-session'])
       .optional(),
+    /** The adapter finished closing the runtime, but the tab still needs retirement. */
+    runtimeCloseSucceeded: z.literal(true).optional(),
     generation: z.number().int().nonnegative().optional(),
   })
   .strict();
@@ -391,7 +393,7 @@ export class SessionHandoffAckStore {
     patch: Partial<
       Pick<
         HandoffAckRecord,
-        'state' | 'successorSdkId' | 'keepPredecessor' | 'runtimeClosePending'
+        'state' | 'successorSdkId' | 'keepPredecessor' | 'runtimeClosePending' | 'runtimeCloseSucceeded'
       >
     >,
     expectedSuccessorTabId?: string,

@@ -145,6 +145,7 @@ interface ArmedCallerStop {
   readonly callerSdkId: string | null;
   readonly successorTabId: string;
   runtimeClosePending?: HandoffAckRecord['runtimeClosePending'];
+  runtimeCloseSucceeded?: HandoffAckRecord['runtimeCloseSucceeded'];
 }
 
 @injectable()
@@ -487,7 +488,7 @@ export class SessionHandoffService
         const settled = await this.ackStore!.compareAndSet(
           record.predecessorTabId,
           'closePending',
-          { state: 'closeCompleted' },
+          { state: 'closeCompleted', runtimeCloseSucceeded: undefined },
           record.successorTabId,
         );
         if (!settled)
@@ -508,16 +509,19 @@ export class SessionHandoffService
           this.stopWaiters.set(record.predecessorTabId, resolveStop),
         );
         if (!this.stopping.has(record.predecessorTabId)) {
-          const existingArm = this.armed.get(record.predecessorTabId);
+          const previousArm = this.armed.get(record.predecessorTabId);
+          const existingArm = previousArm?.successorTabId === record.successorTabId
+            ? previousArm
+            : undefined;
           this.armed.set(record.predecessorTabId, {
             callerTabId: record.predecessorTabId,
             callerSdkId: record.predecessorSdkId,
             successorTabId: record.successorTabId,
             runtimeClosePending:
               record.runtimeClosePending ??
-              (existingArm?.successorTabId === record.successorTabId
-                ? existingArm.runtimeClosePending
-                : undefined),
+              existingArm?.runtimeClosePending,
+            runtimeCloseSucceeded:
+              record.runtimeCloseSucceeded ?? existingArm?.runtimeCloseSucceeded,
           });
         }
         if (
@@ -546,7 +550,8 @@ export class SessionHandoffService
         await this.ackStore!.compareAndSet(
           record.predecessorTabId,
           'closePending',
-          { state: 'closeCompleted' },
+          { state: 'closeCompleted', runtimeCloseSucceeded: undefined },
+          record.successorTabId,
         );
       } catch (error: unknown) {
         // The predecessor is closed; report that. The next acknowledgement
@@ -1242,17 +1247,22 @@ export class SessionHandoffService
     if (result?.kind === 'ambiguous') throw new Error('Ambiguous handoff predecessor');
     const session = result?.kind === 'resolved' ? result.session : undefined;
     // An adapter can remove its live entry before teardown rejects.
-    if (arm.runtimeClosePending && session?.runtime !== arm.runtimeClosePending) {
+    if (!arm.runtimeCloseSucceeded && arm.runtimeClosePending &&
+        session?.runtime !== arm.runtimeClosePending) {
       throw new Error('Handoff predecessor runtime is unavailable after a failed close');
     }
     const sdkRecord = result?.kind === 'unresolved'
       ? this.lifecycle.find(arm.callerTabId)
       : undefined;
-    if (result?.kind === 'unresolved' && !sdkRecord) return;
     const currentSessionId = session?.sessionId ?? sdkRecord?.realSessionId;
     if ((session || sdkRecord) && arm.callerSdkId && currentSessionId !== arm.callerSdkId) {
       throw new Error('Handoff predecessor no longer owns its tab');
     }
+    if (arm.runtimeCloseSucceeded) {
+      if (arm.runtimeClosePending) await this.persistRuntimeClose(arm, undefined);
+      return;
+    }
+    if (result?.kind === 'unresolved' && !sdkRecord) return;
     if (session && session.runtime !== 'claude-sdk') {
       const token = session.runtime === 'codex-app-server'
         ? SDK_TOKENS.CODEX_CHAT_ADAPTER
@@ -1260,9 +1270,10 @@ export class SessionHandoffService
       const adapter = this.container?.resolve<CodexChatAdapter | ProviderSessionChatAdapter>(token);
       if (!adapter) throw new Error('Handoff predecessor runtime is unavailable');
       // Persist before calling the adapter, which can drop the live row even
-      // when teardown fails. Only a successful close clears the marker.
+      // when teardown fails. Keep a confirmed success on the arm if the write fails.
       await this.persistRuntimeClose(arm, session.runtime);
       await adapter.closeSession(SessionId.from(session.sessionId));
+      arm.runtimeCloseSucceeded = true;
       await this.persistRuntimeClose(arm, undefined);
       return;
     }
@@ -1276,7 +1287,7 @@ export class SessionHandoffService
     const updated = await this.ackStore?.compareAndSet(
       arm.callerTabId,
       'closePending',
-      { runtimeClosePending },
+      { runtimeClosePending, runtimeCloseSucceeded: arm.runtimeCloseSucceeded },
       arm.successorTabId,
     );
     if (!updated)

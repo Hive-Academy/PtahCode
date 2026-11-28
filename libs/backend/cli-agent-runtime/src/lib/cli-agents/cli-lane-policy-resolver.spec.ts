@@ -176,6 +176,20 @@ describe('CLI lane policy resolver', () => {
       request: {}, resumePolicy: snapshot })).toMatchObject(snapshot);
   });
 
+  it('caps a resumed Codex yolo snapshot to the current parent permission', () => {
+    const resumePolicy = { permission: 'yolo', network: 'allow', networkSource: 'saved' } as const;
+    expect(resolveCliLanePolicy({
+      cli: 'codex', manifest, saved: {}, request: {}, parentLevel: 'auto-edit', resumePolicy,
+    })).toMatchObject({
+      permission: 'auto-edit', network: 'allow', permissionSource: 'parent-plan', networkSource: 'saved',
+    });
+    expect(resolveCliLanePolicy({
+      cli: 'codex', manifest, saved: {}, request: {}, parentLevel: 'ask', resumePolicy,
+    })).toMatchObject({
+      permission: 'plan', network: 'deny', permissionSource: 'parent-plan', networkSource: 'parent-plan',
+    });
+  });
+
   it('caps a system CLI resume snapshot to the current Codex plan parent', () => {
     expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {},
       parentLevel: 'plan', resumePolicy: {
