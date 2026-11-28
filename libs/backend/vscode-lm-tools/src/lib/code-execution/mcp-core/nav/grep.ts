@@ -390,16 +390,24 @@ export async function renderGrepResult(
   rootReal: string,
 ): Promise<string> {
   const { shown } = selectMatches(result.matches, args.maxMatches);
+  const matchesByFile = new Map<string, number>();
+  for (const match of result.matches) {
+    matchesByFile.set(match.file, (matchesByFile.get(match.file) ?? 0) + 1);
+  }
   const fileCount = new Set(result.matches.map((m) => m.file)).size;
   const atLeast =
     result.incomplete || result.totalMatches > result.matches.length;
   const header = `${atLeast ? 'at least ' : ''}${plural(result.totalMatches, 'match')} in ${atLeast ? 'at least ' : ''}${plural(fileCount, 'file')} (engine: ${result.engine})${args.regexInferred ? ` ${REGEX_INFERRED_NOTE}` : ''}`;
   if (args.output_mode === 'files_with_matches' || args.output_mode === 'count') {
-    const body = [...shown].map(([file, matches]) => args.output_mode === 'files_with_matches'
-      ? `${file} (${plural(matches.length, 'match')})`
-      : `${file}: ${matches.length}`).join('\n');
+    const rows = [...matchesByFile].sort(([left], [right]) => left.localeCompare(right));
+    const body = rows.slice(0, GREP_MAX_FILES).map(([file, matches]) => args.output_mode === 'files_with_matches'
+      ? `${file} (${atLeast ? 'at least ' : ''}${plural(matches, 'match')})`
+      : `${file}: ${atLeast ? 'at least ' : ''}${matches}`).join('\n');
     const footer: string[] = [];
-    const shownCount = [...shown.values()].reduce((count, matches) => count + matches.length, 0);
+    if (rows.length > GREP_MAX_FILES) footer.push(`+${rows.length - GREP_MAX_FILES} more files`);
+    const shownCount = rows
+      .slice(0, GREP_MAX_FILES)
+      .reduce((count, [, matches]) => count + matches, 0);
     const notShown = Math.max(result.totalMatches - shownCount, 0);
     if (notShown > 0) footer.push(`+ ${notShown} more matches not shown; narrow with path/glob or a longer pattern`);
     if (result.incomplete && !result.error) footer.push('The search stopped early (output, time or file limit); narrow with path/glob.');

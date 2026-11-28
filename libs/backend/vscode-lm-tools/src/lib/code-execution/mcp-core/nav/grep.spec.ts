@@ -11,7 +11,8 @@ import {
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AstCodeInsights } from '../../types';
-import { handleGrep, type GrepDeps } from './grep';
+import { handleGrep, renderGrepResult, type GrepDeps } from './grep';
+import type { GrepEngineResult } from './grep-engine';
 import {
   buildGitGrepArgs,
   buildGitPathspecs,
@@ -663,12 +664,44 @@ describe('handleGrep (node engine)', () => {
     const counts = await handleGrep({ pattern: 'needle', path: 'src', maxMatches: 3, output_mode: 'count' }, deps);
     for (const reply of [files, counts]) {
       expect(reply.text).toContain('5 matches in 4 files');
-      expect(reply.text).toContain('+ 2 more matches not shown');
+      expect(reply.text).not.toContain('+ 2 more matches not shown');
     }
     expect(files.text).toContain('mode-a.ts (2 matches)');
     expect(files.text).toContain('mode-b.ts (1 match)');
     expect(counts.text).toContain('mode-a.ts: 2');
     expect(counts.text).toContain('mode-b.ts: 1');
+  });
+
+  it('reports aggregate per-file counts beyond the displayed match cap', async () => {
+    await writeFile(path.join(root, 'src', 'aggregate.ts'), 'needle\nneedle\nneedle\nneedle\n');
+    const files = await handleGrep({ pattern: 'needle', path: 'src/aggregate.ts', maxMatches: 2, output_mode: 'files_with_matches' }, deps);
+    const counts = await handleGrep({ pattern: 'needle', path: 'src/aggregate.ts', maxMatches: 2, output_mode: 'count' }, deps);
+    expect(files.text).toContain('aggregate.ts (4 matches)');
+    expect(counts.text).toContain('aggregate.ts: 4');
+    expect(files.text).not.toContain('+ 2 more matches not shown');
+    expect(counts.text).not.toContain('+ 2 more matches not shown');
+  });
+
+  it.each(['count', 'files_with_matches'] as const)('caps %s rows and reports omitted files', async (output_mode) => {
+    for (let index = 0; index < 42; index += 1) {
+      await writeFile(path.join(root, 'src', `row-${String(index).padStart(2, '0')}.ts`), 'needle\n');
+    }
+    const reply = await handleGrep({ pattern: 'needle', path: 'src', output_mode }, deps);
+    expect(reply.text).toContain('+2 more files');
+    expect(reply.text).toContain('row-39.ts');
+    expect(reply.text).not.toContain('row-40.ts');
+    expect(reply.text).not.toContain('row-41.ts');
+  });
+
+  it('labels per-file counts as lower bounds when the engine result is incomplete', async () => {
+    const result: GrepEngineResult = {
+      engine: 'node',
+      matches: [{ file: 'src/incomplete.ts', line: 1, text: 'needle' }],
+      totalMatches: 1,
+      incomplete: true,
+    };
+    const text = await renderGrepResult(result, { maxMatches: 10, context: 0, output_mode: 'count' }, deps, root);
+    expect(text).toContain('incomplete.ts: at least 1');
   });
 
   const canChmod = process.platform !== 'win32' && process.getuid?.() !== 0;

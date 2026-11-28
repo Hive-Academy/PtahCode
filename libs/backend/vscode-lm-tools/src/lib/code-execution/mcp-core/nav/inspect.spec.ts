@@ -1,4 +1,5 @@
 import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import * as fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -34,7 +35,10 @@ describe('handleInspect', () => {
     };
   });
 
-  afterEach(async () => rm(root, { recursive: true, force: true }));
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  });
 
   it('runs read, grep, list and fixed git ops in input order', async () => {
     const reply = await handleInspect({ ops: [
@@ -77,6 +81,12 @@ describe('handleInspect', () => {
     expect(timeout.text).toContain('timed out');
   });
 
+  it('disables optional Git index locks for status', async () => {
+    const runGit = jest.fn(async (args: readonly string[]) => args.join(' '));
+    await handleInspect({ ops: [{ op: 'git', action: 'status' }] }, { ...deps, runGit });
+    expect(runGit).toHaveBeenCalledWith(['--no-optional-locks', '-c', 'status.relativePaths=true', 'status', '--short', '--branch', '--', '.'], expect.any(String));
+  });
+
   it('accepts existing read and grep aliases and contains operation paths', async () => {
     const alias = await handleInspect({ ops: [
       { op: 'read', file_path: 'src/note.txt', offset: 2, limit: 1 },
@@ -89,7 +99,9 @@ describe('handleInspect', () => {
   });
 
   it('adds continuation footers when an operation or the batch is cut', async () => {
-    const largeDeps = { ...deps, listFiles: async (_pattern: string, limit: number, _root: string) => Array.from({ length: limit }, (_, index) => `${index}-${'x'.repeat(40)}`) };
+    const files = Array.from({ length: 201 }, (_, index) => `src/${index}-${'x'.repeat(40)}.ts`);
+    await Promise.all(files.map((file) => writeFile(path.join(root, file), 'x')));
+    const largeDeps = { ...deps, listFiles: async (_pattern: string, limit: number, _root: string) => files.slice(0, limit) };
     const section = await handleInspect({ ops: [{ op: 'list', pattern: '**/*', limit: 200 }] }, largeDeps);
     expect(section.text).toContain('section cut; continue');
     const total = await handleInspect({ ops: Array.from({ length: 8 }, () => ({ op: 'list', pattern: '**/*', limit: 200 })) }, largeDeps);
@@ -212,6 +224,26 @@ describe('handleInspect', () => {
     }
   });
 
+  (process.platform === 'win32' ? it.skip : it)('applies the list cap after discarding outside workspace matches in a fixed order', async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'ptah-inspect-outside-matches-'));
+    try {
+      await writeFile(path.join(outside, 'first.ts'), 'outside');
+      await writeFile(path.join(outside, 'second.ts'), 'outside');
+      await symlink(outside, path.join(root, '0-external'));
+      await writeFile(path.join(root, 'src', 'inside.ts'), 'inside');
+      const listFiles = async (): Promise<readonly string[]> => [
+        '0-external/first.ts',
+        '0-external/second.ts',
+        'src/inside.ts',
+      ];
+      const reply = await handleInspect({ ops: [{ op: 'list', pattern: '**/*.ts', limit: 1 }] }, { ...deps, listFiles });
+      expect(reply.text).toContain('src/inside.ts');
+      expect(reply.text).not.toContain('No files matched.');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0) ? it.skip : it)('reports partial and empty list results when directories cannot be read', async () => {
     const privateDir = path.join(root, 'private');
     await mkdir(privateDir);
@@ -281,6 +313,58 @@ describe('handleInspect', () => {
       expect(listReply.text).toContain('second.ts');
     } finally {
       await rm(secondRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the default workspace root when allowed roots are ordered differently and falls back on an empty list', async () => {
+    const other = await mkdtemp(path.join(os.tmpdir(), 'ptah-inspect-root-order-'));
+    try {
+      const ordered = { ...deps, allowedWorkspaceRoots: async () => [other, root] };
+      expect((await handleInspect({ ops: [{ op: 'git', action: 'status' }] }, ordered)).text).toContain(`root=${root}`);
+      const empty = { ...deps, allowedWorkspaceRoots: async () => [] };
+      expect((await handleInspect({ ops: [{ op: 'git', action: 'status' }] }, empty)).text).toContain(`root=${root}`);
+    } finally {
+      await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  (process.platform === 'win32' ? it.skip : it)('does not enter an external directory symlink, even when it has no matching files', async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'ptah-inspect-large-outside-'));
+    try {
+      let deep = outside;
+      for (let index = 0; index < 12; index += 1) {
+        deep = path.join(deep, `level-${index}`);
+        await mkdir(deep);
+        await writeFile(path.join(deep, `nonmatch-${index}.js`), 'outside');
+      }
+      const externalLink = path.join(root, '0-external');
+      await symlink(outside, externalLink);
+      await writeFile(path.join(root, 'src', 'later.ts'), 'inside');
+      const openedDirectories: string[] = [];
+      const originalOpendir = fs.promises.opendir.bind(fs.promises);
+      const opendir = jest.spyOn(fs.promises, 'opendir').mockImplementation(async (directory, options) => {
+        openedDirectories.push(path.resolve(String(directory)));
+        return originalOpendir(directory, options);
+      });
+      const reply = await handleInspect({ ops: [{ op: 'list', pattern: '**/*.ts', limit: 1 }] }, deps);
+      opendir.mockRestore();
+      expect(reply.text).toContain('src/later.ts');
+      expect(openedDirectories).not.toContain(path.resolve(externalLink));
+      expect(openedDirectories.some((directory) => directory.startsWith(path.resolve(outside)))).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts an explicit allowed root when default workspace analysis is unavailable', async () => {
+    const suppliedRoot = await mkdtemp(path.join(os.tmpdir(), 'ptah-inspect-explicit-'));
+    try {
+      const explicitDeps = { ...deps, defaultWorkspaceRoot: async () => undefined, allowedWorkspaceRoots: async () => [suppliedRoot] };
+      const reply = await handleInspect({ workspaceRoot: suppliedRoot, ops: [{ op: 'git', action: 'branch' }] }, explicitDeps);
+      expect(reply.isError).toBe(false);
+      expect(reply.text).toContain(`root=${suppliedRoot}`);
+    } finally {
+      await rm(suppliedRoot, { recursive: true, force: true });
     }
   });
 

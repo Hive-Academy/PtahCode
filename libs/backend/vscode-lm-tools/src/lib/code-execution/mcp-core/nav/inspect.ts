@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import picomatch from 'picomatch';
 import { z } from 'zod';
-import { collectBounded, walkGlobMatches } from '@ptah-extension/platform-core';
+import { walkGlobMatches } from '@ptah-extension/platform-core';
 import { DEFAULT_WORKSPACE_EXCLUDES } from '@ptah-extension/workspace-intelligence';
 import { canonicalPathInsideRoot } from '../../namespace-builders/browser-file-url';
 import { describeZodIssues } from '../route-tool-handlers';
@@ -72,17 +72,39 @@ async function resolveListRoot(root: string, pattern: string): Promise<string> {
   }
 }
 
-async function findWorkspaceFiles(root: string, pattern: string, limit: number): Promise<{ readonly matches: readonly string[]; readonly failures: number }> {
+async function findWorkspaceFiles(root: string, pattern: string, limit: number): Promise<{ readonly matches: readonly string[]; readonly failures: number; readonly capped: boolean }> {
   let failures = 0;
-  const matches = await collectBounded(walkGlobMatches(pattern, {
+  const realRoot = await realpath(root);
+  const matches: string[] = [];
+  const rawWalkCap = limit * 20;
+  let rawWalkCount = 0;
+  let capped = false;
+  for await (const match of walkGlobMatches(pattern, {
     cwd: root,
     exclude: [...DEFAULT_WORKSPACE_EXCLUDES],
     dot: false,
+    shouldFollowDirectorySymlink: async (linkPath) =>
+      canonicalPathInsideRoot(await realpath(linkPath), realRoot),
     // A validated root is already open; an unreadable child should leave a
     // partial list instead of turning the entire inspect operation into an error.
     onFailure: () => { failures += 1; },
-  }), limit);
-  return { matches, failures };
+  })) {
+    rawWalkCount += 1;
+    if (rawWalkCount > rawWalkCap) {
+      capped = true;
+      break;
+    }
+    try {
+      const targetReal = await realpath(match);
+      if (!canonicalPathInsideRoot(targetReal, realRoot)) continue;
+      matches.push(path.relative(realRoot, targetReal).split(path.sep).join('/'));
+      if (matches.length === limit) break;
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+  }
+  return { matches, failures, capped };
 }
 
 async function filterContainedFiles(root: string, matches: readonly string[]): Promise<readonly string[]> {
@@ -104,7 +126,7 @@ async function filterContainedFiles(root: string, matches: readonly string[]): P
 
 function gitArgs(op: z.infer<typeof gitSchema>): string[] {
   switch (op.action) {
-    case 'status': return ['-c', 'status.relativePaths=true', 'status', '--short', '--branch', '--', '.'];
+    case 'status': return ['--no-optional-locks', '-c', 'status.relativePaths=true', 'status', '--short', '--branch', '--', '.'];
     case 'diff_stat': return op.base ? ['diff', '--stat', '--relative', `${op.base}...HEAD`, '--', '.'] : ['diff', '--stat', '--relative', '--', '.'];
     case 'log': return ['log', '--oneline', '-n', String(Math.min(op.limit ?? 10, 20)), '--', '.'];
     case 'branch': return ['branch', '--show-current'];
@@ -171,17 +193,20 @@ async function runOp(raw: unknown, index: number, root: string, deps: InspectDep
       const listLimit = limit + 1;
       const realRoot = await resolveListRoot(root, op.pattern);
       const walked = deps.listFiles
-        ? { matches: await deps.listFiles(op.pattern, listLimit, realRoot), failures: 0 }
+        ? { matches: await deps.listFiles(op.pattern, listLimit, realRoot), failures: 0, capped: false }
         : await findWorkspaceFiles(realRoot, op.pattern, listLimit);
-      const matches = deps.listFiles ? walked.matches : await filterContainedFiles(realRoot, walked.matches);
+      const matches = deps.listFiles ? await filterContainedFiles(realRoot, walked.matches) : walked.matches;
       const partial = matches.length > 0;
-      const incomplete = walked.failures > 0 ? `incomplete: ${walked.failures} director${walked.failures === 1 ? 'y' : 'ies'} could not be read` : undefined;
+      const incompleteNotes = [
+        ...(walked.failures > 0 ? [`incomplete: ${walked.failures} director${walked.failures === 1 ? 'y' : 'ies'} could not be read`] : []),
+        ...(walked.capped ? [`incomplete: stopped after ${listLimit * 20} raw file matches to bound the workspace walk`] : []),
+      ];
       const body = [
         ...matches.slice(0, limit),
         ...(matches.length > limit ? [`… more files; continue with a narrower pattern or higher limit (max ${INSPECT_MAX_LIST_LIMIT})`] : []),
-        ...(incomplete ? [incomplete] : []),
+        ...incompleteNotes,
       ].join('\n') || 'No files matched.';
-      return { ok: walked.failures === 0 || partial, header: `## ${index} list ${op.pattern}`, body: !partial && incomplete ? `ERROR op #${index}: No files matched.\n${incomplete}` : body };
+      return { ok: (walked.failures === 0 && !walked.capped) || partial, header: `## ${index} list ${op.pattern}`, body: !partial && incompleteNotes.length ? `ERROR op #${index}: No files matched.\n${incompleteNotes.join('\n')}` : body };
     }
     const op = parsed.data as z.infer<typeof gitSchema>;
     if (op.action !== 'diff_stat' && op.base !== undefined) throw new Error('base is only valid for diff_stat');
@@ -198,9 +223,11 @@ export async function handleInspect(raw: unknown, deps: InspectDeps): Promise<In
   const top = z.object({ workspaceRoot: z.string().trim().min(1).optional(), ops: opsSchema }).strict().safeParse(raw);
   if (!top.success) return { isError: true, text: `Error: invalid ${INSPECT_TOOL_NAME} arguments — ${describeZodIssues(top.error)}` };
   const allowedRoot = await deps.defaultWorkspaceRoot();
-  if (!allowedRoot) return { isError: true, text: 'Error: no workspace is open.' };
+  const registeredRoots = await deps.allowedWorkspaceRoots?.();
+  const allowedRoots = registeredRoots?.length ? [...registeredRoots] : allowedRoot ? [allowedRoot] : [];
+  if (allowedRoots.length === 0) return { isError: true, text: 'Error: no workspace is open.' };
   const root = top.data.workspaceRoot ?? allowedRoot;
-  const allowedRoots = await deps.allowedWorkspaceRoots?.() ?? [allowedRoot];
+  if (!root) return { isError: true, text: 'Error: no workspace is open.' };
   let resolved = await resolveNavWorkspacePath(root, allowedRoots[0] ?? allowedRoot);
   for (const allowed of allowedRoots.slice(1)) {
     if (resolved.ok) break;

@@ -46,7 +46,13 @@ function shortClass(value) {
   return m?.[1] ?? 'Error';
 }
 function isPtah(name) { return /^mcp__ptah__ptah_/i.test(name) || /(?:^|\s)mcp_ptah_lane_ptah_/i.test(name); }
-function toolSearch(name) { return /(?:search|discover|list_tools|tool_search)/i.test(name) && isPtah(name); }
+function toolSearch(name) {
+  const identity = name.toLowerCase()
+    .replace(/^mcp__ptah__/, '')
+    .replace(/^mcp_ptah_lane_/, '')
+    .replace(/[^a-z0-9]+/g, '_');
+  return new Set(['toolsearch', 'tools_list']).has(identity);
+}
 function classify(name, input) {
   const parsed = parseObject(input);
   const command = parsed.command ?? parsed.CommandLine ?? parsed.commandLine ?? (isCommandName(name) ? name.replace(/^run\s+/i, '') : '');
@@ -116,7 +122,7 @@ for (const c of calls) {
 console.log(JSON.stringify({
   totalCalls, ptahCalls, nativeCalls: native.length,
   ptahShare: totalCalls ? Number((ptahCalls / totalCalls).toFixed(4)) : 0,
-  ptahErrors, discoveryCalls: ptah.filter(c => toolSearch(c.toolName)).length,
+  ptahErrors, discoveryCalls: calls.filter(c => toolSearch(c.toolName)).length,
   callsBeforeFirstPtahSuccess: firstSuccessIndex < 0 ? null : firstSuccessIndex,
   byTool: safeByTool,
   nativeCallDetails: nativeCalls,

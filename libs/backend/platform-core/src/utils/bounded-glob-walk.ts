@@ -67,6 +67,8 @@ export interface BoundedGlobWalkOptions {
    * vanished during the walk) is not.
    */
   readonly onFailure: (code: string) => void;
+  /** Optional opt-in guard for directory symlinks; receives the link path. */
+  readonly shouldFollowDirectorySymlink?: (linkPath: string) => boolean | Promise<boolean>;
 }
 
 /** What a search could not read: how many paths, by error code. */
@@ -319,6 +321,16 @@ export async function* walkGlobMatches(
           }
         }
         if (isDirectory) {
+          if (entry.isSymbolicLink() && options.shouldFollowDirectorySymlink) {
+            let shouldFollow: boolean;
+            try {
+              shouldFollow = await options.shouldFollowDirectorySymlink(absolute);
+            } catch (error: unknown) {
+              await failed(error, absolute);
+              continue;
+            }
+            if (!shouldFollow) continue;
+          }
           if (depth + 1 < maxDepth) yield* walk(absolute, entryRel, depth + 1);
         } else if (isFile && includes(absolutePattern ? absolute : entryRel)) {
           yield absolute;
