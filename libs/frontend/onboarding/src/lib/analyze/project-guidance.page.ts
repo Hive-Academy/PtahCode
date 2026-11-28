@@ -8,11 +8,19 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { TabManagerService } from '@ptah-extension/chat-state';
-import { GenerationWorkflowLauncherService } from '@ptah-extension/chat-ui';
-import { VSCodeService } from '@ptah-extension/core';
+import { distinctUntilChanged, map, skip } from 'rxjs';
+import { ExecutionNodeComponent } from '@ptah-extension/chat';
+import { ExecutionTreeBuilderService } from '@ptah-extension/chat-streaming';
+import {
+  AccumulatorKeys,
+  createEmptyStreamingState,
+  setStreamingEventCapped,
+} from '@ptah-extension/chat-types';
+import { isOnboardingIdentityValue } from '@ptah-extension/core';
 import type {
+  EnhancedGenerationStreamPayload,
   EnhancedPromptsDetectedStack,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
@@ -21,11 +29,14 @@ import {
   GenerationWorkflowStore,
   GuidanceGenerationStore,
   GuidanceResultPanelComponent,
+  SetupRunStore,
+  SetupWizardStateService,
   WizardRpcService,
-  findBoundGenerationTab,
+  isTerminalSetupRunStatus,
   safeFailureCopy,
+  stepTarget,
+  type SetupRunRecord,
 } from '@ptah-extension/setup-wizard';
-import { DetailsLogComponent } from '../shared/details-log.component';
 import { LiveRunLayoutComponent } from '../shared/live-run-layout.component';
 import {
   OnboardingStepperComponent,
@@ -45,7 +56,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
   selector: 'ptah-project-guidance-page',
   standalone: true,
   imports: [
-    DetailsLogComponent,
+    ExecutionNodeComponent,
     LiveRunLayoutComponent,
     GuidanceResultPanelComponent,
     OnboardingStepperComponent,
@@ -153,25 +164,40 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         </section>
       } @else {
         <ptah-live-run-layout [hasLog]="!!binding()">
-          @if (binding(); as bound) {
-            <ptah-details-log
+          @if (binding()) {
+            <section
               runLog
-              variant="pane"
-              mode="tab"
-              [tabId]="bound.tabId"
-              [liveState]="
-                panelState() === 'running'
-                  ? 'live'
-                  : panelState() === 'cancelling'
-                    ? 'stopped'
-                    : 'idle'
-              "
-              footerNote="Session output. Read-only."
-            />
+              class="flex h-full min-h-0 flex-col rounded-lg border border-base-300 bg-base-200"
+              aria-labelledby="guidance-log-title"
+            >
+              <h2 id="guidance-log-title" class="px-3 py-2 text-sm font-medium">
+                Details log
+              </h2>
+              <div
+                role="log"
+                aria-labelledby="guidance-log-title"
+                tabindex="0"
+                class="min-h-0 flex-1 overflow-y-auto border-t border-base-300 p-3"
+              >
+                @for (node of transcript().nodes; track node.id) {
+                  <ptah-execution-node
+                    [node]="node"
+                    [isStreaming]="panelState() === 'running'"
+                  />
+                }
+                @if (transcript().text; as text) {
+                  <pre class="whitespace-pre-wrap break-words text-sm">{{
+                    text
+                  }}</pre>
+                } @else if (!transcript().nodes.length) {
+                  <p class="text-sm text-base-content-muted">No output yet.</p>
+                }
+              </div>
+            </section>
           }
           <div
             data-testid="guidance-state-chip"
-            [attr.data-state]="workflow.state()"
+            [attr.data-state]="interrupted() ? 'interrupted' : workflow.state()"
           >
             <ptah-run-panel
               [state]="panelState()"
@@ -195,7 +221,17 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
                   Stop
                 </button>
               }
-              @if (
+              @if (interrupted()) {
+                <button
+                  ptahButton
+                  variant="primary"
+                  type="button"
+                  (click)="retry()"
+                >
+                  Retry
+                </button>
+              } @else if (
+                !boundRunId() &&
                 workflow.state() === 'idle' &&
                 !lookupPending() &&
                 !handoff.inFlight() &&
@@ -295,23 +331,25 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
               Saved guidance was already current; nothing needed changing.
             </p>
           }
-          <section
-            class="rounded-[22px] border border-base-300 p-5"
-            data-glass-surface="content"
-            data-testid="guidance-saved-card"
-          >
-            <ptah-guidance-result-panel
-              [result]="guidance.result()"
-              [runActive]="workflow.isBound()"
-              [showSkip]="true"
-              (enabledChanged)="setEnabled($event)"
-              (cacheRequested)="refreshSaved()"
-              (contentRequested)="loadContent()"
-              (downloadRequested)="download()"
-              (regenerateRequested)="retry()"
-              (skipRequested)="skip()"
-            />
-          </section>
+          @if (binding()) {
+            <section
+              class="rounded-[22px] border border-base-300 p-5"
+              data-glass-surface="content"
+              data-testid="guidance-saved-card"
+            >
+              <ptah-guidance-result-panel
+                [result]="guidance.result()"
+                [runActive]="workflow.isBound()"
+                [showSkip]="true"
+                (enabledChanged)="setEnabled($event)"
+                (cacheRequested)="refreshSaved()"
+                (contentRequested)="loadContent()"
+                (downloadRequested)="download()"
+                (regenerateRequested)="retry()"
+                (skipRequested)="skip()"
+              />
+            </section>
+          }
           @if (guidance.content(); as content) {
             <section
               class="rounded-[22px] border border-base-300 p-5"
@@ -351,15 +389,15 @@ export class ProjectGuidancePage implements OnInit {
   protected readonly handoff = inject(GenerationHandoffStore);
   private readonly step = inject(GenerationStepStore);
   private readonly rpc = inject(WizardRpcService);
-  private readonly tabs = inject(TabManagerService);
-  private readonly vscode = inject(VSCodeService);
-  private readonly launcher = inject(GenerationWorkflowLauncherService);
+  private readonly runs = inject(SetupRunStore);
+  private readonly wizardState = inject(SetupWizardStateService);
+  private readonly treeBuilder = inject(ExecutionTreeBuilderService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private destroyed = false;
-  private autoStartedTab: string | null = null;
-  private boundRunId: string | null = null;
+  private autoStartedParent: string | null = null;
+  protected readonly boundRunId = signal<string | null>(null);
   protected readonly binding = signal<SetupGenerationTabBinding | null>(null);
   protected readonly recovery = signal<OnboardingRecoveryReason | null>(null);
   protected readonly lookupError = signal(false);
@@ -369,28 +407,88 @@ export class ProjectGuidancePage implements OnInit {
   protected readonly standalone = computed(
     () => this.route.snapshot.data['standalone'] === true,
   );
+  protected readonly interrupted = computed(() => {
+    const binding = this.binding();
+    return (
+      !!binding &&
+      !this.workflow.isBound() &&
+      this.runs.get(binding.tabId)?.status === 'interrupted'
+    );
+  });
+  protected readonly transcript = computed(() => {
+    const binding = this.binding();
+    const record = binding && this.runs.get(binding.tabId);
+    const activeRun = this.workflow.run()?.binding;
+    const runId =
+      record?.backendRunId ??
+      (activeRun?.tabId === record?.id ? activeRun?.runId : undefined);
+    if (!record || !runId) return { nodes: [], text: '' };
+
+    const state = createEmptyStreamingState();
+    const text: string[] = [];
+    for (const event of this.wizardState.enhanceStream() as readonly EnhancedGenerationStreamPayload[]) {
+      const source = event.tabBinding;
+      if (
+        source?.tabId !== record.id ||
+        source.workspacePath !== record.workspacePath ||
+        source.workflow !== 'setup-project-prompt' ||
+        source.runId !== runId
+      )
+        continue;
+      const flat = event.flatEvent;
+      if (flat) {
+        setStreamingEventCapped(state, flat);
+        if (
+          flat.eventType === 'text_delta' ||
+          flat.eventType === 'thinking_delta'
+        ) {
+          const key =
+            flat.eventType === 'text_delta'
+              ? AccumulatorKeys.textBlock(flat.messageId, flat.blockIndex ?? 0)
+              : AccumulatorKeys.thinkingBlock(
+                  flat.messageId,
+                  flat.blockIndex ?? 0,
+                );
+          state.textAccumulators.set(
+            key,
+            (state.textAccumulators.get(key) ?? '') + flat.delta,
+          );
+        }
+      } else if (event.toolName)
+        text.push(`\n${event.toolName}: ${event.content}\n`);
+      else text.push(event.content);
+    }
+    return {
+      nodes: state.events.size ? this.treeBuilder.buildTree(state, runId) : [],
+      text: text.join(''),
+    };
+  });
   protected readonly panelState = computed(() =>
-    this.workflow.state() === 'cancelled'
-      ? 'failed'
-      : chipStateFor(this.workflow.state()),
+    this.interrupted()
+      ? 'idle'
+      : this.workflow.state() === 'cancelled'
+        ? 'failed'
+        : chipStateFor(this.workflow.state()),
   );
-  protected readonly runTitle = computed(
-    () =>
-      ({
-        idle: 'Ready to create guidance',
-        starting: 'Starting guidance',
-        running: 'Creating guidance',
-        quiet: 'Checking run state',
-        cancelling: 'Stopping guidance',
-        'stop-unconfirmed': 'Checking stop',
-        'stop-unknown': 'Checking run state',
-        completed: 'Guidance ready',
-        cancelled: 'Guidance stopped',
-        failed: 'Guidance failed',
-        'timed-out': 'Guidance timed out',
-      })[this.workflow.state()],
+  protected readonly runTitle = computed(() =>
+    this.interrupted()
+      ? 'Guidance interrupted'
+      : {
+          idle: 'Ready to create guidance',
+          starting: 'Starting guidance',
+          running: 'Creating guidance',
+          quiet: 'Checking run state',
+          cancelling: 'Stopping guidance',
+          'stop-unconfirmed': 'Checking stop',
+          'stop-unknown': 'Checking run state',
+          completed: 'Guidance ready',
+          cancelled: 'Guidance stopped',
+          failed: 'Guidance failed',
+          'timed-out': 'Guidance timed out',
+        }[this.workflow.state()],
   );
   protected readonly runMessage = computed(() => {
+    if (this.interrupted()) return 'Guidance was interrupted. Retry the run.';
     const state = this.workflow.state();
     const reason = this.workflow.startError();
     if (state === 'failed')
@@ -461,67 +559,142 @@ export class ProjectGuidancePage implements OnInit {
   constructor() {
     this.destroyRef.onDestroy(() => {
       this.destroyed = true;
+      const binding = this.binding();
+      if (binding) this.runs.release(binding.tabId);
     });
     effect(() => {
       const run = this.workflow.run();
-      if (run?.binding.workflow === 'setup-project-prompt')
+      if (run && run.binding.tabId === this.binding()?.tabId)
         this.guidance.adopt(run);
     });
     effect(() => {
       const started = this.handoff.started();
-      const binding = this.binding();
       if (
         !started ||
-        !binding ||
         this.lookupPending() ||
-        this.boundRunId ||
-        this.destroyed ||
-        started.tabId !== binding.tabId ||
-        started.workspacePath !== binding.workspacePath
+        this.boundRunId() ||
+        this.recovery() ||
+        started.workspacePath !== this.runs.workspacePath()
       )
         return;
-      void this.bindLateHandoff(binding, started.runId);
+      const binding = this.binding();
+      if (binding) {
+        if (started.tabId === binding.tabId)
+          void this.bindRunSequence(binding, null);
+        return;
+      }
+      const record = this.runs.get(started.tabId);
+      const parent = this.agentRecord(null);
+      if (record && parent && record.parentId === parent.id)
+        void this.openRecord(record);
     });
   }
 
   async ngOnInit(): Promise<void> {
-    const tabId = this.route.snapshot.queryParamMap.get('tab');
-    const workspacePath =
-      this.tabs.activeWorkspacePath || this.vscode.config().workspaceRoot;
+    this.route.queryParamMap
+      .pipe(
+        map((params) => params.get('tab')),
+        distinctUntilChanged(),
+        skip(1),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((id) => {
+        if (id !== this.binding()?.tabId) void this.openRoute(id);
+      });
+    await this.openRoute(this.route.snapshot.queryParamMap.get('tab'));
+  }
+
+  private async openRoute(recordId: string | null): Promise<void> {
+    this.setBinding(null);
+    this.boundRunId.set(null);
+    this.recovery.set(null);
+    const workspacePath = this.runs.workspacePath();
     if (!workspacePath) {
       this.recovery.set('workspace-mismatch');
       return;
     }
-    const binding: SetupGenerationTabBinding = {
-      tabId: tabId ?? '',
-      workspacePath,
-      workflow: 'setup-project-prompt',
-    };
-    if (!tabId) {
-      const result = await this.launcher.open({
-        workspacePath,
-        workflow: 'setup-project-prompt',
-        origin: 'analysis-result-continue',
-      });
-      if (result.outcome === 'landed') return;
+    const record = recordId ? this.runs.get(recordId) : this.latestGuidance();
+    if (recordId && !record) {
       this.recovery.set('missing-tab');
       return;
     }
-    if (!findBoundGenerationTab(this.tabs, binding)) {
-      this.recovery.set('missing-tab');
+    if (record) {
+      await this.openRecord(
+        record,
+        this.route.snapshot.queryParamMap.get('run'),
+      );
+    } else {
+      this.workflow.unbind();
+      this.guidance.unbind();
+      this.lookupPending.set(false);
+      await this.startPendingHandoff(null);
+    }
+  }
+
+  private async openRecord(
+    record: SetupRunRecord,
+    runId: string | null = null,
+  ): Promise<void> {
+    if (record.workflow !== 'project-guidance') {
+      this.recovery.set('foreign-tab');
       return;
+    }
+    if (record.workspacePath !== this.runs.workspacePath()) {
+      this.recovery.set('workspace-mismatch');
+      return;
+    }
+    const binding = this.runs.bindingFor(record);
+    if (!binding) return;
+    this.recovery.set(null);
+    this.setBinding(binding);
+    await this.bindRunSequence(binding, runId);
+  }
+
+  private setBinding(binding: SetupGenerationTabBinding | null): void {
+    const previous = this.binding();
+    if (previous?.tabId !== binding?.tabId) {
+      if (previous) this.runs.release(previous.tabId);
+      if (binding) this.runs.attach(binding.tabId);
     }
     this.binding.set(binding);
-    await this.bindRunSequence(binding);
-    if (this.destroyed) return;
   }
+
+  private latestGuidance(): SetupRunRecord | null {
+    const parent = this.agentRecord(null);
+    const records = this.runs
+      .runs()
+      .filter((record) => record.workflow === 'project-guidance');
+    return (
+      records.find((record) => !isTerminalSetupRunStatus(record.status)) ??
+      records.find((record) =>
+        parent ? record.parentId === parent.id : record.parentId === null,
+      ) ??
+      (this.standalone() ? records[0] : undefined) ??
+      null
+    );
+  }
+
+  private agentRecord(guidance: SetupRunRecord | null): SetupRunRecord | null {
+    if (this.standalone()) return null;
+    const id =
+      guidance?.parentId ?? this.route.snapshot.queryParamMap.get('gen');
+    const record = id ? this.runs.get(id) : null;
+    return record?.workflow === 'agent-generation' &&
+      record.workspacePath === this.runs.workspacePath()
+      ? record
+      : null;
+  }
+
   private async bindRunSequence(
     binding: SetupGenerationTabBinding,
+    requestedRunId: string | null,
   ): Promise<void> {
     this.lookupPending.set(true);
     this.lookupError.set(false);
-    // URL identity wins, then a handoff started for this tab, then the host's latest run.
-    let runId = this.route.snapshot.queryParamMap.get('run');
+    const record = this.runs.get(binding.tabId);
+    // An interrupted record can outlive the backend attempt it refers to.
+    const interrupted = record?.status === 'interrupted';
+    let runId = requestedRunId;
     const started = this.handoff.started();
     if (
       !runId &&
@@ -529,19 +702,20 @@ export class ProjectGuidancePage implements OnInit {
       started.workspacePath === binding.workspacePath
     )
       runId = started.runId;
-    if (!runId) {
+    runId ??= record?.backendRunId ?? null;
+    if (!runId && !interrupted) {
       try {
         runId =
           (await this.rpc.getBoundRunState(binding))?.binding.runId ?? null;
       } catch {
         // degradation-audit: reported — lookupError shows that the run lookup failed.
-        if (!this.destroyed) {
+        if (!this.destroyed && this.binding() === binding) {
           this.lookupError.set(true);
           this.lookupPending.set(false);
         }
         return;
       }
-      if (this.destroyed) return;
+      if (this.destroyed || this.binding() !== binding) return;
       const late = this.handoff.started();
       if (
         late?.tabId === binding.tabId &&
@@ -549,7 +723,10 @@ export class ProjectGuidancePage implements OnInit {
       )
         runId = late.runId;
     }
-    const result = this.step.bindGuidance(binding, runId ?? undefined);
+    const result = this.step.bindGuidance(
+      binding,
+      interrupted ? undefined : (runId ?? undefined),
+    );
     if (result !== 'bound') {
       this.recovery.set(
         result === 'workspace-mismatch' ? 'workspace-mismatch' : 'foreign-tab',
@@ -557,83 +734,46 @@ export class ProjectGuidancePage implements OnInit {
       this.lookupPending.set(false);
       return;
     }
-    this.boundRunId = runId;
+    this.boundRunId.set(runId);
     this.lookupPending.set(false);
     await this.workflow.refresh();
-    if (this.destroyed) return;
+    if (this.destroyed || this.binding() !== binding) return;
     await this.guidance.refreshCommitted();
-    if (this.destroyed) return;
+    if (this.destroyed || this.binding() !== binding) return;
     await this.refreshStatus();
-    if (this.destroyed) return;
-    if (runId && !this.route.snapshot.queryParamMap.get('run')) {
-      await this.router.navigate([], {
-        queryParams: { ...this.route.snapshot.queryParams, run: runId },
-        replaceUrl: true,
-      });
-      if (this.destroyed) return;
+    if (this.destroyed || this.binding() !== binding) return;
+    if (runId && !requestedRunId) {
+      await this.replaceIdentity(binding, runId);
+      if (this.destroyed || this.binding() !== binding) return;
     }
-    if (this.destroyed) return;
+    if (!runId && !interrupted) await this.startPendingHandoff(record);
+  }
+
+  private async startPendingHandoff(
+    record: SetupRunRecord | null,
+  ): Promise<void> {
+    const agent = this.agentRecord(record);
     // An idle handoff can already be inside manualContinue: only a pending
     // countdown is proof that this page may start it.
     const pending = this.handoff.pending();
     if (
-      !runId &&
-      pending?.agentTabId === this.route.snapshot.queryParamMap.get('gen') &&
+      agent &&
+      pending?.agentRunId === agent.id &&
       this.handoff.outcome() !== 'manual-recovery' &&
-      this.autoStartedTab !== binding.tabId
+      this.autoStartedParent !== agent.id
     ) {
-      this.autoStartedTab = binding.tabId;
+      this.autoStartedParent = agent.id;
       await this.handoff.startNow();
-      if (this.destroyed) return;
-      const accepted = this.handoff.started();
-      if (
-        accepted?.tabId === binding.tabId &&
-        accepted.workspacePath === binding.workspacePath
-      ) {
-        this.boundRunId = accepted.runId;
-        this.workflow.bind(binding, accepted.runId);
-        await this.workflow.refresh();
-        if (this.destroyed) return;
-        await this.router.navigate([], {
-          queryParams: {
-            ...this.route.snapshot.queryParams,
-            run: accepted.runId,
-          },
-          replaceUrl: true,
-        });
-        if (this.destroyed) return;
-      }
     }
   }
-  private async bindLateHandoff(
-    binding: SetupGenerationTabBinding,
-    runId: string,
-  ): Promise<void> {
-    const result = this.step.bindGuidance(binding, runId);
-    if (result !== 'bound') {
-      this.recovery.set(
-        result === 'workspace-mismatch' ? 'workspace-mismatch' : 'foreign-tab',
-      );
-      return;
-    }
-    this.boundRunId = runId;
-    this.lookupError.set(false);
-    await this.workflow.refresh();
-    if (this.destroyed) return;
-    await this.guidance.refreshCommitted();
-    if (this.destroyed) return;
-    await this.refreshStatus();
-    if (this.destroyed) return;
-    await this.router.navigate([], {
-      queryParams: { ...this.route.snapshot.queryParams, run: runId },
-      replaceUrl: true,
-    });
-    if (this.destroyed) return;
-  }
+
   protected async retryLookup(): Promise<void> {
     const binding = this.binding();
     if (binding) {
-      await this.bindRunSequence(binding);
+      await this.bindRunSequence(
+        binding,
+        this.route.snapshot.queryParamMap.get('run'),
+      );
       if (this.destroyed) return;
     }
   }
@@ -651,7 +791,7 @@ export class ProjectGuidancePage implements OnInit {
       )
         this.detectedStack.set(status.detectedStack);
     } catch {
-      /* The saved result panel presents status failures. */
+      // degradation-audit: reported — the saved result panel presents status failures.
     }
   }
   protected async refresh(): Promise<void> {
@@ -665,7 +805,9 @@ export class ProjectGuidancePage implements OnInit {
   protected async openLatest(): Promise<void> {
     const binding = this.binding();
     if (!binding) {
-      await this.router.navigate(['/onboarding']);
+      const record = this.latestGuidance();
+      if (record) await this.openRecord(record);
+      else await this.router.navigate(['/onboarding']);
       if (this.destroyed) return;
       return;
     }
@@ -685,29 +827,85 @@ export class ProjectGuidancePage implements OnInit {
     }
   }
   protected async start(): Promise<void> {
-    const binding = this.binding();
     const started = this.handoff.started();
+    let binding = this.binding();
     if (
-      !binding ||
       this.lookupError() ||
       this.lookupPending() ||
       this.handoff.inFlight() ||
       this.handoff.pending() ||
-      this.boundRunId ||
-      (started?.tabId === binding.tabId &&
+      this.boundRunId() ||
+      (binding &&
+        started?.tabId === binding.tabId &&
         started.workspacePath === binding.workspacePath)
     )
       return;
+    if (!binding) {
+      const parent = this.agentRecord(null);
+      const analysis = this.route.snapshot.queryParamMap.get('analysis');
+      const record = this.runs.start(
+        'project-guidance',
+        this.runs.workspacePath(),
+        {
+          parentId: parent?.id,
+          analysisRunId:
+            parent?.analysisRunId ??
+            (isOnboardingIdentityValue(analysis) ? analysis : null),
+          origin: this.standalone()
+            ? 'independent-start'
+            : 'analysis-result-continue',
+        },
+      );
+      if (!record) {
+        this.recovery.set('workspace-mismatch');
+        return;
+      }
+      await this.openRecord(record);
+      if (this.destroyed) return;
+      binding = this.binding();
+      if (
+        !binding ||
+        this.recovery() ||
+        this.lookupError() ||
+        this.boundRunId()
+      )
+        return;
+    }
     await this.workflow.startGuidance();
     if (this.destroyed) return;
-    await this.refresh();
-    if (this.destroyed) return;
+    await this.followWorkflowBinding();
   }
   protected async retry(): Promise<void> {
     await this.workflow.regenerateGuidance();
     if (this.destroyed) return;
+    await this.followWorkflowBinding();
+  }
+  private async followWorkflowBinding(): Promise<void> {
+    const binding = this.workflow.binding();
+    if (!binding) return;
+    this.setBinding(binding);
+    this.guidance.bind(binding);
     await this.refresh();
     if (this.destroyed) return;
+    const runId =
+      this.runs.get(binding.tabId)?.backendRunId ??
+      this.workflow.run()?.binding.runId ??
+      null;
+    this.boundRunId.set(runId);
+    await this.replaceIdentity(binding, runId);
+  }
+  private async replaceIdentity(
+    binding: SetupGenerationTabBinding,
+    runId: string | null,
+  ): Promise<void> {
+    await this.router.navigate([], {
+      queryParams: {
+        ...this.route.snapshot.queryParams,
+        tab: binding.tabId,
+        run: runId,
+      },
+      replaceUrl: true,
+    });
   }
   protected async setEnabled(value: boolean): Promise<void> {
     await this.guidance.setEnabled(value);
@@ -730,14 +928,24 @@ export class ProjectGuidancePage implements OnInit {
     if (this.destroyed) return;
   }
   protected async openOwner(): Promise<void> {
-    const binding = this.binding();
-    if (!binding) return;
-    await this.launcher.open({
-      workspacePath: binding.workspacePath,
-      workflow: 'setup-project-prompt',
-      origin: 'blocked-run',
-    });
-    if (this.destroyed) return;
+    const rejection = this.workflow.rejection();
+    const ownerId =
+      rejection?.reason === 'blocked' ? rejection.ownerTabId : null;
+    const owner = ownerId ? this.runs.get(ownerId) : null;
+    if (
+      owner?.workflow !== 'project-guidance' ||
+      owner.workspacePath !== this.runs.workspacePath()
+    )
+      return;
+    const target = stepTarget(owner);
+    const navigated = await this.router.navigate(
+      ['/onboarding', ...target.subPath],
+      {
+        queryParams: target.queryParams,
+      },
+    );
+    if (!this.destroyed && navigated && this.binding()?.tabId !== owner.id)
+      await this.openRecord(owner);
   }
   protected async skip(): Promise<void> {
     await this.navigateDone();
@@ -764,4 +972,3 @@ export class ProjectGuidancePage implements OnInit {
     if (this.destroyed) return;
   }
 }
-

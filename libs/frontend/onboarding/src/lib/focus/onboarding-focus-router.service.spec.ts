@@ -1,17 +1,30 @@
 import { TestBed } from '@angular/core/testing';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   SurfaceRouterService,
   WORKSPACE_COORDINATOR,
 } from '@ptah-extension/core';
+import {
+  SetupRunStore,
+  type SetupRunRecord,
+} from '@ptah-extension/setup-wizard';
 import { OnboardingFocusRouter } from './onboarding-focus-router.service';
 
+const generation: SetupRunRecord = {
+  id: 'setup-generation',
+  workspacePath: '/work',
+  workflow: 'agent-generation',
+  status: 'running',
+  step: 'generating',
+  backendRunId: 'backend-generation',
+  analysisRunId: 'analysis',
+  parentId: null,
+  unseen: false,
+  createdAt: 0,
+  updatedAt: 0,
+};
+
 describe('OnboardingFocusRouter', () => {
-  const tabs = {
-    activeWorkspacePath: '/work',
-    findTabBySessionIdAcrossWorkspaces: jest.fn(),
-    switchTab: jest.fn(),
-  };
+  const runs = { workspacePath: () => '/work', get: jest.fn() };
   const surface = { navigateToSurface: jest.fn() };
   const workspace = { switchWorkspace: jest.fn() };
   let router: OnboardingFocusRouter;
@@ -20,28 +33,10 @@ describe('OnboardingFocusRouter', () => {
     jest.clearAllMocks();
     workspace.switchWorkspace.mockResolvedValue(undefined);
     surface.navigateToSurface.mockResolvedValue('navigated');
-    tabs.findTabBySessionIdAcrossWorkspaces.mockImplementation((id: string) => {
-      const workflow =
-        id === 'generation'
-          ? 'setup-agent-generation'
-          : id === 'guidance'
-            ? 'setup-project-prompt'
-            : id === 'harness-new'
-              ? 'harness-new-project'
-              : id === 'harness-config'
-                ? 'harness-configure'
-                : null;
-      return workflow
-        ? {
-            tab: { id: `tab-${id}`, workflow },
-            workspacePath: id === 'guidance' ? '/elsewhere' : '/work',
-          }
-        : null;
-    });
     TestBed.configureTestingModule({
       providers: [
         OnboardingFocusRouter,
-        { provide: TabManagerService, useValue: tabs },
+        { provide: SetupRunStore, useValue: runs },
         { provide: SurfaceRouterService, useValue: surface },
         { provide: WORKSPACE_COORDINATOR, useValue: workspace },
       ],
@@ -50,34 +45,52 @@ describe('OnboardingFocusRouter', () => {
   });
 
   it.each([
-    ['generation', ['analyze', 'skills']],
-    ['guidance', ['guidance']],
-  ] as const)(
-    'focuses %s on its owning step with tab identity',
-    async (sessionId, path) => {
-      expect(router.canFocus(sessionId)).toBe(true);
-      await expect(router.focus(sessionId)).resolves.toEqual({
-        success: true,
-        outcome: 'focused',
-      });
-      expect(surface.navigateToSurface).toHaveBeenCalledWith(
-        'onboarding',
-        path,
-        {
-          queryParams: { tab: `tab-${sessionId}` },
-        },
-      );
-      expect(tabs.switchTab).toHaveBeenCalledWith(`tab-${sessionId}`);
-      if (sessionId === 'guidance')
-        expect(workspace.switchWorkspace).toHaveBeenCalledWith('/elsewhere');
-    },
-  );
+    [generation, ['analyze', 'generate']],
+    [
+      {
+        ...generation,
+        id: 'setup-guidance',
+        workflow: 'project-guidance',
+        workspacePath: '/elsewhere',
+        parentId: generation.id,
+      },
+      ['analyze', 'guidance'],
+    ],
+    [
+      {
+        ...generation,
+        id: 'setup-done',
+        workflow: 'project-guidance',
+        status: 'completed',
+        parentId: generation.id,
+      },
+      ['analyze', 'done'],
+    ],
+  ] as const)('focuses %s on its owning Setup step', async (record, path) => {
+    runs.get.mockReturnValue(record);
+    expect(router.canFocus(record.id)).toBe(true);
+    await expect(router.focus(record.id)).resolves.toEqual({
+      success: true,
+      outcome: 'focused',
+    });
+    expect(runs.get).toHaveBeenCalledWith(record.id);
+    expect(surface.navigateToSurface).toHaveBeenCalledWith('onboarding', path, {
+      queryParams: { tab: record.id, analysis: 'analysis' },
+    });
+    if (record.workspacePath === '/elsewhere')
+      expect(workspace.switchWorkspace).toHaveBeenCalledWith('/elsewhere');
+    else expect(workspace.switchWorkspace).not.toHaveBeenCalled();
+  });
 
-  it.each(['harness-new', 'harness-config'] as const)(
-    'delegates %s chat tabs to normal chat tab focus instead of onboarding',
-    async (sessionId) => {
-      expect(router.canFocus(sessionId)).toBe(false);
-      await expect(router.focus(sessionId)).resolves.toEqual({
+  it.each([
+    null,
+    { ...generation, workflow: 'team-builder', step: 'handed-off' },
+  ] as const)(
+    'rejects a notification without an owning generation record',
+    async (record) => {
+      runs.get.mockReturnValue(record);
+      expect(router.canFocus('other')).toBe(false);
+      await expect(router.focus('other')).resolves.toEqual({
         success: false,
         outcome: 'missing',
       });
@@ -85,9 +98,10 @@ describe('OnboardingFocusRouter', () => {
     },
   );
 
-  it('rejects a session with no owning tab', async () => {
-    expect(router.canFocus('missing')).toBe(false);
-    await expect(router.focus('missing')).resolves.toEqual({
+  it('reports unsuccessful navigation as missing', async () => {
+    runs.get.mockReturnValue(generation);
+    surface.navigateToSurface.mockResolvedValue('cancelled');
+    await expect(router.focus(generation.id)).resolves.toEqual({
       success: false,
       outcome: 'missing',
     });

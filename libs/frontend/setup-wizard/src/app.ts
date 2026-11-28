@@ -4,3 +4,4 @@ export { SetupWizardStateService } from './lib/services/setup-wizard-state.servi
 export { SetupGenerationOpenHandler } from './lib/services/setup-generation-open.handler';
 export { GenerationRunEventAdapter } from './lib/services/generation-run-event-adapter';
 export { provideWizardInternalState } from './lib/services/wizard-internal-state.provider';
+export { SetupRunEntryService } from './lib/services/setup-run-entry.service';

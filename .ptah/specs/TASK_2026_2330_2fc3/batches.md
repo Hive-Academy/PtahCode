@@ -320,7 +320,11 @@ Edge cases:
 ### Task 6.2: Re-bind `GenerationWorkflowStore` and `GuidanceGenerationStore` to records — PENDING
 - Note: `agent-next-steps.component.ts:153` injects `GenerationWorkflowStore`; keep its `run` signal API stable.
 
-## Batch 7: Hand-off store, open handler and Setup entry service — PENDING
+## Batch 7: Hand-off store, open handler and Setup entry service — IMPLEMENTED
+
+- Result: Codex lane; review Ollama Code 8/10 APPROVED; Minor items 1, 2, 3, 5 fixed by a Codex
+  lane; item 4 (no `schedule()` caller) moved to Batch 9. Committed with Batch 8 because
+  onboarding did not typecheck with Batch 7 alone.
 
 - Shape: logic
 - Estimated weight (tokens): ~30k
@@ -348,7 +352,13 @@ Edge cases:
 ### Task 7.2: `SetupGenerationOpenHandler` delegates to the entry port — PENDING
 ### Task 7.3: `SetupRunEntryService` implementing `SETUP_RUN_ENTRY` — PENDING
 
-## Batch 8: Onboarding generation consumers — PENDING
+## Batch 8: Onboarding generation consumers — IMPLEMENTED
+
+- Result: Codex lane; review Ollama Code 8/10 APPROVED (with the Batch 7 Minor fixes).
+- Follow-ups: legacy saved guidance with no Setup record shows the idle start view (needs a
+  workspace-scoped `GuidanceGenerationStore` API); focus router does not verify the workspace
+  switch landed; `openRoute` does not reset `lookupError`; `analyze-skills.page.ts:1099` still
+  creates a guidance chat tab (Batch 10).
 
 - Shape: logic
 - Estimated weight (tokens): ~35k
@@ -386,6 +396,10 @@ Edge cases:
 - Acceptance: running -> live `generationStream()` transcript; failed -> counts and "Retry failed
   items" (`wizard:retry-item`); interrupted -> "Resume" (`resumeGeneration`); needs-input ->
   preview-required state; completed -> navigate to `analyze/done`; `markSeen` on open.
+- Added acceptance (Batch 7 review item 4): no code calls `GenerationHandoffStore.schedule()`.
+  On agent-generation completion, call `schedule(agentRecord.id, workspacePath)` exactly once
+  per record, from a place that also runs when the page is closed (the store layer, not only
+  the page). Add a test that a background completion schedules the guidance hand-off.
 - Gate: do not start until the orchestrator confirms D7.
 - Recommended executor: CLI lane [Angular]; fallback frontend-developer
 - Parallel-safe: yes (with 11, 12) | Execution mode: sequential

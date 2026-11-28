@@ -3,20 +3,32 @@ import {
   TabManagerService,
   isActiveWorkspaceTabSet,
 } from '@ptah-extension/chat-state';
-import { GenerationWorkflowLauncherService } from '@ptah-extension/chat-ui';
-import { VSCodeService, type MessageHandler } from '@ptah-extension/core';
-import { MESSAGE_TYPES } from '@ptah-extension/shared';
-import type { SetupGenerationOpenPayload } from '@ptah-extension/shared';
+import {
+  SETUP_RUN_ENTRY,
+  SurfaceRouterService,
+  VSCodeService,
+  type MessageHandler,
+} from '@ptah-extension/core';
+import {
+  MESSAGE_TYPES,
+  type SetupGenerationOpenPayload,
+  type SetupGenerationWorkflow,
+} from '@ptah-extension/shared';
+
+const OPEN_FAILURE_NOTICE = 'Setup could not open. Try Continue again.';
 
 @Injectable({ providedIn: 'root' })
 export class SetupGenerationOpenHandler implements MessageHandler {
   private readonly tabs = inject(TabManagerService);
-  private readonly launcher = inject(GenerationWorkflowLauncherService);
+  private readonly entry = inject(SETUP_RUN_ENTRY, { optional: true });
+  private readonly router = inject(SurfaceRouterService);
   private readonly vscode = inject(VSCodeService);
-  readonly launchNotice = signal<string | null>(null);
-  readonly handledMessageTypes = [MESSAGE_TYPES.SETUP_GENERATION_OPEN] as const;
+  public readonly launchNotice = signal<string | null>(null);
+  public readonly handledMessageTypes = [
+    MESSAGE_TYPES.SETUP_GENERATION_OPEN,
+  ] as const;
 
-  handleMessage(message: { type: string; payload?: unknown }): void {
+  public handleMessage(message: { type: string; payload?: unknown }): void {
     if (
       message.type !== MESSAGE_TYPES.SETUP_GENERATION_OPEN ||
       !this.isPayload(message.payload)
@@ -35,20 +47,19 @@ export class SetupGenerationOpenHandler implements MessageHandler {
       );
       return;
     }
+    void this.open(message.payload.workflow);
+  }
+
+  private async open(workflow: SetupGenerationWorkflow): Promise<void> {
     this.launchNotice.set(null);
-    void this.launcher
-      .open(message.payload)
-      .then((result) => {
-        if (result.outcome === 'failed')
-          this.launchNotice.set(
-            'The generation tab could not open. Try Continue again.',
-          );
-      })
-      .catch(() =>
-        this.launchNotice.set(
-          'The generation tab could not open. Try Continue again.',
-        ),
-      );
+    try {
+      const result = await (this.entry
+        ? this.entry.openWorkflow(workflow, 'host')
+        : this.router.navigateToSurface('onboarding'));
+      if (result === 'failed') this.launchNotice.set(OPEN_FAILURE_NOTICE);
+    } catch {
+      this.launchNotice.set(OPEN_FAILURE_NOTICE);
+    }
   }
 
   private isPayload(payload: unknown): payload is SetupGenerationOpenPayload {

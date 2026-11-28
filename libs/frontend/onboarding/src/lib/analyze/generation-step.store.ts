@@ -3,11 +3,10 @@ import type {
   SetupGenerationRunState,
   SetupGenerationTabBinding,
 } from '@ptah-extension/shared';
-import { TabManagerService } from '@ptah-extension/chat-state';
 import {
-  findBoundGenerationTab,
   GenerationWorkflowStore,
   GuidanceGenerationStore,
+  SetupRunStore,
   WizardRpcService,
 } from '@ptah-extension/setup-wizard';
 import {
@@ -22,7 +21,7 @@ export interface AnalyzeDoneFacts {
 
 @Injectable({ providedIn: 'root' })
 export class GenerationStepStore {
-  private readonly tabs = inject(TabManagerService);
+  private readonly runs = inject(SetupRunStore);
   private readonly workflow = inject(GenerationWorkflowStore);
   private readonly guidance = inject(GuidanceGenerationStore);
   private readonly rpc = inject(WizardRpcService);
@@ -92,12 +91,12 @@ export class GenerationStepStore {
     runId?: string,
   ): 'bound' | 'invalid-tab' | 'workspace-mismatch' {
     if (binding.workflow !== workflow) return 'invalid-tab';
-    const located = this.tabs.findTabByIdAcrossWorkspaces(binding.tabId);
-    if (!located) return 'invalid-tab';
-    const tab = findBoundGenerationTab(this.tabs, binding);
-    if (!tab) return 'workspace-mismatch';
-    if (tab.workflow !== workflow) return 'invalid-tab';
-    this.workflow.bind(binding, runId);
+    const record = this.runs.get(binding.tabId);
+    const expected = record && this.runs.bindingFor(record);
+    if (!expected || expected.workflow !== workflow) return 'invalid-tab';
+    if (expected.workspacePath !== binding.workspacePath)
+      return 'workspace-mismatch';
+    this.workflow.bind(expected, runId);
     return 'bound';
   }
 

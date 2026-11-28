@@ -1,328 +1,314 @@
-﻿import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { TabManagerService } from '@ptah-extension/chat-state';
-import { GenerationWorkflowLauncherService } from '@ptah-extension/chat-ui';
+import { TestBed } from '@angular/core/testing';
+import { SurfaceRouterService } from '@ptah-extension/core';
+import type {
+  SetupGenerationRunState,
+  SetupGenerationTabBinding,
+} from '@ptah-extension/shared';
 import { GenerationHandoffStore } from './generation-handoff.store';
+import { SetupRunStore, type SetupRunReport } from './setup-run.store';
+import type { SetupRunRecord } from './setup-run.types';
 import { WizardRpcService } from './wizard-rpc.service';
 
+const parent: SetupRunRecord = {
+  id: 'setup-agent',
+  workspacePath: '/ws',
+  workflow: 'agent-generation',
+  status: 'completed',
+  step: 'generating',
+  backendRunId: 'backend-agent',
+  analysisRunId: 'analysis-1',
+  parentId: null,
+  unseen: false,
+  createdAt: 1,
+  updatedAt: 1,
+};
+
+const guidance: SetupRunRecord = {
+  ...parent,
+  id: 'setup-guidance',
+  workflow: 'project-guidance',
+  status: 'running',
+  backendRunId: null,
+};
+
+const binding: SetupGenerationTabBinding = {
+  tabId: guidance.id,
+  workspacePath: '/ws',
+  workflow: 'setup-project-prompt',
+};
+
+const accepted = {
+  runId: 'backend-guidance',
+  source: { kind: 'workspace-discovery', reason: 'no-analysis' },
+  effectiveProvider: 'unknown',
+  effectiveModel: 'unknown',
+};
+
 describe('GenerationHandoffStore', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
-  it('ignores a late failure from a superseded guidance handoff', async () => {
-    let rejectFirst!: (error: Error) => void;
-    const startBoundGuidance = jest.fn()
-      .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
-      .mockResolvedValueOnce({ accepted: { runId: 'new-run' } });
-    TestBed.configureTestingModule({ providers: [
-      GenerationHandoffStore,
-      { provide: TabManagerService, useValue: {
-        tabs: signal([{ id: 'agent' }]),
-        getWorkspaceTabs: () => [{ id: 'agent' }, { id: 'guidance' }],
-        findTabByIdAcrossWorkspaces: () => ({ workspacePath: '/ws', tab: {
-          id: 'guidance', workflow: 'setup-project-prompt', status: 'loaded',
-          streamingState: null, queuedContent: null, queuedOptions: null,
-        } }),
-        isTabStreaming: () => false,
-      } },
-      { provide: GenerationWorkflowLauncherService, useValue: {
-        open: jest.fn().mockResolvedValue({ outcome: 'landed', tabId: 'guidance' }),
-      } },
-      { provide: WizardRpcService, useValue: { startBoundGuidance } },
-    ] });
-    const store = TestBed.inject(GenerationHandoffStore);
-    const first = store.manualContinue('/ws');
-    expect(store.inFlight()).toBe(true);
-    await Promise.resolve();
-    expect(store.openedTab()).toEqual({ tabId: 'guidance', workspacePath: '/ws' });
-    expect(startBoundGuidance).toHaveBeenCalledTimes(1);
-    await store.manualContinue('/ws');
-    expect(store.inFlight()).toBe(false);
-    expect(store.outcome()).toBe('started');
-    rejectFirst(new Error('late failure'));
-    await first;
-    expect(store.outcome()).toBe('started');
-    expect(store.started()?.runId).toBe('new-run');
+  const agent = signal<SetupRunRecord | null>(parent);
+  const cancellingIds = signal<ReadonlySet<string>>(new Set());
+  const activeWorkspace = signal('/ws');
+  const startBoundGuidance = jest.fn();
+  const navigateToSurface = jest.fn();
+  const starts = jest.fn();
+  const whenStarted = jest.fn();
+  const resolveBlockedStart = jest.fn();
+  const targetOf = jest.fn();
+  let child: SetupRunRecord | null;
+  let store: GenerationHandoffStore;
+
+  const reportRun = jest.fn((_id: string, run: SetupGenerationRunState) => {
+    if (child) child = { ...child, backendRunId: run.binding.runId };
+    return child;
   });
-  it('uses one absolute deadline and cancels when the source tab closes', async () => {
-    const open = jest
-      .fn()
-      .mockResolvedValue({ outcome: 'landed', tabId: 'guidance' });
+  const report = jest.fn((_id: string, update: SetupRunReport) => {
+    if (child && update.status) child = { ...child, status: update.status };
+    return child;
+  });
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    agent.set(parent);
+    cancellingIds.set(new Set());
+    activeWorkspace.set('/ws');
+    child = null;
+    starts.mockImplementation(() => (child = guidance));
+    whenStarted.mockImplementation(async () => child);
+    startBoundGuidance.mockResolvedValue({ accepted });
+    navigateToSurface.mockResolvedValue('navigated');
+    targetOf.mockReturnValue({
+      subPath: ['guidance'],
+      queryParams: { tab: guidance.id },
+    });
     TestBed.configureTestingModule({
       providers: [
-        GenerationHandoffStore,
+        { provide: SurfaceRouterService, useValue: { navigateToSurface } },
+        { provide: WizardRpcService, useValue: { startBoundGuidance } },
         {
-          provide: TabManagerService,
+          provide: SetupRunStore,
           useValue: {
-            tabs: signal([]),
-            getWorkspaceTabs: () => [{ id: 'agent' }],
-            findTabByIdAcrossWorkspaces: () => ({
-              workspacePath: '/ws',
-              tab: {
-                status: 'loaded',
-                streamingState: null,
-                queuedContent: null,
-                queuedOptions: null,
-              },
+            get: (id: string) => (id === parent.id ? agent() : child),
+            isCancelling: (id: string) => cancellingIds().has(id),
+            runsFor: () => (child ? [child] : []),
+            workspacePath: activeWorkspace,
+            start: starts,
+            bindingFor: (record: SetupRunRecord) => ({
+              ...binding,
+              tabId: record.id,
             }),
-            isTabStreaming: () => false,
-          },
-        },
-        { provide: GenerationWorkflowLauncherService, useValue: { open } },
-        {
-          provide: WizardRpcService,
-          useValue: {
-            startBoundGuidance: jest
-              .fn()
-              .mockResolvedValue({ accepted: { runId: 'run' } }),
+            startInitial: (
+              _binding: SetupGenerationTabBinding,
+              send: () => unknown,
+            ) => send(),
+            reportRun,
+            report,
+            whenStarted,
+            resolveBlockedStart,
+            targetOf,
           },
         },
       ],
     });
-    const store = TestBed.inject(GenerationHandoffStore);
-    store.schedule('agent', '/ws');
-    const deadline = store.pending()?.guidanceStartDeadline;
-    jest.advanceTimersByTime(3000);
-    expect(store.pending()?.guidanceStartDeadline).toBe(deadline);
-    store.tabClosed('agent');
-    jest.advanceTimersByTime(3000);
-    expect(open).not.toHaveBeenCalled();
-    store.schedule('agent', '/ws');
-    await jest.advanceTimersByTimeAsync(5000);
-    expect(open).toHaveBeenCalledWith(
+    store = TestBed.inject(GenerationHandoffStore);
+  });
+
+  afterEach(() => {
+    TestBed.resetTestingModule();
+    jest.useRealTimers();
+  });
+
+  it('waits five seconds and starts a child of the Setup record in the background', async () => {
+    const deadline = Date.now() + 5_000;
+    store.schedule(parent.id, '/ws/');
+    expect(store.pending()).toEqual({
+      agentRunId: parent.id,
+      workspacePath: '/ws/',
+      guidanceStartDeadline: deadline,
+    });
+    await jest.advanceTimersByTimeAsync(4_999);
+    expect(starts).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+
+    expect(starts).toHaveBeenCalledWith('project-guidance', '/ws', {
+      parentId: parent.id,
+      analysisRunId: 'analysis-1',
+      origin: 'analysis-result-continue',
+    });
+    expect(startBoundGuidance).toHaveBeenCalledWith(binding);
+    expect(reportRun).toHaveBeenCalledWith(
+      guidance.id,
       expect.objectContaining({
-        workflow: 'setup-project-prompt',
-        focus: false,
+        binding: { ...binding, runId: accepted.runId },
       }),
     );
+    expect(store.started()).toEqual({ ...binding, runId: accepted.runId });
     expect(store.outcome()).toBe('started');
-    expect(store.started()).toEqual({ tabId: 'guidance', workspacePath: '/ws', workflow: 'setup-project-prompt', runId: 'run' });
+    expect(navigateToSurface).not.toHaveBeenCalled();
   });
 
-  it('submits once from Start now and once from a later deadline without a mounted shell', async () => {
-    const open = jest
-      .fn()
-      .mockResolvedValue({ outcome: 'landed', tabId: 'guidance' });
-    const startBoundGuidance = jest
-      .fn()
-      .mockResolvedValue({ accepted: { runId: 'run' } });
-    TestBed.configureTestingModule({
-      providers: [
-        GenerationHandoffStore,
-        {
-          provide: TabManagerService,
-          useValue: {
-            tabs: signal([{ id: 'agent' }]),
-            getWorkspaceTabs: () => [{ id: 'agent' }],
-            findTabByIdAcrossWorkspaces: () => ({
-              workspacePath: '/ws',
-              tab: {
-                status: 'loaded',
-                streamingState: null,
-                queuedContent: null,
-                queuedOptions: null,
-              },
-            }),
-            isTabStreaming: () => false,
-          },
-        },
-        { provide: GenerationWorkflowLauncherService, useValue: { open } },
-        { provide: WizardRpcService, useValue: { startBoundGuidance } },
-      ],
-    });
-    const store = TestBed.inject(GenerationHandoffStore);
-    store.schedule('agent', '/ws');
+  it.each(['cancelled', 'dismissed'] as const)(
+    'skips after the parent is %s',
+    async (status) => {
+      store.schedule(parent.id, '/ws');
+      TestBed.tick();
+      agent.set(status === 'dismissed' ? null : { ...parent, status });
+      TestBed.tick();
+
+      expect(store.pending()).toBeNull();
+      expect(store.outcome()).toBe('skipped');
+      await jest.advanceTimersByTimeAsync(5_000);
+      expect(starts).not.toHaveBeenCalled();
+    },
+  );
+
+  it('skips the countdown while the parent awaits cancellation confirmation', async () => {
+    agent.set({ ...parent, status: 'running' });
+    store.schedule(parent.id, '/ws');
+    TestBed.tick();
+    expect(store.pending()?.agentRunId).toBe(parent.id);
+
+    cancellingIds.set(new Set([parent.id]));
+    TestBed.tick();
+    await jest.advanceTimersByTimeAsync(5_000);
+
+    expect(store.pending()).toBeNull();
+    expect(store.outcome()).toBe('skipped');
+    expect(starts).not.toHaveBeenCalled();
+  });
+
+  it('checks the parent again when starting now, before the effect can run', async () => {
+    store.schedule(parent.id, '/ws');
+    agent.set(null);
+
     await store.startNow();
-    expect(store.outcome()).toBe('started');
-    expect(store.started()?.runId).toBe('run');
-    await jest.advanceTimersByTimeAsync(5000);
+
+    expect(store.outcome()).toBe('skipped');
+    expect(starts).not.toHaveBeenCalled();
+  });
+
+  it('lets the user start before the deadline without sending a second start', async () => {
+    store.schedule(parent.id, '/ws');
+
+    await store.startNow();
+    await jest.advanceTimersByTimeAsync(5_000);
+
     expect(startBoundGuidance).toHaveBeenCalledTimes(1);
-    store.schedule('agent', '/ws');
-    await jest.advanceTimersByTimeAsync(5000);
-    expect(startBoundGuidance).toHaveBeenCalledTimes(2);
-    expect(store.outcome()).toBe('started');
   });
 
-  it('starts guidance after landing in the VS Code null-partition tab set', async () => {
-    const guidanceTab = {
-      id: 'guidance',
-      status: 'loaded',
-      streamingState: null,
-      queuedContent: null,
-      queuedOptions: null,
-    };
-    const startBoundGuidance = jest.fn().mockResolvedValue({
-      accepted: { runId: 'run' },
-    });
-    TestBed.configureTestingModule({
-      providers: [
-        GenerationHandoffStore,
-        {
-          provide: TabManagerService,
-          useValue: {
-            tabs: signal([{ id: 'agent' }]),
-            getWorkspaceTabs: () => [{ id: 'agent' }, guidanceTab],
-            findTabByIdAcrossWorkspaces: () => ({
-              workspacePath: null,
-              tab: guidanceTab,
-            }),
-            isTabStreaming: () => false,
-          },
-        },
-        {
-          provide: GenerationWorkflowLauncherService,
-          useValue: {
-            open: jest.fn().mockResolvedValue({
-              outcome: 'landed',
-              tabId: 'guidance',
-            }),
-          },
-        },
-        { provide: WizardRpcService, useValue: { startBoundGuidance } },
-      ],
-    });
-    const store = TestBed.inject(GenerationHandoffStore);
-    store.schedule('agent', '/ws');
-    await store.startNow();
-    expect(startBoundGuidance).toHaveBeenCalledWith({
-      workspacePath: '/ws',
-      tabId: 'guidance',
-      workflow: 'setup-project-prompt',
-    });
-    expect(store.outcome()).toBe('started');
-  });
-
-  it('keeps the deadline across a tab switch, clears it on reload, and offers manual recovery', async () => {
-    const tabs = signal([{ id: 'agent' }]);
-    const open = jest.fn().mockResolvedValue({ outcome: 'failed' });
-    const providers = [
-      GenerationHandoffStore,
-      {
-        provide: TabManagerService,
-        useValue: {
-          tabs,
-          getWorkspaceTabs: () => [{ id: 'agent' }],
-          findTabByIdAcrossWorkspaces: () => ({
-            workspacePath: '/ws',
-            tab: {
-              status: 'loaded',
-              streamingState: null,
-              queuedContent: null,
-              queuedOptions: null,
-            },
-          }),
-          isTabStreaming: () => false,
-        },
-      },
-      { provide: GenerationWorkflowLauncherService, useValue: { open } },
-      {
-        provide: WizardRpcService,
-        useValue: { startBoundGuidance: jest.fn() },
-      },
-    ];
-    TestBed.configureTestingModule({ providers });
-    const store = TestBed.inject(GenerationHandoffStore);
-    store.schedule('agent', '/ws');
-    const deadline = store.pending()?.guidanceStartDeadline;
-    tabs.set([{ id: 'other' }]);
-    TestBed.flushEffects();
-    expect(store.pending()?.guidanceStartDeadline).toBe(deadline);
+  it('clears the countdown on skip and on service destruction', async () => {
+    store.schedule(parent.id, '/ws');
     store.skip();
+    expect(store.outcome()).toBe('skipped');
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(starts).not.toHaveBeenCalled();
+
+    store.schedule(parent.id, '/ws');
     TestBed.resetTestingModule();
-    TestBed.configureTestingModule({ providers });
-    const reloaded = TestBed.inject(GenerationHandoffStore);
-    expect(reloaded.pending()).toBeNull();
-    reloaded.skip();
-    expect(reloaded.outcome()).toBe('skipped');
-    await reloaded.manualContinue('/ws');
-    expect(reloaded.outcome()).toBe('manual-recovery');
-    expect(open).toHaveBeenCalledWith(expect.objectContaining({ focus: true }));
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(starts).not.toHaveBeenCalled();
   });
 
-  it('retains manual recovery after the automatic launch fails at the absolute deadline', async () => {
-    const open = jest
-      .fn()
-      .mockResolvedValueOnce({ outcome: 'failed' })
-      .mockResolvedValueOnce({ outcome: 'landed', tabId: 'guidance' });
-    const startBoundGuidance = jest.fn().mockResolvedValue({
-      accepted: { runId: 'guidance-run' },
-    });
-    TestBed.configureTestingModule({
-      providers: [
-        GenerationHandoffStore,
-        {
-          provide: TabManagerService,
-          useValue: {
-            tabs: signal([{ id: 'agent' }]),
-            getWorkspaceTabs: () => [{ id: 'agent' }],
-            findTabByIdAcrossWorkspaces: () => ({
-              workspacePath: '/ws',
-              tab: {
-                status: 'loaded',
-                streamingState: null,
-                queuedContent: null,
-                queuedOptions: null,
-              },
-            }),
-            isTabStreaming: () => false,
-          },
-        },
-        { provide: GenerationWorkflowLauncherService, useValue: { open } },
-        { provide: WizardRpcService, useValue: { startBoundGuidance } },
-      ],
-    });
-    const store = TestBed.inject(GenerationHandoffStore);
-    store.schedule('agent', '/ws');
-    const deadline = store.pending()?.guidanceStartDeadline;
-    jest.advanceTimersByTime(2000);
-    expect(store.pending()?.guidanceStartDeadline).toBe(deadline);
-    await jest.advanceTimersByTimeAsync(3000);
-    expect(store.outcome()).toBe('manual-recovery');
+  it('joins an existing guidance run without sending another request', async () => {
+    child = { ...guidance, backendRunId: 'existing-run' };
+    store.schedule(parent.id, '/ws');
+
+    await store.startNow();
+
+    expect(starts).not.toHaveBeenCalled();
     expect(startBoundGuidance).not.toHaveBeenCalled();
+    expect(whenStarted).toHaveBeenCalledWith(guidance.id);
+    expect(store.started()).toEqual({ ...binding, runId: 'existing-run' });
+  });
+
+  it('offers manual recovery when a joined guidance retry rejects', async () => {
+    child = guidance;
+    whenStarted.mockRejectedValueOnce(new Error('retry failed'));
+    store.schedule(parent.id, '/ws');
+
+    await store.startNow();
+
+    expect(whenStarted).toHaveBeenCalledWith(guidance.id);
+    expect(startBoundGuidance).not.toHaveBeenCalled();
+    expect(store.started()).toBeNull();
+    expect(store.outcome()).toBe('manual-recovery');
+    expect(store.inFlight()).toBe(false);
+  });
+
+  it('keeps the pending parent chain on manual Continue', async () => {
+    store.schedule(parent.id, '/ws/');
+
     await store.manualContinue('/ws');
+    await jest.advanceTimersByTimeAsync(5_000);
+
+    expect(starts).toHaveBeenCalledTimes(1);
+    expect(starts).toHaveBeenCalledWith('project-guidance', '/ws', {
+      parentId: parent.id,
+      analysisRunId: parent.analysisRunId,
+      origin: 'analysis-result-continue',
+    });
     expect(store.outcome()).toBe('started');
-    expect(startBoundGuidance).toHaveBeenCalledWith({
-      workspacePath: '/ws',
-      tabId: 'guidance',
-      workflow: 'setup-project-prompt',
-    });
-    expect(open).toHaveBeenCalledTimes(2);
+    expect(navigateToSurface).not.toHaveBeenCalled();
   });
 
-  it('does not start guidance into a busy chat tab', async () => {
-    const startBoundGuidance = jest.fn();
-    TestBed.configureTestingModule({
-      providers: [
-        GenerationHandoffStore,
-        {
-          provide: TabManagerService,
-          useValue: {
-            tabs: signal([{ id: 'agent' }]),
-            getWorkspaceTabs: () => [{ id: 'agent' }],
-            findTabByIdAcrossWorkspaces: () => ({
-              workspacePath: '/ws',
-              tab: {
-                status: 'streaming',
-                streamingState: { currentMessageId: 'chat' },
-                queuedContent: null,
-              },
-            }),
-            isTabStreaming: () => true,
-          },
-        },
-        {
-          provide: GenerationWorkflowLauncherService,
-          useValue: {
-            open: jest
-              .fn()
-              .mockResolvedValue({ outcome: 'landed', tabId: 'guidance' }),
-          },
-        },
-        { provide: WizardRpcService, useValue: { startBoundGuidance } },
-      ],
+  it('joins an in-flight start when manual Continue is repeated', async () => {
+    await Promise.all([
+      store.manualContinue('/ws'),
+      store.manualContinue('/ws'),
+    ]);
+
+    expect(starts).toHaveBeenCalledTimes(1);
+    expect(startBoundGuidance).toHaveBeenCalledTimes(1);
+    expect(navigateToSurface).toHaveBeenCalledTimes(1);
+    expect(navigateToSurface).toHaveBeenCalledWith('onboarding', ['guidance'], {
+      queryParams: { tab: guidance.id },
     });
-    const store = TestBed.inject(GenerationHandoffStore);
+    expect(store.started()?.runId).toBe(accepted.runId);
+  });
+
+  it('opens the backend owner when the guidance start is blocked', async () => {
+    const owner = { ...guidance, id: 'owner', backendRunId: 'owner-run' };
+    startBoundGuidance.mockResolvedValue({
+      rejection: { reason: 'blocked', ownerTabId: owner.id },
+    });
+    resolveBlockedStart.mockResolvedValue({ owner, run: null });
+
     await store.manualContinue('/ws');
-    expect(startBoundGuidance).not.toHaveBeenCalled();
+
+    expect(resolveBlockedStart).toHaveBeenCalledWith(binding, owner.id);
+    expect(targetOf).toHaveBeenCalledWith(owner);
+    expect(store.started()).toEqual({
+      ...binding,
+      tabId: owner.id,
+      runId: 'owner-run',
+    });
+  });
+
+  it('reports a safe failure when the start rejects', async () => {
+    startBoundGuidance.mockRejectedValue(new Error('private backend details'));
+
+    await store.manualContinue('/ws');
+
+    expect(report).toHaveBeenCalledWith(guidance.id, {
+      status: 'failed',
+      error: expect.not.stringContaining('private backend details'),
+    });
     expect(store.outcome()).toBe('manual-recovery');
+    expect(store.inFlight()).toBe(false);
+    expect(navigateToSurface).not.toHaveBeenCalled();
+  });
+
+  it('records an accepted start after Skip without replacing the skipped UI state', async () => {
+    store.schedule(parent.id, '/ws');
+    const start = store.startNow();
+    store.skip();
+
+    await start;
+
+    expect(reportRun).toHaveBeenCalledTimes(1);
+    expect(store.started()).toBeNull();
+    expect(store.outcome()).toBe('skipped');
+    expect(store.inFlight()).toBe(false);
   });
 });
